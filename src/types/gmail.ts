@@ -17,6 +17,12 @@ export interface GmailListOptions {
   labels?: string[];
 }
 
+export interface GmailAttachment {
+  filename: string;
+  path: string;
+  mimeType?: string;
+}
+
 export interface GmailSendOptions {
   to: string[];
   cc?: string[];
@@ -24,6 +30,7 @@ export interface GmailSendOptions {
   subject: string;
   body: string;
   isHtml?: boolean;
+  attachments?: GmailAttachment[];
 }
 
 export interface GmailReplyOptions {
