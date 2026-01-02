@@ -79,9 +79,10 @@ async function refreshTokens(
     await setTokens(service, profileName, newTokens);
     return newTokens;
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     throw new CliError(
       'TOKEN_EXPIRED',
-      'Failed to refresh access token',
+      `Failed to refresh access token: ${message}`,
       `Run: allcli auth setup ${service} --profile ${profileName}`
     );
   }
