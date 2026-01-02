@@ -1,7 +1,42 @@
 import { google, gmail_v1 } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions } from '../../types/gmail';
+import { basename } from 'path';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment } from '../../types/gmail';
 import { CliError } from '../../utils/errors';
+
+// Common MIME types by extension
+const MIME_TYPES: Record<string, string> = {
+  '.txt': 'text/plain',
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+  '.gz': 'application/gzip',
+  '.tar': 'application/x-tar',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.wav': 'audio/wav',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+function getMimeType(filename: string): string {
+  const ext = filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+  return MIME_TYPES[ext] || 'application/octet-stream';
+}
 
 export class GmailClient {
   private gmail: gmail_v1.Gmail;
@@ -139,21 +174,38 @@ export class GmailClient {
   }
 
   async send(options: GmailSendOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {
-    const { to, cc, bcc, subject, body, isHtml } = options;
+    const { to, cc, bcc, subject, body, isHtml, attachments } = options;
     const userEmail = await this.getUserEmail();
 
-    const headers = [
-      `From: ${userEmail}`,
-      `To: ${to.join(', ')}`,
-      cc?.length ? `Cc: ${cc.join(', ')}` : '',
-      bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
-      `Subject: ${subject}`,
-      `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
-      '',
-      body,
-    ].filter(Boolean).join('\r\n');
+    let rawMessage: string;
 
-    const encodedMessage = Buffer.from(headers).toString('base64url');
+    if (attachments && attachments.length > 0) {
+      // Build multipart MIME message with attachments
+      rawMessage = await this.buildMultipartMessage({
+        from: userEmail,
+        to,
+        cc,
+        bcc,
+        subject,
+        body,
+        isHtml,
+        attachments,
+      });
+    } else {
+      // Simple message without attachments
+      rawMessage = [
+        `From: ${userEmail}`,
+        `To: ${to.join(', ')}`,
+        cc?.length ? `Cc: ${cc.join(', ')}` : '',
+        bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
+        `Subject: ${subject}`,
+        `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
+        '',
+        body,
+      ].filter(Boolean).join('\r\n');
+    }
+
+    const encodedMessage = Buffer.from(rawMessage).toString('base64url');
 
     try {
       const response = await this.gmail.users.messages.send({
@@ -169,6 +221,67 @@ export class GmailClient {
     } catch (error: any) {
       throw new CliError('API_ERROR', `Failed to send email: ${error.message}`);
     }
+  }
+
+  private async buildMultipartMessage(options: {
+    from: string;
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    body: string;
+    isHtml?: boolean;
+    attachments: GmailAttachment[];
+  }): Promise<string> {
+    const { from, to, cc, bcc, subject, body, isHtml, attachments } = options;
+    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+
+    const headers = [
+      `From: ${from}`,
+      `To: ${to.join(', ')}`,
+      cc?.length ? `Cc: ${cc.join(', ')}` : '',
+      bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
+      `Subject: ${subject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
+      '',
+      body,
+    ].filter(Boolean);
+
+    // Add attachments
+    for (const attachment of attachments) {
+      try {
+        const file = Bun.file(attachment.path);
+        const exists = await file.exists();
+        if (!exists) {
+          throw new CliError('NOT_FOUND', `Attachment not found: ${attachment.path}`);
+        }
+
+        const content = await file.arrayBuffer();
+        const base64Content = Buffer.from(content).toString('base64');
+        const filename = attachment.filename || basename(attachment.path);
+        const mimeType = attachment.mimeType || getMimeType(filename);
+
+        headers.push(
+          `--${boundary}`,
+          `Content-Type: ${mimeType}; name="${filename}"`,
+          'Content-Transfer-Encoding: base64',
+          `Content-Disposition: attachment; filename="${filename}"`,
+          '',
+          base64Content
+        );
+      } catch (error: any) {
+        if (error instanceof CliError) throw error;
+        throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${error.message}`);
+      }
+    }
+
+    headers.push(`--${boundary}--`);
+
+    return headers.join('\r\n');
   }
 
   async reply(options: GmailReplyOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {

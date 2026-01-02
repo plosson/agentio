@@ -1,9 +1,11 @@
 import { Command } from 'commander';
+import { basename } from 'path';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { GmailClient } from '../services/gmail/client';
 import { success } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
+import type { GmailAttachment } from '../types/gmail';
 
 async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gmail', profileName);
@@ -78,6 +80,7 @@ export function registerGmailCommands(program: Command): void {
     .requiredOption('--subject <subject>', 'Email subject')
     .option('--body <body>', 'Email body (or pipe via stdin)')
     .option('--html', 'Treat body as HTML')
+    .option('--attachment <path>', 'File to attach (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .action(async (options) => {
       try {
         let body = options.body;
@@ -91,6 +94,14 @@ export function registerGmailCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
         }
 
+        // Process attachments
+        const attachments: GmailAttachment[] | undefined = options.attachment.length
+          ? options.attachment.map((path: string) => ({
+              path,
+              filename: basename(path),
+            }))
+          : undefined;
+
         const { client, profile } = await getGmailClient(options.profile);
         const result = await client.send({
           to: options.to,
@@ -99,6 +110,7 @@ export function registerGmailCommands(program: Command): void {
           subject: options.subject,
           body,
           isHtml: options.html,
+          attachments,
         });
         success('gmail', 'send', profile, result);
       } catch (error) {
