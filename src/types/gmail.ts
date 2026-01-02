@@ -1,0 +1,33 @@
+export interface GmailMessage {
+  id: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  to: string[];
+  cc: string[];
+  date: string;
+  snippet: string;
+  labels: string[];
+  body?: string;
+}
+
+export interface GmailListOptions {
+  limit?: number;
+  query?: string;
+  labels?: string[];
+}
+
+export interface GmailSendOptions {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  isHtml?: boolean;
+}
+
+export interface GmailReplyOptions {
+  threadId: string;
+  body: string;
+  isHtml?: boolean;
+}
