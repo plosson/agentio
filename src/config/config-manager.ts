@@ -26,8 +26,19 @@ export async function loadConfig(): Promise<Config> {
     return DEFAULT_CONFIG;
   }
 
-  const content = await readFile(CONFIG_FILE, 'utf-8');
-  return JSON.parse(content) as Config;
+  try {
+    const content = await readFile(CONFIG_FILE, 'utf-8');
+    return JSON.parse(content) as Config;
+  } catch {
+    // Config file corrupted, back it up and return default
+    const backupPath = `${CONFIG_FILE}.backup`;
+    const content = await readFile(CONFIG_FILE, 'utf-8').catch(() => '');
+    if (content) {
+      await writeFile(backupPath, content).catch(() => {});
+    }
+    await saveConfig(DEFAULT_CONFIG);
+    return DEFAULT_CONFIG;
+  }
 }
 
 export async function saveConfig(config: Config): Promise<void> {
