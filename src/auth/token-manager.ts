@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { getTokens, setTokens } from './token-store';
 import { getProfile } from '../config/config-manager';
+import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
@@ -19,17 +20,17 @@ export async function getValidTokens(
       profileName
         ? `Profile "${profileName}" not found for ${service}`
         : `No default profile configured for ${service}`,
-      `Run: allcli auth setup ${service} --profile <name>`
+      `Run: allcli auth setup ${service}`
     );
   }
 
-  const tokens = await getTokens(service, profile.name);
+  const tokens = await getTokens(service, profile);
 
   if (!tokens) {
     throw new CliError(
       'AUTH_FAILED',
-      `No tokens found for ${service} profile "${profile.name}"`,
-      `Run: allcli auth setup ${service} --profile ${profile.name}`
+      `No tokens found for ${service} profile "${profile}"`,
+      `Run: allcli auth setup ${service} --profile ${profile}`
     );
   }
 
@@ -39,26 +40,25 @@ export async function getValidTokens(
       throw new CliError(
         'TOKEN_EXPIRED',
         'Access token expired and no refresh token available',
-        `Run: allcli auth setup ${service} --profile ${profile.name}`
+        `Run: allcli auth setup ${service} --profile ${profile}`
       );
     }
 
-    const refreshed = await refreshTokens(service, profile.name, profile.config, tokens);
-    return { tokens: refreshed, profile: profile.name };
+    const refreshed = await refreshTokens(service, profile, tokens);
+    return { tokens: refreshed, profile };
   }
 
-  return { tokens, profile: profile.name };
+  return { tokens, profile };
 }
 
 async function refreshTokens(
   service: ServiceName,
   profileName: string,
-  config: { clientId: string; clientSecret: string },
   tokens: OAuthTokens
 ): Promise<OAuthTokens> {
   const oauth2Client = new google.auth.OAuth2(
-    config.clientId,
-    config.clientSecret
+    GOOGLE_OAUTH_CONFIG.clientId,
+    GOOGLE_OAUTH_CONFIG.clientSecret
   );
 
   oauth2Client.setCredentials({
@@ -88,10 +88,10 @@ async function refreshTokens(
   }
 }
 
-export function createGoogleAuth(tokens: OAuthTokens, config: { clientId: string; clientSecret: string }) {
+export function createGoogleAuth(tokens: OAuthTokens) {
   const oauth2Client = new google.auth.OAuth2(
-    config.clientId,
-    config.clientSecret
+    GOOGLE_OAUTH_CONFIG.clientId,
+    GOOGLE_OAUTH_CONFIG.clientSecret
   );
 
   oauth2Client.setCredentials({

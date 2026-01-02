@@ -1,18 +1,8 @@
-export interface OAuthClientConfig {
-  clientId: string;
-  clientSecret: string;
-  redirectUri?: string; // Optional, will use dynamic port
-}
-
-export interface ServiceProfiles {
-  [profileName: string]: OAuthClientConfig;
-}
-
 export interface Config {
   profiles: {
-    gmail?: ServiceProfiles;
-    gchat?: ServiceProfiles;
-    jira?: ServiceProfiles;
+    gmail?: string[];
+    gchat?: string[];
+    jira?: string[];
   };
   defaults: {
     gmail?: string;

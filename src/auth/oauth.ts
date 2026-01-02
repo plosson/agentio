@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'http';
 import { URL } from 'url';
 import { google } from 'googleapis';
-import type { OAuthClientConfig } from '../types/config';
+import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import type { OAuthTokens } from '../types/tokens';
 
 const GMAIL_SCOPES = [
@@ -31,15 +31,14 @@ async function findAvailablePort(): Promise<number> {
 }
 
 export async function performOAuthFlow(
-  config: OAuthClientConfig,
   service: 'gmail' | 'gchat'
 ): Promise<OAuthTokens> {
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}/callback`;
 
   const oauth2Client = new google.auth.OAuth2(
-    config.clientId,
-    config.clientSecret,
+    GOOGLE_OAUTH_CONFIG.clientId,
+    GOOGLE_OAUTH_CONFIG.clientSecret,
     redirectUri
   );
 
