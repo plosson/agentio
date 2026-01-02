@@ -81,8 +81,11 @@ export async function performOAuthFlow(
       }
 
       if (!code) {
-        res.writeHead(400);
-        res.end('Missing authorization code');
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        res.end('<html><body><h1>Missing Authorization Code</h1><p>You can close this window.</p></body></html>');
+        clearTimeout(timeout);
+        server.close();
+        reject(new Error('Missing authorization code in OAuth callback'));
         return;
       }
 
@@ -123,6 +126,7 @@ export async function performOAuthFlow(
 
     server.on('error', (err) => {
       clearTimeout(timeout);
+      server?.close();
       reject(err);
     });
   });
