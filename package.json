@@ -1,0 +1,25 @@
+{
+  "name": "acli",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "allcli": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target node",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.0.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "commander": "^14.0.2",
+    "googleapis": "^169.0.0"
+  }
+}
