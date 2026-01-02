@@ -9,6 +9,14 @@ export interface SuccessResponse<T = unknown> {
   timestamp: string;
 }
 
+// Replacer that omits empty arrays, null, undefined, and empty strings
+function compactReplacer(_key: string, value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value) && value.length === 0) return undefined;
+  if (value === '') return undefined;
+  return value;
+}
+
 export function success<T>(
   service: ServiceName,
   command: string,
@@ -24,5 +32,11 @@ export function success<T>(
     timestamp: new Date().toISOString(),
   };
 
-  console.log(JSON.stringify(response, null, 2));
+  // Compact JSON: no indentation, omit empty fields
+  console.log(JSON.stringify(response, compactReplacer));
+}
+
+// Output raw text (for body-only mode)
+export function raw(text: string): void {
+  console.log(text);
 }

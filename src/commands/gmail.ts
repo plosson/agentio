@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { basename } from 'path';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { GmailClient } from '../services/gmail/client';
-import { success } from '../utils/output';
+import { success, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
@@ -44,11 +44,16 @@ export function registerGmailCommands(program: Command): void {
     .description('Get a message')
     .option('--profile <name>', 'Profile name')
     .option('--format <format>', 'Body format: text, html, or raw', 'text')
+    .option('--body-only', 'Output only the body as plain text (no JSON wrapper)')
     .action(async (messageId: string, options) => {
       try {
         const { client, profile } = await getGmailClient(options.profile);
         const result = await client.get(messageId, options.format);
-        success('gmail', 'get', profile, result);
+        if (options.bodyOnly) {
+          raw(result.body);
+        } else {
+          success('gmail', 'get', profile, result);
+        }
       } catch (error) {
         handleError(error);
       }
