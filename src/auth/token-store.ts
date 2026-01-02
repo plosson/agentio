@@ -23,19 +23,24 @@ async function loadTokens(): Promise<StoredTokens> {
     return {};
   }
 
-  const encrypted = await readFile(TOKENS_FILE, 'utf-8');
-  const { iv, tag, data } = JSON.parse(encrypted);
+  try {
+    const encrypted = await readFile(TOKENS_FILE, 'utf-8');
+    const { iv, tag, data } = JSON.parse(encrypted);
 
-  const key = deriveKey();
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(iv, 'hex'));
-  decipher.setAuthTag(Buffer.from(tag, 'hex'));
+    const key = deriveKey();
+    const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(tag, 'hex'));
 
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(data, 'hex')),
-    decipher.final(),
-  ]);
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(data, 'hex')),
+      decipher.final(),
+    ]);
 
-  return JSON.parse(decrypted.toString('utf-8'));
+    return JSON.parse(decrypted.toString('utf-8'));
+  } catch {
+    // File corrupted, tampered, or key changed - return empty tokens
+    return {};
+  }
 }
 
 async function saveTokens(tokens: StoredTokens): Promise<void> {
