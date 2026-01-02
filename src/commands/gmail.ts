@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
-import { getProfile } from '../config/config-manager';
 import { GmailClient } from '../services/gmail/client';
 import { success } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
@@ -8,13 +7,7 @@ import { readStdin } from '../utils/stdin';
 
 async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gmail', profileName);
-  const profileConfig = await getProfile('gmail', profile);
-
-  if (!profileConfig) {
-    throw new CliError('PROFILE_NOT_FOUND', `Profile config not found for "${profile}"`);
-  }
-
-  const auth = createGoogleAuth(tokens, profileConfig.config);
+  const auth = createGoogleAuth(tokens);
   return { client: new GmailClient(auth), profile };
 }
 

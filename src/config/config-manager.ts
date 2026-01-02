@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import type { Config, ServiceName, OAuthClientConfig } from '../types/config';
+import type { Config, ServiceName } from '../types/config';
 
 const CONFIG_DIR = join(homedir(), '.config', 'allcli');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -49,7 +49,7 @@ export async function saveConfig(config: Config): Promise<void> {
 export async function getProfile(
   service: ServiceName,
   profileName?: string
-): Promise<{ name: string; config: OAuthClientConfig } | null> {
+): Promise<string | null> {
   const config = await loadConfig();
   const name = profileName || config.defaults[service];
 
@@ -57,26 +57,27 @@ export async function getProfile(
     return null;
   }
 
-  const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles || !serviceProfiles[name]) {
+  const serviceProfiles = config.profiles[service] || [];
+  if (!serviceProfiles.includes(name)) {
     return null;
   }
 
-  return { name, config: serviceProfiles[name] };
+  return name;
 }
 
 export async function setProfile(
   service: ServiceName,
-  profileName: string,
-  oauthConfig: OAuthClientConfig
+  profileName: string
 ): Promise<void> {
   const config = await loadConfig();
 
   if (!config.profiles[service]) {
-    config.profiles[service] = {};
+    config.profiles[service] = [];
   }
 
-  config.profiles[service]![profileName] = oauthConfig;
+  if (!config.profiles[service]!.includes(profileName)) {
+    config.profiles[service]!.push(profileName);
+  }
 
   // Set as default if it's the first profile for this service
   if (!config.defaults[service]) {
@@ -93,16 +94,15 @@ export async function removeProfile(
   const config = await loadConfig();
 
   const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles || !serviceProfiles[profileName]) {
+  if (!serviceProfiles || !serviceProfiles.includes(profileName)) {
     return false;
   }
 
-  delete serviceProfiles[profileName];
+  config.profiles[service] = serviceProfiles.filter((p) => p !== profileName);
 
   // Clear default if it was the removed profile
   if (config.defaults[service] === profileName) {
-    const remaining = Object.keys(serviceProfiles);
-    config.defaults[service] = remaining[0];
+    config.defaults[service] = config.profiles[service]![0];
   }
 
   await saveConfig(config);
@@ -119,7 +119,7 @@ export async function listProfiles(service?: ServiceName): Promise<{
 
   return services.map((svc) => ({
     service: svc,
-    profiles: Object.keys(config.profiles[svc] || {}),
+    profiles: config.profiles[svc] || [],
     default: config.defaults[svc],
   }));
 }

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
-import { setTokens, removeTokens, hasTokens } from '../auth/token-store';
+import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
+import { setTokens, removeTokens } from '../auth/token-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { getValidTokens } from '../auth/token-manager';
 import { CliError, handleError } from '../utils/errors';
@@ -27,30 +27,27 @@ export function registerAuthCommands(program: Command): void {
   auth
     .command('setup <service>')
     .description('Set up authentication for a service')
-    .requiredOption('--profile <name>', 'Profile name')
-    .requiredOption('--client-id <id>', 'OAuth client ID')
-    .requiredOption('--client-secret <secret>', 'OAuth client secret')
+    .option('--profile <name>', 'Profile name', 'default')
     .action(async (service: string, options) => {
       try {
         const svc = validateService(service);
-        const { profile, clientId, clientSecret } = options;
+        const { profile } = options;
 
         if (svc === 'jira') {
           throw new CliError('INVALID_PARAMS', 'Jira is not yet supported');
         }
 
-        // Save profile config
-        await setProfile(svc, profile, {
-          clientId,
-          clientSecret,
-        });
+        if (svc === 'gchat') {
+          throw new CliError('INVALID_PARAMS', 'Google Chat is not yet supported');
+        }
 
         console.error(`Starting OAuth flow for ${svc} profile "${profile}"...`);
 
         // Perform OAuth flow
-        const tokens = await performOAuthFlow({ clientId, clientSecret }, svc);
+        const tokens = await performOAuthFlow(svc);
 
-        // Save tokens
+        // Save profile and tokens
+        await setProfile(svc, profile);
         await setTokens(svc, profile, tokens);
 
         console.error(`\nSuccess! Profile "${profile}" for ${svc} is now configured.`);
