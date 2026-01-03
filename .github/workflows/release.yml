@@ -221,3 +221,61 @@ jobs:
           git add Formula/agentio.rb
           git commit -m "Update agentio to ${{ needs.validate.outputs.version }}"
           git push
+
+  update-scoop:
+    name: Update Scoop Manifest
+    runs-on: ubuntu-latest
+    needs: [validate, release]
+
+    steps:
+      - name: Download checksums
+        run: |
+          curl -sL "https://github.com/plosson/agentio/releases/download/v${{ needs.validate.outputs.version }}/checksums.txt" -o checksums.txt
+          cat checksums.txt
+
+      - name: Extract SHA256 sum
+        id: sha
+        run: |
+          echo "windows_x64=$(grep agentio-windows-x64.exe checksums.txt | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Checkout Scoop bucket
+        uses: actions/checkout@v4
+        with:
+          repository: plosson/scoop-agentio
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: scoop-bucket
+
+      - name: Update manifest
+        run: |
+          cat > scoop-bucket/bucket/agentio.json << EOF
+          {
+              "version": "${{ needs.validate.outputs.version }}",
+              "description": "CLI for LLM agents to interact with communication and tracking services",
+              "homepage": "https://github.com/plosson/agentio",
+              "license": "MIT",
+              "architecture": {
+                  "64bit": {
+                      "url": "https://github.com/plosson/agentio/releases/download/v${{ needs.validate.outputs.version }}/agentio-windows-x64.exe",
+                      "hash": "${{ steps.sha.outputs.windows_x64 }}"
+                  }
+              },
+              "bin": [["agentio-windows-x64.exe", "agentio"]],
+              "checkver": "github",
+              "autoupdate": {
+                  "architecture": {
+                      "64bit": {
+                          "url": "https://github.com/plosson/agentio/releases/download/v\$version/agentio-windows-x64.exe"
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Commit and push
+        run: |
+          cd scoop-bucket
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/agentio.json
+          git commit -m "Update agentio to ${{ needs.validate.outputs.version }}"
+          git push
