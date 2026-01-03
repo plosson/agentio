@@ -4,32 +4,78 @@ CLI for LLM agents to interact with communication and tracking services.
 
 ## Installation
 
-### Via npm/bun (recommended)
+### macOS
 
+**Homebrew (recommended):**
 ```bash
-# Using bun
-bunx agentio --help
-
-# Using npm
-npx agentio --help
-
-# Global install
-bun add -g agentio
-# or
-npm install -g agentio
+brew tap plosson/agentio
+brew install agentio
 ```
 
-### Native binaries
+**Or download binary:**
+```bash
+# Apple Silicon
+curl -L https://github.com/plosson/agentio/releases/latest/download/agentio-darwin-arm64 -o agentio
+chmod +x agentio && sudo mv agentio /usr/local/bin/
 
-Download from [GitHub Releases](https://github.com/plosson/agentio/releases):
+# Intel
+curl -L https://github.com/plosson/agentio/releases/latest/download/agentio-darwin-x64 -o agentio
+chmod +x agentio && sudo mv agentio /usr/local/bin/
+```
 
-| Platform | Binary |
-|----------|--------|
-| macOS Intel | `agentio-darwin-x64` |
-| macOS Apple Silicon | `agentio-darwin-arm64` |
-| Linux x64 | `agentio-linux-x64` |
-| Linux ARM64 | `agentio-linux-arm64` |
-| Windows x64 | `agentio-windows-x64.exe` |
+### Linux
+
+**Debian/Ubuntu (.deb):**
+```bash
+# x64
+curl -LO https://github.com/plosson/agentio/releases/latest/download/agentio_0.1.3_amd64.deb
+sudo dpkg -i agentio_0.1.3_amd64.deb
+
+# ARM64
+curl -LO https://github.com/plosson/agentio/releases/latest/download/agentio_0.1.3_arm64.deb
+sudo dpkg -i agentio_0.1.3_arm64.deb
+```
+
+**Homebrew:**
+```bash
+brew tap plosson/agentio
+brew install agentio
+```
+
+**Or download binary:**
+```bash
+# x64
+curl -L https://github.com/plosson/agentio/releases/latest/download/agentio-linux-x64 -o agentio
+chmod +x agentio && sudo mv agentio /usr/local/bin/
+
+# ARM64
+curl -L https://github.com/plosson/agentio/releases/latest/download/agentio-linux-arm64 -o agentio
+chmod +x agentio && sudo mv agentio /usr/local/bin/
+```
+
+### Windows
+
+**Scoop (recommended):**
+```powershell
+scoop bucket add agentio https://github.com/plosson/scoop-agentio
+scoop install agentio
+```
+
+**Or download binary:**
+
+Download `agentio-windows-x64.exe` from [GitHub Releases](https://github.com/plosson/agentio/releases/latest) and add to your PATH.
+
+### npm / bun
+
+```bash
+# Run directly
+bunx @plosson/agentio --help
+npx @plosson/agentio --help
+
+# Global install
+bun add -g @plosson/agentio
+npm install -g @plosson/agentio
+```
 
 ## Services
 
