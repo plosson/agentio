@@ -196,13 +196,13 @@ export class GmailClient {
       rawMessage = [
         `From: ${userEmail}`,
         `To: ${to.join(', ')}`,
-        cc?.length ? `Cc: ${cc.join(', ')}` : '',
-        bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
+        cc?.length ? `Cc: ${cc.join(', ')}` : null,
+        bcc?.length ? `Bcc: ${bcc.join(', ')}` : null,
         `Subject: ${subject}`,
         `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
         '',
         body,
-      ].filter(Boolean).join('\r\n');
+      ].filter((line): line is string => line !== null).join('\r\n');
     }
 
     const encodedMessage = Buffer.from(rawMessage).toString('base64url');
@@ -239,8 +239,8 @@ export class GmailClient {
     const headers = [
       `From: ${from}`,
       `To: ${to.join(', ')}`,
-      cc?.length ? `Cc: ${cc.join(', ')}` : '',
-      bcc?.length ? `Bcc: ${bcc.join(', ')}` : '',
+      cc?.length ? `Cc: ${cc.join(', ')}` : null,
+      bcc?.length ? `Bcc: ${bcc.join(', ')}` : null,
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
@@ -249,7 +249,7 @@ export class GmailClient {
       `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
       '',
       body,
-    ].filter(Boolean);
+    ].filter((line): line is string => line !== null);
 
     // Add attachments
     for (const attachment of attachments) {

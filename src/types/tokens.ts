@@ -6,8 +6,8 @@ export interface OAuthTokens {
   scope?: string;
 }
 
-export interface StoredTokens {
+export interface StoredCredentials {
   [service: string]: {
-    [profile: string]: OAuthTokens;
+    [profile: string]: Record<string, unknown>;
   };
 }

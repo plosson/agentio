@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import type { Config, ServiceName } from '../types/config';
 
-const CONFIG_DIR = join(homedir(), '.config', 'allcli');
+const CONFIG_DIR = join(homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG: Config = {
@@ -115,7 +115,7 @@ export async function listProfiles(service?: ServiceName): Promise<{
   default?: string;
 }[]> {
   const config = await loadConfig();
-  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira'];
+  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'telegram'];
 
   return services.map((svc) => ({
     service: svc,

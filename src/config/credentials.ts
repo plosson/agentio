@@ -1,4 +1,4 @@
-// Embedded OAuth credentials for allcli
+// Embedded OAuth credentials for agentio
 // These are "public" credentials for a desktop/CLI app - this is standard practice
 
 export const GOOGLE_OAUTH_CONFIG = {

@@ -1,15 +1,44 @@
 {
-  "name": "acli",
-  "module": "index.ts",
+  "name": "agentio",
+  "version": "0.1.0",
+  "description": "CLI for LLM agents to interact with communication and tracking services",
   "type": "module",
-  "private": true,
-  "bin": {
-    "allcli": "./src/index.ts"
+  "license": "MIT",
+  "author": "plosson",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plosson/agentio.git"
   },
+  "bugs": {
+    "url": "https://github.com/plosson/agentio/issues"
+  },
+  "homepage": "https://github.com/plosson/agentio#readme",
+  "keywords": [
+    "cli",
+    "llm",
+    "agent",
+    "gmail",
+    "telegram",
+    "automation",
+    "ai",
+    "mcp"
+  ],
+  "bin": {
+    "agentio": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node",
+    "build:native": "bun build src/index.ts --compile --outfile dist/agentio",
     "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
     "@types/bun": "latest",

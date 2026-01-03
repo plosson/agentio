@@ -1,8 +1,11 @@
 import { Command } from 'commander';
 import { basename } from 'path';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
+import { setCredentials, removeCredentials } from '../auth/token-store';
+import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
+import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { success, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printArchived, printMarked, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
@@ -23,17 +26,17 @@ export function registerGmailCommands(program: Command): void {
     .description('List messages')
     .option('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Number of messages', '10')
-    .option('--query <query>', 'Search query')
+    .option('--query <query>', 'Gmail search query (see "gmail search --help" for syntax)')
     .option('--label <label>', 'Filter by label (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .action(async (options) => {
       try {
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         const result = await client.list({
           limit: parseInt(options.limit, 10),
           query: options.query,
           labels: options.label.length ? options.label : undefined,
         });
-        success('gmail', 'list', profile, result);
+        printMessageList(result.messages, result.total);
       } catch (error) {
         handleError(error);
       }
@@ -44,15 +47,15 @@ export function registerGmailCommands(program: Command): void {
     .description('Get a message')
     .option('--profile <name>', 'Profile name')
     .option('--format <format>', 'Body format: text, html, or raw', 'text')
-    .option('--body-only', 'Output only the body as plain text (no JSON wrapper)')
+    .option('--body-only', 'Output only the message body')
     .action(async (messageId: string, options) => {
       try {
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         const result = await client.get(messageId, options.format);
         if (options.bodyOnly) {
           raw(result.body);
         } else {
-          success('gmail', 'get', profile, result);
+          printMessage(result);
         }
       } catch (error) {
         handleError(error);
@@ -61,15 +64,54 @@ export function registerGmailCommands(program: Command): void {
 
   gmail
     .command('search')
-    .description('Search messages')
+    .description('Search messages using Gmail query syntax')
     .requiredOption('--query <query>', 'Search query')
     .option('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Max results', '10')
+    .addHelpText('after', `
+Query Syntax Examples:
+
+  Keywords:
+    --query "meeting agenda"          Messages containing both words
+    --query "exact phrase"            Messages with exact phrase
+
+  From/To:
+    --query "from:john@example.com"   Messages from specific sender
+    --query "to:me"                   Messages sent to you
+    --query "from:john to:jane"       Combine sender and recipient
+    --query "cc:team@example.com"     Messages where someone was CC'd
+
+  Date Ranges:
+    --query "after:2024/01/01"        Messages after date (YYYY/MM/DD)
+    --query "before:2024/12/31"       Messages before date
+    --query "after:2024/01/01 before:2024/06/30"   Date range
+    --query "newer_than:7d"           Last 7 days (d=days, m=months, y=years)
+    --query "older_than:1m"           Older than 1 month
+
+  Labels:
+    --query "label:inbox"             Messages in inbox
+    --query "label:important"         Important messages
+    --query "label:work"              Custom label (use exact label name)
+    --query "-label:spam"             Exclude spam (- negates)
+
+  Status:
+    --query "is:unread"               Unread messages
+    --query "is:starred"              Starred messages
+    --query "is:important"            Marked as important
+    --query "has:attachment"          Messages with attachments
+
+  Subject:
+    --query "subject:invoice"         Search in subject only
+
+  Combined:
+    --query "from:boss@work.com is:unread newer_than:7d"
+    --query "has:attachment from:client after:2024/01/01"
+`)
     .action(async (options) => {
       try {
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         const result = await client.search(options.query, parseInt(options.limit, 10));
-        success('gmail', 'search', profile, result);
+        printMessageList(result.messages, result.total);
       } catch (error) {
         handleError(error);
       }
@@ -107,7 +149,7 @@ export function registerGmailCommands(program: Command): void {
             }))
           : undefined;
 
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         const result = await client.send({
           to: options.to,
           cc: options.cc.length ? options.cc : undefined,
@@ -117,7 +159,7 @@ export function registerGmailCommands(program: Command): void {
           isHtml: options.html,
           attachments,
         });
-        success('gmail', 'send', profile, result);
+        printSendResult(result);
       } catch (error) {
         handleError(error);
       }
@@ -142,13 +184,13 @@ export function registerGmailCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
         }
 
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         const result = await client.reply({
           threadId: options.threadId,
           body,
           isHtml: options.html,
         });
-        success('gmail', 'reply', profile, result);
+        printSendResult(result);
       } catch (error) {
         handleError(error);
       }
@@ -160,9 +202,9 @@ export function registerGmailCommands(program: Command): void {
     .option('--profile <name>', 'Profile name')
     .action(async (messageId: string, options) => {
       try {
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         await client.archive(messageId);
-        success('gmail', 'archive', profile, { messageId, archived: true });
+        printArchived(messageId);
       } catch (error) {
         handleError(error);
       }
@@ -183,12 +225,77 @@ export function registerGmailCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Cannot specify both --read and --unread');
         }
 
-        const { client, profile } = await getGmailClient(options.profile);
+        const { client } = await getGmailClient(options.profile);
         await client.mark(messageId, options.read);
-        success('gmail', 'mark', profile, {
-          messageId,
-          read: options.read,
-        });
+        printMarked(messageId, options.read);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Profile management
+  const profile = gmail
+    .command('profile')
+    .description('Manage Gmail profiles');
+
+  profile
+    .command('add')
+    .description('Add a new Gmail profile')
+    .option('--profile <name>', 'Profile name', 'default')
+    .action(async (options) => {
+      try {
+        const profileName = options.profile;
+
+        console.error(`Starting OAuth flow for Gmail profile "${profileName}"...`);
+
+        const tokens = await performOAuthFlow('gmail');
+
+        await setProfile('gmail', profileName);
+        await setCredentials('gmail', profileName, tokens);
+
+        console.error(`\nSuccess! Profile "${profileName}" for Gmail is now configured.`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  profile
+    .command('list')
+    .description('List Gmail profiles')
+    .action(async () => {
+      try {
+        const result = await listProfiles('gmail');
+        const { profiles, default: defaultProfile } = result[0];
+
+        if (profiles.length === 0) {
+          console.log('No profiles configured');
+        } else {
+          for (const name of profiles) {
+            const marker = name === defaultProfile ? ' (default)' : '';
+            console.log(`${name}${marker}`);
+          }
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  profile
+    .command('remove')
+    .description('Remove a Gmail profile')
+    .requiredOption('--profile <name>', 'Profile name')
+    .action(async (options) => {
+      try {
+        const profileName = options.profile;
+
+        const removed = await removeProfile('gmail', profileName);
+        await removeCredentials('gmail', profileName);
+
+        if (removed) {
+          console.error(`Removed profile "${profileName}"`);
+        } else {
+          console.error(`Profile "${profileName}" not found`);
+        }
       } catch (error) {
         handleError(error);
       }
