@@ -1,5 +1,5 @@
 {
-  "name": "agentio",
+  "name": "@plosson/agentio",
   "version": "0.1.0",
   "description": "CLI for LLM agents to interact with communication and tracking services",
   "type": "module",
