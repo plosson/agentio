@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { getTokens, setTokens } from './token-store';
+import { getCredentials, setCredentials } from './token-store';
 import { getProfile } from '../config/config-manager';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import { CliError } from '../utils/errors';
@@ -20,17 +20,17 @@ export async function getValidTokens(
       profileName
         ? `Profile "${profileName}" not found for ${service}`
         : `No default profile configured for ${service}`,
-      `Run: allcli auth setup ${service}`
+      `Run: agentio ${service} profile add`
     );
   }
 
-  const tokens = await getTokens(service, profile);
+  const tokens = await getCredentials<OAuthTokens>(service, profile);
 
   if (!tokens) {
     throw new CliError(
       'AUTH_FAILED',
       `No tokens found for ${service} profile "${profile}"`,
-      `Run: allcli auth setup ${service} --profile ${profile}`
+      `Run: agentio ${service} profile add --profile ${profile}`
     );
   }
 
@@ -40,7 +40,7 @@ export async function getValidTokens(
       throw new CliError(
         'TOKEN_EXPIRED',
         'Access token expired and no refresh token available',
-        `Run: allcli auth setup ${service} --profile ${profile}`
+        `Run: agentio ${service} profile add --profile ${profile}`
       );
     }
 
@@ -76,14 +76,14 @@ async function refreshTokens(
       scope: credentials.scope || tokens.scope,
     };
 
-    await setTokens(service, profileName, newTokens);
+    await setCredentials(service, profileName, newTokens);
     return newTokens;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     throw new CliError(
       'TOKEN_EXPIRED',
       `Failed to refresh access token: ${message}`,
-      `Run: allcli auth setup ${service} --profile ${profileName}`
+      `Run: agentio ${service} profile add --profile ${profileName}`
     );
   }
 }

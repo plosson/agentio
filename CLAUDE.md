@@ -1,111 +1,113 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# agentio - Agent I/O CLI
 
-Default to using Bun instead of Node.js.
+A CLI designed for LLM agents to interact with communication services (Gmail, Telegram, Slack) and tracking systems (JIRA, Linear). Features multi-profile support and encrypted credential storage.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+## Tech Stack
 
-## APIs
+- **Runtime**: Bun
+- **Language**: TypeScript
+- **CLI Framework**: Commander.js
+- **APIs**: googleapis (Gmail), Telegram Bot API (fetch-based)
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+## Running the CLI
 
-## Testing
+```bash
+# Development
+bun run dev [command]
+bun run dev --help
 
-Use `bun test` to run tests.
+# Type checking
+bun run typecheck
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+# Build
+bun run build              # Node target
+bun run build:native       # Native executable
 ```
 
-## Frontend
+## Project Structure
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+```
+src/
+├── index.ts                 # CLI entry point, registers all commands
+├── commands/                # Command handlers (one file per service)
+│   ├── gmail.ts             # Gmail commands + profile management
+│   └── telegram.ts          # Telegram commands + profile management
+├── services/                # API clients (one folder per service)
+│   ├── gmail/client.ts      # Gmail API wrapper
+│   └── telegram/client.ts   # Telegram Bot API wrapper
+├── auth/                    # Authentication logic
+│   ├── oauth.ts             # Google OAuth flow (browser-based)
+│   ├── token-manager.ts     # Token validation/refresh
+│   └── token-store.ts       # Encrypted credential storage
+├── config/
+│   └── config-manager.ts    # Profile configuration
+├── types/                   # TypeScript interfaces
+│   ├── config.ts            # Config and ServiceName types
+│   ├── tokens.ts            # Credential storage types
+│   ├── gmail.ts             # Gmail message types
+│   └── telegram.ts          # Telegram API types
+└── utils/
+    ├── errors.ts            # CliError class and error handling
+    ├── output.ts            # Output formatting functions
+    └── stdin.ts             # Stdin reading utility
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Key Patterns
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
+### Multi-Profile Architecture
+
+Each service supports multiple named profiles. Config and credentials are stored separately:
+- **Config**: `~/.config/agentio/config.json` - profile names and defaults
+- **Credentials**: `~/.config/agentio/tokens.enc` - encrypted with AES-256-GCM
+
+### Adding a New Service
+
+1. Add service name to `ServiceName` type in `src/types/config.ts`
+2. Create types in `src/types/<service>.ts`
+3. Create API client in `src/services/<service>/client.ts`
+4. Create commands in `src/commands/<service>.ts` with:
+   - Service operations (list, get, send, etc.)
+   - Profile subcommands (add, list, remove)
+5. Register commands in `src/index.ts`
+
+### Error Handling
+
+Use `CliError` for all user-facing errors:
+```typescript
+throw new CliError('ERROR_CODE', 'message', 'suggestion');
 ```
 
-With the following `frontend.tsx`:
+Wrap command actions with `try/catch` and call `handleError(error)`.
 
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
+### Output Convention
 
-// import .css files directly and it works
-import './index.css';
+- **Success**: Print to stdout (human-readable format optimized for LLM consumption)
+- **Errors/Progress**: Print to stderr
+- Use formatting functions from `src/utils/output.ts`
 
-const root = createRoot(document.body);
+## Current Commands
 
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
+```
+agentio gmail list [--limit N] [--query Q] [--label L]
+agentio gmail get <message-id> [--format text|html|raw] [--body-only]
+agentio gmail search --query <query> [--limit N]
+agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>]
+agentio gmail reply --thread-id <id> [--body <body>]
+agentio gmail archive <message-id>
+agentio gmail mark <message-id> --read|--unread
+agentio gmail profile add [--profile <name>]
+agentio gmail profile list
+agentio gmail profile remove --profile <name>
 
-root.render(<Frontend />);
+agentio telegram send <message> [--parse-mode html|markdown] [--silent]
+agentio telegram profile add [--profile <name>]
+agentio telegram profile list
+agentio telegram profile remove --profile <name>
 ```
 
-Then, run index.ts
+## Design Decisions
 
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- **Embedded OAuth credentials**: Gmail uses embedded OAuth client ID/secret (no user setup required)
+- **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
+- **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
+- **Stdin support**: Commands like `send` and `reply` accept body via pipe

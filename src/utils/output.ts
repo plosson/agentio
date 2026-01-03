@@ -1,39 +1,51 @@
-import type { ServiceName } from '../types/config';
+import type { GmailMessage } from '../types/gmail';
 
-export interface SuccessResponse<T = unknown> {
-  success: true;
-  service: ServiceName;
-  command: string;
-  profile: string;
-  data: T;
-  timestamp: string;
+// Format a list of Gmail messages
+export function printMessageList(messages: GmailMessage[], total: number): void {
+  console.log(`Messages (${messages.length} of ~${total})\n`);
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    console.log(`[${i + 1}] ${msg.id} | thread:${msg.threadId}`);
+    console.log(`    From: ${msg.from}`);
+    if (msg.to.length) console.log(`    To: ${msg.to.join(', ')}`);
+    console.log(`    Date: ${msg.date}`);
+    console.log(`    Subject: ${msg.subject}`);
+    if (msg.labels.length) console.log(`    Labels: ${msg.labels.join(', ')}`);
+    if (msg.snippet) console.log(`    > ${msg.snippet}`);
+    console.log('');
+  }
 }
 
-// Replacer that omits empty arrays, null, undefined, and empty strings
-function compactReplacer(_key: string, value: unknown): unknown {
-  if (value === null || value === undefined) return undefined;
-  if (Array.isArray(value) && value.length === 0) return undefined;
-  if (value === '') return undefined;
-  return value;
+// Format a single Gmail message with body
+export function printMessage(msg: GmailMessage & { body: string }): void {
+  console.log(`ID: ${msg.id}`);
+  console.log(`Thread: ${msg.threadId}`);
+  console.log(`From: ${msg.from}`);
+  if (msg.to.length) console.log(`To: ${msg.to.join(', ')}`);
+  if (msg.cc.length) console.log(`CC: ${msg.cc.join(', ')}`);
+  console.log(`Date: ${msg.date}`);
+  console.log(`Subject: ${msg.subject}`);
+  if (msg.labels.length) console.log(`Labels: ${msg.labels.join(', ')}`);
+  console.log('---');
+  console.log(msg.body);
 }
 
-export function success<T>(
-  service: ServiceName,
-  command: string,
-  profile: string,
-  data: T
-): void {
-  const response: SuccessResponse<T> = {
-    success: true,
-    service,
-    command,
-    profile,
-    data,
-    timestamp: new Date().toISOString(),
-  };
+// Format send/reply result
+export function printSendResult(result: { id: string; threadId: string }): void {
+  console.log('Message sent');
+  console.log(`ID: ${result.id}`);
+  console.log(`Thread: ${result.threadId}`);
+}
 
-  // Compact JSON: no indentation, omit empty fields
-  console.log(JSON.stringify(response, compactReplacer));
+// Format archive confirmation
+export function printArchived(messageId: string): void {
+  console.log(`Archived: ${messageId}`);
+}
+
+// Format mark read/unread confirmation
+export function printMarked(messageId: string, read: boolean): void {
+  console.log(`Marked ${messageId} as ${read ? 'read' : 'unread'}`);
 }
 
 // Output raw text (for body-only mode)

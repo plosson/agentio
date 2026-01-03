@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { hostname, userInfo } from 'os';
 import { CONFIG_DIR, ensureConfigDir } from '../config/config-manager';
-import type { OAuthTokens, StoredTokens } from '../types/tokens';
+import type { StoredCredentials } from '../types/tokens';
 import type { ServiceName } from '../types/config';
 
 const TOKENS_FILE = join(CONFIG_DIR, 'tokens.enc');
@@ -12,11 +12,11 @@ const ALGORITHM = 'aes-256-gcm';
 
 // Derive a machine-specific key from hostname + username
 function deriveKey(): Buffer {
-  const machineId = `${hostname()}-${userInfo().username}-allcli-v1`;
-  return scryptSync(machineId, 'allcli-salt', 32);
+  const machineId = `${hostname()}-${userInfo().username}-agentio-v1`;
+  return scryptSync(machineId, 'agentio-salt', 32);
 }
 
-async function loadTokens(): Promise<StoredTokens> {
+async function loadCredentials(): Promise<StoredCredentials> {
   await ensureConfigDir();
 
   if (!existsSync(TOKENS_FILE)) {
@@ -38,19 +38,19 @@ async function loadTokens(): Promise<StoredTokens> {
 
     return JSON.parse(decrypted.toString('utf-8'));
   } catch {
-    // File corrupted, tampered, or key changed - return empty tokens
+    // File corrupted, tampered, or key changed - return empty credentials
     return {};
   }
 }
 
-async function saveTokens(tokens: StoredTokens): Promise<void> {
+async function saveCredentials(credentials: StoredCredentials): Promise<void> {
   await ensureConfigDir();
 
   const key = deriveKey();
   const iv = randomBytes(16);
   const cipher = createCipheriv(ALGORITHM, key, iv);
 
-  const data = JSON.stringify(tokens);
+  const data = JSON.stringify(credentials);
   const encrypted = Buffer.concat([
     cipher.update(data, 'utf-8'),
     cipher.final(),
@@ -67,48 +67,48 @@ async function saveTokens(tokens: StoredTokens): Promise<void> {
   await writeFile(TOKENS_FILE, stored, { mode: 0o600 });
 }
 
-export async function getTokens(
+export async function getCredentials<T = Record<string, unknown>>(
   service: ServiceName,
   profile: string
-): Promise<OAuthTokens | null> {
-  const tokens = await loadTokens();
-  return tokens[service]?.[profile] || null;
+): Promise<T | null> {
+  const credentials = await loadCredentials();
+  return (credentials[service]?.[profile] as T) || null;
 }
 
-export async function setTokens(
+export async function setCredentials(
   service: ServiceName,
   profile: string,
-  oauthTokens: OAuthTokens
+  data: object
 ): Promise<void> {
-  const tokens = await loadTokens();
+  const credentials = await loadCredentials();
 
-  if (!tokens[service]) {
-    tokens[service] = {};
+  if (!credentials[service]) {
+    credentials[service] = {};
   }
 
-  tokens[service][profile] = oauthTokens;
-  await saveTokens(tokens);
+  credentials[service][profile] = data as Record<string, unknown>;
+  await saveCredentials(credentials);
 }
 
-export async function removeTokens(
+export async function removeCredentials(
   service: ServiceName,
   profile: string
 ): Promise<boolean> {
-  const tokens = await loadTokens();
+  const credentials = await loadCredentials();
 
-  if (!tokens[service]?.[profile]) {
+  if (!credentials[service]?.[profile]) {
     return false;
   }
 
-  delete tokens[service][profile];
-  await saveTokens(tokens);
+  delete credentials[service][profile];
+  await saveCredentials(credentials);
   return true;
 }
 
-export async function hasTokens(
+export async function hasCredentials(
   service: ServiceName,
   profile: string
 ): Promise<boolean> {
-  const tokens = await loadTokens();
-  return !!tokens[service]?.[profile];
+  const credentials = await loadCredentials();
+  return !!credentials[service]?.[profile];
 }
