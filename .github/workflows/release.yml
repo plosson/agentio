@@ -116,10 +116,62 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
+  build-deb:
+    name: Build .deb packages
+    runs-on: ubuntu-latest
+    needs: [validate, build-binaries]
+
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            binary: agentio-linux-x64
+          - arch: arm64
+            binary: agentio-linux-arm64
+
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+
+      - name: Build .deb package
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          ARCH=${{ matrix.arch }}
+          PKG_NAME=agentio_${VERSION}_${ARCH}
+
+          mkdir -p ${PKG_NAME}/DEBIAN
+          mkdir -p ${PKG_NAME}/usr/bin
+
+          cp ${{ matrix.binary }} ${PKG_NAME}/usr/bin/agentio
+          chmod 755 ${PKG_NAME}/usr/bin/agentio
+
+          cat > ${PKG_NAME}/DEBIAN/control << EOF
+          Package: agentio
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: plosson <plosson@users.noreply.github.com>
+          Description: CLI for LLM agents to interact with communication and tracking services
+           A CLI tool designed for LLM agents to interact with communication services
+           (Gmail, Telegram, Slack) and tracking systems (JIRA, Linear).
+          Homepage: https://github.com/plosson/agentio
+          EOF
+
+          dpkg-deb --build ${PKG_NAME}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentio_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.deb
+          path: agentio_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.deb
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [validate, publish-npm, build-binaries]
+    needs: [validate, publish-npm, build-binaries, build-deb]
 
     steps:
       - name: Checkout
