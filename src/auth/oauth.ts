@@ -5,8 +5,15 @@ import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import type { OAuthTokens } from '../types/tokens';
 
 const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',  // search & read emails
+  'https://www.googleapis.com/auth/gmail.send',      // send emails
+  'https://www.googleapis.com/auth/gmail.compose',   // create/update drafts
+];
+
+const GCHAT_SCOPES = [
+  'https://www.googleapis.com/auth/chat.messages.create',     // send messages
+  'https://www.googleapis.com/auth/chat.messages.readonly',   // read messages (get operations)
+  'https://www.googleapis.com/auth/chat.spaces.readonly',     // read space info and list
 ];
 
 const PORT_RANGE_START = 3000;
@@ -42,7 +49,7 @@ export async function performOAuthFlow(
     redirectUri
   );
 
-  const scopes = service === 'gmail' ? GMAIL_SCOPES : [];
+  const scopes = service === 'gmail' ? GMAIL_SCOPES : service === 'gchat' ? GCHAT_SCOPES : [];
 
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',

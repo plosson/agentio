@@ -2,6 +2,7 @@ export interface TelegramCredentials {
   bot_token: string;
   channel_id: string;
   bot_username?: string;
+  channel_name?: string;
 }
 
 export interface TelegramBotInfo {

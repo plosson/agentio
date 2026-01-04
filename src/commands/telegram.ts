@@ -191,13 +191,14 @@ export function registerTelegramCommands(program: Command): void {
           bot_token: botToken,
           channel_id: channelId,
           bot_username: botInfo.username,
+          channel_name: channelName,
         };
 
         await setProfile('telegram', profileName);
         await setCredentials('telegram', profileName, credentials);
 
-        console.error(`✅ Profile "${profileName}" configured!`);
-        console.error(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
+        console.log(`\n✅ Profile "${profileName}" configured!`);
+        console.log(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
       } catch (error) {
         handleError(error);
       }
@@ -216,7 +217,9 @@ export function registerTelegramCommands(program: Command): void {
         } else {
           for (const name of profiles) {
             const marker = name === defaultProfile ? ' (default)' : '';
-            console.log(`${name}${marker}`);
+            const credentials = await getCredentials<TelegramCredentials>('telegram', name);
+            const channelInfo = credentials?.channel_name ? ` - ${credentials.channel_name}` : '';
+            console.log(`${name}${marker}${channelInfo}`);
           }
         }
       } catch (error) {

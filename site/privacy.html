@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - AgentIO</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+    header { margin-bottom: 40px; }
+    h1 { font-size: 2em; color: #1a1a1a; margin-bottom: 10px; }
+    .updated { color: #666; font-size: 0.9em; }
+    .card { background: white; border-radius: 8px; padding: 30px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    h2 { color: #1a1a1a; margin-bottom: 15px; font-size: 1.3em; }
+    h3 { color: #444; margin: 20px 0 10px; font-size: 1.1em; }
+    p { margin-bottom: 15px; }
+    ul { margin-left: 20px; margin-bottom: 15px; }
+    li { margin-bottom: 8px; }
+    code { background: #e8e8e8; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Monaco, monospace; font-size: 0.9em; }
+    a { color: #4285F4; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="back"><a href="/">&larr; Back to Home</a></div>
+
+    <header>
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated: January 3, 2026</p>
+    </header>
+
+    <div class="card">
+      <h2>Overview</h2>
+      <p>AgentIO is a command-line interface (CLI) tool that enables users to interact with their email through the Gmail API. This privacy policy explains how AgentIO handles your data.</p>
+    </div>
+
+    <div class="card">
+      <h2>Data Collection and Use</h2>
+
+      <h3>What AgentIO Accesses</h3>
+      <p>When you authorize AgentIO with your Google account, the application may access:</p>
+      <ul>
+        <li><strong>Email messages</strong>: To search, read, and display your emails</li>
+        <li><strong>Email sending</strong>: To send emails on your behalf</li>
+        <li><strong>Draft creation</strong>: To create and manage email drafts</li>
+      </ul>
+
+      <h3>What AgentIO Stores</h3>
+      <p>AgentIO stores the following data <strong>locally on your device only</strong>:</p>
+      <ul>
+        <li><strong>OAuth tokens</strong>: Encrypted authentication tokens that allow AgentIO to access your Gmail account</li>
+        <li><strong>Profile configuration</strong>: Your profile names and settings</li>
+      </ul>
+
+      <p><strong>AgentIO does NOT:</strong></p>
+      <ul>
+        <li>Store your emails or email content</li>
+        <li>Transmit your data to any external servers</li>
+        <li>Share your data with third parties</li>
+        <li>Collect analytics or usage data</li>
+      </ul>
+
+      <h3>Data Storage Location</h3>
+      <p>All data is stored locally in:</p>
+      <ul>
+        <li><code>~/.config/agentio/config.json</code> (profile configuration)</li>
+        <li><code>~/.config/agentio/tokens.enc</code> (encrypted OAuth tokens)</li>
+      </ul>
+      <p>Tokens are encrypted using AES-256-GCM with a key derived from your machine's hostname and username.</p>
+    </div>
+
+    <div class="card">
+      <h2>Data Security</h2>
+      <ul>
+        <li>OAuth tokens are encrypted at rest using AES-256-GCM encryption</li>
+        <li>Encryption keys are derived from machine-specific identifiers</li>
+        <li>No data is transmitted to external servers</li>
+        <li>All API calls are made directly between your device and Google's servers</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Your Rights</h2>
+      <p>You can at any time:</p>
+      <ul>
+        <li><strong>Revoke access</strong>: Remove AgentIO's access to your Google account at <a href="https://myaccount.google.com/permissions">Google Security Settings</a></li>
+        <li><strong>Delete local data</strong>: Remove the <code>~/.config/agentio</code> directory to delete all stored configuration and tokens</li>
+        <li><strong>Review permissions</strong>: Check what permissions AgentIO has in your Google account settings</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Third-Party Services</h2>
+      <p>AgentIO interacts with the following third-party services:</p>
+      <ul>
+        <li><strong>Google Gmail API</strong>: To access your email. Google's privacy policy applies to their handling of your data: <a href="https://policies.google.com/privacy">Google Privacy Policy</a></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Open Source</h2>
+      <p>AgentIO is open source software. You can review the source code to verify how your data is handled at: <a href="https://github.com/plosson/agentio">github.com/plosson/agentio</a></p>
+    </div>
+
+    <div class="card">
+      <h2>Contact</h2>
+      <p>For questions about this privacy policy or AgentIO's data practices, please open an issue on the GitHub repository: <a href="https://github.com/plosson/agentio/issues">github.com/plosson/agentio/issues</a></p>
+    </div>
+
+    <div class="card">
+      <h2>Changes to This Policy</h2>
+      <p>Any changes to this privacy policy will be reflected in this document with an updated date. As an open source project, all changes are tracked in the project's git history.</p>
+    </div>
+  </div>
+</body>
+</html>
