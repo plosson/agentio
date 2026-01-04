@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { basename } from 'path';
+import { google } from 'googleapis';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
-import { setCredentials, removeCredentials } from '../auth/token-store';
+import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
@@ -250,10 +251,19 @@ Query Syntax Examples:
 
         const tokens = await performOAuthFlow('gmail');
 
-        await setProfile('gmail', profileName);
-        await setCredentials('gmail', profileName, tokens);
+        // Fetch the user's email to store with the profile
+        const auth = createGoogleAuth(tokens);
+        const gmail = google.gmail({ version: 'v1', auth });
+        const userProfile = await gmail.users.getProfile({ userId: 'me' });
+        const email = userProfile.data.emailAddress;
 
-        console.error(`\nSuccess! Profile "${profileName}" for Gmail is now configured.`);
+        await setProfile('gmail', profileName);
+        await setCredentials('gmail', profileName, { ...tokens, email });
+
+        console.log(`\nSuccess! Profile "${profileName}" for Gmail is now configured.`);
+        if (email) {
+          console.log(`   Email: ${email}`);
+        }
       } catch (error) {
         handleError(error);
       }
@@ -272,7 +282,9 @@ Query Syntax Examples:
         } else {
           for (const name of profiles) {
             const marker = name === defaultProfile ? ' (default)' : '';
-            console.log(`${name}${marker}`);
+            const credentials = await getCredentials<{ email?: string }>('gmail', name);
+            const emailInfo = credentials?.email ? ` - ${credentials.email}` : '';
+            console.log(`${name}${marker}${emailInfo}`);
           }
         }
       } catch (error) {

@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import { registerGmailCommands } from './commands/gmail';
 import { registerTelegramCommands } from './commands/telegram';
+import { registerGChatCommands } from './commands/gchat';
 
 const program = new Command();
 
@@ -12,5 +13,6 @@ program
 
 registerGmailCommands(program);
 registerTelegramCommands(program);
+registerGChatCommands(program);
 
 program.parse();
