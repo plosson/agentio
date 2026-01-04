@@ -48,7 +48,8 @@ export type GChatCredentials = GChatWebhookCredentials | GChatOAuthCredentials;
 
 export interface GChatSendOptions {
   threadId?: string;
-  text: string;
+  text?: string;
+  payload?: Record<string, unknown>; // Raw JSON payload for rich messages (cardsV2, etc.)
 }
 
 export interface GChatListOptions {
@@ -64,5 +65,6 @@ export interface GChatGetOptions {
 export interface GChatSendResult {
   messageId: string;
   spaceId?: string;
-  text: string;
+  text?: string;
+  isJsonPayload?: boolean;
 }

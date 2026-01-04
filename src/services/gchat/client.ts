@@ -76,9 +76,8 @@ export class GChatClient {
       );
     }
 
-    const payload = {
-      text: options.text,
-    };
+    // Use raw payload if provided, otherwise construct simple text message
+    const payload = options.payload ?? { text: options.text };
 
     try {
       const response = await fetch(webhookUrl, {
@@ -98,9 +97,23 @@ export class GChatClient {
         );
       }
 
+      // Parse response to extract message ID
+      let messageId = 'unknown';
+      try {
+        const responseData = (await response.json()) as Record<string, unknown>;
+        const messageName = responseData.name as string | undefined;
+        if (messageName) {
+          messageId = messageName.split('/').pop() || 'unknown';
+        }
+      } catch {
+        // If response is not JSON or parsing fails, keep messageId as 'unknown'
+        // The message was still sent successfully (response.ok was true)
+      }
+
       return {
-        messageId: 'unknown',
+        messageId: messageId,
         text: options.text,
+        isJsonPayload: !!options.payload,
       };
     } catch (err) {
       if (err instanceof CliError) throw err;
@@ -125,12 +138,13 @@ export class GChatClient {
       );
     }
 
+    // Use raw payload if provided, otherwise construct simple text message
+    const requestBody = options.payload ?? { text: options.text };
+
     try {
       const response = await chat.spaces.messages.create({
         parent: `spaces/${options.spaceId}`,
-        requestBody: {
-          text: options.text,
-        },
+        requestBody: requestBody as chat_v1.Schema$Message,
       });
 
       const messageId = response.data.name?.split('/').pop() || 'unknown';
@@ -139,6 +153,7 @@ export class GChatClient {
         messageId: messageId,
         spaceId: options.spaceId,
         text: options.text,
+        isJsonPayload: !!options.payload,
       };
     } catch (err) {
       const code = this.getErrorCode(err);

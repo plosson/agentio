@@ -1,0 +1,17 @@
+{
+  "name": "agentio",
+  "owner": {
+    "name": "agentio"
+  },
+  "metadata": {
+    "description": "Skills for LLM agents to interact with communication services via the agentio CLI",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "agentio",
+      "source": "./plugins/agentio",
+      "description": "Skills for Gmail, Telegram, and Google Chat operations via the agentio CLI"
+    }
+  ]
+}

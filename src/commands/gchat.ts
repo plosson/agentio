@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { google } from 'googleapis';
 import { createInterface } from 'readline';
+import { readFile } from 'fs/promises';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
 import { performOAuthFlow } from '../auth/oauth';
@@ -65,22 +66,75 @@ export function registerGChatCommands(program: Command): void {
     .option('--profile <name>', 'Profile name')
     .option('--space <id>', 'Space ID (required for OAuth profiles)')
     .option('--thread <id>', 'Thread ID (optional)')
+    .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
     .argument('[message]', 'Message text (or pipe via stdin)')
     .action(async (message: string | undefined, options) => {
       try {
-        let text = message;
+        let text: string | undefined = message;
+        let payload: Record<string, unknown> | undefined;
 
-        if (!text) {
-          text = await readStdin() || undefined;
-        }
+        // Handle --json option
+        if (options.json !== undefined) {
+          // Check mutual exclusivity
+          if (message) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Cannot use both text message and --json option',
+              'Use either: agentio gchat send "text" OR agentio gchat send --json file.json'
+            );
+          }
 
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          let jsonContent: string;
+
+          if (typeof options.json === 'string') {
+            // Read from file
+            try {
+              jsonContent = await readFile(options.json, 'utf-8');
+            } catch (err) {
+              throw new CliError(
+                'INVALID_PARAMS',
+                `Failed to read JSON file: ${options.json}`,
+                'Check that the file exists and is readable'
+              );
+            }
+          } else {
+            // Read from stdin
+            const stdinContent = await readStdin();
+            if (!stdinContent) {
+              throw new CliError(
+                'INVALID_PARAMS',
+                'No JSON provided via stdin',
+                'Pipe JSON content: cat message.json | agentio gchat send --json'
+              );
+            }
+            jsonContent = stdinContent;
+          }
+
+          // Parse JSON
+          try {
+            payload = JSON.parse(jsonContent) as Record<string, unknown>;
+          } catch (err) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+              'Check that the JSON is valid'
+            );
+          }
+        } else {
+          // Text message mode
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+
+          if (!text) {
+            throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          }
         }
 
         const { client } = await getGChatClient(options.profile);
         const result = await client.send({
           text,
+          payload,
           threadId: options.thread,
           spaceId: options.space,
         });

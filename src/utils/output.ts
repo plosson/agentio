@@ -55,11 +55,14 @@ export function raw(text: string): void {
 }
 
 // Google Chat specific formatters
-export function printGChatSendResult(result: { messageId: string; spaceId?: string }): void {
+export function printGChatSendResult(result: { messageId: string; spaceId?: string; isJsonPayload?: boolean }): void {
   console.log('Message sent');
   console.log(`ID: ${result.messageId}`);
   if (result.spaceId) {
     console.log(`Space: ${result.spaceId}`);
+  }
+  if (result.isJsonPayload) {
+    console.log('Type: JSON payload');
   }
 }
 
