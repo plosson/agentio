@@ -137,6 +137,24 @@ agentio gmail profile add --profile personal
 agentio gmail list --profile work
 ```
 
+## Claude Code Integration
+
+agentio provides a plugin for [Claude Code](https://claude.com/claude-code) with skills for Gmail, Telegram, and Google Chat operations.
+
+### Add the Marketplace
+
+```bash
+/plugin marketplace add plosson/agentio
+```
+
+### Install the Plugin
+
+```bash
+/plugin install agentio@agentio
+```
+
+Once installed, Claude Code can use the agentio CLI skills to help you manage emails, send Telegram messages, and more.
+
 ## Design
 
 agentio is designed for LLM consumption:
