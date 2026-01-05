@@ -1,6 +1,6 @@
 {
   "name": "@plosson/agentio",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "CLI for LLM agents to interact with communication and tracking services",
   "type": "module",
   "license": "MIT",
@@ -34,7 +34,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node",
-    "build:native": "bun build src/index.ts --compile --outfile dist/agentio",
+    "build:native": "bun build src/index.ts --compile --minify --sourcemap --bytecode --outfile dist/agentio",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
