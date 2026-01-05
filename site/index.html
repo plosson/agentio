@@ -21,6 +21,24 @@
     .links a { color: #4285F4; text-decoration: none; margin: 0 15px; }
     .links a:hover { text-decoration: underline; }
     footer { text-align: center; margin-top: 40px; color: #666; font-size: 0.9em; }
+
+    /* Install tabs */
+    .install-tabs { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 0; }
+    .install-tab { padding: 12px 24px; cursor: pointer; color: #666; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+    .install-tab:hover { color: #333; }
+    .install-tab.active { color: #1a1a1a; border-bottom-color: #1a1a1a; }
+    .install-content { display: none; }
+    .install-content.active { display: block; }
+    .install-command { background: #f8f8f8; border-radius: 0 0 8px 8px; padding: 20px; position: relative; font-family: 'SF Mono', Monaco, 'Consolas', monospace; font-size: 14px; overflow-x: auto; }
+    .install-command code { background: none; padding: 0; font-size: inherit; }
+    .copy-btn { position: absolute; top: 12px; right: 12px; background: #e8e8e8; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; color: #666; transition: all 0.2s; }
+    .copy-btn:hover { background: #d8d8d8; color: #333; }
+    .copy-btn.copied { background: #4caf50; color: white; }
+
+    /* Update section */
+    .update-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+    .update-section p { color: #666; margin-bottom: 10px; }
+    .update-command { background: #f8f8f8; border-radius: 6px; padding: 12px 16px; display: inline-block; font-family: 'SF Mono', Monaco, monospace; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -30,6 +48,30 @@
       <h1>AgentIO</h1>
       <p class="tagline">A CLI for LLM agents to interact with communication services</p>
     </header>
+
+    <div class="card">
+      <h2>Quick Install</h2>
+      <div class="install-tabs">
+        <div class="install-tab active" data-tab="unix">macOS and Linux</div>
+        <div class="install-tab" data-tab="windows">Windows</div>
+      </div>
+      <div class="install-content active" data-content="unix">
+        <div class="install-command">
+          <code>curl -LsSf https://agentio.work/install | sh</code>
+          <button class="copy-btn" onclick="copyCommand(this, 'curl -LsSf https://agentio.work/install | sh')">Copy</button>
+        </div>
+      </div>
+      <div class="install-content" data-content="windows">
+        <div class="install-command">
+          <code>iwr -useb https://agentio.work/install.ps1 | iex</code>
+          <button class="copy-btn" onclick="copyCommand(this, 'iwr -useb https://agentio.work/install.ps1 | iex')">Copy</button>
+        </div>
+      </div>
+      <div class="update-section">
+        <p>To update to the latest version:</p>
+        <span class="update-command">agentio update</span>
+      </div>
+    </div>
 
     <div class="card">
       <h2>What is AgentIO?</h2>
@@ -42,16 +84,23 @@
         <li>Gmail: search, read, send, reply, archive emails</li>
         <li>Telegram: send messages to channels</li>
         <li>Google Chat: send messages via webhook or OAuth</li>
+        <li>JIRA: create issues, search, add comments</li>
+        <li>Slack: send messages via webhooks</li>
         <li>Multi-profile support for multiple accounts</li>
         <li>Encrypted credential storage (AES-256-GCM)</li>
-        <li>Designed for automation and LLM agents</li>
+        <li>Self-update capability</li>
       </ul>
     </div>
 
     <div class="card">
-      <h2>Installation</h2>
-      <p>Visit the GitHub repository for installation instructions:</p>
-      <p style="margin-top: 10px;"><a href="https://github.com/plosson/agentio">github.com/plosson/agentio</a></p>
+      <h2>Alternative Installation</h2>
+      <p>Also available via:</p>
+      <ul>
+        <li><strong>Homebrew:</strong> <code>brew tap plosson/agentio && brew install agentio</code></li>
+        <li><strong>Scoop:</strong> <code>scoop bucket add agentio https://github.com/plosson/scoop-agentio && scoop install agentio</code></li>
+        <li><strong>npm:</strong> <code>npm install -g @plosson/agentio</code></li>
+        <li><a href="https://github.com/plosson/agentio/releases/latest">Direct download from GitHub Releases</a></li>
+      </ul>
     </div>
 
     <div class="links">
@@ -64,5 +113,34 @@
       <p>&copy; 2026 AgentIO. Open source software.</p>
     </footer>
   </div>
+
+  <script>
+    // Tab switching
+    document.querySelectorAll('.install-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.dataset.tab;
+
+        // Update tabs
+        document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Update content
+        document.querySelectorAll('.install-content').forEach(c => c.classList.remove('active'));
+        document.querySelector(`[data-content="${tabName}"]`).classList.add('active');
+      });
+    });
+
+    // Copy to clipboard
+    function copyCommand(btn, text) {
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      });
+    }
+  </script>
 </body>
 </html>
