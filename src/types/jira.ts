@@ -1,7 +1,6 @@
 // JIRA OAuth credentials stored per profile
+// Note: clientId and clientSecret are embedded in the app (see config/credentials.ts)
 export interface JiraCredentials {
-  clientId: string;
-  clientSecret: string;
   accessToken: string;
   refreshToken: string;
   expiryDate: number;

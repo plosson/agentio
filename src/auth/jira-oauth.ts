@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'http';
 import { URL } from 'url';
+import { JIRA_OAUTH_CONFIG } from '../config/credentials';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
@@ -98,8 +99,6 @@ async function getAccessibleResources(accessToken: string): Promise<AtlassianSit
 }
 
 export async function refreshJiraToken(
-  clientId: string,
-  clientSecret: string,
   refreshToken: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
   const response = await fetch(ATLASSIAN_TOKEN_URL, {
@@ -109,8 +108,8 @@ export async function refreshJiraToken(
     },
     body: JSON.stringify({
       grant_type: 'refresh_token',
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: JIRA_OAUTH_CONFIG.clientId,
+      client_secret: JIRA_OAUTH_CONFIG.clientSecret,
       refresh_token: refreshToken,
     }),
   });
@@ -129,8 +128,6 @@ export async function refreshJiraToken(
 }
 
 export async function performJiraOAuthFlow(
-  clientId: string,
-  clientSecret: string,
   selectSite?: (sites: AtlassianSite[]) => Promise<AtlassianSite>
 ): Promise<JiraOAuthResult> {
   const port = await findAvailablePort();
@@ -139,7 +136,7 @@ export async function performJiraOAuthFlow(
   const state = Math.random().toString(36).substring(2);
   const authUrl = new URL(ATLASSIAN_AUTH_URL);
   authUrl.searchParams.set('audience', 'api.atlassian.com');
-  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('client_id', JIRA_OAUTH_CONFIG.clientId);
   authUrl.searchParams.set('scope', JIRA_SCOPES.join(' '));
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('state', state);
@@ -202,7 +199,7 @@ export async function performJiraOAuthFlow(
         server.close();
 
         // Exchange code for tokens
-        const tokens = await exchangeCodeForTokens(code, clientId, clientSecret, redirectUri);
+        const tokens = await exchangeCodeForTokens(code, JIRA_OAUTH_CONFIG.clientId, JIRA_OAUTH_CONFIG.clientSecret, redirectUri);
 
         // Get accessible resources to find cloud ID
         const sites = await getAccessibleResources(tokens.accessToken);
