@@ -6,6 +6,7 @@ import { registerGChatCommands } from './commands/gchat';
 import { registerJiraCommands } from './commands/jira';
 import { registerSlackCommands } from './commands/slack';
 import { registerUpdateCommand } from './commands/update';
+import { registerConfigCommands } from './commands/config';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -30,5 +31,6 @@ registerGChatCommands(program);
 registerJiraCommands(program);
 registerSlackCommands(program);
 registerUpdateCommand(program);
+registerConfigCommands(program);
 
 program.parse();

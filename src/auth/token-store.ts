@@ -112,3 +112,11 @@ export async function hasCredentials(
   const credentials = await loadCredentials();
   return !!credentials[service]?.[profile];
 }
+
+export async function getAllCredentials(): Promise<StoredCredentials> {
+  return loadCredentials();
+}
+
+export async function setAllCredentials(credentials: StoredCredentials): Promise<void> {
+  return saveCredentials(credentials);
+}

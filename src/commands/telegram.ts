@@ -1,25 +1,10 @@
 import { Command } from 'commander';
-import { createInterface } from 'readline';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin } from '../utils/stdin';
+import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
 import type { TelegramCredentials, TelegramSendOptions } from '../types/telegram';
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 async function getTelegramClient(profileName?: string): Promise<{ client: TelegramClient; profile: string }> {
   const profile = await getProfile('telegram', profileName);
@@ -107,7 +92,7 @@ export function registerTelegramCommands(program: Command): void {
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (options) => {
       try {
-        const profileName = options.profile;
+        const profileName = await resolveProfileName('telegram', options.profile);
 
         console.error('\n📱 Telegram Bot Setup\n');
 

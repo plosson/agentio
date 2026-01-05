@@ -1,27 +1,12 @@
 import { Command } from 'commander';
-import { createInterface } from 'readline';
 import { readFile } from 'fs/promises';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
 import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin } from '../utils/stdin';
+import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
 import { printSlackSendResult } from '../utils/output';
 import type { SlackCredentials, SlackWebhookCredentials } from '../types/slack';
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 async function getSlackClient(profileName?: string): Promise<{ client: SlackClient; profile: string }> {
   const profile = await getProfile('slack', profileName);
@@ -149,7 +134,7 @@ export function registerSlackCommands(program: Command): void {
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (options) => {
       try {
-        const profileName = options.profile;
+        const profileName = await resolveProfileName('slack', options.profile);
         await setupWebhookProfile(profileName);
       } catch (error) {
         handleError(error);
