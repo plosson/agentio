@@ -6,14 +6,15 @@ import { registerGChatCommands } from './commands/gchat';
 import { registerJiraCommands } from './commands/jira';
 import { registerSlackCommands } from './commands/slack';
 import { registerUpdateCommand } from './commands/update';
-import pkg from '../package.json';
+
+declare const BUILD_VERSION: string;
 
 const program = new Command();
 
 program
   .name('agentio')
   .description('CLI for LLM agents to interact with communication and tracking services')
-  .version(pkg.version);
+  .version(BUILD_VERSION);
 
 registerGmailCommands(program);
 registerTelegramCommands(program);
