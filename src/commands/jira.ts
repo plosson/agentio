@@ -1,11 +1,10 @@
 import { Command } from 'commander';
-import { createInterface } from 'readline';
 import { setCredentials, removeCredentials, getCredentials, setCredentials as updateCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin } from '../utils/stdin';
+import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
 import {
   printJiraProjectList,
   printJiraIssueList,
@@ -15,20 +14,6 @@ import {
   printJiraTransitionResult,
 } from '../utils/output';
 import type { JiraCredentials } from '../types/jira';
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 async function ensureValidToken(credentials: JiraCredentials, profile: string): Promise<JiraCredentials> {
   // Check if token is expired or about to expire (within 5 minutes)
@@ -228,7 +213,7 @@ export function registerJiraCommands(program: Command): void {
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (options) => {
       try {
-        const profileName = options.profile;
+        const profileName = await resolveProfileName('jira', options.profile);
 
         console.error('\n🔧 JIRA OAuth Setup\n');
 

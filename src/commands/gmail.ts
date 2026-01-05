@@ -8,7 +8,7 @@ import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
 import { printMessageList, printMessage, printSendResult, printArchived, printMarked, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin } from '../utils/stdin';
+import { readStdin, resolveProfileName } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
 
 async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
@@ -245,7 +245,7 @@ Query Syntax Examples:
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (options) => {
       try {
-        const profileName = options.profile;
+        const profileName = await resolveProfileName('gmail', options.profile);
 
         console.error(`Starting OAuth flow for Gmail profile "${profileName}"...`);
 

@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { google } from 'googleapis';
-import { createInterface } from 'readline';
 import { readFile } from 'fs/promises';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
@@ -8,23 +7,9 @@ import { performOAuthFlow } from '../auth/oauth';
 import { createGoogleAuth } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin } from '../utils/stdin';
+import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage } from '../utils/output';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 async function getGChatClient(profileName?: string): Promise<{ client: GChatClient; profile: string }> {
   const profile = await getProfile('gchat', profileName);
@@ -195,7 +180,7 @@ export function registerGChatCommands(program: Command): void {
     .option('--profile <name>', 'Profile name', 'default')
     .action(async (options) => {
       try {
-        const profileName = options.profile;
+        const profileName = await resolveProfileName('gchat', options.profile);
 
         console.error('\nGoogle Chat Setup\n');
 
