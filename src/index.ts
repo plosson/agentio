@@ -4,6 +4,7 @@ import { registerGmailCommands } from './commands/gmail';
 import { registerTelegramCommands } from './commands/telegram';
 import { registerGChatCommands } from './commands/gchat';
 import { registerJiraCommands } from './commands/jira';
+import { registerSlackCommands } from './commands/slack';
 
 const program = new Command();
 
@@ -16,5 +17,6 @@ registerGmailCommands(program);
 registerTelegramCommands(program);
 registerGChatCommands(program);
 registerJiraCommands(program);
+registerSlackCommands(program);
 
 program.parse();
