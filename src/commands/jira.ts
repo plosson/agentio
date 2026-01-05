@@ -37,11 +37,7 @@ async function ensureValidToken(credentials: JiraCredentials, profile: string): 
     console.error('Access token expired, refreshing...');
 
     try {
-      const refreshed = await refreshJiraToken(
-        credentials.clientId,
-        credentials.clientSecret,
-        credentials.refreshToken
-      );
+      const refreshed = await refreshJiraToken(credentials.refreshToken);
 
       const newCredentials: JiraCredentials = {
         ...credentials,
@@ -236,29 +232,6 @@ export function registerJiraCommands(program: Command): void {
 
         console.error('\n🔧 JIRA OAuth Setup\n');
 
-        console.error('Step 1: Create an OAuth 2.0 app in Atlassian Developer Console');
-        console.error('  → https://developer.atlassian.com/console/myapps/\n');
-        console.error('  1. Click "Create" → "OAuth 2.0 integration"');
-        console.error('  2. Enter a name for your app (e.g., "My JIRA CLI")');
-        console.error('  3. Under "Authorization" → "OAuth 2.0 (3LO)"');
-        console.error('     Add callback URL: http://localhost:3000/callback');
-        console.error('  4. Under "Permissions", add these scopes:');
-        console.error('     - Jira API → read:jira-work');
-        console.error('     - Jira API → write:jira-work');
-        console.error('  5. Go to "Settings" to find your Client ID and Secret\n');
-
-        const clientId = await prompt('? Enter your Client ID: ');
-        if (!clientId) {
-          throw new CliError('INVALID_PARAMS', 'Client ID is required');
-        }
-
-        const clientSecret = await prompt('? Enter your Client Secret: ');
-        if (!clientSecret) {
-          throw new CliError('INVALID_PARAMS', 'Client Secret is required');
-        }
-
-        console.error('\nStep 2: Authorize the app');
-
         // Site selection callback
         const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
           console.error('\nMultiple JIRA sites found:\n');
@@ -277,14 +250,12 @@ export function registerJiraCommands(program: Command): void {
           return sites[index];
         };
 
-        const result = await performJiraOAuthFlow(clientId, clientSecret, selectSite);
+        const result = await performJiraOAuthFlow(selectSite);
 
         console.error(`\n✓ Authorized for site: ${result.siteUrl}\n`);
 
         // Save credentials
         const credentials: JiraCredentials = {
-          clientId,
-          clientSecret,
           accessToken: result.accessToken,
           refreshToken: result.refreshToken,
           expiryDate: result.expiryDate,

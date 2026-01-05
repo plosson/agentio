@@ -11,3 +11,12 @@ export const GOOGLE_OAUTH_CONFIG = {
   clientId: CLIENT_ID,
   clientSecret: reveal(CLIENT_SECRET_ENC),
 };
+
+// JIRA/Atlassian OAuth credentials
+const JIRA_CLIENT_ID = '7408S0MZKdYnsiz0KXlUT15Lb69k7y0e';
+const JIRA_CLIENT_SECRET_ENC = 'C0J5Cyvhfl_UHCvmY9BfvKa_gzqdaa5mb3FwzRmq-YApJdAoBAKmeCl3xmcYLRCFdMvQLWVmifTkryoB0bmhVWX6eRTzoj1q4iyyTxZzT0yff0pYvLguHzp9Y4U';
+
+export const JIRA_OAUTH_CONFIG = {
+  clientId: JIRA_CLIENT_ID,
+  clientSecret: reveal(JIRA_CLIENT_SECRET_ENC),
+};
