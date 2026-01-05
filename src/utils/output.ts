@@ -1,6 +1,7 @@
 import type { GmailMessage } from '../types/gmail';
 import type { GChatMessage } from '../types/gchat';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
+import type { SlackSendResult } from '../types/slack';
 
 // Format a list of Gmail messages
 export function printMessageList(messages: GmailMessage[], total: number): void {
@@ -181,4 +182,12 @@ export function printJiraTransitionResult(result: JiraTransitionResult): void {
   console.log(`Issue: ${result.issueKey}`);
   console.log(`Transition: ${result.transitionName}`);
   console.log(`New Status: ${result.newStatus}`);
+}
+
+// Slack specific formatters
+export function printSlackSendResult(result: SlackSendResult): void {
+  console.log('Message sent');
+  if (result.isJsonPayload) {
+    console.log('Type: Block Kit payload');
+  }
 }
