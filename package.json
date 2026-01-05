@@ -34,7 +34,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node",
-    "build:native": "bun build src/index.ts --compile --minify --sourcemap --bytecode --outfile dist/agentio",
+    "build:native": "bun build src/index.ts --compile --minify --sourcemap --bytecode --define BUILD_VERSION=\"\\\"$(bun -e 'console.log(require(\"./package.json\").version)')\\\"\" --outfile dist/agentio",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
