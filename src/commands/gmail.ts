@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { basename, join } from 'path';
+import { tmpdir } from 'os';
 import { google } from 'googleapis';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
@@ -17,6 +18,53 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function findChromePath(): string | null {
+  const platform = process.platform;
+
+  const paths: string[] = [];
+
+  if (platform === 'darwin') {
+    paths.push(
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    );
+  } else if (platform === 'linux') {
+    paths.push(
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/snap/bin/chromium',
+      '/usr/bin/microsoft-edge',
+      '/usr/bin/brave-browser',
+    );
+  } else if (platform === 'win32') {
+    const programFiles = process.env['PROGRAMFILES'] || 'C:\\Program Files';
+    const programFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+    const localAppData = process.env['LOCALAPPDATA'] || '';
+
+    paths.push(
+      `${programFiles}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${programFilesX86}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${localAppData}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${programFiles}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${programFilesX86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${programFiles}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+      `${localAppData}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+    );
+  }
+
+  for (const p of paths) {
+    if (Bun.file(p).size > 0) {
+      return p;
+    }
+  }
+
+  return null;
 }
 
 async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
@@ -323,25 +371,47 @@ ${emailHeader}
 </html>`;
         }
 
-        // Lazy load playwright-core to avoid bundling issues
-        const { chromium } = await import('playwright-core');
+        // Find Chrome browser
+        const chromePath = findChromePath();
+        if (!chromePath) {
+          throw new CliError(
+            'NOT_FOUND',
+            'Chrome/Chromium not found',
+            'Install Google Chrome, Chromium, or Microsoft Edge'
+          );
+        }
 
-        // Launch browser and generate PDF
-        console.error('Launching browser...');
-        const browser = await chromium.launch({
-          channel: 'chrome', // Use system Chrome
-        });
+        // Write HTML to temp file
+        const tempHtml = join(tmpdir(), `agentio-email-${Date.now()}.html`);
+        await Bun.write(tempHtml, html);
 
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle' });
-        await page.pdf({
-          path: options.output,
-          format: 'A4',
-          margin: { top: '1cm', right: '1cm', bottom: '1cm', left: '1cm' },
-        });
+        // Resolve output path to absolute
+        const outputPath = options.output.startsWith('/')
+          ? options.output
+          : join(process.cwd(), options.output);
 
-        await browser.close();
-        console.log(`Exported to ${options.output}`);
+        try {
+          // Run Chrome in headless mode to generate PDF
+          console.error('Generating PDF...');
+          const result = Bun.spawnSync([
+            chromePath,
+            '--headless=new',
+            '--disable-gpu',
+            '--no-pdf-header-footer',
+            `--print-to-pdf=${outputPath}`,
+            tempHtml,
+          ]);
+
+          if (result.exitCode !== 0) {
+            const stderr = result.stderr.toString();
+            throw new CliError('API_ERROR', `Chrome failed: ${stderr}`);
+          }
+
+          console.log(`Exported to ${options.output}`);
+        } finally {
+          // Clean up temp file
+          await Bun.file(tempHtml).unlink();
+        }
       } catch (error) {
         handleError(error);
       }
