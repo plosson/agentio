@@ -141,6 +141,29 @@ agentio provides a plugin for [Claude Code](https://claude.com/claude-code) with
 
 Once installed, Claude Code can use the agentio CLI skills to help you manage emails, send Telegram messages, and more.
 
+### Install Skills Directly
+
+You can also install skills directly without the plugin system:
+
+```bash
+# List available skills
+agentio skill list
+
+# Install all skills to current directory
+agentio skill install
+
+# Install a specific skill
+agentio skill install agentio-gmail
+
+# Install to a specific directory
+agentio skill install -d ~/myproject
+
+# Skip confirmation prompts
+agentio skill install -y
+```
+
+Skills are installed to `.claude/skills/` in the target directory.
+
 ## Design
 
 agentio is designed for LLM consumption:
