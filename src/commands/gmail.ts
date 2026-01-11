@@ -12,6 +12,14 @@ import { CliError, handleError } from '../utils/errors';
 import { readStdin, resolveProfileName } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gmail', profileName);
   const auth = createGoogleAuth(tokens);
@@ -288,30 +296,33 @@ Query Syntax Examples:
         const { client } = await getGmailClient(options.profile);
         const message = await client.get(messageId, 'html');
 
-        // Build HTML document with email metadata
-        const html = `<!DOCTYPE html>
+        // Build HTML document - inject header before body content
+        const emailHeader = `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px 20px; margin-bottom: 16px; border-bottom: 1px solid #ddd; background: #f9f9f9;">
+  <div style="font-size: 1.3em; font-weight: 600; margin-bottom: 12px;">${escapeHtml(message.subject)}</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>From:</strong> ${escapeHtml(message.from)}</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>To:</strong> ${escapeHtml(message.to.join(', '))}</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>Date:</strong> ${escapeHtml(message.date)}</div>
+</div>`;
+
+        let html: string;
+        const body = message.body || '';
+
+        // Check if body is already a full HTML document
+        if (body.trim().toLowerCase().startsWith('<!doctype') || body.trim().toLowerCase().startsWith('<html')) {
+          // Inject header after <body> tag
+          html = body.replace(/<body[^>]*>/i, (match) => `${match}${emailHeader}`);
+        } else {
+          // Wrap fragment in minimal HTML
+          html = `<!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; line-height: 1.5; }
-    .header { border-bottom: 1px solid #ddd; padding-bottom: 16px; margin-bottom: 24px; }
-    .header-field { margin: 4px 0; }
-    .header-label { font-weight: 600; color: #555; }
-    .subject { font-size: 1.4em; font-weight: 600; margin-bottom: 16px; }
-    .body { white-space: pre-wrap; }
-  </style>
-</head>
+<head><meta charset="utf-8"></head>
 <body>
-  <div class="header">
-    <div class="subject">${escapeHtml(message.subject)}</div>
-    <div class="header-field"><span class="header-label">From:</span> ${escapeHtml(message.from)}</div>
-    <div class="header-field"><span class="header-label">To:</span> ${escapeHtml(message.to)}</div>
-    <div class="header-field"><span class="header-label">Date:</span> ${escapeHtml(message.date)}</div>
-  </div>
-  <div class="body">${message.body}</div>
+${emailHeader}
+<div style="padding: 0 20px;">${body}</div>
 </body>
 </html>`;
+        }
 
         // Launch browser and generate PDF
         console.error('Launching browser...');
