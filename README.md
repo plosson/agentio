@@ -67,10 +67,11 @@ Download from [GitHub Releases](https://github.com/plosson/agentio/releases/late
 
 | Service | Status | Commands |
 |---------|--------|----------|
-| Gmail | Available | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark` |
+| Gmail | Available | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
 | Telegram | Available | `send` |
-| Slack | Planned | - |
-| JIRA | Planned | - |
+| Google Chat | Available | `send`, `list`, `get` |
+| Slack | Available | `send` |
+| JIRA | Available | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
 | Linear | Planned | - |
 
 ## Usage
@@ -95,6 +96,14 @@ agentio gmail send --to user@example.com --subject "Hello" --body "Message body"
 
 # Or pipe content
 echo "Message body" | agentio gmail send --to user@example.com --subject "Hello"
+
+# Download attachments
+agentio gmail attachment <message-id>
+agentio gmail attachment <message-id> --name "document.pdf" --output ./downloads
+
+# Export email as PDF
+agentio gmail export <message-id>
+agentio gmail export <message-id> --output email.pdf
 ```
 
 ### Telegram
@@ -108,6 +117,64 @@ agentio telegram send "Hello from agentio!"
 
 # Send with formatting
 agentio telegram send --parse-mode markdown "**Bold** and _italic_"
+```
+
+### Google Chat
+
+```bash
+# Set up profile (webhook or OAuth)
+agentio gchat profile add
+
+# Send message via webhook
+agentio gchat send "Hello from agentio!"
+
+# Send with JSON payload for rich messages
+agentio gchat send --json message.json
+
+# List messages (OAuth profiles only)
+agentio gchat list --space <space-id>
+
+# Get a specific message (OAuth profiles only)
+agentio gchat get <message-id> --space <space-id>
+```
+
+### Slack
+
+```bash
+# Set up webhook profile
+agentio slack profile add
+
+# Send message
+agentio slack send "Hello from agentio!"
+
+# Send Block Kit message from JSON file
+agentio slack send --json blocks.json
+```
+
+### JIRA
+
+```bash
+# Authenticate with OAuth
+agentio jira profile add
+
+# List projects
+agentio jira projects
+
+# Search issues
+agentio jira search --project MYPROJ --status "In Progress"
+agentio jira search --jql "assignee = currentUser() AND status != Done"
+
+# Get issue details
+agentio jira get PROJ-123
+
+# Add a comment
+agentio jira comment PROJ-123 "This is my comment"
+
+# View available transitions
+agentio jira transitions PROJ-123
+
+# Transition an issue
+agentio jira transition PROJ-123 <transition-id>
 ```
 
 ## Multi-Profile Support
@@ -179,6 +246,27 @@ Configuration is stored in `~/.config/agentio/`:
 
 - `config.json` - Profile names and defaults
 - `tokens.enc` - Encrypted credentials (AES-256-GCM)
+
+### Export/Import
+
+Transfer configuration between machines:
+
+```bash
+# Export configuration (generates encryption key)
+agentio config export
+
+# Export with custom output file
+agentio config export --output backup.config
+
+# Import on another machine
+agentio config import agentio.config --key <encryption-key>
+
+# Or use environment variable
+AGENTIO_KEY=<key> agentio config import agentio.config
+
+# Merge with existing config instead of replacing
+agentio config import agentio.config --key <key> --merge
+```
 
 ## License
 
