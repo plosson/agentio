@@ -1,5 +1,11 @@
 {
   "name": "agentio",
   "description": "Skills for LLM agents to interact with Gmail, Telegram, and Google Chat via the agentio CLI",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "author": {
+    "name": "Pierre-Alexandre Losson",
+    "email": "plosson@gmail.com"
+  },
+  "repository": "https://github.com/plosson/agentio",
+  "license": "MIT"
 }
