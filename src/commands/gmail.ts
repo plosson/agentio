@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { basename, join } from 'path';
 import { google } from 'googleapis';
-import { chromium } from 'playwright-core';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
@@ -323,6 +322,9 @@ ${emailHeader}
 </body>
 </html>`;
         }
+
+        // Lazy load playwright-core to avoid bundling issues
+        const { chromium } = await import('playwright-core');
 
         // Launch browser and generate PDF
         console.error('Launching browser...');
