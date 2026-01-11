@@ -11,11 +11,9 @@ import {
 } from '../services/claude-plugin/agentio-json';
 import {
   installPlugin,
-  discoverComponents,
   removePluginFiles,
 } from '../services/claude-plugin/installer';
-import { parseSource, getDefaultBranch } from '../services/claude-plugin/source-parser';
-import type { InstalledComponent, ComponentType } from '../types/claude-plugin';
+import type { InstalledComponent } from '../types/claude-plugin';
 
 export function registerClaudeCommands(program: Command): void {
   const claude = program
@@ -158,31 +156,8 @@ export function registerClaudeCommands(program: Command): void {
 
         console.error(`Removing plugin: ${name}...`);
 
-        // Discover what was installed to remove files
-        const parsed = parseSource(entry.source);
-        if (!parsed.branch) {
-          parsed.branch = await getDefaultBranch(parsed.owner, parsed.repo);
-        }
-
-        const discovered = await discoverComponents(parsed);
-
-        // Build list of installed components
-        const components: InstalledComponent[] = [];
-        const componentTypes: ComponentType[] = entry.components || [
-          'skills',
-          'commands',
-          'hooks',
-        ];
-
-        for (const type of componentTypes) {
-          for (const compName of discovered[type]) {
-            components.push({
-              name: compName,
-              type,
-              path: path.join(targetDir, '.claude', type, compName),
-            });
-          }
-        }
+        // Use stored installed components (no network calls needed)
+        const components: InstalledComponent[] = entry.installedComponents || [];
 
         // Remove files
         removePluginFiles(targetDir, components);

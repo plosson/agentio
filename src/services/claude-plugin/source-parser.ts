@@ -107,51 +107,8 @@ function parseShortForm(source: string): ParsedSource {
 }
 
 /**
- * Get the default branch for a repository.
+ * Build a git clone URL from parsed source.
  */
-export async function getDefaultBranch(
-  owner: string,
-  repo: string
-): Promise<string> {
-  const url = `https://api.github.com/repos/${owner}/${repo}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'agentio-plugin-manager',
-    },
-  });
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new CliError('NOT_FOUND', `Repository not found: ${owner}/${repo}`);
-    }
-    throw new CliError('API_ERROR', `GitHub API error: ${response.statusText}`);
-  }
-
-  const data = (await response.json()) as { default_branch: string };
-  return data.default_branch;
-}
-
-/**
- * Build the GitHub API URL for contents.
- */
-export function getContentsUrl(
-  parsed: ParsedSource,
-  subPath?: string
-): string {
-  const basePath = parsed.path ? `${parsed.path}` : '';
-  const fullPath = subPath
-    ? basePath
-      ? `${basePath}/${subPath}`
-      : subPath
-    : basePath;
-
-  let url = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents`;
-  if (fullPath) {
-    url += `/${fullPath}`;
-  }
-  if (parsed.branch) {
-    url += `?ref=${parsed.branch}`;
-  }
-  return url;
+export function buildGitCloneUrl(parsed: ParsedSource): string {
+  return `https://github.com/${parsed.owner}/${parsed.repo}.git`;
 }
