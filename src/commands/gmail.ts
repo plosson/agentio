@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { basename, join } from 'path';
 import { google } from 'googleapis';
+import { chromium } from 'playwright-core';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
@@ -272,6 +273,62 @@ Query Syntax Examples:
           printAttachmentDownloaded(attachment.filename, outputPath, data.length);
           if (toDownload.length > 1) console.log('');
         }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gmail
+    .command('export <message-id>')
+    .description('Export a message as PDF')
+    .option('--profile <name>', 'Profile name')
+    .option('--output <path>', 'Output file path', 'message.pdf')
+    .action(async (messageId: string, options) => {
+      try {
+        const { client } = await getGmailClient(options.profile);
+        const message = await client.get(messageId, 'html');
+
+        // Build HTML document with email metadata
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; line-height: 1.5; }
+    .header { border-bottom: 1px solid #ddd; padding-bottom: 16px; margin-bottom: 24px; }
+    .header-field { margin: 4px 0; }
+    .header-label { font-weight: 600; color: #555; }
+    .subject { font-size: 1.4em; font-weight: 600; margin-bottom: 16px; }
+    .body { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="subject">${escapeHtml(message.subject)}</div>
+    <div class="header-field"><span class="header-label">From:</span> ${escapeHtml(message.from)}</div>
+    <div class="header-field"><span class="header-label">To:</span> ${escapeHtml(message.to)}</div>
+    <div class="header-field"><span class="header-label">Date:</span> ${escapeHtml(message.date)}</div>
+  </div>
+  <div class="body">${message.body}</div>
+</body>
+</html>`;
+
+        // Launch browser and generate PDF
+        console.error('Launching browser...');
+        const browser = await chromium.launch({
+          channel: 'chrome', // Use system Chrome
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle' });
+        await page.pdf({
+          path: options.output,
+          format: 'A4',
+          margin: { top: '1cm', right: '1cm', bottom: '1cm', left: '1cm' },
+        });
+
+        await browser.close();
+        console.log(`Exported to ${options.output}`);
       } catch (error) {
         handleError(error);
       }
