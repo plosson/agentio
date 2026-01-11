@@ -9,6 +9,7 @@ export interface GmailMessage {
   snippet: string;
   labels: string[];
   body?: string;
+  attachments?: GmailAttachmentInfo[];
 }
 
 export interface GmailListOptions {
@@ -21,6 +22,13 @@ export interface GmailAttachment {
   filename: string;
   path: string;
   mimeType?: string;
+}
+
+export interface GmailAttachmentInfo {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
 }
 
 export interface GmailSendOptions {

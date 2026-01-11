@@ -1,12 +1,12 @@
 import { Command } from 'commander';
-import { basename } from 'path';
+import { basename, join } from 'path';
 import { google } from 'googleapis';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
 import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printArchived, printMarked, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, resolveProfileName } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
@@ -229,6 +229,49 @@ Query Syntax Examples:
         const { client } = await getGmailClient(options.profile);
         await client.mark(messageId, options.read);
         printMarked(messageId, options.read);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gmail
+    .command('attachment <message-id>')
+    .description('Download attachments from a message')
+    .option('--profile <name>', 'Profile name')
+    .option('--name <filename>', 'Download specific attachment by filename (downloads all if not specified)')
+    .option('--output <dir>', 'Output directory', '.')
+    .action(async (messageId: string, options) => {
+      try {
+        const { client } = await getGmailClient(options.profile);
+        const outputDir = options.output;
+
+        // Download all attachments
+        const results = await client.getAllAttachments(messageId);
+
+        if (results.length === 0) {
+          console.log('No attachments found');
+          return;
+        }
+
+        // Filter by filename if specified
+        const toDownload = options.name
+          ? results.filter(({ attachment }) => attachment.filename === options.name)
+          : results;
+
+        if (toDownload.length === 0) {
+          throw new CliError('NOT_FOUND', `Attachment not found: ${options.name}`);
+        }
+
+        if (toDownload.length > 1) {
+          console.log(`Downloading ${toDownload.length} attachment(s)...\n`);
+        }
+
+        for (const { data, attachment } of toDownload) {
+          const outputPath = join(outputDir, attachment.filename);
+          await Bun.write(outputPath, data);
+          printAttachmentDownloaded(attachment.filename, outputPath, data.length);
+          if (toDownload.length > 1) console.log('');
+        }
       } catch (error) {
         handleError(error);
       }

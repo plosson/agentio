@@ -1,7 +1,15 @@
-import type { GmailMessage } from '../types/gmail';
+import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
 import type { GChatMessage } from '../types/gchat';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
 import type { SlackSendResult } from '../types/slack';
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 // Format a list of Gmail messages
 export function printMessageList(messages: GmailMessage[], total: number): void {
@@ -30,8 +38,39 @@ export function printMessage(msg: GmailMessage & { body: string }): void {
   console.log(`Date: ${msg.date}`);
   console.log(`Subject: ${msg.subject}`);
   if (msg.labels.length) console.log(`Labels: ${msg.labels.join(', ')}`);
+  if (msg.attachments && msg.attachments.length > 0) {
+    console.log(`Attachments: ${msg.attachments.length}`);
+    for (const att of msg.attachments) {
+      console.log(`  - ${att.filename} (${formatBytes(att.size)}) [${att.id}]`);
+    }
+  }
   console.log('---');
   console.log(msg.body);
+}
+
+// Format attachment list
+export function printAttachmentList(attachments: GmailAttachmentInfo[]): void {
+  if (attachments.length === 0) {
+    console.log('No attachments');
+    return;
+  }
+
+  console.log(`Attachments (${attachments.length})\n`);
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i];
+    console.log(`[${i + 1}] ${att.filename}`);
+    console.log(`    Size: ${formatBytes(att.size)}`);
+    console.log(`    Type: ${att.mimeType}`);
+    console.log(`    ID: ${att.id}`);
+    console.log('');
+  }
+}
+
+// Format attachment download result
+export function printAttachmentDownloaded(filename: string, path: string, size: number): void {
+  console.log(`Downloaded: ${filename}`);
+  console.log(`  Path: ${path}`);
+  console.log(`  Size: ${formatBytes(size)}`);
 }
 
 // Format send/reply result
