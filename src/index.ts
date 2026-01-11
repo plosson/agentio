@@ -7,7 +7,7 @@ import { registerJiraCommands } from './commands/jira';
 import { registerSlackCommands } from './commands/slack';
 import { registerUpdateCommand } from './commands/update';
 import { registerConfigCommands } from './commands/config';
-import { registerSkillCommands } from './commands/skill';
+import { registerClaudeCommands } from './commands/claude';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -33,6 +33,6 @@ registerJiraCommands(program);
 registerSlackCommands(program);
 registerUpdateCommand(program);
 registerConfigCommands(program);
-registerSkillCommands(program);
+registerClaudeCommands(program);
 
 program.parse();
