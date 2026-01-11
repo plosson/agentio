@@ -192,44 +192,49 @@ agentio gmail list --profile work
 
 ## Claude Code Integration
 
-agentio provides a plugin for [Claude Code](https://claude.com/claude-code) with skills for Gmail, Telegram, and Google Chat operations.
-
-### Add the Marketplace
-
-```bash
-/plugin marketplace add plosson/agentio
-```
+agentio provides plugins for [Claude Code](https://claude.ai/download) with skills for Gmail, Telegram, and Google Chat operations.
 
 ### Install the Plugin
 
 ```bash
-/plugin install agentio@agentio
+# Install from GitHub
+agentio claude plugin install plosson/agentio
+
+# Or install from a full GitHub URL
+agentio claude plugin install https://github.com/plosson/agentio
+
+# Install to a specific directory
+agentio claude plugin install plosson/agentio -d ~/myproject
+
+# Install only skills (skip commands and hooks)
+agentio claude plugin install plosson/agentio --skills
+
+# Force reinstall if already exists
+agentio claude plugin install plosson/agentio -f
 ```
 
 Once installed, Claude Code can use the agentio CLI skills to help you manage emails, send Telegram messages, and more.
 
-### Install Skills Directly
-
-You can also install skills directly without the plugin system:
+### Manage Plugins
 
 ```bash
-# List available skills
-agentio skill list
+# List installed plugins
+agentio claude plugin list
 
-# Install all skills to current directory
-agentio skill install
-
-# Install a specific skill
-agentio skill install agentio-gmail
-
-# Install to a specific directory
-agentio skill install -d ~/myproject
-
-# Skip confirmation prompts
-agentio skill install -y
+# Remove a plugin
+agentio claude plugin remove agentio
 ```
 
-Skills are installed to `.claude/skills/` in the target directory.
+### Install from agentio.json
+
+If your project has an `agentio.json` file listing plugins, you can install all of them at once:
+
+```bash
+# Install all plugins from agentio.json in current directory
+agentio claude plugin install
+```
+
+Plugins are installed to `.claude/` in the target directory (skills, commands, and hooks subdirectories).
 
 ## Design
 
