@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "agentio",
-      "source": "./claude/agentio",
+      "source": "./claude",
       "description": "Skills for Gmail, Telegram, and Google Chat operations via the agentio CLI"
     }
   ]
