@@ -1,7 +1,7 @@
 import { google, gmail_v1 } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment } from '../../types/gmail';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
 import { CliError } from '../../utils/errors';
 
 // Common MIME types by extension
@@ -64,7 +64,31 @@ export class GmailClient {
     return result;
   }
 
-  private parseMessage(message: gmail_v1.Schema$Message): GmailMessage {
+  private extractAttachments(payload: gmail_v1.Schema$MessagePart | undefined): GmailAttachmentInfo[] {
+    const attachments: GmailAttachmentInfo[] = [];
+
+    const processpart = (part: gmail_v1.Schema$MessagePart): void => {
+      if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+        attachments.push({
+          id: part.body.attachmentId,
+          filename: part.filename,
+          mimeType: part.mimeType || 'application/octet-stream',
+          size: part.body.size || 0,
+        });
+      }
+      for (const child of part.parts || []) {
+        processpart(child);
+      }
+    };
+
+    if (payload) {
+      processpart(payload);
+    }
+
+    return attachments;
+  }
+
+  private parseMessage(message: gmail_v1.Schema$Message, includeAttachments: boolean = false): GmailMessage {
     const headers = this.parseHeaders(message.payload?.headers);
 
     const parseAddresses = (value?: string): string[] => {
@@ -72,7 +96,7 @@ export class GmailClient {
       return value.split(',').map((addr) => addr.trim());
     };
 
-    return {
+    const result: GmailMessage = {
       id: message.id!,
       threadId: message.threadId!,
       subject: headers['subject'] || '(no subject)',
@@ -83,6 +107,15 @@ export class GmailClient {
       snippet: message.snippet || '',
       labels: message.labelIds || [],
     };
+
+    if (includeAttachments) {
+      const attachments = this.extractAttachments(message.payload);
+      if (attachments.length > 0) {
+        result.attachments = attachments;
+      }
+    }
+
+    return result;
   }
 
   private getBody(payload: gmail_v1.Schema$MessagePart | undefined, preferHtml: boolean = false): string {
@@ -151,7 +184,7 @@ export class GmailClient {
         format: format === 'raw' ? 'raw' : 'full',
       });
 
-      const message = this.parseMessage(response.data);
+      const message = this.parseMessage(response.data, true);
       let body: string;
 
       if (format === 'raw') {
@@ -162,6 +195,47 @@ export class GmailClient {
 
       return { ...message, body };
     } catch (error: any) {
+      if (error.code === 404) {
+        throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
+      }
+      throw new CliError('API_ERROR', `Gmail API error: ${error.message}`);
+    }
+  }
+
+  async getAllAttachments(messageId: string): Promise<Array<{ data: Buffer; attachment: GmailAttachmentInfo }>> {
+    try {
+      const message = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full',
+      });
+
+      const attachments = this.extractAttachments(message.data.payload);
+
+      if (attachments.length === 0) {
+        return [];
+      }
+
+      const results: Array<{ data: Buffer; attachment: GmailAttachmentInfo }> = [];
+
+      for (const attachment of attachments) {
+        const response = await this.gmail.users.messages.attachments.get({
+          userId: 'me',
+          messageId,
+          id: attachment.id,
+        });
+
+        if (response.data.data) {
+          results.push({
+            data: Buffer.from(response.data.data, 'base64'),
+            attachment,
+          });
+        }
+      }
+
+      return results;
+    } catch (error: any) {
+      if (error instanceof CliError) throw error;
       if (error.code === 404) {
         throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
       }
