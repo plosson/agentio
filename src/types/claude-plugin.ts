@@ -44,6 +44,7 @@ export interface AgentioPluginEntry {
   source: string;
   version: string;
   components?: ComponentType[];
+  installedComponents: InstalledComponent[];
 }
 
 // agentio.json structure
