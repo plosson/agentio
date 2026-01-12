@@ -72,6 +72,7 @@ Download from [GitHub Releases](https://github.com/plosson/agentio/releases/late
 | Google Chat | Available | `send`, `list`, `get` |
 | Slack | Available | `send` |
 | JIRA | Available | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
+| RSS | Available | `articles`, `get`, `info` |
 | Linear | Planned | - |
 
 ## Usage
@@ -177,6 +178,23 @@ agentio jira transitions PROJ-123
 agentio jira transition PROJ-123 <transition-id>
 ```
 
+### RSS
+
+```bash
+# List articles from a blog (feed URL auto-discovered)
+agentio rss articles https://simonwillison.net
+agentio rss articles https://steipete.me --limit 5
+
+# Filter by date
+agentio rss articles https://blog.fsck.com --since 2025-01-01
+
+# Get feed info (shows discovered feed URL)
+agentio rss info https://kau.sh
+
+# Get a specific article
+agentio rss get https://simonwillison.net <article-url>
+```
+
 ## Multi-Profile Support
 
 Each service supports multiple named profiles:
@@ -192,53 +210,51 @@ agentio gmail list --profile work
 
 ## Claude Code Integration
 
-agentio provides plugins for [Claude Code](https://claude.ai/download) with skills for Gmail, Telegram, and Google Chat operations.
+agentio provides plugins for [Claude Code](https://claude.ai/download) with skills for Gmail, Telegram, Google Chat, JIRA, and RSS operations.
 
-### Install the Plugin
+### Install Marketplaces and Plugins
 
 ```bash
-# Install from GitHub
-agentio claude plugin install plosson/agentio
+# Add a marketplace (auto-detected from URL)
+agentio claude install https://github.com/plosson/agentio
 
-# Or install from a full GitHub URL
-agentio claude plugin install https://github.com/plosson/agentio
+# Install a plugin (auto-detected from name@marketplace format)
+agentio claude install agentio-gmail@agentio
 
-# Install to a specific directory
-agentio claude plugin install plosson/agentio -d ~/myproject
-
-# Install only specific components (skills, commands, hooks, agents)
-agentio claude plugin install plosson/agentio --skills
-agentio claude plugin install plosson/agentio --agents
-
-# Force reinstall if already exists
-agentio claude plugin install plosson/agentio -f
-
-# Show detailed installation logs
-agentio claude plugin install plosson/agentio --verbose
+# Install all from agentio.json
+agentio claude install
 ```
-
-Once installed, Claude Code can use the agentio CLI skills to help you manage emails, send Telegram messages, and more.
 
 ### Manage Plugins
 
 ```bash
-# List installed plugins
-agentio claude plugin list
+# List marketplaces and plugins from agentio.json
+agentio claude list
 
-# Remove a plugin
-agentio claude plugin remove agentio
+# Update marketplaces
+agentio claude update
+agentio claude update https://github.com/plosson/agentio
+
+# Remove a marketplace or plugin
+agentio claude remove https://github.com/plosson/agentio
+agentio claude remove agentio-gmail@agentio
 ```
 
-### Install from agentio.json
+### agentio.json
 
-If your project has an `agentio.json` file listing plugins, you can install all of them at once:
+Projects can define marketplaces and plugins in an `agentio.json` file:
 
-```bash
-# Install all plugins from agentio.json in current directory
-agentio claude plugin install
+```json
+{
+  "marketplaces": [
+    "https://github.com/plosson/agentio"
+  ],
+  "plugins": [
+    "agentio-gmail@agentio",
+    "agentio-rss@agentio"
+  ]
+}
 ```
-
-Plugins are installed to `.claude/` in the target directory (skills, commands, hooks, and agents subdirectories).
 
 ## Design
 
