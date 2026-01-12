@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-Confluence Cloud provides a robust REST API (v2) suitable for CLI integration. The API supports page/content management with OAuth 2.0 authentication, making it feasible to implement as a new service in agentio. Implementation is **recommended** with some considerations around OAuth complexity.
+Confluence Cloud provides a robust REST API (v2) suitable for CLI integration. The API supports page/content management
+with OAuth 2.0 authentication, making it feasible to implement as a new service in agentio. Implementation is *
+*recommended** with some considerations around OAuth complexity.
 
 ---
 
@@ -10,13 +12,14 @@ Confluence Cloud provides a robust REST API (v2) suitable for CLI integration. T
 
 ### API Versions
 
-| Version | Status | Base Path | Target Platform |
-|---------|--------|-----------|-----------------|
-| REST API v1 | Deprecated (EOL: Jan 2024) | `/wiki/rest/api` | Cloud/DC |
-| REST API v2 | Current | `/wiki/api/v2` | Cloud |
-| Data Center API | Maintained | `/rest/api` | Data Center only |
+| Version         | Status                     | Base Path        | Target Platform  |
+|-----------------|----------------------------|------------------|------------------|
+| REST API v1     | Deprecated (EOL: Jan 2024) | `/wiki/rest/api` | Cloud/DC         |
+| REST API v2     | Current                    | `/wiki/api/v2`   | Cloud            |
+| Data Center API | Maintained                 | `/rest/api`      | Data Center only |
 
 **Recommendation**: Use REST API v2 for Confluence Cloud. The v2 API offers:
+
 - Better performance through endpoint specialization
 - Cursor-based pagination (more efficient than v1's offset-based)
 - Granular OAuth 2.0 scopes
@@ -24,21 +27,22 @@ Confluence Cloud provides a robust REST API (v2) suitable for CLI integration. T
 
 ### Available Endpoints (v2)
 
-| Category | Endpoints | Operations |
-|----------|-----------|------------|
-| Pages | `/wiki/api/v2/pages` | GET (list), POST (create) |
-| Pages | `/wiki/api/v2/pages/{id}` | GET, PUT (update), DELETE |
-| Pages by Space | `/wiki/api/v2/spaces/{id}/pages` | GET (list) |
-| Blog Posts | `/wiki/api/v2/blogposts` | CRUD operations |
-| Spaces | `/wiki/api/v2/spaces` | GET (list), GET by ID |
-| Comments | `/wiki/api/v2/pages/{id}/footer-comments` | CRUD operations |
-| Attachments | `/wiki/api/v2/pages/{id}/attachments` | CRUD operations |
-| Labels | `/wiki/api/v2/pages/{id}/labels` | GET, POST, DELETE |
-| Search | `/wiki/api/v2/search` | GET with CQL |
+| Category       | Endpoints                                 | Operations                |
+|----------------|-------------------------------------------|---------------------------|
+| Pages          | `/wiki/api/v2/pages`                      | GET (list), POST (create) |
+| Pages          | `/wiki/api/v2/pages/{id}`                 | GET, PUT (update), DELETE |
+| Pages by Space | `/wiki/api/v2/spaces/{id}/pages`          | GET (list)                |
+| Blog Posts     | `/wiki/api/v2/blogposts`                  | CRUD operations           |
+| Spaces         | `/wiki/api/v2/spaces`                     | GET (list), GET by ID     |
+| Comments       | `/wiki/api/v2/pages/{id}/footer-comments` | CRUD operations           |
+| Attachments    | `/wiki/api/v2/pages/{id}/attachments`     | CRUD operations           |
+| Labels         | `/wiki/api/v2/pages/{id}/labels`          | GET, POST, DELETE         |
+| Search         | `/wiki/api/v2/search`                     | GET with CQL              |
 
 ### Content Body Formats
 
 The API supports multiple content representations:
+
 - `storage` - Confluence storage format (XML-like)
 - `atlas_doc_format` - Atlassian Document Format (JSON)
 - `wiki` - Legacy wiki markup (limited support)
@@ -50,16 +54,19 @@ The API supports multiple content representations:
 ### Option A: API Tokens (Basic Auth)
 
 **How it works**:
+
 - User creates API token at https://id.atlassian.com/manage/api-tokens
 - Requests use Basic Auth: `email:api_token` (base64 encoded)
 - Tokens can have scopes (granular permissions)
 
 **Pros**:
+
 - Simple to implement
 - User-friendly setup flow
 - Scoped tokens available for security
 
 **Cons**:
+
 - Tokens expire (1 year max after March 2025)
 - Tied to individual user account
 - Not compliant with Atlassian's app policies for distribution
@@ -69,18 +76,21 @@ The API supports multiple content representations:
 ### Option B: OAuth 2.0 (3LO)
 
 **How it works**:
+
 1. Register app in Atlassian Developer Console
 2. User authorizes via browser flow
 3. App receives access + refresh tokens
 4. Requests use Bearer token via `api.atlassian.com`
 
 **Pros**:
+
 - More secure (no password/token sharing)
 - Refresh tokens for long-lived access
 - Compliant with Atlassian security requirements
 - Embedded credentials possible (like Gmail in agentio)
 
 **Cons**:
+
 - More complex implementation
 - Requires browser-based authorization
 - Different API base URL (`api.atlassian.com` vs `{site}.atlassian.net`)
@@ -90,11 +100,13 @@ The API supports multiple content representations:
 ### Recommendation for agentio
 
 **Primary**: OAuth 2.0 (3LO) with embedded client credentials
+
 - Matches existing Gmail pattern
 - More secure for end users
 - Single app registration covers all users
 
 **Fallback**: API Token support for users who prefer it
+
 - Similar to how some services offer multiple auth options
 
 ---
@@ -103,15 +115,15 @@ The API supports multiple content representations:
 
 ### Required Scopes for agentio Operations
 
-| Operation | Scope | Description |
-|-----------|-------|-------------|
-| Read pages | `read:page:confluence` | View page content |
-| Create/update pages | `write:page:confluence` | Create and modify pages |
-| Delete pages | `delete:page:confluence` | Move to trash/purge |
-| Read spaces | `read:space:confluence` | List and view spaces |
-| Search | `search:confluence` | Use CQL search |
-| Read user | `read:me` | Get current user info |
-| Offline access | `offline_access` | Refresh token support |
+| Operation           | Scope                    | Description             |
+|---------------------|--------------------------|-------------------------|
+| Read pages          | `read:page:confluence`   | View page content       |
+| Create/update pages | `write:page:confluence`  | Create and modify pages |
+| Delete pages        | `delete:page:confluence` | Move to trash/purge     |
+| Read spaces         | `read:space:confluence`  | List and view spaces    |
+| Search              | `search:confluence`      | Use CQL search          |
+| Read user           | `read:me`                | Get current user info   |
+| Offline access      | `offline_access`         | Refresh token support   |
 
 ### Minimal Scope Set
 
@@ -130,13 +142,13 @@ offline_access
 
 ### Points-Based System (Confluence Cloud)
 
-| Tier | Quota | Notes |
-|------|-------|-------|
-| Tier 1 (Global) | 65,000 points/hour | Default for all apps |
-| Tier 2 Free | 65,000 points/hour | Per-tenant |
-| Tier 2 Standard | 100,000 + 10/user | Max 500,000 |
-| Tier 2 Premium | 130,000 + 20/user | Max 500,000 |
-| Tier 2 Enterprise | 150,000 + 30/user | Max 500,000 |
+| Tier              | Quota              | Notes                |
+|-------------------|--------------------|----------------------|
+| Tier 1 (Global)   | 65,000 points/hour | Default for all apps |
+| Tier 2 Free       | 65,000 points/hour | Per-tenant           |
+| Tier 2 Standard   | 100,000 + 10/user  | Max 500,000          |
+| Tier 2 Premium    | 130,000 + 20/user  | Max 500,000          |
+| Tier 2 Enterprise | 150,000 + 30/user  | Max 500,000          |
 
 ### Point Costs
 
@@ -170,22 +182,24 @@ X-RateLimit-Reset: 2025-10-08T15:00:00Z
 
 ## 5. Cloud vs Data Center
 
-| Aspect | Cloud | Data Center |
-|--------|-------|-------------|
-| API Version | v2 recommended | v1 style maintained |
-| Authentication | OAuth 2.0 / API tokens | Basic auth / PAT |
-| Base URL | `api.atlassian.com` (OAuth) | Self-hosted URL |
-| Rate Limits | Points-based | Configurable |
-| Support | Active development | Maintenance mode |
-| End of Sale | N/A | March 2026 |
+| Aspect         | Cloud                       | Data Center         |
+|----------------|-----------------------------|---------------------|
+| API Version    | v2 recommended              | v1 style maintained |
+| Authentication | OAuth 2.0 / API tokens      | Basic auth / PAT    |
+| Base URL       | `api.atlassian.com` (OAuth) | Self-hosted URL     |
+| Rate Limits    | Points-based                | Configurable        |
+| Support        | Active development          | Maintenance mode    |
+| End of Sale    | N/A                         | March 2026          |
 
-**Recommendation**: Focus on Cloud initially. Data Center support can be added later if needed, but market is shifting to Cloud.
+**Recommendation**: Focus on Cloud initially. Data Center support can be added later if needed, but market is shifting
+to Cloud.
 
 ---
 
 ## 6. Pricing Impact
 
 Confluence API access is included with Confluence Cloud subscription:
+
 - Free: Up to 10 users
 - Standard: $5.16/user/month
 - Premium: $9.73/user/month
@@ -199,21 +213,21 @@ No additional API fees. Rate limits scale with plan tier.
 
 ### Technical Feasibility: **HIGH**
 
-| Factor | Assessment |
-|--------|------------|
-| API Maturity | Stable v2 API with good documentation |
+| Factor         | Assessment                               |
+|----------------|------------------------------------------|
+| API Maturity   | Stable v2 API with good documentation    |
 | Authentication | OAuth 2.0 matches existing Gmail pattern |
-| Functionality | Covers read/write/search needs |
-| Rate Limits | Generous for CLI use cases |
+| Functionality  | Covers read/write/search needs           |
+| Rate Limits    | Generous for CLI use cases               |
 
 ### Implementation Complexity: **MEDIUM**
 
-| Component | Complexity | Notes |
-|-----------|------------|-------|
-| OAuth flow | Medium | Reuse existing oauth.ts patterns |
-| API client | Low | Standard REST with cursor pagination |
-| Content formatting | Medium | Storage format has learning curve |
-| Multi-site support | Medium | Users may have multiple Confluence sites |
+| Component          | Complexity | Notes                                    |
+|--------------------|------------|------------------------------------------|
+| OAuth flow         | Medium     | Reuse existing oauth.ts patterns         |
+| API client         | Low        | Standard REST with cursor pagination     |
+| Content formatting | Medium     | Storage format has learning curve        |
+| Multi-site support | Medium     | Users may have multiple Confluence sites |
 
 ### Alignment with agentio Goals: **HIGH**
 
@@ -227,12 +241,12 @@ No additional API fees. Rate limits scale with plan tier.
 
 ### Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| OAuth complexity | Medium | Reuse Gmail OAuth patterns |
-| Storage format learning curve | Low | Provide format conversion utilities |
-| Multi-site handling | Medium | Design profile to include site selection |
-| Rate limit changes (Feb 2026) | Low | Monitor Atlassian announcements |
+| Risk                          | Severity | Mitigation                               |
+|-------------------------------|----------|------------------------------------------|
+| OAuth complexity              | Medium   | Reuse Gmail OAuth patterns               |
+| Storage format learning curve | Low      | Provide format conversion utilities      |
+| Multi-site handling           | Medium   | Design profile to include site selection |
+| Rate limit changes (Feb 2026) | Low      | Monitor Atlassian announcements          |
 
 ### Limitations
 
@@ -262,14 +276,14 @@ Confluence integration is a strong fit for agentio:
 
 ### Suggested Scope (MVP)
 
-| Command | Priority | Description |
-|---------|----------|-------------|
-| `confluence list` | P1 | List pages in a space |
-| `confluence get` | P1 | Read page content |
-| `confluence search` | P1 | Search across spaces |
-| `confluence create` | P2 | Create new page |
-| `confluence update` | P2 | Update existing page |
-| `confluence profile add/list/remove` | P1 | Profile management |
+| Command                              | Priority | Description           |
+|--------------------------------------|----------|-----------------------|
+| `confluence list`                    | P1       | List pages in a space |
+| `confluence get`                     | P1       | Read page content     |
+| `confluence search`                  | P1       | Search across spaces  |
+| `confluence create`                  | P2       | Create new page       |
+| `confluence update`                  | P2       | Update existing page  |
+| `confluence profile add/list/remove` | P1       | Profile management    |
 
 ### Next Steps
 
