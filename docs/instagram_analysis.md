@@ -5,21 +5,25 @@
 
 ## Executive Summary
 
-The Instagram API integration for agentio is **feasible but with significant limitations**. The official Instagram Graph API supports Business and Creator accounts only, requires Facebook App Review approval, and has restrictive rate limits (200 API calls/hour). Personal accounts are no longer supported via any public API since the Basic Display API deprecation in December 2024.
+The Instagram API integration for agentio is **feasible but with significant limitations**. The official Instagram Graph
+API supports Business and Creator accounts only, requires Facebook App Review approval, and has restrictive rate
+limits (200 API calls/hour). Personal accounts are no longer supported via any public API since the Basic Display API
+deprecation in December 2024.
 
 ## API Overview
 
 ### Available APIs
 
-| API | Status | Purpose |
-|-----|--------|---------|
-| Instagram Graph API | Active | Full functionality for Business/Creator accounts |
-| Instagram Messaging API | Active | Direct message automation for businesses |
-| Instagram Basic Display API | **Deprecated** (Dec 4, 2024) | Was for personal account read-only access |
+| API                         | Status                       | Purpose                                          |
+|-----------------------------|------------------------------|--------------------------------------------------|
+| Instagram Graph API         | Active                       | Full functionality for Business/Creator accounts |
+| Instagram Messaging API     | Active                       | Direct message automation for businesses         |
+| Instagram Basic Display API | **Deprecated** (Dec 4, 2024) | Was for personal account read-only access        |
 
 ### Supported Operations
 
 **Content Publishing** (Business accounts only):
+
 - Single image posts (JPEG only)
 - Video posts (automatically published as Reels)
 - Carousel posts (up to 10 images/videos)
@@ -27,6 +31,7 @@ The Instagram API integration for agentio is **feasible but with significant lim
 - Stories (since 2023)
 
 **Reading Content**:
+
 - List own media (photos, videos, reels)
 - Get media details and metadata
 - Read comments on own posts
@@ -34,16 +39,19 @@ The Instagram API integration for agentio is **feasible but with significant lim
 - Search hashtags (30 unique per 7 days)
 
 **Comment Management**:
+
 - Read comments
 - Post comments
 - Delete own comments
 
 **Direct Messaging** (Messaging API):
+
 - Send/receive DMs
 - User must initiate contact first (24-hour window)
 - 200 DMs/hour limit
 
 **Not Supported**:
+
 - Reading home feed (posts from accounts you follow)
 - Fetching other users' followers/following lists
 - Public content search (beyond hashtags)
@@ -65,14 +73,14 @@ The Instagram API integration for agentio is **feasible but with significant lim
 Two authentication approaches available:
 
 1. **Business Login** (simpler):
-   - Authenticates directly through Instagram
-   - Generates Instagram User access tokens
-   - Best for single-account applications
+    - Authenticates directly through Instagram
+    - Generates Instagram User access tokens
+    - Best for single-account applications
 
 2. **Facebook Login** (recommended for production):
-   - Connects through Facebook Pages
-   - Better for managing multiple accounts
-   - Centralized control through Business Manager
+    - Connects through Facebook Pages
+    - Better for managing multiple accounts
+    - Centralized control through Business Manager
 
 ### Token Lifecycle
 
@@ -81,15 +89,15 @@ Two authentication approaches available:
 
 ### Required Permission Scopes
 
-| Scope | Purpose |
-|-------|---------|
-| `instagram_basic` | Read profile and media |
+| Scope                       | Purpose                          |
+|-----------------------------|----------------------------------|
+| `instagram_basic`           | Read profile and media           |
 | `instagram_content_publish` | Publish posts, videos, carousels |
-| `instagram_manage_comments` | Read/write/delete comments |
-| `instagram_manage_insights` | Access analytics |
+| `instagram_manage_comments` | Read/write/delete comments       |
+| `instagram_manage_insights` | Access analytics                 |
 | `instagram_manage_messages` | DM functionality (Messaging API) |
-| `pages_show_list` | View managed Facebook Pages |
-| `pages_manage_metadata` | Manage Page settings |
+| `pages_show_list`           | View managed Facebook Pages      |
+| `pages_manage_metadata`     | Manage Page settings             |
 
 ## App Review Process
 
@@ -117,19 +125,20 @@ Two authentication approaches available:
 
 ## Rate Limits
 
-| Operation | Limit |
-|-----------|-------|
-| API calls | 200 per hour per Instagram account |
-| Content publishing | 25 posts per 24 hours |
-| Hashtag searches | 30 unique hashtags per 7 days |
-| Direct messages | 200 per hour |
-| DM window | 24 hours (user must initiate) |
+| Operation          | Limit                              |
+|--------------------|------------------------------------|
+| API calls          | 200 per hour per Instagram account |
+| Content publishing | 25 posts per 24 hours              |
+| Hashtag searches   | 30 unique hashtags per 7 days      |
+| Direct messages    | 200 per hour                       |
+| DM window          | 24 hours (user must initiate)      |
 
 **Note**: Rate limits were significantly reduced in 2025 (previously 5,000 calls/hour).
 
 ## Pricing
 
 The Instagram Graph API is **free to use**. No paid tiers or API fees. However:
+
 - Rate limits apply to all users equally
 - No way to purchase higher limits
 - Third-party wrapper services may charge fees
@@ -139,27 +148,27 @@ The Instagram Graph API is **free to use**. No paid tiers or API fees. However:
 ### What We Can Build
 
 1. **Profile Management**
-   - Add/remove Instagram profiles
-   - Store OAuth tokens securely
+    - Add/remove Instagram profiles
+    - Store OAuth tokens securely
 
 2. **Content Publishing** (Business accounts)
-   - `instagram post` - Post single image
-   - `instagram post-video` - Post video (as Reel)
-   - `instagram post-carousel` - Post multiple images
-   - `instagram post-story` - Post story
+    - `instagram post` - Post single image
+    - `instagram post-video` - Post video (as Reel)
+    - `instagram post-carousel` - Post multiple images
+    - `instagram post-story` - Post story
 
 3. **Content Reading**
-   - `instagram list` - List own recent posts
-   - `instagram get <id>` - Get post details
-   - `instagram comments <id>` - List comments on a post
+    - `instagram list` - List own recent posts
+    - `instagram get <id>` - Get post details
+    - `instagram comments <id>` - List comments on a post
 
 4. **Comment Management**
-   - `instagram comment <post-id> <text>` - Add comment
-   - `instagram delete-comment <comment-id>` - Delete own comment
+    - `instagram comment <post-id> <text>` - Add comment
+    - `instagram delete-comment <comment-id>` - Delete own comment
 
 5. **Insights**
-   - `instagram insights <id>` - Get post metrics
-   - `instagram account-insights` - Get account metrics
+    - `instagram insights <id>` - Get post metrics
+    - `instagram account-insights` - Get account metrics
 
 ### What We Cannot Build
 
@@ -188,14 +197,14 @@ The Instagram Graph API is **free to use**. No paid tiers or API fees. However:
 
 ### Competitive Comparison
 
-| Feature | Gmail | Telegram | Instagram |
-|---------|-------|----------|-----------|
-| Personal accounts | Yes | Yes | **No** |
-| App approval | Simple OAuth | Bot token | **Complex review** |
-| Read feed/inbox | Yes | Yes | **Own content only** |
-| Send/post | Yes | Yes | Yes (Business only) |
-| Rate limits | Generous | Generous | **200/hour** |
-| Setup complexity | Low | Low | **High** |
+| Feature           | Gmail        | Telegram  | Instagram            |
+|-------------------|--------------|-----------|----------------------|
+| Personal accounts | Yes          | Yes       | **No**               |
+| App approval      | Simple OAuth | Bot token | **Complex review**   |
+| Read feed/inbox   | Yes          | Yes       | **Own content only** |
+| Send/post         | Yes          | Yes       | Yes (Business only)  |
+| Rate limits       | Generous     | Generous  | **200/hour**         |
+| Setup complexity  | Low          | Low       | **High**             |
 
 ## Recommendation
 
@@ -213,26 +222,31 @@ Instagram integration is feasible but should be considered **low priority** due 
 If proceeding, implement in phases:
 
 **Phase 1 (MVP)**:
+
 - Profile management with OAuth
 - Content publishing (images, videos)
 - List/get own posts
 
 **Phase 2 (If demand exists)**:
+
 - Comment management
 - Insights/analytics
 - Carousel and Story support
 
 **Phase 3 (Advanced)**:
+
 - DM support (requires webhook infrastructure)
 
 ### Alternative Consideration
 
 For a CLI tool used by LLM agents, Instagram's limitations significantly reduce utility:
+
 - Agents cannot read feeds or discover content
 - Can only publish and read own content
 - High setup overhead for users
 
-Consider deprioritizing Instagram in favor of services with more complete API access (e.g., LinkedIn, Discord, or other platforms with better developer support).
+Consider deprioritizing Instagram in favor of services with more complete API access (e.g., LinkedIn, Discord, or other
+platforms with better developer support).
 
 ## Sources
 

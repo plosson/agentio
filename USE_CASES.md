@@ -1,10 +1,10 @@
 # Use Cases
 
-## Plugin Install (`agentio claude plugin install`)
+## Plugin Install (`agentio claude install`)
 
 ### Team Onboarding & Consistency
-- New developer clones repo, runs `agentio claude plugin install` → gets all team skills/commands/hooks instantly
-- `agentio.json` becomes like `package.json` for Claude Code plugins - version-controlled, reproducible environments
+- New developer clones repo, runs `agentio claude install` → gets all team skills/commands/hooks instantly
+- `agentio.json` becomes like `package.json` for Claude Code plugins and marketplaces - version-controlled, reproducible environments
 - Ensures everyone on the team has identical Claude Code capabilities
 
 ### CI/CD Agent Environments
