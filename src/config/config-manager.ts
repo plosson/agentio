@@ -115,7 +115,7 @@ export async function listProfiles(service?: ServiceName): Promise<{
   default?: string;
 }[]> {
   const config = await loadConfig();
-  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'telegram'];
+  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'slack', 'telegram'];
 
   return services.map((svc) => ({
     service: svc,
