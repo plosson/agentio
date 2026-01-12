@@ -100,6 +100,82 @@ async function installPluginCmd(name: string): Promise<boolean> {
 }
 
 /**
+ * Get list of installed marketplaces with their names and sources.
+ */
+async function getMarketplaces(): Promise<Array<{ name: string; source: string }>> {
+  const result = await execClaude(['plugin', 'marketplace', 'list']);
+  if (!result.success) {
+    return [];
+  }
+
+  const marketplaces: Array<{ name: string; source: string }> = [];
+  const lines = result.stdout.split('\n');
+
+  let currentName: string | null = null;
+  for (const line of lines) {
+    // Match marketplace name: "  ❯ marketplace-name"
+    const nameMatch = line.match(/^\s*❯\s+(.+)$/);
+    if (nameMatch) {
+      currentName = nameMatch[1].trim();
+      continue;
+    }
+
+    // Match source line: "    Source: GitHub (user/repo)" or "    Source: Git (url)"
+    const sourceMatch = line.match(/^\s*Source:\s*(?:GitHub|Git)\s*\((.+)\)$/);
+    if (sourceMatch && currentName) {
+      marketplaces.push({ name: currentName, source: sourceMatch[1].trim() });
+      currentName = null;
+    }
+  }
+
+  return marketplaces;
+}
+
+/**
+ * Find marketplace name by URL.
+ */
+async function findMarketplaceName(url: string): Promise<string | null> {
+  const marketplaces = await getMarketplaces();
+
+  // Normalize the URL for comparison
+  const normalizedUrl = url
+    .replace(/^https?:\/\//, '')
+    .replace(/^github\.com\//, '')
+    .replace(/\.git$/, '')
+    .toLowerCase();
+
+  for (const mp of marketplaces) {
+    const normalizedSource = mp.source
+      .replace(/^https?:\/\//, '')
+      .replace(/^github\.com\//, '')
+      .replace(/\.git$/, '')
+      .toLowerCase();
+
+    if (normalizedSource === normalizedUrl || normalizedSource.includes(normalizedUrl) || normalizedUrl.includes(normalizedSource)) {
+      return mp.name;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Update a marketplace by name.
+ */
+async function updateMarketplace(name: string): Promise<boolean> {
+  console.error(`Updating marketplace: ${name}`);
+  const result = await execClaude(['plugin', 'marketplace', 'update', name]);
+
+  if (result.success) {
+    console.log(`  Updated: ${name}`);
+    return true;
+  }
+
+  console.error(`  Failed: ${result.stderr.trim()}`);
+  return false;
+}
+
+/**
  * Uninstall a plugin by calling claude plugin uninstall --scope project.
  */
 async function uninstallPluginCmd(name: string): Promise<boolean> {
@@ -223,6 +299,50 @@ export function registerClaudeCommands(program: Command): void {
           for (const name of config.plugins) {
             console.log(`  ${name}`);
           }
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // update command - updates marketplaces
+  claude
+    .command('update')
+    .description('Update marketplaces (all from agentio.json or a specific URL)')
+    .argument('[url]', 'Marketplace URL to update (updates all from agentio.json if not specified)')
+    .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
+    .action(async (url, options) => {
+      try {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        if (url) {
+          // Update specific marketplace by URL
+          const name = await findMarketplaceName(url);
+          if (!name) {
+            throw new CliError('NOT_FOUND', `Marketplace not found for URL: ${url}`, 'Make sure the marketplace is installed');
+          }
+          await updateMarketplace(name);
+        } else {
+          // Update all marketplaces from agentio.json
+          const config = loadAgentioJson(targetDir);
+
+          if (config.marketplaces.length === 0) {
+            console.log('No marketplaces defined in agentio.json');
+            return;
+          }
+
+          console.error(`Updating marketplaces from agentio.json...`);
+
+          for (const marketplaceUrl of config.marketplaces) {
+            const name = await findMarketplaceName(marketplaceUrl);
+            if (name) {
+              await updateMarketplace(name);
+            } else {
+              console.error(`  Skipped (not installed): ${marketplaceUrl}`);
+            }
+          }
+
+          console.log('\nDone.');
         }
       } catch (error) {
         handleError(error);
