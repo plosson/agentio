@@ -29,8 +29,10 @@ export function registerClaudeCommands(program: Command): void {
     .option('--skills', 'Install only skills')
     .option('--commands', 'Install only commands')
     .option('--hooks', 'Install only hooks')
+    .option('--agents', 'Install only agents')
     .option('-f, --force', 'Force reinstall if already exists')
     .option('-d, --dir <path>', 'Target directory (default: current directory)')
+    .option('-v, --verbose', 'Show detailed installation logs')
     .action(async (source, options) => {
       try {
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
@@ -48,8 +50,10 @@ export function registerClaudeCommands(program: Command): void {
             skills: options.skills,
             commands: options.commands,
             hooks: options.hooks,
+            agents: options.agents,
             force: options.force,
             targetDir,
+            verbose: options.verbose,
           });
 
           console.log(`\nInstalled: ${result.manifest.name} v${result.manifest.version}`);
@@ -91,8 +95,10 @@ export function registerClaudeCommands(program: Command): void {
               commands:
                 !entry.components || entry.components.includes('commands'),
               hooks: !entry.components || entry.components.includes('hooks'),
+              agents: !entry.components || entry.components.includes('agents'),
               force: options.force,
               targetDir,
+              verbose: options.verbose,
             };
 
             try {
