@@ -206,11 +206,15 @@ agentio claude plugin install https://github.com/plosson/agentio
 # Install to a specific directory
 agentio claude plugin install plosson/agentio -d ~/myproject
 
-# Install only skills (skip commands and hooks)
+# Install only specific components (skills, commands, hooks, agents)
 agentio claude plugin install plosson/agentio --skills
+agentio claude plugin install plosson/agentio --agents
 
 # Force reinstall if already exists
 agentio claude plugin install plosson/agentio -f
+
+# Show detailed installation logs
+agentio claude plugin install plosson/agentio --verbose
 ```
 
 Once installed, Claude Code can use the agentio CLI skills to help you manage emails, send Telegram messages, and more.
@@ -234,7 +238,7 @@ If your project has an `agentio.json` file listing plugins, you can install all 
 agentio claude plugin install
 ```
 
-Plugins are installed to `.claude/` in the target directory (skills, commands, and hooks subdirectories).
+Plugins are installed to `.claude/` in the target directory (skills, commands, hooks, and agents subdirectories).
 
 ## Design
 

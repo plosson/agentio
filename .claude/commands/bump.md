@@ -8,7 +8,7 @@ Perform a version bump with the following steps:
 
 ## 0. Check for pending changes 
 
-If there are uncommited changes, ask if we can commit them 
+If there are uncommited changes, ask if we can commit & push them 
 
 ## 1. Update package.json
 
