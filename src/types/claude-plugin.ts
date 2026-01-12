@@ -14,13 +14,14 @@ export interface PluginManifest {
 }
 
 // Component types that can be installed
-export type ComponentType = 'skills' | 'commands' | 'hooks';
+export type ComponentType = 'skills' | 'commands' | 'hooks' | 'agents';
 
 // Discovered components from filesystem
 export interface DiscoveredComponents {
   skills: string[];
   commands: string[];
   hooks: string[];
+  agents: string[];
 }
 
 // Installation options
@@ -28,8 +29,10 @@ export interface PluginInstallOptions {
   skills?: boolean;
   commands?: boolean;
   hooks?: boolean;
+  agents?: boolean;
   force?: boolean;
   targetDir?: string;
+  verbose?: boolean;
 }
 
 // Single installed component record

@@ -101,9 +101,10 @@ function discoverComponents(
     skills: [],
     commands: [],
     hooks: [],
+    agents: [],
   };
 
-  const componentTypes: ComponentType[] = ['skills', 'commands', 'hooks'];
+  const componentTypes: ComponentType[] = ['skills', 'commands', 'hooks', 'agents'];
 
   for (const type of componentTypes) {
     const typePath = path.join(basePath, type);
@@ -144,12 +145,13 @@ function determineComponentsToInstall(
   discovered: DiscoveredComponents
 ): DiscoveredComponents {
   // If no specific flags, install all
-  const installAll = !options.skills && !options.commands && !options.hooks;
+  const installAll = !options.skills && !options.commands && !options.hooks && !options.agents;
 
   return {
     skills: installAll || options.skills ? discovered.skills : [],
     commands: installAll || options.commands ? discovered.commands : [],
     hooks: installAll || options.hooks ? discovered.hooks : [],
+    agents: installAll || options.agents ? discovered.agents : [],
   };
 }
 
@@ -159,13 +161,14 @@ function determineComponentsToInstall(
 function getInstalledComponentTypes(
   options: PluginInstallOptions
 ): ComponentType[] | undefined {
-  const installAll = !options.skills && !options.commands && !options.hooks;
+  const installAll = !options.skills && !options.commands && !options.hooks && !options.agents;
   if (installAll) return undefined; // Default: all
 
   const types: ComponentType[] = [];
   if (options.skills) types.push('skills');
   if (options.commands) types.push('commands');
   if (options.hooks) types.push('hooks');
+  if (options.agents) types.push('agents');
   return types;
 }
 
@@ -177,22 +180,85 @@ export async function installPlugin(
   options: PluginInstallOptions
 ): Promise<InstallResult> {
   const parsed = parseSource(source);
+  const verbose = options.verbose ?? false;
+
+  if (verbose) {
+    console.error(`\n[verbose] Parsed source:`);
+    console.error(`  Owner: ${parsed.owner}`);
+    console.error(`  Repo: ${parsed.repo}`);
+    console.error(`  Branch: ${parsed.branch ?? '(default)'}`);
+    console.error(`  Path: ${parsed.path ?? '(root)'}`);
+    console.error(`  Clone URL: ${buildGitCloneUrl(parsed)}`);
+  }
 
   // Clone repo to temp directory
+  if (verbose) {
+    console.error(`\n[verbose] Cloning repository...`);
+  }
   const repoDir = cloneRepo(parsed);
+  if (verbose) {
+    console.error(`[verbose] Cloned to: ${repoDir}`);
+  }
 
   try {
     // Read manifest from cloned repo
     const manifest = readPluginManifest(repoDir, parsed);
 
+    if (verbose) {
+      console.error(`\n[verbose] Plugin manifest:`);
+      console.error(`  Name: ${manifest.name}`);
+      console.error(`  Version: ${manifest.version}`);
+      if (manifest.description) {
+        console.error(`  Description: ${manifest.description}`);
+      }
+    }
+
     // Discover available components
     const discovered = discoverComponents(repoDir, parsed);
+
+    if (verbose) {
+      const totalDiscovered = discovered.skills.length + discovered.commands.length + discovered.hooks.length + discovered.agents.length;
+      console.error(`\n[verbose] Discovered ${totalDiscovered} component(s):`);
+      if (discovered.skills.length > 0) {
+        console.error(`  Skills (${discovered.skills.length}): ${discovered.skills.join(', ')}`);
+      }
+      if (discovered.commands.length > 0) {
+        console.error(`  Commands (${discovered.commands.length}): ${discovered.commands.join(', ')}`);
+      }
+      if (discovered.hooks.length > 0) {
+        console.error(`  Hooks (${discovered.hooks.length}): ${discovered.hooks.join(', ')}`);
+      }
+      if (discovered.agents.length > 0) {
+        console.error(`  Agents (${discovered.agents.length}): ${discovered.agents.join(', ')}`);
+      }
+    }
 
     // Determine what to install
     const toInstall = determineComponentsToInstall(options, discovered);
 
+    if (verbose) {
+      const totalToInstall = toInstall.skills.length + toInstall.commands.length + toInstall.hooks.length + toInstall.agents.length;
+      console.error(`\n[verbose] Installing ${totalToInstall} component(s):`);
+      if (toInstall.skills.length > 0) {
+        console.error(`  Skills: ${toInstall.skills.join(', ')}`);
+      }
+      if (toInstall.commands.length > 0) {
+        console.error(`  Commands: ${toInstall.commands.join(', ')}`);
+      }
+      if (toInstall.hooks.length > 0) {
+        console.error(`  Hooks: ${toInstall.hooks.join(', ')}`);
+      }
+      if (toInstall.agents.length > 0) {
+        console.error(`  Agents: ${toInstall.agents.join(', ')}`);
+      }
+    }
+
     const targetDir = options.targetDir || process.cwd();
     const installed: InstalledComponent[] = [];
+
+    if (verbose) {
+      console.error(`\n[verbose] Target directory: ${targetDir}`);
+    }
 
     // Install skills
     for (const skillName of toInstall.skills) {
@@ -201,7 +267,13 @@ export async function installPlugin(
       if (fs.existsSync(destPath)) {
         if (!options.force) {
           console.error(`  Skipping existing skill: ${skillName}`);
+          if (verbose) {
+            console.error(`    [verbose] Path: ${destPath}`);
+          }
           continue;
+        }
+        if (verbose) {
+          console.error(`  [verbose] Removing existing: ${destPath}`);
         }
         fs.rmSync(destPath, { recursive: true });
       }
@@ -209,6 +281,9 @@ export async function installPlugin(
       copyComponent(repoDir, parsed, 'skills', skillName, targetDir);
       installed.push({ name: skillName, type: 'skills', path: destPath });
       console.error(`  Installed skill: ${skillName}`);
+      if (verbose) {
+        console.error(`    [verbose] Path: ${destPath}`);
+      }
     }
 
     // Install commands
@@ -218,7 +293,13 @@ export async function installPlugin(
       if (fs.existsSync(destPath)) {
         if (!options.force) {
           console.error(`  Skipping existing command: ${cmdName}`);
+          if (verbose) {
+            console.error(`    [verbose] Path: ${destPath}`);
+          }
           continue;
+        }
+        if (verbose) {
+          console.error(`  [verbose] Removing existing: ${destPath}`);
         }
         fs.rmSync(destPath, { recursive: true });
       }
@@ -226,6 +307,9 @@ export async function installPlugin(
       copyComponent(repoDir, parsed, 'commands', cmdName, targetDir);
       installed.push({ name: cmdName, type: 'commands', path: destPath });
       console.error(`  Installed command: ${cmdName}`);
+      if (verbose) {
+        console.error(`    [verbose] Path: ${destPath}`);
+      }
     }
 
     // Install hooks
@@ -235,7 +319,13 @@ export async function installPlugin(
       if (fs.existsSync(destPath)) {
         if (!options.force) {
           console.error(`  Skipping existing hook: ${hookName}`);
+          if (verbose) {
+            console.error(`    [verbose] Path: ${destPath}`);
+          }
           continue;
+        }
+        if (verbose) {
+          console.error(`  [verbose] Removing existing: ${destPath}`);
         }
         fs.rmSync(destPath, { recursive: true });
       }
@@ -243,9 +333,41 @@ export async function installPlugin(
       copyComponent(repoDir, parsed, 'hooks', hookName, targetDir);
       installed.push({ name: hookName, type: 'hooks', path: destPath });
       console.error(`  Installed hook: ${hookName}`);
+      if (verbose) {
+        console.error(`    [verbose] Path: ${destPath}`);
+      }
+    }
+
+    // Install agents
+    for (const agentName of toInstall.agents) {
+      const destPath = path.join(targetDir, '.claude', 'agents', agentName);
+
+      if (fs.existsSync(destPath)) {
+        if (!options.force) {
+          console.error(`  Skipping existing agent: ${agentName}`);
+          if (verbose) {
+            console.error(`    [verbose] Path: ${destPath}`);
+          }
+          continue;
+        }
+        if (verbose) {
+          console.error(`  [verbose] Removing existing: ${destPath}`);
+        }
+        fs.rmSync(destPath, { recursive: true });
+      }
+
+      copyComponent(repoDir, parsed, 'agents', agentName, targetDir);
+      installed.push({ name: agentName, type: 'agents', path: destPath });
+      console.error(`  Installed agent: ${agentName}`);
+      if (verbose) {
+        console.error(`    [verbose] Path: ${destPath}`);
+      }
     }
 
     // Update agentio.json
+    if (verbose) {
+      console.error(`\n[verbose] Updating agentio.json`);
+    }
     addPlugin(targetDir, manifest.name, {
       source: source,
       version: manifest.version,
@@ -260,6 +382,9 @@ export async function installPlugin(
     };
   } finally {
     // Always cleanup temp directory
+    if (verbose) {
+      console.error(`\n[verbose] Cleaning up temp directory: ${repoDir}`);
+    }
     cleanupTempDir(repoDir);
   }
 }
