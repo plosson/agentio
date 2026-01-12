@@ -1,183 +1,267 @@
 import { Command } from 'commander';
 import * as path from 'path';
-import * as fs from 'fs';
+import { spawn } from 'child_process';
 import { CliError, handleError } from '../utils/errors';
 import {
   loadAgentioJson,
-  agentioJsonExists,
-  listPlugins,
+  addMarketplace,
+  addPlugin,
+  removeMarketplace,
   removePlugin,
-  getPlugin,
 } from '../services/claude-plugin/agentio-json';
-import {
-  installPlugin,
-  removePluginFiles,
-} from '../services/claude-plugin/installer';
-import type { InstalledComponent } from '../types/claude-plugin';
+
+/**
+ * Execute a claude CLI command and return the result.
+ */
+async function execClaude(
+  args: string[]
+): Promise<{ success: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn('claude', args, {
+      stdio: ['inherit', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      resolve({
+        success: code === 0,
+        stdout,
+        stderr,
+      });
+    });
+
+    proc.on('error', (err) => {
+      resolve({
+        success: false,
+        stdout: '',
+        stderr: err.message,
+      });
+    });
+  });
+}
+
+/**
+ * Install a marketplace by calling claude plugin marketplace add.
+ * Silently skips if already installed.
+ */
+async function installMarketplace(url: string): Promise<boolean> {
+  console.error(`Adding marketplace: ${url}`);
+  const result = await execClaude(['plugin', 'marketplace', 'add', url]);
+
+  if (result.success) {
+    console.log(`  Added: ${url}`);
+    return true;
+  }
+
+  // Check if already installed (skip silently)
+  const errLower = result.stderr.toLowerCase();
+  if (errLower.includes('already') || errLower.includes('exists')) {
+    console.log(`  Skipped (already added): ${url}`);
+    return true;
+  }
+
+  console.error(`  Failed: ${result.stderr.trim()}`);
+  return false;
+}
+
+/**
+ * Install a plugin by calling claude plugin install --scope project.
+ */
+async function installPluginCmd(name: string): Promise<boolean> {
+  console.error(`Installing plugin: ${name}`);
+  const result = await execClaude(['plugin', 'install', name, '--scope', 'project']);
+
+  if (result.success) {
+    console.log(`  Installed: ${name}`);
+    return true;
+  }
+
+  console.error(`  Failed: ${result.stderr.trim()}`);
+  return false;
+}
+
+/**
+ * Uninstall a plugin by calling claude plugin uninstall --scope project.
+ */
+async function uninstallPluginCmd(name: string): Promise<boolean> {
+  console.error(`Uninstalling plugin: ${name}`);
+  const result = await execClaude(['plugin', 'uninstall', name, '--scope', 'project']);
+
+  if (result.success) {
+    console.log(`  Uninstalled: ${name}`);
+    return true;
+  }
+
+  // Check if not installed (skip silently)
+  const errLower = result.stderr.toLowerCase();
+  if (errLower.includes('not installed') || errLower.includes('not found')) {
+    console.log(`  Skipped (not installed): ${name}`);
+    return true;
+  }
+
+  console.error(`  Failed: ${result.stderr.trim()}`);
+  return false;
+}
 
 export function registerClaudeCommands(program: Command): void {
   const claude = program
     .command('claude')
     .description('Claude Code plugin operations');
 
-  const plugin = claude.command('plugin').description('Manage Claude Code plugins');
+  // install command group
+  const install = claude.command('install').description('Install marketplaces and plugins');
 
-  plugin
-    .command('install')
-    .description('Install plugin(s) from GitHub or agentio.json')
-    .argument('[source]', 'GitHub URL or owner/repo (omit to install from agentio.json)')
-    .option('--skills', 'Install only skills')
-    .option('--commands', 'Install only commands')
-    .option('--hooks', 'Install only hooks')
-    .option('--agents', 'Install only agents')
-    .option('-f, --force', 'Force reinstall if already exists')
-    .option('-d, --dir <path>', 'Target directory (default: current directory)')
-    .option('-v, --verbose', 'Show detailed installation logs')
-    .action(async (source, options) => {
-      try {
-        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
-
-        if (!fs.existsSync(targetDir)) {
-          throw new CliError('INVALID_PARAMS', `Directory does not exist: ${targetDir}`);
-        }
-
-        if (source) {
-          // Install specific plugin from source
-          console.error(`Installing plugin from: ${source}`);
-          console.error(`Target: ${path.join(targetDir, '.claude')}`);
-
-          const result = await installPlugin(source, {
-            skills: options.skills,
-            commands: options.commands,
-            hooks: options.hooks,
-            agents: options.agents,
-            force: options.force,
-            targetDir,
-            verbose: options.verbose,
-          });
-
-          console.log(`\nInstalled: ${result.manifest.name} v${result.manifest.version}`);
-          if (result.installed.length > 0) {
-            console.log(`Components: ${result.installed.length}`);
-            for (const comp of result.installed) {
-              console.log(`  ${comp.type}/${comp.name}`);
-            }
-          }
-        } else {
-          // Install all plugins from agentio.json
-          if (!agentioJsonExists(targetDir)) {
-            throw new CliError(
-              'NOT_FOUND',
-              'No agentio.json found',
-              'Run: agentio claude plugin install <source> to install a plugin'
-            );
-          }
-
-          const agentioJson = loadAgentioJson(targetDir);
-          const plugins = Object.entries(agentioJson.plugins);
-
-          if (plugins.length === 0) {
-            console.log('No plugins defined in agentio.json');
-            return;
-          }
-
-          console.error(`Installing ${plugins.length} plugin(s) from agentio.json...`);
-          console.error(`Target: ${path.join(targetDir, '.claude')}`);
-
-          let installed = 0;
-          for (const [name, entry] of plugins) {
-            console.error(`\nInstalling ${name}...`);
-
-            // Determine component flags based on entry.components
-            const installOptions = {
-              skills:
-                !entry.components || entry.components.includes('skills'),
-              commands:
-                !entry.components || entry.components.includes('commands'),
-              hooks: !entry.components || entry.components.includes('hooks'),
-              agents: !entry.components || entry.components.includes('agents'),
-              force: options.force,
-              targetDir,
-              verbose: options.verbose,
-            };
-
-            try {
-              const result = await installPlugin(entry.source, installOptions);
-              console.log(`  Installed: ${result.manifest.name} v${result.manifest.version}`);
-              installed++;
-            } catch (error) {
-              console.error(`  Failed to install ${name}: ${error}`);
-            }
-          }
-
-          console.log(`\nInstalled ${installed} of ${plugins.length} plugin(s)`);
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  plugin
-    .command('list')
-    .description('List plugins from agentio.json')
+  install
+    .command('marketplace')
+    .description('Add a plugin marketplace')
+    .argument('<url>', 'Marketplace GitHub URL')
     .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
-    .action(async (options) => {
+    .action(async (url, options) => {
       try {
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
 
-        const plugins = listPlugins(targetDir);
-
-        if (plugins.length === 0) {
-          console.log('No plugins in agentio.json');
-          return;
-        }
-
-        console.log(`Plugins (${plugins.length}):\n`);
-        for (const { name, entry } of plugins) {
-          console.log(`${name} v${entry.version}`);
-          console.log(`  Source: ${entry.source}`);
-          if (entry.components) {
-            console.log(`  Components: ${entry.components.join(', ')}`);
-          }
-          console.log('');
+        const success = await installMarketplace(url);
+        if (success) {
+          addMarketplace(targetDir, url);
         }
       } catch (error) {
         handleError(error);
       }
     });
 
-  plugin
-    .command('remove')
-    .description('Remove an installed plugin')
-    .argument('<name>', 'Plugin name')
+  install
+    .command('plugin')
+    .description('Install a plugin')
+    .argument('<name>', 'Plugin name (e.g., plugin-name@marketplace)')
     .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
     .action(async (name, options) => {
       try {
         const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
 
-        const entry = getPlugin(targetDir, name);
-        if (!entry) {
-          throw new CliError('NOT_FOUND', `Plugin '${name}' not found in agentio.json`);
+        const success = await installPluginCmd(name);
+        if (success) {
+          addPlugin(targetDir, name);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // install with no subcommand - install all from agentio.json
+  install.action(async (options) => {
+    try {
+      const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+      const config = loadAgentioJson(targetDir);
+
+      if (config.marketplaces.length === 0 && config.plugins.length === 0) {
+        console.log('No marketplaces or plugins defined in agentio.json');
+        return;
+      }
+
+      console.error(`Installing from agentio.json...`);
+
+      // Install marketplaces first
+      if (config.marketplaces.length > 0) {
+        console.error(`\nMarketplaces (${config.marketplaces.length}):`);
+        for (const url of config.marketplaces) {
+          await installMarketplace(url);
+        }
+      }
+
+      // Then install plugins
+      if (config.plugins.length > 0) {
+        console.error(`\nPlugins (${config.plugins.length}):`);
+        for (const name of config.plugins) {
+          await installPluginCmd(name);
+        }
+      }
+
+      console.log('\nDone.');
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+  // list command
+  claude
+    .command('list')
+    .description('List marketplaces and plugins from agentio.json')
+    .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
+    .action(async (options) => {
+      try {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+        const config = loadAgentioJson(targetDir);
+
+        if (config.marketplaces.length === 0 && config.plugins.length === 0) {
+          console.log('No marketplaces or plugins defined in agentio.json');
+          return;
         }
 
-        console.error(`Removing plugin: ${name}...`);
-
-        // Use stored installed components (no network calls needed)
-        const components: InstalledComponent[] = entry.installedComponents || [];
-
-        // Remove files
-        removePluginFiles(targetDir, components);
-
-        // Update agentio.json
-        removePlugin(targetDir, name);
-
-        console.log(`Removed: ${name}`);
-        if (components.length > 0) {
-          console.log(`Removed components: ${components.length}`);
-          for (const comp of components) {
-            console.log(`  ${comp.type}/${comp.name}`);
+        if (config.marketplaces.length > 0) {
+          console.log(`Marketplaces (${config.marketplaces.length}):`);
+          for (const url of config.marketplaces) {
+            console.log(`  ${url}`);
           }
         }
+
+        if (config.plugins.length > 0) {
+          if (config.marketplaces.length > 0) {
+            console.log('');
+          }
+          console.log(`Plugins (${config.plugins.length}):`);
+          for (const name of config.plugins) {
+            console.log(`  ${name}`);
+          }
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // remove command group
+  const remove = claude.command('remove').description('Remove marketplaces and plugins');
+
+  remove
+    .command('marketplace')
+    .description('Remove a marketplace from agentio.json')
+    .argument('<url>', 'Marketplace URL to remove')
+    .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
+    .action(async (url, options) => {
+      try {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        const removed = removeMarketplace(targetDir, url);
+        if (removed) {
+          console.log(`Removed marketplace: ${url}`);
+        } else {
+          throw new CliError('NOT_FOUND', `Marketplace not found: ${url}`);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  remove
+    .command('plugin')
+    .description('Uninstall a plugin and remove from agentio.json')
+    .argument('<name>', 'Plugin name to remove')
+    .option('-d, --dir <path>', 'Directory with agentio.json (default: current directory)')
+    .action(async (name, options) => {
+      try {
+        const targetDir = options.dir ? path.resolve(options.dir) : process.cwd();
+
+        await uninstallPluginCmd(name);
+        removePlugin(targetDir, name);
       } catch (error) {
         handleError(error);
       }

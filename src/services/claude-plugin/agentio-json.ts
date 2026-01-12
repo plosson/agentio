@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AgentioJson, AgentioPluginEntry } from '../../types/claude-plugin';
+import type { AgentioJson } from '../../types/claude-plugin';
 
 const AGENTIO_JSON_FILE = 'agentio.json';
 
@@ -19,15 +19,18 @@ export function loadAgentioJson(dir: string): AgentioJson {
   const filePath = getAgentioJsonPath(dir);
 
   if (!fs.existsSync(filePath)) {
-    return { plugins: {} };
+    return { marketplaces: [], plugins: [] };
   }
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const data = JSON.parse(content) as AgentioJson;
 
-  // Ensure plugins object exists
+  // Ensure arrays exist
+  if (!data.marketplaces) {
+    data.marketplaces = [];
+  }
   if (!data.plugins) {
-    data.plugins = {};
+    data.plugins = [];
   }
 
   return data;
@@ -43,61 +46,53 @@ export function saveAgentioJson(dir: string, data: AgentioJson): void {
 }
 
 /**
- * Check if agentio.json exists in the given directory.
+ * Add a marketplace URL if not already present.
  */
-export function agentioJsonExists(dir: string): boolean {
-  return fs.existsSync(getAgentioJsonPath(dir));
+export function addMarketplace(dir: string, url: string): void {
+  const data = loadAgentioJson(dir);
+  if (!data.marketplaces.includes(url)) {
+    data.marketplaces.push(url);
+    saveAgentioJson(dir, data);
+  }
 }
 
 /**
- * Add or update a plugin entry in agentio.json.
+ * Add a plugin name if not already present.
  */
-export function addPlugin(
-  dir: string,
-  name: string,
-  entry: AgentioPluginEntry
-): void {
+export function addPlugin(dir: string, name: string): void {
   const data = loadAgentioJson(dir);
-  data.plugins[name] = entry;
-  saveAgentioJson(dir, data);
+  if (!data.plugins.includes(name)) {
+    data.plugins.push(name);
+    saveAgentioJson(dir, data);
+  }
 }
 
 /**
- * Remove a plugin entry from agentio.json.
- * Returns true if plugin was found and removed.
+ * Remove a marketplace URL.
+ * Returns true if found and removed.
  */
-export function removePlugin(dir: string, name: string): boolean {
+export function removeMarketplace(dir: string, url: string): boolean {
   const data = loadAgentioJson(dir);
-
-  if (!data.plugins[name]) {
+  const index = data.marketplaces.indexOf(url);
+  if (index === -1) {
     return false;
   }
-
-  delete data.plugins[name];
+  data.marketplaces.splice(index, 1);
   saveAgentioJson(dir, data);
   return true;
 }
 
 /**
- * Get a plugin entry from agentio.json.
+ * Remove a plugin name.
+ * Returns true if found and removed.
  */
-export function getPlugin(
-  dir: string,
-  name: string
-): AgentioPluginEntry | undefined {
+export function removePlugin(dir: string, name: string): boolean {
   const data = loadAgentioJson(dir);
-  return data.plugins[name];
-}
-
-/**
- * List all plugins in agentio.json.
- */
-export function listPlugins(
-  dir: string
-): Array<{ name: string; entry: AgentioPluginEntry }> {
-  const data = loadAgentioJson(dir);
-  return Object.entries(data.plugins).map(([name, entry]) => ({
-    name,
-    entry,
-  }));
+  const index = data.plugins.indexOf(name);
+  if (index === -1) {
+    return false;
+  }
+  data.plugins.splice(index, 1);
+  saveAgentioJson(dir, data);
+  return true;
 }
