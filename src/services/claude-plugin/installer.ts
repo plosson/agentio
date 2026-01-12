@@ -279,7 +279,7 @@ export async function installPlugin(
       }
 
       copyComponent(repoDir, parsed, 'skills', skillName, targetDir);
-      installed.push({ name: skillName, type: 'skills', path: destPath });
+      installed.push({ name: skillName, type: 'skills', path: `.claude/skills/${skillName}` });
       console.error(`  Installed skill: ${skillName}`);
       if (verbose) {
         console.error(`    [verbose] Path: ${destPath}`);
@@ -305,7 +305,7 @@ export async function installPlugin(
       }
 
       copyComponent(repoDir, parsed, 'commands', cmdName, targetDir);
-      installed.push({ name: cmdName, type: 'commands', path: destPath });
+      installed.push({ name: cmdName, type: 'commands', path: `.claude/commands/${cmdName}` });
       console.error(`  Installed command: ${cmdName}`);
       if (verbose) {
         console.error(`    [verbose] Path: ${destPath}`);
@@ -331,7 +331,7 @@ export async function installPlugin(
       }
 
       copyComponent(repoDir, parsed, 'hooks', hookName, targetDir);
-      installed.push({ name: hookName, type: 'hooks', path: destPath });
+      installed.push({ name: hookName, type: 'hooks', path: `.claude/hooks/${hookName}` });
       console.error(`  Installed hook: ${hookName}`);
       if (verbose) {
         console.error(`    [verbose] Path: ${destPath}`);
@@ -357,7 +357,7 @@ export async function installPlugin(
       }
 
       copyComponent(repoDir, parsed, 'agents', agentName, targetDir);
-      installed.push({ name: agentName, type: 'agents', path: destPath });
+      installed.push({ name: agentName, type: 'agents', path: `.claude/agents/${agentName}` });
       console.error(`  Installed agent: ${agentName}`);
       if (verbose) {
         console.error(`    [verbose] Path: ${destPath}`);
@@ -397,12 +397,7 @@ export function removePluginFiles(
   components: InstalledComponent[]
 ): void {
   for (const comp of components) {
-    const compPath = path.join(
-      targetDir,
-      '.claude',
-      comp.type,
-      comp.name
-    );
+    const compPath = path.join(targetDir, comp.path);
     if (fs.existsSync(compPath)) {
       fs.rmSync(compPath, { recursive: true });
     }

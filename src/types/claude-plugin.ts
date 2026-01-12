@@ -39,7 +39,7 @@ export interface PluginInstallOptions {
 export interface InstalledComponent {
   name: string;
   type: ComponentType;
-  path: string;
+  path: string; // Relative to agentio.json
 }
 
 // Plugin entry in agentio.json
