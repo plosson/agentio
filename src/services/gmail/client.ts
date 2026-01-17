@@ -308,54 +308,140 @@ export class GmailClient {
     attachments: GmailAttachment[];
   }): Promise<string> {
     const { from, to, cc, bcc, subject, body, isHtml, attachments } = options;
-    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
 
-    const headers = [
-      `From: ${from}`,
-      `To: ${to.join(', ')}`,
-      cc?.length ? `Cc: ${cc.join(', ')}` : null,
-      bcc?.length ? `Bcc: ${bcc.join(', ')}` : null,
-      `Subject: ${subject}`,
-      'MIME-Version: 1.0',
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
-      '',
-      body,
-    ].filter((line): line is string => line !== null);
+    // Separate inline and regular attachments
+    const inlineAttachments = attachments.filter(a => a.contentId);
+    const regularAttachments = attachments.filter(a => !a.contentId);
 
-    // Add attachments
-    for (const attachment of attachments) {
-      try {
-        const file = Bun.file(attachment.path);
-        const exists = await file.exists();
-        if (!exists) {
-          throw new CliError('NOT_FOUND', `Attachment not found: ${attachment.path}`);
-        }
+    const hasInline = inlineAttachments.length > 0;
+    const hasRegular = regularAttachments.length > 0;
 
-        const content = await file.arrayBuffer();
-        const base64Content = Buffer.from(content).toString('base64');
-        const filename = attachment.filename || basename(attachment.path);
-        const mimeType = attachment.mimeType || getMimeType(filename);
+    // Generate boundaries
+    const mixedBoundary = `----=_Mixed_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+    const relatedBoundary = `----=_Related_${Date.now()}_${Math.random().toString(36).substring(2)}`;
 
-        headers.push(
-          `--${boundary}`,
-          `Content-Type: ${mimeType}; name="${filename}"`,
-          'Content-Transfer-Encoding: base64',
-          `Content-Disposition: attachment; filename="${filename}"`,
-          '',
-          base64Content
-        );
-      } catch (error: any) {
-        if (error instanceof CliError) throw error;
-        throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${error.message}`);
+    const lines: string[] = [];
+
+    // Email headers
+    lines.push(`From: ${from}`);
+    lines.push(`To: ${to.join(', ')}`);
+    if (cc?.length) lines.push(`Cc: ${cc.join(', ')}`);
+    if (bcc?.length) lines.push(`Bcc: ${bcc.join(', ')}`);
+    lines.push(`Subject: ${subject}`);
+    lines.push('MIME-Version: 1.0');
+
+    if (hasRegular && hasInline) {
+      // Both: multipart/mixed containing multipart/related + regular attachments
+      lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+      lines.push('');
+      lines.push(`--${mixedBoundary}`);
+      lines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+      lines.push('');
+
+      // HTML body
+      lines.push(`--${relatedBoundary}`);
+      lines.push(`Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`);
+      lines.push('');
+      lines.push(body);
+
+      // Inline images
+      for (const attachment of inlineAttachments) {
+        const encoded = await this.encodeAttachment(attachment);
+        lines.push(`--${relatedBoundary}`);
+        lines.push(`Content-Type: ${encoded.mimeType}; name="${encoded.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-ID: <${attachment.contentId}>`);
+        lines.push(`Content-Disposition: inline; filename="${encoded.filename}"`);
+        lines.push('');
+        lines.push(encoded.base64);
       }
+      lines.push(`--${relatedBoundary}--`);
+
+      // Regular attachments
+      for (const attachment of regularAttachments) {
+        const encoded = await this.encodeAttachment(attachment);
+        lines.push(`--${mixedBoundary}`);
+        lines.push(`Content-Type: ${encoded.mimeType}; name="${encoded.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: attachment; filename="${encoded.filename}"`);
+        lines.push('');
+        lines.push(encoded.base64);
+      }
+      lines.push(`--${mixedBoundary}--`);
+
+    } else if (hasInline) {
+      // Only inline: multipart/related
+      lines.push(`Content-Type: multipart/related; boundary="${relatedBoundary}"`);
+      lines.push('');
+
+      // HTML body
+      lines.push(`--${relatedBoundary}`);
+      lines.push(`Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`);
+      lines.push('');
+      lines.push(body);
+
+      // Inline images
+      for (const attachment of inlineAttachments) {
+        const encoded = await this.encodeAttachment(attachment);
+        lines.push(`--${relatedBoundary}`);
+        lines.push(`Content-Type: ${encoded.mimeType}; name="${encoded.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-ID: <${attachment.contentId}>`);
+        lines.push(`Content-Disposition: inline; filename="${encoded.filename}"`);
+        lines.push('');
+        lines.push(encoded.base64);
+      }
+      lines.push(`--${relatedBoundary}--`);
+
+    } else {
+      // Only regular: multipart/mixed (original behavior)
+      lines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+      lines.push('');
+      lines.push(`--${mixedBoundary}`);
+      lines.push(`Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`);
+      lines.push('');
+      lines.push(body);
+
+      for (const attachment of regularAttachments) {
+        const encoded = await this.encodeAttachment(attachment);
+        lines.push(`--${mixedBoundary}`);
+        lines.push(`Content-Type: ${encoded.mimeType}; name="${encoded.filename}"`);
+        lines.push('Content-Transfer-Encoding: base64');
+        lines.push(`Content-Disposition: attachment; filename="${encoded.filename}"`);
+        lines.push('');
+        lines.push(encoded.base64);
+      }
+      lines.push(`--${mixedBoundary}--`);
     }
 
-    headers.push(`--${boundary}--`);
+    return lines.join('\r\n');
+  }
 
-    return headers.join('\r\n');
+  private async encodeAttachment(attachment: GmailAttachment): Promise<{
+    filename: string;
+    mimeType: string;
+    base64: string;
+  }> {
+    try {
+      const file = Bun.file(attachment.path);
+      const exists = await file.exists();
+      if (!exists) {
+        throw new CliError('NOT_FOUND', `Attachment not found: ${attachment.path}`);
+      }
+
+      const content = await file.arrayBuffer();
+      const filename = attachment.filename || basename(attachment.path);
+      const mimeType = attachment.mimeType || getMimeType(filename);
+
+      return {
+        filename,
+        mimeType,
+        base64: Buffer.from(content).toString('base64'),
+      };
+    } catch (error: any) {
+      if (error instanceof CliError) throw error;
+      throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${error.message}`);
+    }
   }
 
   async reply(options: GmailReplyOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {

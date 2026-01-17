@@ -22,6 +22,7 @@ export interface GmailAttachment {
   filename: string;
   path: string;
   mimeType?: string;
+  contentId?: string;  // For inline images, referenced as cid:contentId in HTML
 }
 
 export interface GmailAttachmentInfo {
