@@ -1,0 +1,4 @@
+{
+  "marketplaces": ["https://github.com/plosson/agentio"],
+  "plugins": ["agentio-gmail@agentio", "agentio-slack@agentio"]
+}

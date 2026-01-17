@@ -1,8 +1,48 @@
 # agentio
 
-CLI for LLM agents to interact with communication and tracking services.
+**Run LLM agent workflows in GitHub Actions. No servers. No Zapier. Just cron.**
 
-## Quick Install
+agentio is a CLI that lets LLM agents interact with Gmail, Slack, JIRA, Telegram, Google Chat, and RSS feeds. Designed for CI/CD pipelines and scheduled automation.
+
+## Why agentio?
+
+You want your AI agent to:
+- Send a daily Slack summary of unread emails
+- Monitor RSS feeds and post to Telegram
+- Update JIRA tickets based on email threads
+- Run on a schedule, without managing servers
+
+**agentio makes this trivial.** Authenticate once locally, export your config as a single encrypted file, and run anywhere — GitHub Actions, GitLab CI, or any CI/CD platform.
+
+## Quick Example: Daily Email Digest in GitHub Actions
+
+```yaml
+name: Daily Email Digest
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Every day at 9am UTC
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install agentio
+        run: curl -LsSf https://agentio.work/install | sh
+
+      - name: Import config
+        run: echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
+
+      - name: Run digest
+        env:
+          AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+        run: |
+          agentio config import config.enc --key "$AGENTIO_KEY"
+          agentio gmail list --limit 20 --unread
+```
+
+That's it. Your agent now has secure access to Gmail in CI/CD.
+
+## Install
 
 **macOS / Linux:**
 ```bash
@@ -14,150 +54,154 @@ curl -LsSf https://agentio.work/install | sh
 iwr -useb https://agentio.work/install.ps1 | iex
 ```
 
-## Update
-
-```bash
-agentio update
-```
-
-## Alternative Installation Methods
-
 <details>
-<summary>Homebrew (macOS/Linux)</summary>
+<summary><strong>Other methods</strong> (Homebrew, Scoop, npm)</summary>
 
+**Homebrew (macOS/Linux):**
 ```bash
 brew tap plosson/agentio
 brew install agentio
 ```
-</details>
 
-<details>
-<summary>Scoop (Windows)</summary>
-
+**Scoop (Windows):**
 ```powershell
 scoop bucket add agentio https://github.com/plosson/scoop-agentio
 scoop install agentio
 ```
-</details>
 
-<details>
-<summary>npm / bun</summary>
-
+**npm / bun:**
 ```bash
-# Run directly
-bunx @plosson/agentio --help
 npx @plosson/agentio --help
-
-# Global install
-bun add -g @plosson/agentio
+# or global install
 npm install -g @plosson/agentio
 ```
+
 </details>
 
-<details>
-<summary>Direct binary download</summary>
+## Setup: Authenticate Once, Run Anywhere
 
-Download from [GitHub Releases](https://github.com/plosson/agentio/releases/latest):
-- macOS: `agentio-darwin-arm64` (Apple Silicon) or `agentio-darwin-x64` (Intel)
-- Linux: `agentio-linux-x64` or `agentio-linux-arm64`
-- Windows: `agentio-windows-x64.exe`
-</details>
+### 1. Authenticate locally
+
+```bash
+# Add your Gmail account (opens browser for OAuth)
+agentio gmail profile add
+
+# Add Slack webhook
+agentio slack profile add
+
+# Add any other services you need...
+```
+
+### 2. Export your config
+
+```bash
+agentio config export
+# Outputs:
+#   ✓ Exported to agentio.config
+#   ✓ Encryption key: abc123...
+#
+# Store BOTH in your CI/CD secrets!
+```
+
+All credentials are encrypted with AES-256-GCM. The export file is useless without the key.
+
+### 3. Add to GitHub Secrets
+
+| Secret | Value |
+|--------|-------|
+| `AGENTIO_CONFIG` | Base64-encoded contents of `agentio.config` |
+| `AGENTIO_KEY` | The encryption key from export |
+
+```bash
+# Get base64 for GitHub secret
+cat agentio.config | base64
+```
+
+### 4. Use in your workflow
+
+```yaml
+- name: Import config
+  run: echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
+
+- name: Run agentio
+  env:
+    AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+  run: |
+    agentio config import config.enc --key "$AGENTIO_KEY"
+    agentio gmail list --limit 10
+```
+
+Done. Your agent can now access all your services securely in CI/CD.
 
 ## Services
 
-| Service | Status | Commands |
-|---------|--------|----------|
-| Gmail | Available | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
-| Telegram | Available | `send` |
-| Google Chat | Available | `send`, `list`, `get` |
-| Slack | Available | `send` |
-| JIRA | Available | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
-| RSS | Available | `articles`, `get`, `info` |
-| Linear | Planned | - |
+| Service | Auth | Commands |
+|---------|------|----------|
+| **Gmail** | OAuth | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
+| **Slack** | Webhook | `send` |
+| **Telegram** | Bot Token | `send` |
+| **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
+| **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
+| **Discourse** | API Key | `list`, `get`, `categories` |
+| **RSS** | None | `articles`, `get`, `info` |
 
-## Usage
+## Usage Examples
 
-### Gmail
+<details>
+<summary><strong>Gmail</strong></summary>
 
 ```bash
-# First, authenticate
-agentio gmail profile add
-
 # List recent emails
 agentio gmail list --limit 10
 
-# Search emails
+# Search
 agentio gmail search --query "from:boss@company.com is:unread"
 
-# Get a specific email
+# Get specific email
 agentio gmail get <message-id>
 
-# Send an email
-agentio gmail send --to user@example.com --subject "Hello" --body "Message body"
-
-# Or pipe content
-echo "Message body" | agentio gmail send --to user@example.com --subject "Hello"
+# Send (body from stdin works great with LLMs)
+echo "Generated by my agent" | agentio gmail send --to user@example.com --subject "Daily Report"
 
 # Download attachments
-agentio gmail attachment <message-id>
-agentio gmail attachment <message-id> --name "document.pdf" --output ./downloads
+agentio gmail attachment <message-id> --output ./downloads
 
-# Export email as PDF
-agentio gmail export <message-id>
+# Export as PDF
 agentio gmail export <message-id> --output email.pdf
 ```
 
-### Telegram
+</details>
+
+<details>
+<summary><strong>Slack</strong></summary>
 
 ```bash
-# Set up bot profile (interactive wizard)
-agentio telegram profile add
-
-# Send message to channel
-agentio telegram send "Hello from agentio!"
-
-# Send with formatting
-agentio telegram send --parse-mode markdown "**Bold** and _italic_"
-```
-
-### Google Chat
-
-```bash
-# Set up profile (webhook or OAuth)
-agentio gchat profile add
-
-# Send message via webhook
-agentio gchat send "Hello from agentio!"
-
-# Send with JSON payload for rich messages
-agentio gchat send --json message.json
-
-# List messages (OAuth profiles only)
-agentio gchat list --space <space-id>
-
-# Get a specific message (OAuth profiles only)
-agentio gchat get <message-id> --space <space-id>
-```
-
-### Slack
-
-```bash
-# Set up webhook profile
-agentio slack profile add
-
 # Send message
-agentio slack send "Hello from agentio!"
+agentio slack send "Deployment complete ✓"
 
-# Send Block Kit message from JSON file
+# Send rich Block Kit message
 agentio slack send --json blocks.json
 ```
 
-### JIRA
+</details>
+
+<details>
+<summary><strong>Telegram</strong></summary>
 
 ```bash
-# Authenticate with OAuth
-agentio jira profile add
+# Send to channel
+agentio telegram send "Alert: New items found"
 
+# With markdown
+agentio telegram send --parse-mode markdown "**Bold** and _italic_"
+```
+
+</details>
+
+<details>
+<summary><strong>JIRA</strong></summary>
+
+```bash
 # List projects
 agentio jira projects
 
@@ -168,39 +212,38 @@ agentio jira search --jql "assignee = currentUser() AND status != Done"
 # Get issue details
 agentio jira get PROJ-123
 
-# Add a comment
-agentio jira comment PROJ-123 "This is my comment"
+# Add comment
+agentio jira comment PROJ-123 "Automated update from CI"
 
-# View available transitions
-agentio jira transitions PROJ-123
-
-# Transition an issue
+# Transition issue
+agentio jira transitions PROJ-123  # see available transitions
 agentio jira transition PROJ-123 <transition-id>
 ```
 
-### RSS
+</details>
+
+<details>
+<summary><strong>RSS</strong></summary>
 
 ```bash
-# List articles from a blog (feed URL auto-discovered)
-agentio rss articles https://simonwillison.net
-agentio rss articles https://steipete.me --limit 5
+# List articles (auto-discovers feed URL)
+agentio rss articles https://simonwillison.net --limit 10
 
 # Filter by date
-agentio rss articles https://blog.fsck.com --since 2025-01-01
+agentio rss articles https://blog.example.com --since 2025-01-01
 
-# Get feed info (shows discovered feed URL)
-agentio rss info https://kau.sh
-
-# Get a specific article
+# Get full article
 agentio rss get https://simonwillison.net <article-url>
 ```
 
+</details>
+
 ## Multi-Profile Support
 
-Each service supports multiple named profiles:
+Manage multiple accounts per service:
 
 ```bash
-# Add profiles for different accounts
+# Add named profiles
 agentio gmail profile add --profile work
 agentio gmail profile add --profile personal
 
@@ -208,90 +251,79 @@ agentio gmail profile add --profile personal
 agentio gmail list --profile work
 ```
 
+## Workflow Examples
+
+The [`examples/`](./examples) folder contains ready-to-use workflows. Here's how it works:
+
+### Daily Email Briefing → Slack
+
+```yaml
+name: Daily Briefing
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'  # Weekdays at 7 AM UTC
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup agentio
+        run: |
+          curl -LsSf https://agentio.work/install | sh
+          echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
+          agentio config import config.enc --key "${{ secrets.AGENTIO_KEY }}"
+
+      - name: Setup Claude Code
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          agentio claude install  # Reads agentio.json
+
+      - name: Run briefing
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
+```
+
+The magic is in `prompt.md` — Claude reads your emails via the agentio plugin, analyzes them, and posts a summary to Slack:
+
+```markdown
+# Daily Email Briefing
+
+1. Fetch unread emails from the last 24 hours using agentio-gmail
+2. Categorize by urgency: Urgent / Important / FYI
+3. Generate a morning briefing with one-line summaries
+4. Send to Slack using agentio-slack
+```
+
+See [`examples/daily-briefing/`](./examples/daily-briefing) for the complete working example.
+
 ## Claude Code Integration
 
-agentio provides plugins for [Claude Code](https://claude.ai/download) with skills for Gmail, Telegram, Google Chat, JIRA, and RSS operations.
+agentio includes skills for [Claude Code](https://claude.ai/download) that let Claude directly read your email, post to Slack, or query JIRA during conversations.
 
-### Install Marketplaces and Plugins
-
-```bash
-# Add a marketplace (auto-detected from URL)
-agentio claude install https://github.com/plosson/agentio
-
-# Install a plugin (auto-detected from name@marketplace format)
-agentio claude install agentio-gmail@agentio
-
-# Install all from agentio.json
-agentio claude install
-```
-
-### Manage Plugins
+**Install skills:**
 
 ```bash
-# List marketplaces and plugins from agentio.json
-agentio claude list
-
-# Update marketplaces
-agentio claude update
-agentio claude update https://github.com/plosson/agentio
-
-# Remove a marketplace or plugin
-agentio claude remove https://github.com/plosson/agentio
-agentio claude remove agentio-gmail@agentio
+agentio claude install https://github.com/plosson/agentio  # marketplace
+agentio claude install agentio-gmail@agentio               # Gmail skill
+agentio claude install agentio-jira@agentio                # JIRA skill
 ```
 
-### agentio.json
+**Then in Claude Code:**
 
-Projects can define marketplaces and plugins in an `agentio.json` file:
+> "Summarize my unread emails and post a summary to Slack"
 
-```json
-{
-  "marketplaces": [
-    "https://github.com/plosson/agentio"
-  ],
-  "plugins": [
-    "agentio-gmail@agentio",
-    "agentio-rss@agentio"
-  ]
-}
-```
+Claude uses the installed skills to fetch emails and send the summary — no manual commands needed.
 
-## Design
+## Design Principles
 
-agentio is designed for LLM consumption:
-
-- **Structured output**: Human-readable text output optimized for LLM parsing
-- **Clear errors**: Error messages written to stderr with suggestions
-- **Stdin support**: Pipe content to commands that accept body text
-- **Multi-profile**: Manage multiple accounts per service
-
-## Configuration
-
-Configuration is stored in `~/.config/agentio/`:
-
-- `config.json` - Profile names and defaults
-- `tokens.enc` - Encrypted credentials (AES-256-GCM)
-
-### Export/Import
-
-Transfer configuration between machines:
-
-```bash
-# Export configuration (generates encryption key)
-agentio config export
-
-# Export with custom output file
-agentio config export --output backup.config
-
-# Import on another machine
-agentio config import agentio.config --key <encryption-key>
-
-# Or use environment variable
-AGENTIO_KEY=<key> agentio config import agentio.config
-
-# Merge with existing config instead of replacing
-agentio config import agentio.config --key <key> --merge
-```
+- **Structured output** — Text output optimized for LLM parsing
+- **Stdin support** — Pipe content to commands (`echo "msg" | agentio slack send`)
+- **Single config export** — One encrypted file + key = full portability
+- **Multi-profile** — Multiple accounts per service
+- **No runtime dependencies** — Single binary, runs anywhere
 
 ## License
 
