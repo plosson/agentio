@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { listProfiles, CONFIG_DIR } from '../config/config-manager';
+import { listProfiles, listEnv, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials, setCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
@@ -115,13 +115,13 @@ export function registerStatusCommand(program: Command): void {
     .command('status')
     .description('Show configured profiles and credential status')
     .option('--no-test', 'Skip credential testing')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
         const allProfiles = await listProfiles();
         const version = program.version();
-
-        console.log(`agentio v${version}`);
-        console.log(`Config: ${CONFIG_DIR}\n`);
+        const envVars = await listEnv();
+        const envKeys = Object.keys(envVars).sort();
 
         // Collect all profile statuses
         const statuses: ProfileStatus[] = [];
@@ -169,6 +169,32 @@ export function registerStatusCommand(program: Command): void {
             });
           }
         }
+
+        // JSON output mode
+        if (options.json) {
+          // Group profiles by service
+          const services: Record<string, Array<Omit<ProfileStatus, 'service'>>> = {};
+          for (const s of statuses) {
+            const { service, ...rest } = s;
+            if (!services[service]) {
+              services[service] = [];
+            }
+            services[service].push(rest);
+          }
+          const output = {
+            version,
+            configDir: CONFIG_DIR,
+            env: envKeys,
+            services,
+          };
+          console.log(JSON.stringify(output, null, 2));
+          return;
+        }
+
+        // Human-readable output
+        console.log(`agentio v${version}`);
+        console.log(`Config: ${CONFIG_DIR}`);
+        console.log(`Env: ${envKeys.length > 0 ? envKeys.join(', ') : 'none'}\n`);
 
         if (statuses.length === 0) {
           console.log('No profiles configured.');
