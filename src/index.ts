@@ -7,6 +7,7 @@ import { registerJiraCommands } from './commands/jira';
 import { registerSlackCommands } from './commands/slack';
 import { registerRssCommands } from './commands/rss';
 import { registerDiscourseCommands } from './commands/discourse';
+import { registerSqlCommands } from './commands/sql';
 import { registerUpdateCommand } from './commands/update';
 import { registerConfigCommands } from './commands/config';
 import { registerClaudeCommands } from './commands/claude';
@@ -14,13 +15,13 @@ import { registerStatusCommand } from './commands/status';
 
 declare const BUILD_VERSION: string | undefined;
 
-const getVersion = (): string => {
+function getVersion(): string {
   if (typeof BUILD_VERSION !== 'undefined') {
     return BUILD_VERSION;
   }
   // Fallback for development mode
   return require('../package.json').version;
-};
+}
 
 const program = new Command();
 
@@ -36,6 +37,7 @@ registerJiraCommands(program);
 registerSlackCommands(program);
 registerRssCommands(program);
 registerDiscourseCommands(program);
+registerSqlCommands(program);
 registerUpdateCommand(program);
 registerConfigCommands(program);
 registerClaudeCommands(program);

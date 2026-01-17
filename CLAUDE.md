@@ -327,3 +327,5 @@ if (!text) {
 - [ ] Register commands in `src/index.ts`
 - [ ] Test all operations: send, list, get (as applicable)
 - [ ] Test profile management: add, list, remove
+- [ ] Make sure status command gives the status for the service (if relevant) 
+- [ ] Create an associated skill in claude/skills (look at the others for inspiration)

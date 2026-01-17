@@ -6,6 +6,7 @@ export interface Config {
     slack?: string[];
     telegram?: string[];
     discourse?: string[];
+    sql?: string[];
   };
   defaults: {
     gmail?: string;
@@ -14,7 +15,8 @@ export interface Config {
     slack?: string;
     telegram?: string;
     discourse?: string;
+    sql?: string;
   };
 }
 
-export type ServiceName = 'gmail' | 'gchat' | 'jira' | 'slack' | 'telegram' | 'discourse';
+export type ServiceName = 'gmail' | 'gchat' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';

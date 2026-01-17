@@ -9,6 +9,7 @@ import { JiraClient } from '../services/jira/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
+import { SqlClient } from '../services/sql/client';
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
@@ -17,6 +18,7 @@ import type { JiraCredentials } from '../types/jira';
 import type { GChatCredentials } from '../types/gchat';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
+import type { SqlCredentials } from '../types/sql';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -87,6 +89,11 @@ async function createServiceClient(
     case 'discourse': {
       const creds = credentials as DiscourseCredentials;
       return new DiscourseClient(creds);
+    }
+
+    case 'sql': {
+      const creds = credentials as SqlCredentials;
+      return new SqlClient(creds);
     }
 
     default:
@@ -180,7 +187,7 @@ export function registerStatusCommand(program: Command): void {
           const profilePad = profileName.padEnd(profileWidth);
 
           let statusStr: string;
-          let details = '';
+          let details: string;
 
           switch (s.status) {
             case 'ok':
@@ -197,6 +204,7 @@ export function registerStatusCommand(program: Command): void {
               break;
             case 'skipped':
               statusStr = '-';
+              details = '';
               break;
           }
 

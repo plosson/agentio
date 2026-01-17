@@ -26,30 +26,33 @@ function generateKey(): string {
   return randomBytes(32).toString('hex');
 }
 
-function encrypt(data: string, key: Buffer): { iv: string; tag: string; data: string } {
+// Compact format: base64(iv + ciphertext + tag)
+function encrypt(data: string, key: Buffer): string {
   const iv = randomBytes(16);
   const cipher = createCipheriv(ALGORITHM, key, iv);
 
-  const encrypted = Buffer.concat([
+  const ciphertext = Buffer.concat([
     cipher.update(data, 'utf-8'),
     cipher.final(),
   ]);
 
   const tag = cipher.getAuthTag();
-
-  return {
-    iv: iv.toString('hex'),
-    tag: tag.toString('hex'),
-    data: encrypted.toString('hex'),
-  };
+  const combined = Buffer.concat([iv, ciphertext, tag]);
+  return combined.toString('base64');
 }
 
-function decrypt(encrypted: { iv: string; tag: string; data: string }, key: Buffer): string {
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(encrypted.iv, 'hex'));
-  decipher.setAuthTag(Buffer.from(encrypted.tag, 'hex'));
+function decrypt(data: string, key: Buffer): string {
+  const combined = Buffer.from(data, 'base64');
+
+  const iv = combined.subarray(0, 16);
+  const tag = combined.subarray(combined.length - 16);
+  const ciphertext = combined.subarray(16, combined.length - 16);
+
+  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(tag);
 
   const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(encrypted.data, 'hex')),
+    decipher.update(ciphertext),
     decipher.final(),
   ]);
 
@@ -66,6 +69,7 @@ export function registerConfigCommands(program: Command): void {
     .description('Export configuration and credentials to an encrypted file')
     .option('--key <key>', 'Encryption key (64 hex characters). If not provided, a random key will be generated')
     .option('--output <file>', 'Output file path', DEFAULT_EXPORT_FILE)
+    .option('--env', 'Output as environment variables instead of writing to file')
     .action(async (options) => {
       try {
         // Validate key if provided
@@ -97,14 +101,20 @@ export function registerConfigCommands(program: Command): void {
         const key = deriveKeyFromPassword(encryptionKey);
         const encrypted = encrypt(JSON.stringify(exportData), key);
 
-        // Write to file
-        const outputPath = join(process.cwd(), options.output);
-        await writeFile(outputPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+        if (options.env) {
+          // Output as environment variables
+          console.log(`AGENTIO_KEY=${encryptionKey}`);
+          console.log(`AGENTIO_CONFIG=${encrypted}`);
+        } else {
+          // Write to file
+          const outputPath = join(process.cwd(), options.output);
+          await writeFile(outputPath, encrypted, { mode: 0o600 });
 
-        console.log(`Configuration exported to: ${outputPath}`);
-        console.log(`Encryption key: ${encryptionKey}`);
-        console.log('');
-        console.log('Keep this key safe! You will need it to import the configuration.');
+          console.log(`Configuration exported to: ${outputPath}`);
+          console.log(`Encryption key: ${encryptionKey}`);
+          console.log('');
+          console.log('Keep this key safe! You will need it to import the configuration.');
+        }
       } catch (error) {
         handleError(error);
       }
@@ -137,7 +147,7 @@ export function registerConfigCommands(program: Command): void {
           );
         }
 
-        let encryptedContent: string;
+        let encrypted: string;
 
         if (file) {
           // Read from file
@@ -149,35 +159,14 @@ export function registerConfigCommands(program: Command): void {
               'Provide a valid path to the exported configuration file'
             );
           }
-          encryptedContent = await readFile(filePath, 'utf-8');
+          encrypted = await readFile(filePath, 'utf-8');
         } else if (process.env.AGENTIO_CONFIG) {
-          // Decode from AGENTIO_CONFIG environment variable (base64-encoded)
-          try {
-            encryptedContent = Buffer.from(process.env.AGENTIO_CONFIG, 'base64').toString('utf-8');
-          } catch {
-            throw new CliError(
-              'INVALID_PARAMS',
-              'Failed to decode AGENTIO_CONFIG',
-              'AGENTIO_CONFIG must be a valid base64-encoded string'
-            );
-          }
+          encrypted = process.env.AGENTIO_CONFIG;
         } else {
           throw new CliError(
             'INVALID_PARAMS',
             'No configuration source provided',
-            'Provide a file path or set AGENTIO_CONFIG environment variable (base64-encoded)'
-          );
-        }
-
-        // Parse the encrypted content
-        let encrypted: { iv: string; tag: string; data: string };
-        try {
-          encrypted = JSON.parse(encryptedContent);
-        } catch {
-          throw new CliError(
-            'INVALID_PARAMS',
-            'Invalid configuration format',
-            'The configuration does not appear to be a valid agentio export'
+            'Provide a file path or set AGENTIO_CONFIG environment variable'
           );
         }
 
@@ -185,7 +174,7 @@ export function registerConfigCommands(program: Command): void {
         const derivedKey = deriveKeyFromPassword(key);
         let exportData: ExportedData;
         try {
-          const decrypted = decrypt(encrypted, derivedKey);
+          const decrypted = decrypt(encrypted.trim(), derivedKey);
           exportData = JSON.parse(decrypted);
         } catch {
           throw new CliError(

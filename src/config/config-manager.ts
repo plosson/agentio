@@ -7,6 +7,8 @@ import type { Config, ServiceName } from '../types/config';
 const CONFIG_DIR = join(homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
+const ALL_SERVICES: ServiceName[] = ['gmail', 'gchat', 'jira', 'slack', 'telegram', 'discourse', 'sql'];
+
 const DEFAULT_CONFIG: Config = {
   profiles: {},
   defaults: {},
@@ -131,7 +133,7 @@ export async function listProfiles(service?: ServiceName): Promise<{
   default?: string;
 }[]> {
   const config = await loadConfig();
-  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'slack', 'telegram', 'discourse'];
+  const services = service ? [service] : ALL_SERVICES;
 
   return services.map((svc) => ({
     service: svc,
