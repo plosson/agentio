@@ -10,7 +10,6 @@ import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
 const ALGORITHM = 'aes-256-gcm';
-const DEFAULT_EXPORT_FILE = 'agentio.config';
 
 interface ExportedData {
   version: number;
@@ -66,10 +65,9 @@ export function registerConfigCommands(program: Command): void {
 
   config
     .command('export')
-    .description('Export configuration and credentials to an encrypted file')
+    .description('Export configuration and credentials (as environment variables by default, or to a file)')
     .option('--key <key>', 'Encryption key (64 hex characters). If not provided, a random key will be generated')
-    .option('--output <file>', 'Output file path', DEFAULT_EXPORT_FILE)
-    .option('--env', 'Output as environment variables instead of writing to file')
+    .option('--file <path>', 'Write encrypted config to file instead of outputting AGENTIO_CONFIG')
     .action(async (options) => {
       try {
         // Validate key if provided
@@ -101,19 +99,15 @@ export function registerConfigCommands(program: Command): void {
         const key = deriveKeyFromPassword(encryptionKey);
         const encrypted = encrypt(JSON.stringify(exportData), key);
 
-        if (options.env) {
+        if (options.file) {
+          // Write to file, output just the key
+          const filePath = options.file.startsWith('/') ? options.file : join(process.cwd(), options.file);
+          await writeFile(filePath, encrypted, { mode: 0o600 });
+          console.log(`AGENTIO_KEY=${encryptionKey}`);
+        } else {
           // Output as environment variables
           console.log(`AGENTIO_KEY=${encryptionKey}`);
           console.log(`AGENTIO_CONFIG=${encrypted}`);
-        } else {
-          // Write to file
-          const outputPath = join(process.cwd(), options.output);
-          await writeFile(outputPath, encrypted, { mode: 0o600 });
-
-          console.log(`Configuration exported to: ${outputPath}`);
-          console.log(`Encryption key: ${encryptionKey}`);
-          console.log('');
-          console.log('Keep this key safe! You will need it to import the configuration.');
         }
       } catch (error) {
         handleError(error);
