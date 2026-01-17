@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig, saveConfig } from '../config/config-manager';
+import { loadConfig, saveConfig, setEnv, unsetEnv, listEnv } from '../config/config-manager';
 import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import type { Config } from '../types/config';
@@ -240,6 +240,57 @@ export function registerConfigCommands(program: Command): void {
           await saveConfig(exportData.config);
           await setAllCredentials(exportData.credentials);
           console.log('Configuration imported successfully');
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Environment variable management
+  const env = config
+    .command('env')
+    .description('Manage environment variables')
+    .action(async () => {
+      try {
+        const vars = await listEnv();
+        const entries = Object.entries(vars).sort(([a], [b]) => a.localeCompare(b));
+        if (entries.length === 0) {
+          console.log('No environment variables configured');
+          return;
+        }
+        for (const [key, value] of entries) {
+          console.log(`${key}=${value}`);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  env
+    .command('set')
+    .description('Set an environment variable')
+    .argument('<key>', 'Variable name')
+    .argument('<value>', 'Variable value')
+    .action(async (key, value) => {
+      try {
+        await setEnv(key, value);
+        console.log(`Set ${key}`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  env
+    .command('unset')
+    .description('Remove an environment variable')
+    .argument('<key>', 'Variable name')
+    .action(async (key) => {
+      try {
+        const removed = await unsetEnv(key);
+        if (removed) {
+          console.log(`Removed ${key}`);
+        } else {
+          throw new CliError('NOT_FOUND', `Variable not found: ${key}`);
         }
       } catch (error) {
         handleError(error);

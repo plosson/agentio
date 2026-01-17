@@ -142,4 +142,33 @@ export async function listProfiles(service?: ServiceName): Promise<{
   }));
 }
 
+export async function getEnv(key: string): Promise<string | undefined> {
+  const config = await loadConfig();
+  return config.env?.[key];
+}
+
+export async function setEnv(key: string, value: string): Promise<void> {
+  const config = await loadConfig();
+  if (!config.env) {
+    config.env = {};
+  }
+  config.env[key] = value;
+  await saveConfig(config);
+}
+
+export async function unsetEnv(key: string): Promise<boolean> {
+  const config = await loadConfig();
+  if (!config.env || !(key in config.env)) {
+    return false;
+  }
+  delete config.env[key];
+  await saveConfig(config);
+  return true;
+}
+
+export async function listEnv(): Promise<Record<string, string>> {
+  const config = await loadConfig();
+  return config.env || {};
+}
+
 export { CONFIG_DIR, CONFIG_FILE };

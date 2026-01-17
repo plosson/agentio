@@ -17,6 +17,7 @@ export interface Config {
     discourse?: string;
     sql?: string;
   };
+  env?: Record<string, string>;
 }
 
 export type ServiceName = 'gmail' | 'gchat' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';
