@@ -2,6 +2,7 @@ import { google, gmail_v1 } from 'googleapis';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
 import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
 
 // Common MIME types by extension
@@ -38,12 +39,26 @@ function getMimeType(filename: string): string {
   return MIME_TYPES[ext] || 'application/octet-stream';
 }
 
-export class GmailClient {
+export class GmailClient implements ServiceClient {
   private gmail: gmail_v1.Gmail;
   private userEmail: string | null = null;
 
   constructor(auth: OAuth2Client) {
     this.gmail = google.gmail({ version: 'v1', auth });
+  }
+
+  async validate(): Promise<ValidationResult> {
+    try {
+      const email = await this.getUserEmail();
+      return { valid: true, info: email };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      // Check if it's a refresh failure
+      if (message.includes('invalid_grant') || message.includes('Token has been expired or revoked')) {
+        return { valid: false, error: 'refresh token expired, re-authenticate' };
+      }
+      return { valid: false, error: message };
+    }
   }
 
   private async getUserEmail(): Promise<string> {

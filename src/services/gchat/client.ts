@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import type { chat_v1 } from 'googleapis';
 import { CliError } from '../../utils/errors';
 import type { ErrorCode } from '../../utils/errors';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
 import type {
   GChatCredentials,
@@ -14,11 +15,32 @@ import type {
   GChatMessage,
 } from '../../types/gchat';
 
-export class GChatClient {
+export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
 
   constructor(credentials: GChatCredentials) {
     this.credentials = credentials;
+  }
+
+  async validate(): Promise<ValidationResult> {
+    if (this.credentials.type === 'webhook') {
+      // Cannot validate webhooks without sending a message
+      return { valid: true, info: 'webhook (not testable)' };
+    }
+
+    try {
+      const oauthCreds = this.credentials as GChatOAuthCredentials;
+      const auth = this.createOAuthClient(oauthCreds);
+      const chat = google.chat({ version: 'v1', auth });
+      await chat.spaces.list({ pageSize: 1 });
+      return { valid: true, info: 'oauth' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('invalid_grant') || message.includes('Token has been expired or revoked')) {
+        return { valid: false, error: 'refresh token expired, re-authenticate' };
+      }
+      return { valid: false, error: message };
+    }
   }
 
   async send(options: GChatSendOptions & { spaceId?: string }): Promise<GChatSendResult> {

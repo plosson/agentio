@@ -10,6 +10,7 @@ import { registerDiscourseCommands } from './commands/discourse';
 import { registerUpdateCommand } from './commands/update';
 import { registerConfigCommands } from './commands/config';
 import { registerClaudeCommands } from './commands/claude';
+import { registerStatusCommand } from './commands/status';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -38,5 +39,6 @@ registerDiscourseCommands(program);
 registerUpdateCommand(program);
 registerConfigCommands(program);
 registerClaudeCommands(program);
+registerStatusCommand(program);
 
 program.parse();

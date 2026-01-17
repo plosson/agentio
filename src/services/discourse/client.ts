@@ -6,6 +6,7 @@ import type {
   DiscoursePost,
   DiscourseListOptions,
 } from '../../types/discourse';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError, type ErrorCode } from '../../utils/errors';
 
 interface DiscourseApiResponse {
@@ -85,7 +86,7 @@ interface RawPost {
   like_count: number;
 }
 
-export class DiscourseClient {
+export class DiscourseClient implements ServiceClient {
   private baseUrl: string;
   private apiKey: string;
   private username: string;
@@ -95,6 +96,18 @@ export class DiscourseClient {
     this.baseUrl = credentials.baseUrl.replace(/\/$/, '');
     this.apiKey = credentials.apiKey;
     this.username = credentials.username;
+  }
+
+  async validate(): Promise<ValidationResult> {
+    try {
+      await this.getCategories();
+      return { valid: true, info: this.baseUrl };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 
   private async request<T>(
@@ -140,7 +153,8 @@ export class DiscourseClient {
   }
 
   private getErrorCode(status: number): ErrorCode {
-    if (status === 401 || status === 403) return 'AUTH_FAILED';
+    if (status === 401) return 'AUTH_FAILED';
+    if (status === 403) return 'PERMISSION_DENIED';
     if (status === 404) return 'NOT_FOUND';
     if (status === 429) return 'RATE_LIMITED';
     return 'API_ERROR';

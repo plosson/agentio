@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
+import { setCredentials, getCredentials } from '../auth/token-store';
+import { setProfile, getProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
@@ -124,9 +125,11 @@ export function registerSlackCommands(program: Command): void {
     });
 
   // Profile management
-  const profile = slack
-    .command('profile')
-    .description('Manage Slack profiles');
+  const profile = createProfileCommands<SlackCredentials>(slack, {
+    service: 'slack',
+    displayName: 'Slack',
+    getExtraInfo: (credentials) => credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook',
+  });
 
   profile
     .command('add')
@@ -136,50 +139,6 @@ export function registerSlackCommands(program: Command): void {
       try {
         const profileName = await resolveProfileName('slack', options.profile);
         await setupWebhookProfile(profileName);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List Slack profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('slack');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<SlackCredentials>('slack', name);
-            const channelInfo = credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook';
-            console.log(`${name}${marker}${channelInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a Slack profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('slack', profileName);
-        await removeCredentials('slack', profileName);
-
-        if (removed) {
-          console.log(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
-        }
       } catch (error) {
         handleError(error);
       }

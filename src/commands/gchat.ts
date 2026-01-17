@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import { google } from 'googleapis';
 import { readFile } from 'fs/promises';
-import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
+import { setCredentials, getCredentials } from '../auth/token-store';
+import { setProfile, getProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { createGoogleAuth } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
@@ -170,9 +171,11 @@ export function registerGChatCommands(program: Command): void {
     });
 
   // Profile management
-  const profile = gchat
-    .command('profile')
-    .description('Manage Google Chat profiles');
+  const profile = createProfileCommands<GChatCredentials>(gchat, {
+    service: 'gchat',
+    displayName: 'Google Chat',
+    getExtraInfo: (credentials) => credentials?.type === 'webhook' ? ' - webhook' : ' - oauth',
+  });
 
   profile
     .command('add')
@@ -192,50 +195,6 @@ export function registerGChatCommands(program: Command): void {
           await setupOAuthProfile(profileName);
         } else {
           throw new CliError('INVALID_PARAMS', 'Profile type must be "webhook" or "oauth"');
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List Google Chat profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('gchat');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<GChatCredentials>('gchat', name);
-            const typeInfo = credentials?.type === 'webhook' ? ' - webhook' : ' - oauth';
-            console.log(`${name}${marker}${typeInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a Google Chat profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('gchat', profileName);
-        await removeCredentials('gchat', profileName);
-
-        if (removed) {
-          console.log(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
         }
       } catch (error) {
         handleError(error);

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
-import { setCredentials, removeCredentials, getCredentials, setCredentials as updateCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
+import { setCredentials, getCredentials } from '../auth/token-store';
+import { setProfile, getProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
 import { CliError, handleError } from '../utils/errors';
@@ -31,7 +32,7 @@ async function ensureValidToken(credentials: JiraCredentials, profile: string): 
         expiryDate: Date.now() + refreshed.expiresIn * 1000,
       };
 
-      await updateCredentials('jira', profile, newCredentials);
+      await setCredentials('jira', profile, newCredentials);
       return newCredentials;
     } catch (error) {
       throw new CliError(
@@ -203,9 +204,11 @@ export function registerJiraCommands(program: Command): void {
     });
 
   // Profile management
-  const profile = jira
-    .command('profile')
-    .description('Manage JIRA profiles');
+  const profile = createProfileCommands<JiraCredentials>(jira, {
+    service: 'jira',
+    displayName: 'JIRA',
+    getExtraInfo: (credentials) => credentials?.siteUrl ? ` - ${credentials.siteUrl}` : '',
+  });
 
   profile
     .command('add')
@@ -215,7 +218,7 @@ export function registerJiraCommands(program: Command): void {
       try {
         const profileName = await resolveProfileName('jira', options.profile);
 
-        console.error('\n🔧 JIRA OAuth Setup\n');
+        console.error('\nJIRA OAuth Setup\n');
 
         // Site selection callback
         const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
@@ -237,7 +240,7 @@ export function registerJiraCommands(program: Command): void {
 
         const result = await performJiraOAuthFlow(selectSite);
 
-        console.error(`\n✓ Authorized for site: ${result.siteUrl}\n`);
+        console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
 
         // Save credentials
         const credentials: JiraCredentials = {
@@ -251,52 +254,8 @@ export function registerJiraCommands(program: Command): void {
         await setProfile('jira', profileName);
         await setCredentials('jira', profileName, credentials);
 
-        console.log(`\n✅ Profile "${profileName}" configured!`);
+        console.log(`\nProfile "${profileName}" configured!`);
         console.log(`   Test with: agentio jira projects --profile ${profileName}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List JIRA profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('jira');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<JiraCredentials>('jira', name);
-            const siteInfo = credentials?.siteUrl ? ` - ${credentials.siteUrl}` : '';
-            console.log(`${name}${marker}${siteInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a JIRA profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('jira', profileName);
-        await removeCredentials('jira', profileName);
-
-        if (removed) {
-          console.error(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
-        }
       } catch (error) {
         handleError(error);
       }

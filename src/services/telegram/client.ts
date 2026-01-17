@@ -1,4 +1,5 @@
 import type { TelegramBotInfo, TelegramChat, TelegramMessage, TelegramSendOptions } from '../../types/telegram';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
@@ -10,7 +11,7 @@ interface TelegramApiResponse<T> {
   error_code?: number;
 }
 
-export class TelegramClient {
+export class TelegramClient implements ServiceClient {
   private baseUrl: string;
 
   constructor(
@@ -18,6 +19,18 @@ export class TelegramClient {
     private channelId: string
   ) {
     this.baseUrl = `${TELEGRAM_API_BASE}${botToken}`;
+  }
+
+  async validate(): Promise<ValidationResult> {
+    try {
+      const botInfo = await this.getMe();
+      return { valid: true, info: `@${botInfo.username}` };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 
   private async request<T>(method: string, params?: Record<string, unknown>): Promise<T> {

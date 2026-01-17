@@ -1,6 +1,7 @@
 import { Command } from 'commander';
-import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
+import { setCredentials, getCredentials } from '../auth/token-store';
+import { setProfile, getProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { DiscourseClient } from '../services/discourse/client';
 import { CliError, handleError } from '../utils/errors';
 import { prompt, resolveProfileName } from '../utils/stdin';
@@ -102,7 +103,11 @@ export function registerDiscourseCommands(program: Command): void {
     });
 
   // Profile management
-  const profile = discourse.command('profile').description('Manage Discourse profiles');
+  const profile = createProfileCommands<DiscourseCredentials>(discourse, {
+    service: 'discourse',
+    displayName: 'Discourse',
+    getExtraInfo: (credentials) => credentials?.baseUrl ? ` - ${credentials.baseUrl}` : '',
+  });
 
   profile
     .command('add')
@@ -112,7 +117,7 @@ export function registerDiscourseCommands(program: Command): void {
       try {
         const profileName = await resolveProfileName('discourse', options.profile);
 
-        console.error('\n💬 Discourse Setup\n');
+        console.error('\nDiscourse Setup\n');
 
         // Step 1: Get base URL
         console.error('Step 1: Enter your Discourse forum URL');
@@ -188,59 +193,15 @@ export function registerDiscourseCommands(program: Command): void {
           throw error;
         }
 
-        console.error(`\n✓ Connected to ${normalizedUrl}`);
-        console.error(`✓ Authenticated as ${username}\n`);
+        console.error(`\nConnected to ${normalizedUrl}`);
+        console.error(`Authenticated as ${username}\n`);
 
         // Save credentials
         await setProfile('discourse', profileName);
         await setCredentials('discourse', profileName, credentials);
 
-        console.log(`\n✅ Profile "${profileName}" configured!`);
+        console.log(`\nProfile "${profileName}" configured!`);
         console.log(`   Test with: agentio discourse list --profile ${profileName}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List Discourse profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('discourse');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<DiscourseCredentials>('discourse', name);
-            const urlInfo = credentials?.baseUrl ? ` - ${credentials.baseUrl}` : '';
-            console.log(`${name}${marker}${urlInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a Discourse profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('discourse', profileName);
-        await removeCredentials('discourse', profileName);
-
-        if (removed) {
-          console.error(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
-        }
       } catch (error) {
         handleError(error);
       }

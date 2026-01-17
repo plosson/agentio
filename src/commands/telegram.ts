@@ -1,6 +1,7 @@
 import { Command } from 'commander';
-import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles, getProfile } from '../config/config-manager';
+import { setCredentials, getCredentials } from '../auth/token-store';
+import { setProfile, getProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
@@ -82,9 +83,11 @@ export function registerTelegramCommands(program: Command): void {
     });
 
   // Profile management
-  const profile = telegram
-    .command('profile')
-    .description('Manage Telegram profiles');
+  const profile = createProfileCommands<TelegramCredentials>(telegram, {
+    service: 'telegram',
+    displayName: 'Telegram',
+    getExtraInfo: (credentials) => credentials?.channel_name ? ` - ${credentials.channel_name}` : '',
+  });
 
   profile
     .command('add')
@@ -94,16 +97,16 @@ export function registerTelegramCommands(program: Command): void {
       try {
         const profileName = await resolveProfileName('telegram', options.profile);
 
-        console.error('\n📱 Telegram Bot Setup\n');
+        console.error('\nTelegram Bot Setup\n');
 
         // Step 1: Create bot
         console.error('Step 1: Create your bot');
         console.error('  Open Telegram and message @BotFather');
-        console.error('  → https://t.me/BotFather\n');
+        console.error('  -> https://t.me/BotFather\n');
         console.error('  Send these commands:');
         console.error('    /newbot');
-        console.error('    → Enter a display name (e.g., "My Announcements Bot")');
-        console.error('    → Enter a username ending in "bot" (e.g., "my_announce_bot")\n');
+        console.error('    -> Enter a display name (e.g., "My Announcements Bot")');
+        console.error('    -> Enter a username ending in "bot" (e.g., "my_announce_bot")\n');
         console.error('  BotFather will give you a token like:');
         console.error('    123456789:ABCdefGHIjklMNOpqrsTUVwxyz\n');
 
@@ -125,17 +128,17 @@ export function registerTelegramCommands(program: Command): void {
           throw error;
         }
 
-        console.error(`\n✓ Bot verified: @${botInfo.username}\n`);
+        console.error(`\nBot verified: @${botInfo.username}\n`);
 
         // Step 2: Add bot to channel
         console.error('Step 2: Add bot to your channel');
         console.error('  1. Open your Telegram channel');
-        console.error('  2. Go to Channel Settings → Administrators');
+        console.error('  2. Go to Channel Settings -> Administrators');
         console.error(`  3. Add @${botInfo.username} as admin with "Post Messages" permission\n`);
 
         console.error('  How to find your channel ID:');
-        console.error('  • Public channel: Use @username (e.g., @mychannel)');
-        console.error('  • Private channel: Forward any message from the channel to @userinfobot');
+        console.error('  - Public channel: Use @username (e.g., @mychannel)');
+        console.error('  - Private channel: Forward any message from the channel to @userinfobot');
         console.error('    The bot will reply with the channel ID (starts with -100)\n');
 
         const channelId = await prompt('? Enter channel ID: ');
@@ -162,8 +165,8 @@ export function registerTelegramCommands(program: Command): void {
         }
 
         const channelName = chatInfo.title || chatInfo.username || channelId;
-        console.error(`\n✓ Channel verified: ${channelName}`);
-        console.error('✓ Bot can post to this channel\n');
+        console.error(`\nChannel verified: ${channelName}`);
+        console.error('Bot can post to this channel\n');
 
         // Step 3: Optional customization tips
         console.error('Step 3: Customize your bot (optional)');
@@ -182,52 +185,8 @@ export function registerTelegramCommands(program: Command): void {
         await setProfile('telegram', profileName);
         await setCredentials('telegram', profileName, credentials);
 
-        console.log(`\n✅ Profile "${profileName}" configured!`);
+        console.log(`\nProfile "${profileName}" configured!`);
         console.log(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List Telegram profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('telegram');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<TelegramCredentials>('telegram', name);
-            const channelInfo = credentials?.channel_name ? ` - ${credentials.channel_name}` : '';
-            console.log(`${name}${marker}${channelInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a Telegram profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('telegram', profileName);
-        await removeCredentials('telegram', profileName);
-
-        if (removed) {
-          console.error(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
-        }
       } catch (error) {
         handleError(error);
       }

@@ -1,4 +1,5 @@
 import { CliError, type ErrorCode } from '../../utils/errors';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import type {
   JiraCredentials,
   JiraProject,
@@ -11,13 +12,55 @@ import type {
   JiraTransitionResult,
 } from '../../types/jira';
 
-export class JiraClient {
+export class JiraClient implements ServiceClient {
   private credentials: JiraCredentials;
   private baseUrl: string;
 
   constructor(credentials: JiraCredentials) {
     this.credentials = credentials;
     this.baseUrl = `https://api.atlassian.com/ex/jira/${credentials.cloudId}/rest/api/3`;
+  }
+
+  async validate(): Promise<ValidationResult> {
+    try {
+      // Try /myself endpoint first (requires read:me scope)
+      const url = `${this.baseUrl}/myself`;
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.credentials.accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const user = await response.json() as { displayName?: string; emailAddress?: string };
+        const info = user.displayName || user.emailAddress || this.credentials.siteUrl;
+        return { valid: true, info };
+      }
+
+      // Fall back to project search if /myself fails (older tokens without read:me scope)
+      const fallbackUrl = `${this.baseUrl}/project/search?maxResults=1`;
+      const fallbackResponse = await fetch(fallbackUrl, {
+        headers: {
+          Authorization: `Bearer ${this.credentials.accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (fallbackResponse.ok) {
+        return { valid: true, info: this.credentials.siteUrl };
+      }
+
+      return {
+        valid: false,
+        error: `API returned ${fallbackResponse.status}`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 
   private async request<T>(

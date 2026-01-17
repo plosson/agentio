@@ -109,13 +109,29 @@ export async function removeProfile(
   return true;
 }
 
+export async function setDefault(
+  service: ServiceName,
+  profileName: string
+): Promise<boolean> {
+  const config = await loadConfig();
+
+  const serviceProfiles = config.profiles[service] || [];
+  if (!serviceProfiles.includes(profileName)) {
+    return false;
+  }
+
+  config.defaults[service] = profileName;
+  await saveConfig(config);
+  return true;
+}
+
 export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
   profiles: string[];
   default?: string;
 }[]> {
   const config = await loadConfig();
-  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'slack', 'telegram'];
+  const services: ServiceName[] = service ? [service] : ['gmail', 'gchat', 'jira', 'slack', 'telegram', 'discourse'];
 
   return services.map((svc) => ({
     service: svc,

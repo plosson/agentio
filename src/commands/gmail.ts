@@ -3,8 +3,9 @@ import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { google } from 'googleapis';
 import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
-import { setCredentials, removeCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, removeProfile, listProfiles } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
+import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
 import { printMessageList, printMessage, printSendResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
@@ -438,9 +439,11 @@ ${emailHeader}
     });
 
   // Profile management
-  const profile = gmail
-    .command('profile')
-    .description('Manage Gmail profiles');
+  const profile = createProfileCommands<{ email?: string }>(gmail, {
+    service: 'gmail',
+    displayName: 'Gmail',
+    getExtraInfo: (credentials) => credentials?.email ? ` - ${credentials.email}` : '',
+  });
 
   profile
     .command('add')
@@ -456,8 +459,8 @@ ${emailHeader}
 
         // Fetch the user's email to store with the profile
         const auth = createGoogleAuth(tokens);
-        const gmail = google.gmail({ version: 'v1', auth });
-        const userProfile = await gmail.users.getProfile({ userId: 'me' });
+        const gmailApi = google.gmail({ version: 'v1', auth });
+        const userProfile = await gmailApi.users.getProfile({ userId: 'me' });
         const email = userProfile.data.emailAddress;
 
         await setProfile('gmail', profileName);
@@ -466,50 +469,6 @@ ${emailHeader}
         console.log(`\nSuccess! Profile "${profileName}" for Gmail is now configured.`);
         if (email) {
           console.log(`   Email: ${email}`);
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('list')
-    .description('List Gmail profiles')
-    .action(async () => {
-      try {
-        const result = await listProfiles('gmail');
-        const { profiles, default: defaultProfile } = result[0];
-
-        if (profiles.length === 0) {
-          console.log('No profiles configured');
-        } else {
-          for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
-            const credentials = await getCredentials<{ email?: string }>('gmail', name);
-            const emailInfo = credentials?.email ? ` - ${credentials.email}` : '';
-            console.log(`${name}${marker}${emailInfo}`);
-          }
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('remove')
-    .description('Remove a Gmail profile')
-    .requiredOption('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileName = options.profile;
-
-        const removed = await removeProfile('gmail', profileName);
-        await removeCredentials('gmail', profileName);
-
-        if (removed) {
-          console.error(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
         }
       } catch (error) {
         handleError(error);

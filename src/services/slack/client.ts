@@ -1,4 +1,5 @@
 import { CliError } from '../../utils/errors';
+import type { ServiceClient, ValidationResult } from '../../types/service';
 import type {
   SlackCredentials,
   SlackSendOptions,
@@ -6,11 +7,18 @@ import type {
   SlackWebhookCredentials,
 } from '../../types/slack';
 
-export class SlackClient {
+export class SlackClient implements ServiceClient {
   private credentials: SlackCredentials;
 
   constructor(credentials: SlackCredentials) {
     this.credentials = credentials;
+  }
+
+  async validate(): Promise<ValidationResult> {
+    // Webhooks cannot be validated without sending a message
+    const webhookCreds = this.credentials as SlackWebhookCredentials;
+    const info = webhookCreds.channelName ? `#${webhookCreds.channelName}` : 'webhook (not testable)';
+    return { valid: true, info };
   }
 
   async send(options: SlackSendOptions): Promise<SlackSendResult> {
