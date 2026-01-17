@@ -17,7 +17,7 @@ export class SlackClient implements ServiceClient {
   async validate(): Promise<ValidationResult> {
     // Webhooks cannot be validated without sending a message
     const webhookCreds = this.credentials as SlackWebhookCredentials;
-    const info = webhookCreds.channelName ? `#${webhookCreds.channelName}` : 'webhook (not testable)';
+    const info = webhookCreds.channelName ? `#${webhookCreds.channelName}` : 'webhook';
     return { valid: true, info };
   }
 

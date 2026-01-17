@@ -94,6 +94,15 @@ async function createServiceClient(
   }
 }
 
+interface ProfileStatus {
+  service: string;
+  profile: string;
+  isDefault: boolean;
+  status: 'ok' | 'invalid' | 'no-creds' | 'skipped';
+  info?: string;
+  error?: string;
+}
+
 export function registerStatusCommand(program: Command): void {
   program
     .command('status')
@@ -107,28 +116,30 @@ export function registerStatusCommand(program: Command): void {
         console.log(`agentio v${version}`);
         console.log(`Config: ${CONFIG_DIR}\n`);
 
-        let hasProfiles = false;
+        // Collect all profile statuses
+        const statuses: ProfileStatus[] = [];
 
         for (const { service, profiles, default: defaultProfile } of allProfiles) {
-          if (profiles.length === 0) {
-            continue;
-          }
-
-          hasProfiles = true;
-          const displayName = service.charAt(0).toUpperCase() + service.slice(1);
-          console.log(displayName);
-
           for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
             const credentials = await getCredentials(service, name);
 
             if (!credentials) {
-              console.log(`  ${name}${marker}    ? no credentials`);
+              statuses.push({
+                service,
+                profile: name,
+                isDefault: name === defaultProfile,
+                status: 'no-creds',
+              });
               continue;
             }
 
             if (options.test === false) {
-              console.log(`  ${name}${marker}`);
+              statuses.push({
+                service,
+                profile: name,
+                isDefault: name === defaultProfile,
+                status: 'skipped',
+              });
               continue;
             }
 
@@ -141,20 +152,56 @@ export function registerStatusCommand(program: Command): void {
               result = { valid: true, info: 'unknown service' };
             }
 
-            const status = result.valid ? 'ok' : 'invalid';
-            const statusMark = result.valid ? '+' : 'x';
-            const info = result.info ? `  ${result.info}` : '';
-            const error = result.error ? `  (${result.error})` : '';
-
-            console.log(`  ${name}${marker}    ${statusMark} ${status}${info}${error}`);
+            statuses.push({
+              service,
+              profile: name,
+              isDefault: name === defaultProfile,
+              status: result.valid ? 'ok' : 'invalid',
+              info: result.info,
+              error: result.error,
+            });
           }
-
-          console.log();
         }
 
-        if (!hasProfiles) {
+        if (statuses.length === 0) {
           console.log('No profiles configured.');
           console.log('Run: agentio <service> profile add');
+          return;
+        }
+
+        // Calculate column widths
+        const serviceWidth = Math.max(...statuses.map((s) => s.service.length));
+        const profileWidth = Math.max(...statuses.map((s) => s.profile.length + (s.isDefault ? 1 : 0)));
+
+        // Print each profile on one line
+        for (const s of statuses) {
+          const servicePad = s.service.padEnd(serviceWidth);
+          const profileName = s.profile + (s.isDefault ? '*' : '');
+          const profilePad = profileName.padEnd(profileWidth);
+
+          let statusStr: string;
+          let details = '';
+
+          switch (s.status) {
+            case 'ok':
+              statusStr = 'ok';
+              details = s.info || '';
+              break;
+            case 'invalid':
+              statusStr = 'ERR';
+              details = s.error || '';
+              break;
+            case 'no-creds':
+              statusStr = 'ERR';
+              details = 'no credentials';
+              break;
+            case 'skipped':
+              statusStr = '-';
+              break;
+          }
+
+          const line = `${servicePad}  ${profilePad}  ${statusStr.padEnd(3)}  ${details}`.trimEnd();
+          console.log(line);
         }
       } catch (error) {
         console.error('Error:', error instanceof Error ? error.message : 'Unknown error');

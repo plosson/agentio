@@ -25,7 +25,7 @@ export class GChatClient implements ServiceClient {
   async validate(): Promise<ValidationResult> {
     if (this.credentials.type === 'webhook') {
       // Cannot validate webhooks without sending a message
-      return { valid: true, info: 'webhook (not testable)' };
+      return { valid: true, info: 'webhook' };
     }
 
     try {
