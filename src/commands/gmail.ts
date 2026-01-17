@@ -185,6 +185,7 @@ Query Syntax Examples:
     .option('--body <body>', 'Email body (or pipe via stdin)')
     .option('--html', 'Treat body as HTML')
     .option('--attachment <path>', 'File to attach (repeatable)', (val, acc: string[]) => [...acc, val], [])
+    .option('--inline <cid:path>', 'Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)', (val, acc: string[]) => [...acc, val], [])
     .action(async (options) => {
       try {
         let body = options.body;
@@ -198,13 +199,32 @@ Query Syntax Examples:
           throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
         }
 
-        // Process attachments
-        const attachments: GmailAttachment[] | undefined = options.attachment.length
-          ? options.attachment.map((path: string) => ({
-              path,
-              filename: basename(path),
-            }))
-          : undefined;
+        // Process regular attachments
+        const regularAttachments: GmailAttachment[] = options.attachment.map((path: string) => ({
+          path,
+          filename: basename(path),
+        }));
+
+        // Process inline images (format: contentId:filepath)
+        const inlineAttachments: GmailAttachment[] = options.inline.map((spec: string) => {
+          const colonIndex = spec.indexOf(':');
+          if (colonIndex === -1) {
+            throw new CliError('INVALID_PARAMS', `Invalid inline format: ${spec}`, 'Use format: contentId:filepath (e.g., logo:./logo.png)');
+          }
+          const contentId = spec.substring(0, colonIndex);
+          const path = spec.substring(colonIndex + 1);
+          return {
+            path,
+            filename: basename(path),
+            contentId,
+          };
+        });
+
+        // Combine attachments
+        const attachments: GmailAttachment[] | undefined =
+          regularAttachments.length || inlineAttachments.length
+            ? [...regularAttachments, ...inlineAttachments]
+            : undefined;
 
         const { client } = await getGmailClient(options.profile);
         const result = await client.send({
