@@ -13,8 +13,8 @@ export const GOOGLE_OAUTH_CONFIG = {
 };
 
 // JIRA/Atlassian OAuth credentials
-const JIRA_CLIENT_ID = '7408S0MZKdYnsiz0KXlUT15Lb69k7y0e';
-const JIRA_CLIENT_SECRET_ENC = 'C0J5Cyvhfl_UHCvmY9BfvKa_gzqdaa5mb3FwzRmq-YApJdAoBAKmeCl3xmcYLRCFdMvQLWVmifTkryoB0bmhVWX6eRTzoj1q4iyyTxZzT0yff0pYvLguHzp9Y4U';
+const JIRA_CLIENT_ID = 'cVyhx1kQLRUef6gr50M9cTDke7ZPL4CN';
+const JIRA_CLIENT_SECRET_ENC = 'cFN1vM5KVVVCIkv9YlE5O0rerKJUkr-CszeusEVxofAH7W0evcCidzAB_OdTygfAcq2LjbN1IXK7ZiBBl3XrBsIO7RfxSGcEfHWpSbbHWxnKPP6H2iOoQZbOfns';
 
 export const JIRA_OAUTH_CONFIG = {
   clientId: JIRA_CLIENT_ID,

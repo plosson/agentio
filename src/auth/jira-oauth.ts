@@ -9,11 +9,11 @@ const ATLASSIAN_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessibl
 const JIRA_SCOPES = [
   'read:jira-work',   // Read projects, issues
   'write:jira-work',  // Add comments, change status
+  'read:me',          // Read current user info
   'offline_access',   // Get refresh tokens
 ];
 
-const PORT_RANGE_START = 3000;
-const PORT_RANGE_END = 3010;
+const OAUTH_PORT = 9999;
 
 export interface JiraOAuthResult {
   accessToken: string;
@@ -31,23 +31,6 @@ export interface AtlassianSite {
   avatarUrl?: string;
 }
 
-async function findAvailablePort(): Promise<number> {
-  for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const server = createServer();
-        server.listen(port, () => {
-          server.close(() => resolve());
-        });
-        server.on('error', reject);
-      });
-      return port;
-    } catch {
-      continue;
-    }
-  }
-  throw new Error(`No available port found in range ${PORT_RANGE_START}-${PORT_RANGE_END}`);
-}
 
 async function exchangeCodeForTokens(
   code: string,
@@ -130,8 +113,7 @@ export async function refreshJiraToken(
 export async function performJiraOAuthFlow(
   selectSite?: (sites: AtlassianSite[]) => Promise<AtlassianSite>
 ): Promise<JiraOAuthResult> {
-  const port = await findAvailablePort();
-  const redirectUri = `http://localhost:${port}/callback`;
+  const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
 
   const state = Math.random().toString(36).substring(2);
   const authUrl = new URL(ATLASSIAN_AUTH_URL);
@@ -152,7 +134,7 @@ export async function performJiraOAuthFlow(
     }, 5 * 60 * 1000);
 
     server = createServer(async (req, res) => {
-      const url = new URL(req.url || '', `http://localhost:${port}`);
+      const url = new URL(req.url || '', `http://localhost:${OAUTH_PORT}`);
 
       if (url.pathname !== '/callback') {
         res.writeHead(404);
@@ -230,7 +212,7 @@ export async function performJiraOAuthFlow(
       }
     });
 
-    server.listen(port, () => {
+    server.listen(OAUTH_PORT, () => {
       console.error(`\nOpening browser for Atlassian authorization...`);
       console.error(`If browser doesn't open, visit:\n${authUrl.toString()}\n`);
 
