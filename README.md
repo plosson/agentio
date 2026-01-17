@@ -115,6 +115,8 @@ agentio config export
 
 All credentials are encrypted with AES-256-GCM. The export file is useless without the key.
 
+**Note:** GitHub secrets are limited to 48KB per secret. Only add the profiles you need for your workflow to keep the exported config small.
+
 ### 3. Add to GitHub Secrets
 
 | Secret | Value |
