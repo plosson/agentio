@@ -14,33 +14,43 @@ You want your AI agent to:
 
 **agentio makes this trivial.** Authenticate once locally, export your config as a single encrypted file, and run anywhere — GitHub Actions, GitLab CI, or any CI/CD platform.
 
-## Quick Example: Daily Email Digest in GitHub Actions
+## Quick Example
+
+A scheduled workflow that reads your emails, has Claude summarize them, and posts to Slack:
 
 ```yaml
-name: Daily Email Digest
+# .github/workflows/daily-briefing.yml
+name: Daily Briefing
 on:
   schedule:
-    - cron: '0 9 * * *'  # Every day at 9am UTC
+    - cron: '0 7 * * 1-5'
 
 jobs:
-  digest:
+  briefing:
     runs-on: ubuntu-latest
     steps:
-      - name: Install agentio
-        run: curl -LsSf https://agentio.work/install | sh
-
-      - name: Import config
-        run: echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
-
-      - name: Run digest
+      - uses: actions/checkout@v4
+      - run: curl -LsSf https://agentio.work/install | sh
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: |
+          echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
+          agentio config import config.enc --key "${{ secrets.AGENTIO_KEY }}"
+          agentio claude install
         env:
-          AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
-        run: |
-          agentio config import config.enc --key "$AGENTIO_KEY"
-          agentio gmail list --limit 20 --unread
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-That's it. Your agent now has secure access to Gmail in CI/CD.
+```markdown
+# prompt.md
+Fetch my unread emails from the last 24 hours using agentio-gmail.
+Summarize them by urgency and sender.
+Post the summary to Slack using agentio-slack.
+```
+
+See [`examples/daily-briefing/`](./examples/daily-briefing) for the complete working example.
 
 ## Install
 
