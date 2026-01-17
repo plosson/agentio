@@ -1,6 +1,6 @@
 ---
 name: agentio-gmail
-description: Use when interacting with Gmail - list, read, search, send, reply to, archive, or mark emails. Requires agentio CLI with a configured Gmail profile.
+description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), reply, archive, mark, download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
 ---
 
 # Gmail Operations with agentio
@@ -60,6 +60,22 @@ Options:
 - `--body <body>`: Email body (or pipe via stdin)
 - `--html`: Treat body as HTML
 - `--attachment <path>`: File to attach (repeatable)
+- `--inline <cid:path>`: Inline image (repeatable). Supports PNG, JPG, GIF only (not SVG)
+
+### Inline Images
+
+To embed images directly in HTML emails, use `--inline` with a content ID and file path:
+
+```bash
+agentio gmail send \
+  --to user@example.com \
+  --subject "Report" \
+  --html \
+  --body '<p>See chart:</p><img src="cid:chart1">' \
+  --inline chart1:./chart.png
+```
+
+Reference inline images in HTML using `src="cid:<contentId>"`.
 
 ## Reply to a Thread
 
@@ -79,3 +95,24 @@ agentio gmail archive <message-id>
 agentio gmail mark <message-id> --read
 agentio gmail mark <message-id> --unread
 ```
+
+## Download Attachments
+
+```bash
+agentio gmail attachment <message-id> [--name <filename>] [--output <dir>]
+```
+
+Options:
+- `--name <filename>`: Download specific attachment by filename (downloads all if not specified)
+- `--output <dir>`: Output directory (default: current directory)
+
+## Export Message as PDF
+
+```bash
+agentio gmail export <message-id> [--output <path>]
+```
+
+Options:
+- `--output <path>`: Output file path (default: `message.pdf`)
+
+Requires Chrome, Chromium, or Edge browser installed.

@@ -28,19 +28,16 @@ on:
 jobs:
   briefing:
     runs-on: ubuntu-latest
+    env:
+      AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
+      AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - run: curl -LsSf https://agentio.work/install | sh
       - run: npm install -g @anthropic-ai/claude-code
-      - run: |
-          echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
-          agentio config import config.enc --key "${{ secrets.AGENTIO_KEY }}"
-          agentio claude install
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - run: agentio config import && agentio claude install
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
 ```markdown
@@ -132,15 +129,13 @@ cat agentio.config | base64
 ### 4. Use in your workflow
 
 ```yaml
-- name: Import config
-  run: echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
+env:
+  AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
+  AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
 
-- name: Run agentio
-  env:
-    AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
-  run: |
-    agentio config import config.enc --key "$AGENTIO_KEY"
-    agentio gmail list --limit 10
+steps:
+  - run: agentio config import  # Auto-detects env vars
+  - run: agentio gmail list --limit 10
 ```
 
 Done. Your agent can now access all your services securely in CI/CD.
@@ -278,24 +273,16 @@ on:
 jobs:
   briefing:
     runs-on: ubuntu-latest
+    env:
+      AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
+      AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup agentio
-        run: |
-          curl -LsSf https://agentio.work/install | sh
-          echo "${{ secrets.AGENTIO_CONFIG }}" | base64 -d > config.enc
-          agentio config import config.enc --key "${{ secrets.AGENTIO_KEY }}"
-
-      - name: Setup Claude Code
-        run: |
-          npm install -g @anthropic-ai/claude-code
-          agentio claude install  # Reads agentio.json
-
-      - name: Run briefing
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
+      - run: curl -LsSf https://agentio.work/install | sh
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: agentio config import && agentio claude install
+      - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
 ```
 
 The magic is in `prompt.md` — Claude reads your emails via the agentio plugin, analyzes them, and posts a summary to Slack:

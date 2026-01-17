@@ -112,8 +112,8 @@ export function registerConfigCommands(program: Command): void {
 
   config
     .command('import')
-    .description('Import configuration and credentials from an encrypted file')
-    .argument('<file>', 'Path to the encrypted configuration file')
+    .description('Import configuration and credentials from an encrypted file or environment variables')
+    .argument('[file]', 'Path to the encrypted configuration file (optional if AGENTIO_CONFIG env var is set)')
     .option('--key <key>', 'Encryption key (64 hex characters). Falls back to AGENTIO_KEY env var')
     .option('--merge', 'Merge with existing configuration instead of replacing')
     .action(async (file, options) => {
@@ -137,26 +137,47 @@ export function registerConfigCommands(program: Command): void {
           );
         }
 
-        // Check file exists
-        const filePath = file.startsWith('/') ? file : join(process.cwd(), file);
-        if (!existsSync(filePath)) {
+        let encryptedContent: string;
+
+        if (file) {
+          // Read from file
+          const filePath = file.startsWith('/') ? file : join(process.cwd(), file);
+          if (!existsSync(filePath)) {
+            throw new CliError(
+              'NOT_FOUND',
+              `File not found: ${filePath}`,
+              'Provide a valid path to the exported configuration file'
+            );
+          }
+          encryptedContent = await readFile(filePath, 'utf-8');
+        } else if (process.env.AGENTIO_CONFIG) {
+          // Decode from AGENTIO_CONFIG environment variable (base64-encoded)
+          try {
+            encryptedContent = Buffer.from(process.env.AGENTIO_CONFIG, 'base64').toString('utf-8');
+          } catch {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Failed to decode AGENTIO_CONFIG',
+              'AGENTIO_CONFIG must be a valid base64-encoded string'
+            );
+          }
+        } else {
           throw new CliError(
-            'NOT_FOUND',
-            `File not found: ${filePath}`,
-            'Provide a valid path to the exported configuration file'
+            'INVALID_PARAMS',
+            'No configuration source provided',
+            'Provide a file path or set AGENTIO_CONFIG environment variable (base64-encoded)'
           );
         }
 
-        // Read and parse the encrypted file
-        const encryptedContent = await readFile(filePath, 'utf-8');
+        // Parse the encrypted content
         let encrypted: { iv: string; tag: string; data: string };
         try {
           encrypted = JSON.parse(encryptedContent);
         } catch {
           throw new CliError(
             'INVALID_PARAMS',
-            'Invalid file format',
-            'The file does not appear to be a valid agentio export file'
+            'Invalid configuration format',
+            'The configuration does not appear to be a valid agentio export'
           );
         }
 
