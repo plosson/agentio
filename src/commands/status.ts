@@ -5,6 +5,7 @@ import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
+import { GitHubClient } from '../services/github/client';
 import { JiraClient } from '../services/jira/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
@@ -14,6 +15,7 @@ import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
 import type { TelegramCredentials } from '../types/telegram';
+import type { GitHubCredentials } from '../types/github';
 import type { JiraCredentials } from '../types/jira';
 import type { GChatCredentials } from '../types/gchat';
 import type { SlackCredentials } from '../types/slack';
@@ -49,22 +51,36 @@ async function createServiceClient(
       return new TelegramClient(creds.bot_token, creds.channel_id);
     }
 
+    case 'github': {
+      const creds = credentials as GitHubCredentials;
+      return new GitHubClient(creds);
+    }
+
     case 'jira': {
       let creds = credentials as JiraCredentials;
-      // Refresh token if expired or about to expire
-      const bufferTime = 5 * 60 * 1000;
-      if (creds.expiryDate && Date.now() + bufferTime >= creds.expiryDate) {
+
+      // Helper to refresh token
+      const tryRefresh = async (): Promise<JiraCredentials | null> => {
         try {
           const refreshed = await refreshJiraToken(creds.refreshToken);
-          creds = {
+          const newCreds = {
             ...creds,
             accessToken: refreshed.accessToken,
             refreshToken: refreshed.refreshToken,
             expiryDate: Date.now() + refreshed.expiresIn * 1000,
           };
-          await setCredentials('jira', profileName, creds);
+          await setCredentials('jira', profileName, newCreds);
+          return newCreds;
         } catch {
-          // Return a mock client that reports refresh failure
+          return null;
+        }
+      };
+
+      // Refresh token if expired or about to expire
+      const bufferTime = 5 * 60 * 1000;
+      if (creds.expiryDate && Date.now() + bufferTime >= creds.expiryDate) {
+        const refreshedCreds = await tryRefresh();
+        if (!refreshedCreds) {
           return {
             validate: async () => ({
               valid: false,
@@ -72,8 +88,32 @@ async function createServiceClient(
             }),
           };
         }
+        creds = refreshedCreds;
       }
-      return new JiraClient(creds);
+
+      // Create client and return a wrapper that attempts refresh on validation failure
+      const client = new JiraClient(creds);
+      return {
+        validate: async () => {
+          const result = await client.validate();
+          if (result.valid) {
+            return result;
+          }
+
+          // Validation failed - try to refresh token and retry
+          const refreshedCreds = await tryRefresh();
+          if (!refreshedCreds) {
+            return {
+              valid: false,
+              error: 'refresh token expired, re-authenticate',
+            };
+          }
+
+          // Retry validation with refreshed credentials
+          const refreshedClient = new JiraClient(refreshedCreds);
+          return refreshedClient.validate();
+        },
+      };
     }
 
     case 'gchat': {

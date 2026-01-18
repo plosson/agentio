@@ -20,3 +20,12 @@ export const JIRA_OAUTH_CONFIG = {
   clientId: JIRA_CLIENT_ID,
   clientSecret: reveal(JIRA_CLIENT_SECRET_ENC),
 };
+
+// GitHub OAuth credentials
+const GITHUB_CLIENT_ID = 'Ov23liR1X63IRAf6eONJ';
+const GITHUB_CLIENT_SECRET_ENC = 'Sztvs0AEbI5enapA40GFdqQc4RMgf8tmrMGXZ7RQIxYnuKmllPl8bZluGh5e15QfTjRe7HwZ5Bc';
+
+export const GITHUB_OAUTH_CONFIG = {
+  clientId: GITHUB_CLIENT_ID,
+  clientSecret: reveal(GITHUB_CLIENT_SECRET_ENC),
+};

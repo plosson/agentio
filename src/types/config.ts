@@ -2,6 +2,7 @@ export interface Config {
   profiles: {
     gmail?: string[];
     gchat?: string[];
+    github?: string[];
     jira?: string[];
     slack?: string[];
     telegram?: string[];
@@ -11,6 +12,7 @@ export interface Config {
   defaults: {
     gmail?: string;
     gchat?: string;
+    github?: string;
     jira?: string;
     slack?: string;
     telegram?: string;
@@ -20,4 +22,4 @@ export interface Config {
   env?: Record<string, string>;
 }
 
-export type ServiceName = 'gmail' | 'gchat' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';
+export type ServiceName = 'gmail' | 'gchat' | 'github' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';

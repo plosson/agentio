@@ -58,6 +58,31 @@ function decrypt(data: string, key: Buffer): string {
   return decrypted.toString('utf-8');
 }
 
+/**
+ * Generate encrypted config data for CI/CD environments.
+ * Returns the key and encrypted config that can be used as environment variables.
+ */
+export async function generateExportData(): Promise<{ key: string; config: string }> {
+  const encryptionKey = generateKey();
+
+  const configData = await loadConfig();
+  const credentials = await getAllCredentials();
+
+  const exportData: ExportedData = {
+    version: 1,
+    config: configData,
+    credentials,
+  };
+
+  const key = deriveKeyFromPassword(encryptionKey);
+  const encrypted = encrypt(JSON.stringify(exportData), key);
+
+  return {
+    key: encryptionKey,
+    config: encrypted,
+  };
+}
+
 export function registerConfigCommands(program: Command): void {
   const config = program
     .command('config')

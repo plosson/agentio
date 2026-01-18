@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { registerGmailCommands } from './commands/gmail';
 import { registerTelegramCommands } from './commands/telegram';
 import { registerGChatCommands } from './commands/gchat';
+import { registerGitHubCommands } from './commands/github';
 import { registerJiraCommands } from './commands/jira';
 import { registerSlackCommands } from './commands/slack';
 import { registerRssCommands } from './commands/rss';
@@ -33,6 +34,7 @@ program
 registerGmailCommands(program);
 registerTelegramCommands(program);
 registerGChatCommands(program);
+registerGitHubCommands(program);
 registerJiraCommands(program);
 registerSlackCommands(program);
 registerRssCommands(program);
