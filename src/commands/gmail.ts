@@ -275,26 +275,28 @@ Query Syntax Examples:
     });
 
   gmail
-    .command('archive <message-id>')
-    .description('Archive a message')
+    .command('archive <message-id...>')
+    .description('Archive one or more messages')
     .option('--profile <name>', 'Profile name')
-    .action(async (messageId: string, options) => {
+    .action(async (messageIds: string[], options) => {
       try {
         const { client } = await getGmailClient(options.profile);
-        await client.archive(messageId);
-        printArchived(messageId);
+        for (const messageId of messageIds) {
+          await client.archive(messageId);
+          printArchived(messageId);
+        }
       } catch (error) {
         handleError(error);
       }
     });
 
   gmail
-    .command('mark <message-id>')
-    .description('Mark message as read or unread')
+    .command('mark <message-id...>')
+    .description('Mark one or more messages as read or unread')
     .option('--profile <name>', 'Profile name')
     .option('--read', 'Mark as read')
     .option('--unread', 'Mark as unread')
-    .action(async (messageId: string, options) => {
+    .action(async (messageIds: string[], options) => {
       try {
         if (!options.read && !options.unread) {
           throw new CliError('INVALID_PARAMS', 'Specify --read or --unread');
@@ -304,8 +306,10 @@ Query Syntax Examples:
         }
 
         const { client } = await getGmailClient(options.profile);
-        await client.mark(messageId, options.read);
-        printMarked(messageId, options.read);
+        for (const messageId of messageIds) {
+          await client.mark(messageId, options.read);
+          printMarked(messageId, options.read);
+        }
       } catch (error) {
         handleError(error);
       }
