@@ -1,5 +1,5 @@
 import { getCredentials } from '../auth/token-store';
-import { getProfile } from '../config/config-manager';
+import { resolveProfile } from '../config/config-manager';
 import { CliError } from './errors';
 import type { ServiceName } from '../types/config';
 
@@ -10,6 +10,7 @@ export interface ClientFactoryConfig<TCredentials, TClient> {
 
 /**
  * Creates a type-safe client getter function for a service.
+ * Profile is optional - if only one profile exists, it will be used automatically.
  *
  * Usage:
  * ```typescript
@@ -21,18 +22,20 @@ export interface ClientFactoryConfig<TCredentials, TClient> {
  */
 export function createClientGetter<TCredentials, TClient>(
   config: ClientFactoryConfig<TCredentials, TClient>
-): (profileName: string) => Promise<{ client: TClient; profile: string }> {
+): (profileName?: string) => Promise<{ client: TClient; profile: string }> {
   const { service, createClient } = config;
 
-  return async (profileName: string): Promise<{ client: TClient; profile: string }> => {
-    const profile = await getProfile(service, profileName);
+  return async (profileName?: string): Promise<{ client: TClient; profile: string }> => {
+    const { profile, error } = await resolveProfile(service, profileName);
 
     if (!profile) {
-      throw new CliError(
-        'PROFILE_NOT_FOUND',
-        `Profile "${profileName}" not found for ${service}`,
-        `Run: agentio ${service} profile add`
-      );
+      if (error === 'none') {
+        throw new CliError('PROFILE_NOT_FOUND', `No ${service} profile configured`, `Run: agentio ${service} profile add`);
+      }
+      if (error === 'multiple') {
+        throw new CliError('PROFILE_NOT_FOUND', `Multiple ${service} profiles exist`, 'Specify --profile <name>');
+      }
+      throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
     }
 
     const credentials = await getCredentials<TCredentials>(service, profile);

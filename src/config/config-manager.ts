@@ -7,7 +7,7 @@ import type { Config, ServiceName } from '../types/config';
 const CONFIG_DIR = join(homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
-const ALL_SERVICES: ServiceName[] = ['gmail', 'gchat', 'github', 'jira', 'slack', 'telegram', 'discourse', 'sql'];
+const ALL_SERVICES: ServiceName[] = ['gdocs', 'gmail', 'gchat', 'github', 'jira', 'slack', 'telegram', 'discourse', 'sql'];
 
 const DEFAULT_CONFIG: Config = {
   profiles: {},
@@ -59,6 +59,40 @@ export async function getProfile(
   }
 
   return profileName;
+}
+
+/**
+ * Resolve profile name for a service.
+ * - If profileName is provided, validates it exists
+ * - If not provided and exactly 1 profile exists, returns that profile
+ * - Returns null if no profiles exist or if multiple profiles exist without explicit selection
+ */
+export async function resolveProfile(
+  service: ServiceName,
+  profileName?: string
+): Promise<{ profile: string | null; error?: 'none' | 'multiple' }> {
+  const config = await loadConfig();
+  const serviceProfiles = config.profiles[service] || [];
+
+  if (profileName) {
+    // Explicit profile requested - validate it exists
+    if (!serviceProfiles.includes(profileName)) {
+      return { profile: null };
+    }
+    return { profile: profileName };
+  }
+
+  // No profile specified - check if we can auto-select
+  if (serviceProfiles.length === 0) {
+    return { profile: null, error: 'none' };
+  }
+
+  if (serviceProfiles.length === 1) {
+    return { profile: serviceProfiles[0] };
+  }
+
+  // Multiple profiles exist - user must specify
+  return { profile: null, error: 'multiple' };
 }
 
 export async function setProfile(

@@ -1,5 +1,6 @@
 import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
 import type { GChatMessage, GChatSpace } from '../types/gchat';
+import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
@@ -372,4 +373,31 @@ export function printDiscourseTopic(topic: DiscourseTopicDetail): void {
     const content = post.cooked.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     console.log(content);
   }
+}
+
+// Google Docs specific formatters
+export function printGDocsList(docs: GDocsDocument[]): void {
+  if (docs.length === 0) {
+    console.log('No documents found');
+    return;
+  }
+
+  console.log(`Documents (${docs.length})\n`);
+
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    console.log(`[${i + 1}] ${doc.title}`);
+    console.log(`    ID: ${doc.id}`);
+    if (doc.owner) console.log(`    Owner: ${doc.owner}`);
+    if (doc.modifiedTime) console.log(`    Modified: ${doc.modifiedTime}`);
+    console.log(`    Link: ${doc.webViewLink}`);
+    console.log('');
+  }
+}
+
+export function printGDocCreated(result: GDocsCreateResult): void {
+  console.log('Document created');
+  console.log(`ID: ${result.id}`);
+  console.log(`Title: ${result.title}`);
+  console.log(`Link: ${result.webViewLink}`);
 }

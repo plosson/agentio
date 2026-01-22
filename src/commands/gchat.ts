@@ -26,7 +26,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('send')
     .description('Send a message to Google Chat')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--space <id>', 'Space ID (required for OAuth profiles)')
     .option('--thread <id>', 'Thread ID (optional)')
     .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
@@ -111,7 +111,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('list')
     .description('List messages from a Google Chat space (OAuth profiles only)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .requiredOption('--space <id>', 'Space ID')
     .option('--limit <n>', 'Number of messages', '10')
     .option('--thread <id>', 'Filter by thread ID')
@@ -135,7 +135,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('get <message-id>')
     .description('Get a message from a Google Chat space (OAuth profiles only)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .requiredOption('--space <id>', 'Space ID')
     .action(async (messageId: string, options) => {
       try {
@@ -154,7 +154,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('spaces')
     .description('List available Google Chat spaces (OAuth profiles only)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
     .action(async (options) => {
       try {

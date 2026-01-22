@@ -25,7 +25,7 @@ export function registerDiscourseCommands(program: Command): void {
   discourse
     .command('list')
     .description('List latest topics')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--category <slug>', 'Filter by category slug or name')
     .option('--page <number>', 'Page number (0-indexed)', '0')
     .action(async (options) => {
@@ -46,7 +46,7 @@ export function registerDiscourseCommands(program: Command): void {
     .command('get')
     .description('Get a topic with its posts')
     .argument('<topic-id>', 'Topic ID')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (topicId: string, options) => {
       try {
         const id = parseInt(topicId, 10);
@@ -66,7 +66,7 @@ export function registerDiscourseCommands(program: Command): void {
   discourse
     .command('categories')
     .description('List all categories')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (options) => {
       try {
         const { client } = await getDiscourseClient(options.profile);

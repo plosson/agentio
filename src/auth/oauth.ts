@@ -17,13 +17,21 @@ const GCHAT_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',           // get user email for profile naming
 ];
 
-const SCOPES: Record<'gmail' | 'gchat', string[]> = {
+const GDOCS_SCOPES = [
+  'https://www.googleapis.com/auth/documents',          // read/write docs
+  'https://www.googleapis.com/auth/drive.file',         // create/access files created by this app
+  'https://www.googleapis.com/auth/drive.readonly',     // read all drive files (list, metadata, export)
+  'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
+];
+
+const SCOPES: Record<'gmail' | 'gchat' | 'gdocs', string[]> = {
   gmail: GMAIL_SCOPES,
   gchat: GCHAT_SCOPES,
+  gdocs: GDOCS_SCOPES,
 };
 
 export async function performOAuthFlow(
-  service: 'gmail' | 'gchat'
+  service: 'gmail' | 'gchat' | 'gdocs'
 ): Promise<OAuthTokens> {
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}/callback`;

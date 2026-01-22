@@ -5,6 +5,7 @@ import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
+import { GDocsClient } from '../services/gdocs/client';
 import { GitHubClient } from '../services/github/client';
 import { JiraClient } from '../services/jira/client';
 import { GChatClient } from '../services/gchat/client';
@@ -17,6 +18,7 @@ import type { OAuthTokens } from '../types/tokens';
 import type { TelegramCredentials } from '../types/telegram';
 import type { GitHubCredentials } from '../types/github';
 import type { JiraCredentials } from '../types/jira';
+import type { GDocsCredentials } from '../types/gdocs';
 import type { GChatCredentials } from '../types/gchat';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
@@ -44,6 +46,11 @@ async function createServiceClient(
         scope: creds.scope,
       });
       return new GmailClient(auth);
+    }
+
+    case 'gdocs': {
+      const creds = credentials as GDocsCredentials;
+      return new GDocsClient(creds);
     }
 
     case 'telegram': {

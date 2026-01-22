@@ -21,7 +21,7 @@ export function registerTelegramCommands(program: Command): void {
   telegram
     .command('send')
     .description('Send a message to the channel')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--parse-mode <mode>', 'Message format: html or markdown')
     .option('--silent', 'Send without notification')
     .argument('[message]', 'Message text (or pipe via stdin)')

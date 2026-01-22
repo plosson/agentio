@@ -33,7 +33,7 @@ export function registerSqlCommands(program: Command): void {
   sql
     .command('query')
     .description('Execute a SQL query')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--limit <n>', 'Maximum rows to return', '100')
     .argument('[query]', 'SQL query (or pipe via stdin)')
     .action(async (query: string | undefined, options) => {

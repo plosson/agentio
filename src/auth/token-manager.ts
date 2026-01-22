@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { getCredentials, setCredentials } from './token-store';
-import { getProfile } from '../config/config-manager';
+import { resolveProfile } from '../config/config-manager';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
@@ -10,16 +10,18 @@ const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function getValidTokens(
   service: ServiceName,
-  profileName: string
+  profileName?: string
 ): Promise<{ tokens: OAuthTokens; profile: string }> {
-  const profile = await getProfile(service, profileName);
+  const { profile, error } = await resolveProfile(service, profileName);
 
   if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for ${service}`,
-      `Run: agentio ${service} profile add`
-    );
+    if (error === 'none') {
+      throw new CliError('PROFILE_NOT_FOUND', `No ${service} profile configured`, `Run: agentio ${service} profile add`);
+    }
+    if (error === 'multiple') {
+      throw new CliError('PROFILE_NOT_FOUND', `Multiple ${service} profiles exist`, 'Specify --profile <name>');
+    }
+    throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
   }
 
   const tokens = await getCredentials<OAuthTokens>(service, profile);

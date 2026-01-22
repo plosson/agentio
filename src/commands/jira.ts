@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setProfile, resolveProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
@@ -46,15 +46,17 @@ async function ensureValidToken(credentials: JiraCredentials, profile: string): 
   return credentials;
 }
 
-async function getJiraClient(profileName: string): Promise<{ client: JiraClient; profile: string }> {
-  const profile = await getProfile('jira', profileName);
+async function getJiraClient(profileName?: string): Promise<{ client: JiraClient; profile: string }> {
+  const { profile, error } = await resolveProfile('jira', profileName);
 
   if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for jira`,
-      'Run: agentio jira profile add'
-    );
+    if (error === 'none') {
+      throw new CliError('PROFILE_NOT_FOUND', 'No jira profile configured', 'Run: agentio jira profile add');
+    }
+    if (error === 'multiple') {
+      throw new CliError('PROFILE_NOT_FOUND', 'Multiple jira profiles exist', 'Specify --profile <name>');
+    }
+    throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for jira`, 'Run: agentio jira profile add');
   }
 
   let credentials = await getCredentials<JiraCredentials>('jira', profile);
@@ -85,7 +87,7 @@ export function registerJiraCommands(program: Command): void {
   jira
     .command('projects')
     .description('List JIRA projects')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--limit <number>', 'Maximum number of projects', '50')
     .action(async (options) => {
       try {
@@ -103,7 +105,7 @@ export function registerJiraCommands(program: Command): void {
   jira
     .command('search')
     .description('Search JIRA issues')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--jql <query>', 'JQL query')
     .option('--project <key>', 'Project key')
     .option('--status <status>', 'Issue status')
@@ -130,7 +132,7 @@ export function registerJiraCommands(program: Command): void {
     .command('get')
     .description('Get JIRA issue details')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (issueKey: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);
@@ -147,7 +149,7 @@ export function registerJiraCommands(program: Command): void {
     .description('Add a comment to an issue')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
     .argument('[body]', 'Comment body (or pipe via stdin)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (issueKey: string, body: string | undefined, options) => {
       try {
         let text = body;
@@ -173,7 +175,7 @@ export function registerJiraCommands(program: Command): void {
     .command('transitions')
     .description('List available transitions for an issue')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (issueKey: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);
@@ -190,7 +192,7 @@ export function registerJiraCommands(program: Command): void {
     .description('Transition an issue to a new status')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
     .argument('<transition-id>', 'Transition ID (use "transitions" command to see available)')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (issueKey: string, transitionId: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);

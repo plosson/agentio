@@ -23,7 +23,7 @@ export function registerSlackCommands(program: Command): void {
   slack
     .command('send')
     .description('Send a message to Slack')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--json [file]', 'Send Block Kit message from JSON file (or stdin if no file specified)')
     .argument('[message]', 'Message text (or pipe via stdin)')
     .action(async (message: string | undefined, options) => {

@@ -35,7 +35,7 @@ export function registerGitHubCommands(program: Command): void {
     .command('install')
     .description('Install AGENTIO_KEY and AGENTIO_CONFIG as GitHub Actions secrets')
     .argument('<repo>', 'Repository in owner/repo format')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (repo: string, options) => {
       try {
         // Validate repo format
@@ -70,7 +70,7 @@ export function registerGitHubCommands(program: Command): void {
     .command('uninstall')
     .description('Remove AGENTIO_KEY and AGENTIO_CONFIG secrets from a repository')
     .argument('<repo>', 'Repository in owner/repo format')
-    .requiredOption('--profile <name>', 'Profile name')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (repo: string, options) => {
       try {
         // Validate repo format
