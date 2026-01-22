@@ -16,9 +16,10 @@ const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
 function extractDisplayName(url: string): string {
   try {
     const parsed = new URL(url);
+    const username = parsed.username ? decodeURIComponent(parsed.username) : '';
     const host = parsed.hostname || 'localhost';
     const db = parsed.pathname.replace(/^\//, '') || 'database';
-    return `${host}/${db}`;
+    return username ? `${username}@${host}/${db}` : `${host}/${db}`;
   } catch {
     return url.substring(0, 30);
   }
