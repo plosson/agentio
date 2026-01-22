@@ -144,7 +144,6 @@ async function createServiceClient(
 interface ProfileStatus {
   service: string;
   profile: string;
-  isDefault: boolean;
   status: 'ok' | 'invalid' | 'no-creds' | 'skipped';
   info?: string;
   error?: string;
@@ -166,7 +165,7 @@ export function registerStatusCommand(program: Command): void {
         // Collect all profile statuses
         const statuses: ProfileStatus[] = [];
 
-        for (const { service, profiles, default: defaultProfile } of allProfiles) {
+        for (const { service, profiles } of allProfiles) {
           for (const name of profiles) {
             const credentials = await getCredentials(service, name);
 
@@ -174,7 +173,6 @@ export function registerStatusCommand(program: Command): void {
               statuses.push({
                 service,
                 profile: name,
-                isDefault: name === defaultProfile,
                 status: 'no-creds',
               });
               continue;
@@ -184,7 +182,6 @@ export function registerStatusCommand(program: Command): void {
               statuses.push({
                 service,
                 profile: name,
-                isDefault: name === defaultProfile,
                 status: 'skipped',
               });
               continue;
@@ -202,7 +199,6 @@ export function registerStatusCommand(program: Command): void {
             statuses.push({
               service,
               profile: name,
-              isDefault: name === defaultProfile,
               status: result.valid ? 'ok' : 'invalid',
               info: result.info,
               error: result.error,
@@ -244,13 +240,12 @@ export function registerStatusCommand(program: Command): void {
 
         // Calculate column widths
         const serviceWidth = Math.max(...statuses.map((s) => s.service.length));
-        const profileWidth = Math.max(...statuses.map((s) => s.profile.length + (s.isDefault ? 1 : 0)));
+        const profileWidth = Math.max(...statuses.map((s) => s.profile.length));
 
         // Print each profile on one line
         for (const s of statuses) {
           const servicePad = s.service.padEnd(serviceWidth);
-          const profileName = s.profile + (s.isDefault ? '*' : '');
-          const profilePad = profileName.padEnd(profileWidth);
+          const profilePad = s.profile.padEnd(profileWidth);
 
           let statusStr: string;
           let details: string;

@@ -10,16 +10,14 @@ const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function getValidTokens(
   service: ServiceName,
-  profileName?: string
+  profileName: string
 ): Promise<{ tokens: OAuthTokens; profile: string }> {
   const profile = await getProfile(service, profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for ${service}`
-        : `No default profile configured for ${service}`,
+      `Profile "${profileName}" not found for ${service}`,
       `Run: agentio ${service} profile add`
     );
   }

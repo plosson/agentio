@@ -42,6 +42,7 @@ export interface GChatOAuthCredentials {
   expiryDate?: number;
   tokenType: string;
   scope?: string;
+  email: string;
 }
 
 export type GChatCredentials = GChatWebhookCredentials | GChatOAuthCredentials;
@@ -55,6 +56,8 @@ export interface GChatSendOptions {
 export interface GChatListOptions {
   spaceId: string;
   limit?: number;
+  threadId?: string;
+  since?: Date;
 }
 
 export interface GChatGetOptions {

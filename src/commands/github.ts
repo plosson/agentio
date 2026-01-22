@@ -6,18 +6,15 @@ import { GitHubClient } from '../services/github/client';
 import { performGitHubOAuthFlow } from '../auth/github-oauth';
 import { generateExportData } from './config';
 import { CliError, handleError } from '../utils/errors';
-import { resolveProfileName } from '../utils/stdin';
 import type { GitHubCredentials } from '../types/github';
 
-async function getGitHubClient(profileName?: string): Promise<{ client: GitHubClient; profile: string }> {
+async function getGitHubClient(profileName: string): Promise<{ client: GitHubClient; profile: string }> {
   const profile = await getProfile('github', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for github`
-        : 'No default profile configured for github',
+      `Profile "${profileName}" not found for github`,
       'Run: agentio github profile add'
     );
   }
@@ -59,7 +56,7 @@ export function registerGitHubCommands(program: Command): void {
     .command('install')
     .description('Install AGENTIO_KEY and AGENTIO_CONFIG as GitHub Actions secrets')
     .argument('<repo>', 'Repository in owner/repo format')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (repo: string, options) => {
       try {
         // Validate repo format
@@ -94,7 +91,7 @@ export function registerGitHubCommands(program: Command): void {
     .command('uninstall')
     .description('Remove AGENTIO_KEY and AGENTIO_CONFIG secrets from a repository')
     .argument('<repo>', 'Repository in owner/repo format')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (repo: string, options) => {
       try {
         // Validate repo format
@@ -128,11 +125,9 @@ export function registerGitHubCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new GitHub profile')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('github', options.profile);
-
         console.error('\nGitHub Setup\n');
         console.error('This will open your browser to authorize agentio with GitHub.');
         console.error('You will need to grant access to repositories where you want to set secrets.\n');
@@ -153,6 +148,8 @@ export function registerGitHubCommands(program: Command): void {
         // Update credentials with user info
         credentials.username = user.login;
         credentials.email = user.email;
+
+        const profileName = options.profile || user.login;
 
         console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
 

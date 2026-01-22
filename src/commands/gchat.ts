@@ -8,19 +8,17 @@ import { performOAuthFlow } from '../auth/oauth';
 import { createGoogleAuth } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
-import { printGChatSendResult, printGChatMessageList, printGChatMessage } from '../utils/output';
+import { readStdin, prompt } from '../utils/stdin';
+import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList } from '../utils/output';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
-async function getGChatClient(profileName?: string): Promise<{ client: GChatClient; profile: string }> {
+async function getGChatClient(profileName: string): Promise<{ client: GChatClient; profile: string }> {
   const profile = await getProfile('gchat', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for gchat`
-        : 'No default profile configured for gchat',
+      `Profile "${profileName}" not found for gchat`,
       'Run: agentio gchat profile add'
     );
   }
@@ -49,7 +47,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('send')
     .description('Send a message to Google Chat')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--space <id>', 'Space ID (required for OAuth profiles)')
     .option('--thread <id>', 'Thread ID (optional)')
     .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
@@ -134,15 +132,19 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('list')
     .description('List messages from a Google Chat space (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .requiredOption('--space <id>', 'Space ID')
     .option('--limit <n>', 'Number of messages', '10')
+    .option('--thread <id>', 'Filter by thread ID')
+    .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
     .action(async (options) => {
       try {
         const { client } = await getGChatClient(options.profile);
         const messages = await client.list({
           spaceId: options.space,
           limit: parseInt(options.limit, 10),
+          threadId: options.thread,
+          since: options.since ? new Date(options.since) : undefined,
         });
 
         printGChatMessageList(messages);
@@ -154,7 +156,7 @@ export function registerGChatCommands(program: Command): void {
   gchat
     .command('get <message-id>')
     .description('Get a message from a Google Chat space (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .requiredOption('--space <id>', 'Space ID')
     .action(async (messageId: string, options) => {
       try {
@@ -170,6 +172,27 @@ export function registerGChatCommands(program: Command): void {
       }
     });
 
+  gchat
+    .command('spaces')
+    .description('List available Google Chat spaces (OAuth profiles only)')
+    .requiredOption('--profile <name>', 'Profile name')
+    .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
+    .action(async (options) => {
+      try {
+        const { client } = await getGChatClient(options.profile);
+        let spaces = await client.listSpaces();
+
+        if (options.filter) {
+          const filterLower = options.filter.toLowerCase();
+          spaces = spaces.filter(s => s.displayName.toLowerCase().includes(filterLower));
+        }
+
+        printGChatSpaceList(spaces);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
   // Profile management
   const profile = createProfileCommands<GChatCredentials>(gchat, {
     service: 'gchat',
@@ -180,19 +203,24 @@ export function registerGChatCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new Google Chat profile (webhook or OAuth)')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('gchat', options.profile);
-
         console.error('\nGoogle Chat Setup\n');
 
         const profileType = await prompt('Choose profile type (webhook/oauth): ');
 
         if (profileType.toLowerCase() === 'webhook') {
-          await setupWebhookProfile(profileName);
+          if (!options.profile) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Profile name is required for webhook profiles',
+              'Run: agentio gchat profile add --profile <name>'
+            );
+          }
+          await setupWebhookProfile(options.profile);
         } else if (profileType.toLowerCase() === 'oauth') {
-          await setupOAuthProfile(profileName);
+          await setupOAuthProfile(options.profile);
         } else {
           throw new CliError('INVALID_PARAMS', 'Profile type must be "webhook" or "oauth"');
         }
@@ -257,26 +285,45 @@ async function setupWebhookProfile(profileName: string): Promise<void> {
   printProfileSetupSuccess(profileName, 'webhook');
 }
 
-async function setupOAuthProfile(profileName: string): Promise<void> {
+async function setupOAuthProfile(profileNameOverride?: string): Promise<void> {
   console.error('OAuth Setup\n');
   console.error('Starting OAuth flow for Google Chat profile...\n');
 
   const tokens = await performOAuthFlow('gchat');
+  const auth = createGoogleAuth(tokens);
 
-  // Optionally fetch user info - Chat API doesn't have a getProfile like Gmail
-  // For now, just validate the token works
+  // Fetch user email for profile naming
+  let userEmail: string;
   try {
-    const auth = createGoogleAuth(tokens);
-    const chat = google.chat({ version: 'v1', auth });
-    // Simple validation: list spaces
-    await chat.spaces.list({ pageSize: 1 });
+    const oauth2 = google.oauth2({ version: 'v2', auth });
+    const userInfo = await oauth2.userinfo.get();
+    userEmail = userInfo.data.email || '';
+    if (!userEmail) {
+      throw new Error('No email returned');
+    }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     throw new CliError(
       'AUTH_FAILED',
-      'Failed to validate Google Chat access. Check OAuth scopes.',
-      'Try again with: agentio gchat profile add --profile ' + profileName
+      `Failed to fetch user email: ${errorMessage}`,
+      'Ensure the account has an email address'
     );
   }
+
+  // Validate the token works with Chat API
+  try {
+    const chat = google.chat({ version: 'v1', auth });
+    await chat.spaces.list({ pageSize: 1 });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new CliError(
+      'AUTH_FAILED',
+      `Failed to validate Google Chat access: ${errorMessage}`,
+      'Google Chat API requires a Google Workspace account. Personal Gmail accounts cannot use the Chat API.'
+    );
+  }
+
+  const profileName = profileNameOverride || userEmail;
 
   const credentials: GChatOAuthCredentials = {
     type: 'oauth',
@@ -285,6 +332,7 @@ async function setupOAuthProfile(profileName: string): Promise<void> {
     expiryDate: tokens.expiry_date,
     tokenType: tokens.token_type,
     scope: tokens.scope,
+    email: userEmail,
   };
 
   await setProfile('gchat', profileName);

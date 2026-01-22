@@ -4,18 +4,16 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
+import { readStdin, prompt } from '../utils/stdin';
 import type { SqlCredentials } from '../types/sql';
 
-async function getSqlClient(profileName?: string): Promise<{ client: SqlClient; profile: string }> {
+async function getSqlClient(profileName: string): Promise<{ client: SqlClient; profile: string }> {
   const profile = await getProfile('sql', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for sql`
-        : 'No default profile configured for sql',
+      `Profile "${profileName}" not found for sql`,
       'Run: agentio sql profile add'
     );
   }
@@ -55,7 +53,7 @@ export function registerSqlCommands(program: Command): void {
   sql
     .command('query')
     .description('Execute a SQL query')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Maximum rows to return', '100')
     .argument('[query]', 'SQL query (or pipe via stdin)')
     .action(async (query: string | undefined, options) => {
@@ -94,12 +92,10 @@ export function registerSqlCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new SQL database profile')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
     .option('--interactive', 'Interactive mode: prompt for individual connection components')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('sql', options.profile);
-
         let url: string;
 
         if (options.interactive) {
@@ -137,6 +133,9 @@ export function registerSqlCommands(program: Command): void {
 
         const displayName = extractDisplayName(url);
         console.error(`\nConnected to: ${displayName}\n`);
+
+        // Auto-name based on connection display name
+        const profileName = options.profile || displayName;
 
         // Save credentials
         const credentials: SqlCredentials = {

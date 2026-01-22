@@ -10,7 +10,7 @@ import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
 import { printMessageList, printMessage, printSendResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, resolveProfileName } from '../utils/stdin';
+import { readStdin } from '../utils/stdin';
 import type { GmailAttachment } from '../types/gmail';
 
 function escapeHtml(text: string): string {
@@ -68,7 +68,7 @@ function findChromePath(): string | null {
   return null;
 }
 
-async function getGmailClient(profileName?: string): Promise<{ client: GmailClient; profile: string }> {
+async function getGmailClient(profileName: string): Promise<{ client: GmailClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gmail', profileName);
   const auth = createGoogleAuth(tokens);
   return { client: new GmailClient(auth), profile };
@@ -82,7 +82,7 @@ export function registerGmailCommands(program: Command): void {
   gmail
     .command('list')
     .description('List messages')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Number of messages', '10')
     .option('--query <query>', 'Gmail search query (see "gmail search --help" for syntax)')
     .option('--label <label>', 'Filter by label (repeatable)', (val, acc: string[]) => [...acc, val], [])
@@ -103,7 +103,7 @@ export function registerGmailCommands(program: Command): void {
   gmail
     .command('get <message-id>')
     .description('Get a message')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--format <format>', 'Body format: text, html, or raw', 'text')
     .option('--body-only', 'Output only the message body')
     .action(async (messageId: string, options) => {
@@ -124,7 +124,7 @@ export function registerGmailCommands(program: Command): void {
     .command('search')
     .description('Search messages using Gmail query syntax')
     .requiredOption('--query <query>', 'Search query')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Max results', '10')
     .addHelpText('after', `
 Query Syntax Examples:
@@ -178,7 +178,7 @@ Query Syntax Examples:
   gmail
     .command('send')
     .description('Send an email')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .requiredOption('--to <email>', 'Recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .option('--cc <email>', 'CC recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .option('--bcc <email>', 'BCC recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
@@ -246,7 +246,7 @@ Query Syntax Examples:
   gmail
     .command('reply')
     .description('Reply to a thread')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .requiredOption('--thread-id <id>', 'Thread ID')
     .option('--body <body>', 'Reply body (or pipe via stdin)')
     .option('--html', 'Treat body as HTML')
@@ -277,7 +277,7 @@ Query Syntax Examples:
   gmail
     .command('archive <message-id...>')
     .description('Archive one or more messages')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (messageIds: string[], options) => {
       try {
         const { client } = await getGmailClient(options.profile);
@@ -293,7 +293,7 @@ Query Syntax Examples:
   gmail
     .command('mark <message-id...>')
     .description('Mark one or more messages as read or unread')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--read', 'Mark as read')
     .option('--unread', 'Mark as unread')
     .action(async (messageIds: string[], options) => {
@@ -318,7 +318,7 @@ Query Syntax Examples:
   gmail
     .command('attachment <message-id>')
     .description('Download attachments from a message')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--name <filename>', 'Download specific attachment by filename (downloads all if not specified)')
     .option('--output <dir>', 'Output directory', '.')
     .action(async (messageId: string, options) => {
@@ -361,7 +361,7 @@ Query Syntax Examples:
   gmail
     .command('export <message-id>')
     .description('Export a message as PDF')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--output <path>', 'Output file path', 'message.pdf')
     .action(async (messageId: string, options) => {
       try {
@@ -452,12 +452,10 @@ ${emailHeader}
   profile
     .command('add')
     .description('Add a new Gmail profile')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('gmail', options.profile);
-
-        console.error(`Starting OAuth flow for Gmail profile "${profileName}"...`);
+        console.error('Starting OAuth flow for Gmail...\n');
 
         const tokens = await performOAuthFlow('gmail');
 
@@ -467,13 +465,17 @@ ${emailHeader}
         const userProfile = await gmailApi.users.getProfile({ userId: 'me' });
         const email = userProfile.data.emailAddress;
 
+        if (!email) {
+          throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
+        }
+
+        const profileName = options.profile || email;
+
         await setProfile('gmail', profileName);
         await setCredentials('gmail', profileName, { ...tokens, email });
 
-        console.log(`\nSuccess! Profile "${profileName}" for Gmail is now configured.`);
-        if (email) {
-          console.log(`   Email: ${email}`);
-        }
+        console.log(`\nSuccess! Profile "${profileName}" configured.`);
+        console.log(`   Email: ${email}`);
       } catch (error) {
         handleError(error);
       }

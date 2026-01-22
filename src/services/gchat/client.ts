@@ -13,6 +13,7 @@ import type {
   GChatWebhookCredentials,
   GChatOAuthCredentials,
   GChatMessage,
+  GChatSpace,
 } from '../../types/gchat';
 
 export class GChatClient implements ServiceClient {
@@ -85,6 +86,17 @@ export class GChatClient implements ServiceClient {
       );
     }
     return this.getViaOAuth(options);
+  }
+
+  async listSpaces(): Promise<GChatSpace[]> {
+    if (this.credentials.type === 'webhook') {
+      throw new CliError(
+        'PERMISSION_DENIED',
+        'Listing spaces is not supported for webhook profiles',
+        'Use an OAuth profile to list spaces'
+      );
+    }
+    return this.listSpacesViaOAuth();
   }
 
   private async sendViaWebhook(options: GChatSendOptions): Promise<GChatSendResult> {
@@ -194,9 +206,21 @@ export class GChatClient implements ServiceClient {
     const chat = google.chat({ version: 'v1', auth });
 
     try {
+      // Build filter from options
+      const filters: string[] = [];
+      if (options.threadId) {
+        filters.push(`thread.name = "spaces/${options.spaceId}/threads/${options.threadId}"`);
+      }
+      if (options.since) {
+        filters.push(`createTime > "${options.since.toISOString()}"`);
+      }
+      const filter = filters.length > 0 ? filters.join(' AND ') : undefined;
+
       const response = await chat.spaces.messages.list({
         parent: `spaces/${options.spaceId}`,
         pageSize: options.limit || 10,
+        orderBy: 'createTime desc',
+        filter,
       });
 
       const messages = response.data.messages || [];
@@ -273,6 +297,32 @@ export class GChatClient implements ServiceClient {
         code,
         `Failed to get message: ${message}`,
         'Check that the space ID and message ID are valid'
+      );
+    }
+  }
+
+  private async listSpacesViaOAuth(): Promise<GChatSpace[]> {
+    const oauthCreds = this.credentials as GChatOAuthCredentials;
+    const auth = this.createOAuthClient(oauthCreds);
+    const chat = google.chat({ version: 'v1', auth });
+
+    try {
+      const response = await chat.spaces.list({});
+
+      const spaces = response.data.spaces || [];
+      return spaces.map((space: chat_v1.Schema$Space) => ({
+        name: space.name || '',
+        displayName: space.displayName || 'Unnamed',
+        type: (space.type as 'ROOM' | 'DM') || 'ROOM',
+        description: space.spaceDetails?.description || undefined,
+      }));
+    } catch (err) {
+      const code = this.getErrorCode(err);
+      const message = this.getErrorMessage(err);
+      throw new CliError(
+        code,
+        `Failed to list spaces: ${message}`,
+        'Check that OAuth token is valid and has Chat scope'
       );
     }
   }

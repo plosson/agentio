@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { listProfiles, removeProfile, setDefault } from '../config/config-manager';
+import { listProfiles, removeProfile } from '../config/config-manager';
 import { removeCredentials, getCredentials } from '../auth/token-store';
-import { handleError, CliError } from './errors';
+import { handleError } from './errors';
 import type { ServiceName } from '../types/config';
 
 export interface ProfileCommandsOptions<T> {
@@ -26,16 +26,15 @@ export function createProfileCommands<T>(
     .action(async () => {
       try {
         const result = await listProfiles(service);
-        const { profiles, default: defaultProfile } = result[0];
+        const { profiles } = result[0];
 
         if (profiles.length === 0) {
           console.log('No profiles configured');
         } else {
           for (const name of profiles) {
-            const marker = name === defaultProfile ? ' (default)' : '';
             const credentials = await getCredentials<T>(service, name);
             const extraInfo = getExtraInfo ? getExtraInfo(credentials) : '';
-            console.log(`${name}${marker}${extraInfo}`);
+            console.log(`${name}${extraInfo}`);
           }
         }
       } catch (error) {
@@ -58,28 +57,6 @@ export function createProfileCommands<T>(
           console.log(`Removed profile "${profileName}"`);
         } else {
           console.error(`Profile "${profileName}" not found`);
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  profile
-    .command('default')
-    .description(`Set the default ${displayName} profile`)
-    .argument('<name>', 'Profile name to set as default')
-    .action(async (name) => {
-      try {
-        const success = await setDefault(service, name);
-
-        if (success) {
-          console.log(`Default profile set to "${name}"`);
-        } else {
-          throw new CliError(
-            'PROFILE_NOT_FOUND',
-            `Profile "${name}" not found`,
-            `Run: agentio ${service} profile list`
-          );
         }
       } catch (error) {
         handleError(error);

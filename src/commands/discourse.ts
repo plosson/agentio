@@ -4,7 +4,7 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { DiscourseClient } from '../services/discourse/client';
 import { CliError, handleError } from '../utils/errors';
-import { prompt, resolveProfileName } from '../utils/stdin';
+import { prompt } from '../utils/stdin';
 import type { DiscourseCredentials } from '../types/discourse';
 import {
   printDiscourseTopicList,
@@ -13,16 +13,14 @@ import {
 } from '../utils/output';
 
 async function getDiscourseClient(
-  profileName?: string
+  profileName: string
 ): Promise<{ client: DiscourseClient; profile: string }> {
   const profile = await getProfile('discourse', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for discourse`
-        : 'No default profile configured for discourse',
+      `Profile "${profileName}" not found for discourse`,
       'Run: agentio discourse profile add'
     );
   }
@@ -50,7 +48,7 @@ export function registerDiscourseCommands(program: Command): void {
   discourse
     .command('list')
     .description('List latest topics')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--category <slug>', 'Filter by category slug or name')
     .option('--page <number>', 'Page number (0-indexed)', '0')
     .action(async (options) => {
@@ -71,7 +69,7 @@ export function registerDiscourseCommands(program: Command): void {
     .command('get')
     .description('Get a topic with its posts')
     .argument('<topic-id>', 'Topic ID')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (topicId: string, options) => {
       try {
         const id = parseInt(topicId, 10);
@@ -91,7 +89,7 @@ export function registerDiscourseCommands(program: Command): void {
   discourse
     .command('categories')
     .description('List all categories')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (options) => {
       try {
         const { client } = await getDiscourseClient(options.profile);
@@ -112,11 +110,9 @@ export function registerDiscourseCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new Discourse profile')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('discourse', options.profile);
-
         console.error('\nDiscourse Setup\n');
 
         // Step 1: Get base URL
@@ -195,6 +191,9 @@ export function registerDiscourseCommands(program: Command): void {
 
         console.error(`\nConnected to ${normalizedUrl}`);
         console.error(`Authenticated as ${username}\n`);
+
+        // Auto-name based on username
+        const profileName = options.profile || username.trim();
 
         // Save credentials
         await setProfile('discourse', profileName);

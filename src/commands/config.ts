@@ -231,13 +231,6 @@ export function registerConfigCommands(program: Command): void {
             }
           }
 
-          // Merge defaults (only if not set)
-          for (const [service, defaultProfile] of Object.entries(exportData.config.defaults)) {
-            if (defaultProfile && !(currentConfig.defaults as Record<string, string | undefined>)[service]) {
-              (currentConfig.defaults as Record<string, string>)[service] = defaultProfile;
-            }
-          }
-
           // Merge credentials
           for (const [service, profiles] of Object.entries(exportData.credentials)) {
             if (!currentCredentials[service]) {

@@ -11,7 +11,6 @@ const ALL_SERVICES: ServiceName[] = ['gmail', 'gchat', 'jira', 'slack', 'telegra
 
 const DEFAULT_CONFIG: Config = {
   profiles: {},
-  defaults: {},
 };
 
 export async function ensureConfigDir(): Promise<void> {
@@ -50,21 +49,16 @@ export async function saveConfig(config: Config): Promise<void> {
 
 export async function getProfile(
   service: ServiceName,
-  profileName?: string
+  profileName: string
 ): Promise<string | null> {
   const config = await loadConfig();
-  const name = profileName || config.defaults[service];
-
-  if (!name) {
-    return null;
-  }
 
   const serviceProfiles = config.profiles[service] || [];
-  if (!serviceProfiles.includes(name)) {
+  if (!serviceProfiles.includes(profileName)) {
     return null;
   }
 
-  return name;
+  return profileName;
 }
 
 export async function setProfile(
@@ -79,11 +73,6 @@ export async function setProfile(
 
   if (!config.profiles[service]!.includes(profileName)) {
     config.profiles[service]!.push(profileName);
-  }
-
-  // Set as default if it's the first profile for this service
-  if (!config.defaults[service]) {
-    config.defaults[service] = profileName;
   }
 
   await saveConfig(config);
@@ -102,27 +91,6 @@ export async function removeProfile(
 
   config.profiles[service] = serviceProfiles.filter((p) => p !== profileName);
 
-  // Clear default if it was the removed profile
-  if (config.defaults[service] === profileName) {
-    config.defaults[service] = config.profiles[service]![0];
-  }
-
-  await saveConfig(config);
-  return true;
-}
-
-export async function setDefault(
-  service: ServiceName,
-  profileName: string
-): Promise<boolean> {
-  const config = await loadConfig();
-
-  const serviceProfiles = config.profiles[service] || [];
-  if (!serviceProfiles.includes(profileName)) {
-    return false;
-  }
-
-  config.defaults[service] = profileName;
   await saveConfig(config);
   return true;
 }
@@ -130,7 +98,6 @@ export async function setDefault(
 export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
   profiles: string[];
-  default?: string;
 }[]> {
   const config = await loadConfig();
   const services = service ? [service] : ALL_SERVICES;
@@ -138,7 +105,6 @@ export async function listProfiles(service?: ServiceName): Promise<{
   return services.map((svc) => ({
     service: svc,
     profiles: config.profiles[svc] || [],
-    default: config.defaults[svc],
   }));
 }
 

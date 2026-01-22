@@ -5,19 +5,17 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
+import { readStdin, prompt } from '../utils/stdin';
 import { printSlackSendResult } from '../utils/output';
 import type { SlackCredentials, SlackWebhookCredentials } from '../types/slack';
 
-async function getSlackClient(profileName?: string): Promise<{ client: SlackClient; profile: string }> {
+async function getSlackClient(profileName: string): Promise<{ client: SlackClient; profile: string }> {
   const profile = await getProfile('slack', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for slack`
-        : 'No default profile configured for slack',
+      `Profile "${profileName}" not found for slack`,
       'Run: agentio slack profile add'
     );
   }
@@ -46,7 +44,7 @@ export function registerSlackCommands(program: Command): void {
   slack
     .command('send')
     .description('Send a message to Slack')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--json [file]', 'Send Block Kit message from JSON file (or stdin if no file specified)')
     .argument('[message]', 'Message text (or pipe via stdin)')
     .action(async (message: string | undefined, options) => {
@@ -134,11 +132,10 @@ export function registerSlackCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new Slack profile (webhook)')
-    .option('--profile <name>', 'Profile name', 'default')
+    .requiredOption('--profile <name>', 'Profile name (required)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('slack', options.profile);
-        await setupWebhookProfile(profileName);
+        await setupWebhookProfile(options.profile);
       } catch (error) {
         handleError(error);
       }

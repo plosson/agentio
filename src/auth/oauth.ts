@@ -14,6 +14,8 @@ const GCHAT_SCOPES = [
   'https://www.googleapis.com/auth/chat.messages.create',     // send messages
   'https://www.googleapis.com/auth/chat.messages.readonly',   // read messages (get operations)
   'https://www.googleapis.com/auth/chat.spaces.readonly',     // read space info and list
+  'https://www.googleapis.com/auth/chat.memberships.readonly', // read space members
+  'https://www.googleapis.com/auth/userinfo.email',           // get user email for profile naming
 ];
 
 const PORT_RANGE_START = 3000;

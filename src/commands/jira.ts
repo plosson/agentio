@@ -5,7 +5,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
+import { readStdin, prompt } from '../utils/stdin';
 import {
   printJiraProjectList,
   printJiraIssueList,
@@ -46,15 +46,13 @@ async function ensureValidToken(credentials: JiraCredentials, profile: string): 
   return credentials;
 }
 
-async function getJiraClient(profileName?: string): Promise<{ client: JiraClient; profile: string }> {
+async function getJiraClient(profileName: string): Promise<{ client: JiraClient; profile: string }> {
   const profile = await getProfile('jira', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for jira`
-        : 'No default profile configured for jira',
+      `Profile "${profileName}" not found for jira`,
       'Run: agentio jira profile add'
     );
   }
@@ -87,7 +85,7 @@ export function registerJiraCommands(program: Command): void {
   jira
     .command('projects')
     .description('List JIRA projects')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--limit <number>', 'Maximum number of projects', '50')
     .action(async (options) => {
       try {
@@ -105,7 +103,7 @@ export function registerJiraCommands(program: Command): void {
   jira
     .command('search')
     .description('Search JIRA issues')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--jql <query>', 'JQL query')
     .option('--project <key>', 'Project key')
     .option('--status <status>', 'Issue status')
@@ -132,7 +130,7 @@ export function registerJiraCommands(program: Command): void {
     .command('get')
     .description('Get JIRA issue details')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (issueKey: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);
@@ -149,7 +147,7 @@ export function registerJiraCommands(program: Command): void {
     .description('Add a comment to an issue')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
     .argument('[body]', 'Comment body (or pipe via stdin)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (issueKey: string, body: string | undefined, options) => {
       try {
         let text = body;
@@ -175,7 +173,7 @@ export function registerJiraCommands(program: Command): void {
     .command('transitions')
     .description('List available transitions for an issue')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (issueKey: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);
@@ -192,7 +190,7 @@ export function registerJiraCommands(program: Command): void {
     .description('Transition an issue to a new status')
     .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
     .argument('<transition-id>', 'Transition ID (use "transitions" command to see available)')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .action(async (issueKey: string, transitionId: string, options) => {
       try {
         const { client } = await getJiraClient(options.profile);
@@ -213,11 +211,9 @@ export function registerJiraCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new JIRA profile with OAuth authentication')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('jira', options.profile);
-
         console.error('\nJIRA OAuth Setup\n');
 
         // Site selection callback
@@ -241,6 +237,10 @@ export function registerJiraCommands(program: Command): void {
         const result = await performJiraOAuthFlow(selectSite);
 
         console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
+
+        // Auto-name based on site hostname
+        const siteHostname = new URL(result.siteUrl).hostname;
+        const profileName = options.profile || siteHostname;
 
         // Save credentials
         const credentials: JiraCredentials = {

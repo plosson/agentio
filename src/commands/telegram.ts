@@ -4,18 +4,16 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt, resolveProfileName } from '../utils/stdin';
+import { readStdin, prompt } from '../utils/stdin';
 import type { TelegramCredentials, TelegramSendOptions } from '../types/telegram';
 
-async function getTelegramClient(profileName?: string): Promise<{ client: TelegramClient; profile: string }> {
+async function getTelegramClient(profileName: string): Promise<{ client: TelegramClient; profile: string }> {
   const profile = await getProfile('telegram', profileName);
 
   if (!profile) {
     throw new CliError(
       'PROFILE_NOT_FOUND',
-      profileName
-        ? `Profile "${profileName}" not found for telegram`
-        : 'No default profile configured for telegram',
+      `Profile "${profileName}" not found for telegram`,
       'Run: agentio telegram profile add'
     );
   }
@@ -44,7 +42,7 @@ export function registerTelegramCommands(program: Command): void {
   telegram
     .command('send')
     .description('Send a message to the channel')
-    .option('--profile <name>', 'Profile name')
+    .requiredOption('--profile <name>', 'Profile name')
     .option('--parse-mode <mode>', 'Message format: html or markdown')
     .option('--silent', 'Send without notification')
     .argument('[message]', 'Message text (or pipe via stdin)')
@@ -92,11 +90,9 @@ export function registerTelegramCommands(program: Command): void {
   profile
     .command('add')
     .description('Add a new Telegram bot profile')
-    .option('--profile <name>', 'Profile name', 'default')
+    .option('--profile <name>', 'Profile name (auto-detected from bot username if not provided)')
     .action(async (options) => {
       try {
-        const profileName = await resolveProfileName('telegram', options.profile);
-
         console.error('\nTelegram Bot Setup\n');
 
         // Step 1: Create bot
@@ -173,6 +169,9 @@ export function registerTelegramCommands(program: Command): void {
         console.error('  You can set a profile photo and description in @BotFather:');
         console.error('    /setuserpic - Set bot photo');
         console.error('    /setdescription - Set bot description\n');
+
+        // Auto-name based on bot username
+        const profileName = options.profile || botInfo.username;
 
         // Save credentials
         const credentials: TelegramCredentials = {

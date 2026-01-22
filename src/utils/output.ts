@@ -1,5 +1,5 @@
 import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
-import type { GChatMessage } from '../types/gchat';
+import type { GChatMessage, GChatSpace } from '../types/gchat';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
@@ -144,6 +144,25 @@ export function printGChatMessage(msg: GChatMessage): void {
   if (msg.text) {
     console.log('---');
     console.log(msg.text);
+  }
+}
+
+export function printGChatSpaceList(spaces: GChatSpace[]): void {
+  if (spaces.length === 0) {
+    console.log('No spaces found');
+    return;
+  }
+
+  console.log(`Spaces (${spaces.length})\n`);
+
+  for (const space of spaces) {
+    const spaceId = space.name.replace('spaces/', '');
+    console.log(`[${space.type}] ${space.displayName}`);
+    console.log(`    ID: ${spaceId}`);
+    if (space.description) {
+      console.log(`    Description: ${space.description}`);
+    }
+    console.log('');
   }
 }
 
