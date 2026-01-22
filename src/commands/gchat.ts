@@ -1,9 +1,10 @@
 import { Command } from 'commander';
 import { google } from 'googleapis';
 import { readFile } from 'fs/promises';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { createGoogleAuth } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
@@ -12,32 +13,10 @@ import { readStdin, prompt } from '../utils/stdin';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList } from '../utils/output';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
-async function getGChatClient(profileName: string): Promise<{ client: GChatClient; profile: string }> {
-  const profile = await getProfile('gchat', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for gchat`,
-      'Run: agentio gchat profile add'
-    );
-  }
-
-  const credentials = await getCredentials<GChatCredentials>('gchat', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for gchat profile "${profile}"`,
-      `Run: agentio gchat profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new GChatClient(credentials),
-    profile,
-  };
-}
+const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
+  service: 'gchat',
+  createClient: (credentials) => new GChatClient(credentials),
+});
 
 export function registerGChatCommands(program: Command): void {
   const gchat = program

@@ -1,4 +1,4 @@
-import { CliError, type ErrorCode } from '../../utils/errors';
+import { CliError, httpStatusToErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import type {
   JiraCredentials,
@@ -86,7 +86,7 @@ export class JiraClient implements ServiceClient {
 
     if (!response.ok) {
       const errorText = await response.text();
-      const code = this.getErrorCode(response.status);
+      const code = httpStatusToErrorCode(response.status);
       throw new CliError(code, `JIRA API error: ${errorText}`);
     }
 
@@ -96,14 +96,6 @@ export class JiraClient implements ServiceClient {
     }
 
     return response.json();
-  }
-
-  private getErrorCode(status: number): ErrorCode {
-    if (status === 401) return 'AUTH_FAILED';
-    if (status === 403) return 'PERMISSION_DENIED';
-    if (status === 404) return 'NOT_FOUND';
-    if (status === 429) return 'RATE_LIMITED';
-    return 'API_ERROR';
   }
 
   async listProjects(options: JiraProjectListOptions = {}): Promise<JiraProject[]> {

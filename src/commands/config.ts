@@ -3,26 +3,12 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { createInterface } from 'readline';
 import { loadConfig, saveConfig, setEnv, unsetEnv, listEnv } from '../config/config-manager';
 import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
+import { confirm } from '../utils/stdin';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
-
-async function confirm(message: string): Promise<boolean> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(`${message} [y/N] `, (answer) => {
-      rl.close();
-      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-    });
-  });
-}
 
 const ALGORITHM = 'aes-256-gcm';
 

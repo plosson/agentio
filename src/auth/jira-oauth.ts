@@ -1,6 +1,6 @@
-import { createServer, type Server } from 'http';
 import { URL } from 'url';
 import { JIRA_OAUTH_CONFIG } from '../config/credentials';
+import { startOAuthCallbackServer, launchBrowser } from './oauth-server';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
@@ -114,8 +114,8 @@ export async function performJiraOAuthFlow(
   selectSite?: (sites: AtlassianSite[]) => Promise<AtlassianSite>
 ): Promise<JiraOAuthResult> {
   const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
-
   const state = Math.random().toString(36).substring(2);
+
   const authUrl = new URL(ATLASSIAN_AUTH_URL);
   authUrl.searchParams.set('audience', 'api.atlassian.com');
   authUrl.searchParams.set('client_id', JIRA_OAUTH_CONFIG.clientId);
@@ -125,107 +125,45 @@ export async function performJiraOAuthFlow(
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('prompt', 'consent');
 
-  return new Promise((resolve, reject) => {
-    let server: Server;
-
-    const timeout = setTimeout(() => {
-      server?.close();
-      reject(new Error('OAuth flow timed out after 5 minutes'));
-    }, 5 * 60 * 1000);
-
-    server = createServer(async (req, res) => {
-      const url = new URL(req.url || '', `http://localhost:${OAUTH_PORT}`);
-
-      if (url.pathname !== '/callback') {
-        res.writeHead(404);
-        res.end('Not found');
-        return;
-      }
-
-      const code = url.searchParams.get('code');
-      const error = url.searchParams.get('error');
-      const returnedState = url.searchParams.get('state');
-
-      if (error) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>');
-        clearTimeout(timeout);
-        server.close();
-        reject(new Error(`OAuth error: ${error}`));
-        return;
-      }
-
-      if (returnedState !== state) {
-        res.writeHead(400, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h1>State Mismatch</h1><p>You can close this window.</p></body></html>');
-        clearTimeout(timeout);
-        server.close();
-        reject(new Error('OAuth state mismatch - possible CSRF attack'));
-        return;
-      }
-
-      if (!code) {
-        res.writeHead(400, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h1>Missing Authorization Code</h1><p>You can close this window.</p></body></html>');
-        clearTimeout(timeout);
-        server.close();
-        reject(new Error('Missing authorization code in OAuth callback'));
-        return;
-      }
-
-      try {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body><h1>Authorization Successful!</h1><p>You can close this window and return to the terminal.</p></body></html>');
-
-        clearTimeout(timeout);
-        server.close();
-
-        // Exchange code for tokens
-        const tokens = await exchangeCodeForTokens(code, JIRA_OAUTH_CONFIG.clientId, JIRA_OAUTH_CONFIG.clientSecret, redirectUri);
-
-        // Get accessible resources to find cloud ID
-        const sites = await getAccessibleResources(tokens.accessToken);
-
-        if (sites.length === 0) {
-          throw new Error('No accessible Jira sites found. Make sure your app has the correct permissions.');
-        }
-
-        // Let user select site if multiple, otherwise use the first one
-        let selectedSite: AtlassianSite;
-        if (sites.length === 1) {
-          selectedSite = sites[0];
-        } else if (selectSite) {
-          selectedSite = await selectSite(sites);
-        } else {
-          selectedSite = sites[0];
-        }
-
-        resolve({
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          expiryDate: Date.now() + tokens.expiresIn * 1000,
-          cloudId: selectedSite.id,
-          siteUrl: selectedSite.url,
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
-
-    server.listen(OAUTH_PORT, () => {
-      console.error(`\nOpening browser for Atlassian authorization...`);
-      console.error(`If browser doesn't open, visit:\n${authUrl.toString()}\n`);
-
-      // Open browser
-      const open = process.platform === 'darwin' ? 'open' :
-                   process.platform === 'win32' ? 'start' : 'xdg-open';
-      Bun.spawn([open, authUrl.toString()], { stdout: 'ignore', stderr: 'ignore' });
-    });
-
-    server.on('error', (err) => {
-      clearTimeout(timeout);
-      server?.close();
-      reject(err);
-    });
+  // Start callback server and browser in parallel
+  const callbackPromise = startOAuthCallbackServer({
+    port: OAUTH_PORT,
+    serviceName: 'Atlassian',
+    expectedState: state,
   });
+
+  console.error(`\nOpening browser for Atlassian authorization...`);
+  console.error(`If browser doesn't open, visit:\n${authUrl.toString()}\n`);
+  launchBrowser(authUrl.toString());
+
+  // Wait for the callback with the authorization code
+  const { code } = await callbackPromise;
+
+  // Exchange code for tokens
+  const tokens = await exchangeCodeForTokens(code, JIRA_OAUTH_CONFIG.clientId, JIRA_OAUTH_CONFIG.clientSecret, redirectUri);
+
+  // Get accessible resources to find cloud ID
+  const sites = await getAccessibleResources(tokens.accessToken);
+
+  if (sites.length === 0) {
+    throw new Error('No accessible Jira sites found. Make sure your app has the correct permissions.');
+  }
+
+  // Let user select site if multiple, otherwise use the first one
+  let selectedSite: AtlassianSite;
+  if (sites.length === 1) {
+    selectedSite = sites[0];
+  } else if (selectSite) {
+    selectedSite = await selectSite(sites);
+  } else {
+    selectedSite = sites[0];
+  }
+
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiryDate: Date.now() + tokens.expiresIn * 1000,
+    cloudId: selectedSite.id,
+    siteUrl: selectedSite.url,
+  };
 }

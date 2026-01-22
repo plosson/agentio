@@ -1,38 +1,17 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import type { SqlCredentials } from '../types/sql';
 
-async function getSqlClient(profileName: string): Promise<{ client: SqlClient; profile: string }> {
-  const profile = await getProfile('sql', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for sql`,
-      'Run: agentio sql profile add'
-    );
-  }
-
-  const credentials = await getCredentials<SqlCredentials>('sql', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for sql profile "${profile}"`,
-      `Run: agentio sql profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new SqlClient(credentials),
-    profile,
-  };
-}
+const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
+  service: 'sql',
+  createClient: (credentials) => new SqlClient(credentials),
+});
 
 function extractDisplayName(url: string): string {
   try {

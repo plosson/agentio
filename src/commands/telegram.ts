@@ -1,38 +1,17 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import type { TelegramCredentials, TelegramSendOptions } from '../types/telegram';
 
-async function getTelegramClient(profileName: string): Promise<{ client: TelegramClient; profile: string }> {
-  const profile = await getProfile('telegram', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for telegram`,
-      'Run: agentio telegram profile add'
-    );
-  }
-
-  const credentials = await getCredentials<TelegramCredentials>('telegram', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for telegram profile "${profile}"`,
-      `Run: agentio telegram profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new TelegramClient(credentials.bot_token, credentials.channel_id),
-    profile,
-  };
-}
+const getTelegramClient = createClientGetter<TelegramCredentials, TelegramClient>({
+  service: 'telegram',
+  createClient: (credentials) => new TelegramClient(credentials.botToken, credentials.channelId),
+});
 
 export function registerTelegramCommands(program: Command): void {
   const telegram = program
@@ -84,7 +63,7 @@ export function registerTelegramCommands(program: Command): void {
   const profile = createProfileCommands<TelegramCredentials>(telegram, {
     service: 'telegram',
     displayName: 'Telegram',
-    getExtraInfo: (credentials) => credentials?.channel_name ? ` - ${credentials.channel_name}` : '',
+    getExtraInfo: (credentials) => credentials?.channelName ? ` - ${credentials.channelName}` : '',
   });
 
   profile
@@ -175,10 +154,10 @@ export function registerTelegramCommands(program: Command): void {
 
         // Save credentials
         const credentials: TelegramCredentials = {
-          bot_token: botToken,
-          channel_id: channelId,
-          bot_username: botInfo.username,
-          channel_name: channelName,
+          botToken: botToken,
+          channelId: channelId,
+          botUsername: botInfo.username,
+          channelName: channelName,
         };
 
         await setProfile('telegram', profileName);

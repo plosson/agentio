@@ -7,7 +7,7 @@ import type {
   DiscourseListOptions,
 } from '../../types/discourse';
 import type { ServiceClient, ValidationResult } from '../../types/service';
-import { CliError, type ErrorCode } from '../../utils/errors';
+import { CliError, httpStatusToErrorCode } from '../../utils/errors';
 
 interface DiscourseApiResponse {
   errors?: string[];
@@ -129,7 +129,7 @@ export class DiscourseClient implements ServiceClient {
       });
 
       if (!response.ok) {
-        const errorCode = this.getErrorCode(response.status);
+        const errorCode = httpStatusToErrorCode(response.status);
         const text = await response.text();
         let message = `Discourse API error: ${response.status}`;
         try {
@@ -150,14 +150,6 @@ export class DiscourseClient implements ServiceClient {
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new CliError('NETWORK_ERROR', `Failed to connect to Discourse: ${message}`);
     }
-  }
-
-  private getErrorCode(status: number): ErrorCode {
-    if (status === 401) return 'AUTH_FAILED';
-    if (status === 403) return 'PERMISSION_DENIED';
-    if (status === 404) return 'NOT_FOUND';
-    if (status === 429) return 'RATE_LIMITED';
-    return 'API_ERROR';
   }
 
   async getCategories(): Promise<DiscourseCategory[]> {

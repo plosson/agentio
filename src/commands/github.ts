@@ -1,39 +1,18 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { GitHubClient } from '../services/github/client';
 import { performGitHubOAuthFlow } from '../auth/github-oauth';
 import { generateExportData } from './config';
 import { CliError, handleError } from '../utils/errors';
 import type { GitHubCredentials } from '../types/github';
 
-async function getGitHubClient(profileName: string): Promise<{ client: GitHubClient; profile: string }> {
-  const profile = await getProfile('github', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for github`,
-      'Run: agentio github profile add'
-    );
-  }
-
-  const credentials = await getCredentials<GitHubCredentials>('github', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for github profile "${profile}"`,
-      `Run: agentio github profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new GitHubClient(credentials),
-    profile,
-  };
-}
+const getGitHubClient = createClientGetter<GitHubCredentials, GitHubClient>({
+  service: 'github',
+  createClient: (credentials) => new GitHubClient(credentials),
+});
 
 function parseRepo(repo: string): { owner: string; name: string } {
   const parts = repo.split('/');

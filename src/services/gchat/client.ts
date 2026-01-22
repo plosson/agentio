@@ -1,7 +1,6 @@
 import { google } from 'googleapis';
 import type { chat_v1 } from 'googleapis';
-import { CliError } from '../../utils/errors';
-import type { ErrorCode } from '../../utils/errors';
+import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
 import type {
@@ -331,10 +330,9 @@ export class GChatClient implements ServiceClient {
     if (err && typeof err === 'object') {
       const error = err as Record<string, unknown>;
       const code = error.code || error.status;
-      if (code === 401) return 'AUTH_FAILED';
-      if (code === 403) return 'PERMISSION_DENIED';
-      if (code === 404) return 'NOT_FOUND';
-      if (code === 429) return 'RATE_LIMITED';
+      if (typeof code === 'number') {
+        return httpStatusToErrorCode(code);
+      }
     }
     return 'API_ERROR';
   }

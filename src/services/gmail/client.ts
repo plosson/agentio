@@ -186,8 +186,9 @@ export class GmailClient implements ServiceClient {
         messages,
         total: response.data.resultSizeEstimate || messages.length,
       };
-    } catch (error: any) {
-      throw new CliError('API_ERROR', `Gmail API error: ${error.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
     }
   }
 
@@ -209,11 +210,12 @@ export class GmailClient implements ServiceClient {
       }
 
       return { ...message, body };
-    } catch (error: any) {
-      if (error.code === 404) {
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
         throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
       }
-      throw new CliError('API_ERROR', `Gmail API error: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
     }
   }
 
@@ -249,12 +251,13 @@ export class GmailClient implements ServiceClient {
       }
 
       return results;
-    } catch (error: any) {
+    } catch (error) {
       if (error instanceof CliError) throw error;
-      if (error.code === 404) {
+      if (this.isNotFoundError(error)) {
         throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
       }
-      throw new CliError('API_ERROR', `Gmail API error: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
     }
   }
 
@@ -307,8 +310,9 @@ export class GmailClient implements ServiceClient {
         threadId: response.data.threadId!,
         labelIds: response.data.labelIds || ['SENT'],
       };
-    } catch (error: any) {
-      throw new CliError('API_ERROR', `Failed to send email: ${error.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to send email: ${message}`);
     }
   }
 
@@ -453,9 +457,10 @@ export class GmailClient implements ServiceClient {
         mimeType,
         base64: Buffer.from(content).toString('base64'),
       };
-    } catch (error: any) {
+    } catch (error) {
       if (error instanceof CliError) throw error;
-      throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${message}`);
     }
   }
 
@@ -510,9 +515,10 @@ export class GmailClient implements ServiceClient {
         threadId: response.data.threadId!,
         labelIds: response.data.labelIds || ['SENT'],
       };
-    } catch (error: any) {
+    } catch (error) {
       if (error instanceof CliError) throw error;
-      throw new CliError('API_ERROR', `Failed to send reply: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to send reply: ${message}`);
     }
   }
 
@@ -525,11 +531,12 @@ export class GmailClient implements ServiceClient {
           removeLabelIds: ['INBOX'],
         },
       });
-    } catch (error: any) {
-      if (error.code === 404) {
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
         throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
       }
-      throw new CliError('API_ERROR', `Failed to archive: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to archive: ${message}`);
     }
   }
 
@@ -542,11 +549,19 @@ export class GmailClient implements ServiceClient {
           ? { removeLabelIds: ['UNREAD'] }
           : { addLabelIds: ['UNREAD'] },
       });
-    } catch (error: any) {
-      if (error.code === 404) {
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
         throw new CliError('NOT_FOUND', `Message not found: ${messageId}`);
       }
-      throw new CliError('API_ERROR', `Failed to update message: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to update message: ${message}`);
     }
+  }
+
+  private isNotFoundError(error: unknown): boolean {
+    if (error && typeof error === 'object' && 'code' in error) {
+      return (error as { code: unknown }).code === 404;
+    }
+    return false;
   }
 }

@@ -1,7 +1,8 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { DiscourseClient } from '../services/discourse/client';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
@@ -12,34 +13,10 @@ import {
   printDiscourseCategoryList,
 } from '../utils/output';
 
-async function getDiscourseClient(
-  profileName: string
-): Promise<{ client: DiscourseClient; profile: string }> {
-  const profile = await getProfile('discourse', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for discourse`,
-      'Run: agentio discourse profile add'
-    );
-  }
-
-  const credentials = await getCredentials<DiscourseCredentials>('discourse', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for discourse profile "${profile}"`,
-      `Run: agentio discourse profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new DiscourseClient(credentials),
-    profile,
-  };
-}
+const getDiscourseClient = createClientGetter<DiscourseCredentials, DiscourseClient>({
+  service: 'discourse',
+  createClient: (credentials) => new DiscourseClient(credentials),
+});
 
 export function registerDiscourseCommands(program: Command): void {
   const discourse = program.command('discourse').description('Discourse forum operations');

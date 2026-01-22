@@ -48,7 +48,7 @@ async function createServiceClient(
 
     case 'telegram': {
       const creds = credentials as TelegramCredentials;
-      return new TelegramClient(creds.bot_token, creds.channel_id);
+      return new TelegramClient(creds.botToken, creds.channelId);
     }
 
     case 'github': {

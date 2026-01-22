@@ -1,40 +1,19 @@
 import { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { printSlackSendResult } from '../utils/output';
 import type { SlackCredentials, SlackWebhookCredentials } from '../types/slack';
 
-async function getSlackClient(profileName: string): Promise<{ client: SlackClient; profile: string }> {
-  const profile = await getProfile('slack', profileName);
-
-  if (!profile) {
-    throw new CliError(
-      'PROFILE_NOT_FOUND',
-      `Profile "${profileName}" not found for slack`,
-      'Run: agentio slack profile add'
-    );
-  }
-
-  const credentials = await getCredentials<SlackCredentials>('slack', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for slack profile "${profile}"`,
-      `Run: agentio slack profile add --profile ${profile}`
-    );
-  }
-
-  return {
-    client: new SlackClient(credentials),
-    profile,
-  };
-}
+const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
+  service: 'slack',
+  createClient: (credentials) => new SlackClient(credentials),
+});
 
 export function registerSlackCommands(program: Command): void {
   const slack = program

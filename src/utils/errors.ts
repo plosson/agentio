@@ -10,6 +10,18 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFIG_ERROR';
 
+/**
+ * Map HTTP status codes to standard error codes.
+ * Use this in API clients to standardize error handling.
+ */
+export function httpStatusToErrorCode(status: number): ErrorCode {
+  if (status === 401) return 'AUTH_FAILED';
+  if (status === 403) return 'PERMISSION_DENIED';
+  if (status === 404) return 'NOT_FOUND';
+  if (status === 429) return 'RATE_LIMITED';
+  return 'API_ERROR';
+}
+
 export class CliError extends Error {
   constructor(
     public code: ErrorCode,

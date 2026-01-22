@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { createInterface } from 'readline';
 import { CliError, handleError } from '../utils/errors';
+import { prompt } from '../utils/stdin';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -15,20 +15,6 @@ interface GitHubRelease {
     name: string;
     browser_download_url: string;
   }>;
-}
-
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
 }
 
 function getCurrentVersion(): string {
