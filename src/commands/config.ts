@@ -3,11 +3,26 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { createInterface } from 'readline';
 import { loadConfig, saveConfig, setEnv, unsetEnv, listEnv } from '../config/config-manager';
 import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
+
+async function confirm(message: string): Promise<boolean> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(`${message} [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+    });
+  });
+}
 
 const ALGORITHM = 'aes-256-gcm';
 
@@ -304,6 +319,34 @@ export function registerConfigCommands(program: Command): void {
         } else {
           throw new CliError('NOT_FOUND', `Variable not found: ${key}`);
         }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  config
+    .command('clear')
+    .description('Clear all configuration and credentials')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (options) => {
+      try {
+        if (!options.force) {
+          const confirmed = await confirm(
+            'This will delete all profiles and credentials. Are you sure?'
+          );
+          if (!confirmed) {
+            console.error('Aborted');
+            return;
+          }
+        }
+
+        // Reset config to default (empty profiles)
+        await saveConfig({ profiles: {} });
+
+        // Clear all credentials
+        await setAllCredentials({});
+
+        console.log('Configuration cleared');
       } catch (error) {
         handleError(error);
       }
