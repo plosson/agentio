@@ -24,14 +24,28 @@ const GDOCS_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
 ];
 
-const SCOPES: Record<'gmail' | 'gchat' | 'gdocs', string[]> = {
+const GDRIVE_READONLY_SCOPES = [
+  'https://www.googleapis.com/auth/drive.readonly',     // read all drive files (list, metadata, download)
+  'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
+];
+
+const GDRIVE_FULL_SCOPES = [
+  'https://www.googleapis.com/auth/drive',              // full access to all drive files
+  'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
+];
+
+const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full', string[]> = {
   gmail: GMAIL_SCOPES,
   gchat: GCHAT_SCOPES,
   gdocs: GDOCS_SCOPES,
+  'gdrive-readonly': GDRIVE_READONLY_SCOPES,
+  'gdrive-full': GDRIVE_FULL_SCOPES,
 };
 
+export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full';
+
 export async function performOAuthFlow(
-  service: 'gmail' | 'gchat' | 'gdocs'
+  service: OAuthService
 ): Promise<OAuthTokens> {
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}/callback`;

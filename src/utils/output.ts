@@ -1,6 +1,7 @@
 import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
 import type { GChatMessage, GChatSpace } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
+import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult } from '../types/gdrive';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
@@ -400,4 +401,84 @@ export function printGDocCreated(result: GDocsCreateResult): void {
   console.log(`ID: ${result.id}`);
   console.log(`Title: ${result.title}`);
   console.log(`Link: ${result.webViewLink}`);
+}
+
+// Google Drive specific formatters
+function getShortMimeType(mimeType: string): string {
+  const shortTypes: Record<string, string> = {
+    'application/vnd.google-apps.folder': 'folder',
+    'application/vnd.google-apps.document': 'gdoc',
+    'application/vnd.google-apps.spreadsheet': 'gsheet',
+    'application/vnd.google-apps.presentation': 'gslide',
+    'application/pdf': 'pdf',
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'text/plain': 'txt',
+    'application/zip': 'zip',
+  };
+  if (shortTypes[mimeType]) return shortTypes[mimeType];
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.startsWith('text/')) return 'text';
+  return 'file';
+}
+
+export function printGDriveFileList(files: GDriveFile[], title: string = 'Files'): void {
+  if (files.length === 0) {
+    console.log('No files found');
+    return;
+  }
+
+  console.log(`${title} (${files.length})\n`);
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
+    const typeIndicator = isFolder ? '[folder]' : `[${getShortMimeType(file.mimeType)}]`;
+    const flags: string[] = [];
+    if (file.starred) flags.push('*');
+    if (file.shared) flags.push('shared');
+    const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+
+    console.log(`[${i + 1}] ${file.name} ${typeIndicator}${flagStr}`);
+    console.log(`    ID: ${file.id}`);
+    if (file.size) console.log(`    Size: ${formatBytes(file.size)}`);
+    if (file.owners?.length) console.log(`    Owner: ${file.owners[0]}`);
+    if (file.modifiedTime) console.log(`    Modified: ${file.modifiedTime}`);
+    if (file.webViewLink) console.log(`    Link: ${file.webViewLink}`);
+    console.log('');
+  }
+}
+
+export function printGDriveFile(file: GDriveFile): void {
+  console.log(`ID: ${file.id}`);
+  console.log(`Name: ${file.name}`);
+  console.log(`Type: ${file.mimeType}`);
+  if (file.size) console.log(`Size: ${formatBytes(file.size)}`);
+  if (file.description) console.log(`Description: ${file.description}`);
+  if (file.owners?.length) console.log(`Owners: ${file.owners.join(', ')}`);
+  if (file.parents?.length) console.log(`Parents: ${file.parents.join(', ')}`);
+  console.log(`Starred: ${file.starred ? 'yes' : 'no'}`);
+  console.log(`Shared: ${file.shared ? 'yes' : 'no'}`);
+  console.log(`Trashed: ${file.trashed ? 'yes' : 'no'}`);
+  if (file.createdTime) console.log(`Created: ${file.createdTime}`);
+  if (file.modifiedTime) console.log(`Modified: ${file.modifiedTime}`);
+  if (file.webViewLink) console.log(`View: ${file.webViewLink}`);
+  if (file.webContentLink) console.log(`Download: ${file.webContentLink}`);
+}
+
+export function printGDriveDownloaded(result: GDriveDownloadResult): void {
+  console.log(`Downloaded: ${result.filename}`);
+  console.log(`  Path: ${result.path}`);
+  console.log(`  Size: ${formatBytes(result.size)}`);
+  console.log(`  Type: ${result.mimeType}`);
+}
+
+export function printGDriveUploaded(result: GDriveUploadResult): void {
+  console.log(`Uploaded: ${result.name}`);
+  console.log(`  ID: ${result.id}`);
+  console.log(`  Size: ${formatBytes(result.size)}`);
+  console.log(`  Type: ${result.mimeType}`);
+  if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
 }

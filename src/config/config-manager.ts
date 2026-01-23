@@ -7,7 +7,7 @@ import type { Config, ServiceName } from '../types/config';
 const CONFIG_DIR = join(homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
-const ALL_SERVICES: ServiceName[] = ['gdocs', 'gmail', 'gchat', 'github', 'jira', 'slack', 'telegram', 'discourse', 'sql'];
+const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gchat', 'github', 'jira', 'slack', 'telegram', 'discourse', 'sql'];
 
 const DEFAULT_CONFIG: Config = {
   profiles: {},
