@@ -78,7 +78,11 @@ function generateDocs(program: Command, services?: string[]): string {
   let commands = collectCommands(program, 'agentio');
 
   // Filter by services if specified, otherwise exclude utility commands
+  // Always exclude profile subcommands
   commands = commands.filter((cmd) => {
+    if (cmd.fullPath.includes(' profile ')) {
+      return false;
+    }
     const parts = cmd.fullPath.split(' ');
     const service = parts[1];
     if (services && services.length > 0) {
