@@ -101,7 +101,8 @@ export function registerGmailCommands(program: Command): void {
     });
 
   gmail
-    .command('get <message-id>')
+    .command('get')
+    .argument('<message-id>', 'Message ID')
     .description('Get a message')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--format <format>', 'Body format: text, html, or raw', 'text')
@@ -275,7 +276,8 @@ Query Syntax Examples:
     });
 
   gmail
-    .command('archive <message-id...>')
+    .command('archive')
+    .argument('<message-id...>', 'Message ID(s)')
     .description('Archive one or more messages')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (messageIds: string[], options) => {
@@ -291,7 +293,8 @@ Query Syntax Examples:
     });
 
   gmail
-    .command('mark <message-id...>')
+    .command('mark')
+    .argument('<message-id...>', 'Message ID(s)')
     .description('Mark one or more messages as read or unread')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--read', 'Mark as read')
@@ -316,7 +319,8 @@ Query Syntax Examples:
     });
 
   gmail
-    .command('attachment <message-id>')
+    .command('attachment')
+    .argument('<message-id>', 'Message ID')
     .description('Download attachments from a message')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--name <filename>', 'Download specific attachment by filename (downloads all if not specified)')
@@ -359,7 +363,8 @@ Query Syntax Examples:
     });
 
   gmail
-    .command('export <message-id>')
+    .command('export')
+    .argument('<message-id>', 'Message ID')
     .description('Export a message as PDF')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--output <path>', 'Output file path', 'message.pdf')

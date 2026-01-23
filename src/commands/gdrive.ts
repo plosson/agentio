@@ -95,7 +95,8 @@ Query Syntax Examples:
     });
 
   gdrive
-    .command('get <file-id-or-url>')
+    .command('get')
+    .argument('<file-id-or-url>', 'File ID or URL')
     .description('Get file metadata')
     .option('--profile <name>', 'Profile name')
     .action(async (fileIdOrUrl: string, options) => {
@@ -132,7 +133,8 @@ Query Syntax Examples:
     });
 
   gdrive
-    .command('download <file-id-or-url>')
+    .command('download')
+    .argument('<file-id-or-url>', 'File ID or URL')
     .description('Download a file (or export Google Workspace files)')
     .option('--profile <name>', 'Profile name')
     .requiredOption('--output <path>', 'Output file path')
@@ -164,7 +166,8 @@ Examples:
     });
 
   gdrive
-    .command('put <file-path>')
+    .command('put')
+    .argument('<file-path>', 'Local file path')
     .description('Upload a file to Google Drive')
     .option('--profile <name>', 'Profile name')
     .option('--name <name>', 'Name for the file in Drive (defaults to local filename)')

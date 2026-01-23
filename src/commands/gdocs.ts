@@ -24,7 +24,8 @@ export function registerGDocsCommands(program: Command): void {
     .description('Google Docs operations');
 
   gdocs
-    .command('get <doc-id-or-url>')
+    .command('get')
+    .argument('<doc-id-or-url>', 'Document ID or URL')
     .description('Export a document')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .option('--format <format>', 'Export format: markdown or docx', 'markdown')

@@ -134,7 +134,8 @@ export function registerGChatCommands(program: Command): void {
     });
 
   gchat
-    .command('get <message-id>')
+    .command('get')
+    .argument('<message-id>', 'Message ID')
     .description('Get a message from a Google Chat space (OAuth profiles only)')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .requiredOption('--space <id>', 'Space ID')
