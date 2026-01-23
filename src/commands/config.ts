@@ -7,8 +7,14 @@ import { loadConfig, saveConfig, setEnv, unsetEnv, listEnv } from '../config/con
 import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
-import type { Config } from '../types/config';
+import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
+import type { Config, ServiceName } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
+
+interface ProfileSelection {
+  service: ServiceName;
+  profile: string;
+}
 
 const ALGORITHM = 'aes-256-gcm';
 
@@ -94,6 +100,7 @@ export function registerConfigCommands(program: Command): void {
     .description('Export configuration and credentials (as environment variables by default, or to a file)')
     .option('--key <key>', 'Encryption key (64 hex characters). If not provided, a random key will be generated')
     .option('--file <path>', 'Write encrypted config to file instead of outputting AGENTIO_CONFIG')
+    .option('--all', 'Export all profiles without prompting for selection')
     .action(async (options) => {
       try {
         // Validate key if provided
@@ -115,23 +122,103 @@ export function registerConfigCommands(program: Command): void {
         const configData = await loadConfig();
         const credentials = await getAllCredentials();
 
+        // Build list of all available profiles
+        const allProfiles: ProfileSelection[] = [];
+        for (const [service, profiles] of Object.entries(configData.profiles)) {
+          if (profiles) {
+            for (const profile of profiles) {
+              allProfiles.push({ service: service as ServiceName, profile });
+            }
+          }
+        }
+
+        if (allProfiles.length === 0) {
+          throw new CliError(
+            'NOT_FOUND',
+            'No profiles configured',
+            'Add profiles first with: agentio <service> profile add'
+          );
+        }
+
+        // Determine which profiles to export
+        let selectedProfiles: ProfileSelection[];
+
+        if (options.all || !isInteractive()) {
+          // Export all profiles
+          selectedProfiles = allProfiles;
+        } else {
+          // Interactive: ask user to select profiles
+          const exportAll = await interactiveSelect({
+            message: 'What would you like to export?',
+            choices: [
+              { name: `All profiles (${allProfiles.length})`, value: 'all' },
+              { name: 'Select specific profiles', value: 'select' },
+            ],
+            default: 'all',
+          });
+
+          if (exportAll === 'all') {
+            selectedProfiles = allProfiles;
+          } else {
+            selectedProfiles = await interactiveCheckbox({
+              message: 'Select profiles to export:',
+              choices: allProfiles.map((p) => ({
+                name: `${p.service}: ${p.profile}`,
+                value: p,
+                checked: false,
+              })),
+              required: true,
+            });
+          }
+        }
+
+        // Filter config and credentials based on selection
+        const filteredConfig: Config = { profiles: {} };
+        const filteredCredentials: StoredCredentials = {};
+
+        for (const { service, profile } of selectedProfiles) {
+          // Add to filtered config
+          if (!filteredConfig.profiles[service]) {
+            (filteredConfig.profiles as Record<string, string[]>)[service] = [];
+          }
+          (filteredConfig.profiles as Record<string, string[]>)[service].push(profile);
+
+          // Add credentials if they exist
+          if (credentials[service]?.[profile]) {
+            if (!filteredCredentials[service]) {
+              filteredCredentials[service] = {};
+            }
+            filteredCredentials[service][profile] = credentials[service][profile];
+          }
+        }
+
+        // Include env vars if they exist
+        if (configData.env) {
+          filteredConfig.env = configData.env;
+        }
+
         const exportData: ExportedData = {
           version: 1,
-          config: configData,
-          credentials,
+          config: filteredConfig,
+          credentials: filteredCredentials,
         };
 
         // Encrypt the data
         const key = deriveKeyFromPassword(encryptionKey);
         const encrypted = encrypt(JSON.stringify(exportData), key);
 
+        const profileCount = selectedProfiles.length;
+        const profileText = profileCount === 1 ? 'profile' : 'profiles';
+
         if (options.file) {
           // Write to file, output just the key
           const filePath = options.file.startsWith('/') ? options.file : join(process.cwd(), options.file);
           await writeFile(filePath, encrypted, { mode: 0o600 });
+          console.error(`Exported ${profileCount} ${profileText} to ${filePath}`);
           console.log(`AGENTIO_KEY=${encryptionKey}`);
         } else {
           // Output as environment variables
+          console.error(`Exported ${profileCount} ${profileText}`);
           console.log(`AGENTIO_KEY=${encryptionKey}`);
           console.log(`AGENTIO_CONFIG=${encrypted}`);
         }

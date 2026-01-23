@@ -10,6 +10,7 @@ import { createGoogleAuth } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
+import { interactiveSelect } from '../utils/interactive';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList } from '../utils/output';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
@@ -187,9 +188,15 @@ export function registerGChatCommands(program: Command): void {
       try {
         console.error('\nGoogle Chat Setup\n');
 
-        const profileType = await prompt('Choose profile type (webhook/oauth): ');
+        const profileType = await interactiveSelect({
+          message: 'Choose profile type:',
+          choices: [
+            { name: 'Webhook', value: 'webhook', description: 'Simple incoming webhook URL' },
+            { name: 'OAuth', value: 'oauth', description: 'Full API access with Google Workspace account' },
+          ],
+        });
 
-        if (profileType.toLowerCase() === 'webhook') {
+        if (profileType === 'webhook') {
           if (!options.profile) {
             throw new CliError(
               'INVALID_PARAMS',
@@ -198,10 +205,8 @@ export function registerGChatCommands(program: Command): void {
             );
           }
           await setupWebhookProfile(options.profile);
-        } else if (profileType.toLowerCase() === 'oauth') {
-          await setupOAuthProfile(options.profile);
         } else {
-          throw new CliError('INVALID_PARAMS', 'Profile type must be "webhook" or "oauth"');
+          await setupOAuthProfile(options.profile);
         }
       } catch (error) {
         handleError(error);

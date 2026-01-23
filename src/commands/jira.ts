@@ -5,7 +5,8 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
 import { CliError, handleError } from '../utils/errors';
-import { readStdin, prompt } from '../utils/stdin';
+import { readStdin } from '../utils/stdin';
+import { interactiveSelect } from '../utils/interactive';
 import {
   printJiraProjectList,
   printJiraIssueList,
@@ -220,20 +221,14 @@ export function registerJiraCommands(program: Command): void {
 
         // Site selection callback
         const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
-          console.error('\nMultiple JIRA sites found:\n');
-          sites.forEach((site, index) => {
-            console.error(`  [${index + 1}] ${site.name} (${site.url})`);
+          return interactiveSelect({
+            message: 'Select a JIRA site:',
+            choices: sites.map((site) => ({
+              name: site.name,
+              value: site,
+              description: site.url,
+            })),
           });
-          console.error('');
-
-          const choice = await prompt(`? Select a site (1-${sites.length}): `);
-          const index = parseInt(choice, 10) - 1;
-
-          if (isNaN(index) || index < 0 || index >= sites.length) {
-            throw new CliError('INVALID_PARAMS', 'Invalid selection');
-          }
-
-          return sites[index];
         };
 
         const result = await performJiraOAuthFlow(selectSite);

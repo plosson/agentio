@@ -6,6 +6,7 @@ import { createClientGetter } from '../utils/client-factory';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
+import { interactiveSelect } from '../utils/interactive';
 import type { SqlCredentials } from '../types/sql';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
@@ -138,31 +139,16 @@ async function promptInteractiveConnection(): Promise<string> {
   console.error('\nSQL Database Setup (Interactive)\n');
 
   // Database type
-  console.error('Database type:');
-  console.error('  1. PostgreSQL');
-  console.error('  2. MySQL');
-  console.error('  3. SQLite\n');
+  const dbType = await interactiveSelect({
+    message: 'Select database type:',
+    choices: [
+      { name: 'PostgreSQL', value: 'postgres' as const, description: 'Default port 5432' },
+      { name: 'MySQL', value: 'mysql' as const, description: 'Default port 3306' },
+      { name: 'SQLite', value: 'sqlite' as const, description: 'Local file database' },
+    ],
+  });
 
-  const typeChoice = await prompt('? Select type (1-3): ');
-  let dbType: 'postgres' | 'mysql' | 'sqlite';
-  let defaultPort: string;
-
-  switch (typeChoice) {
-    case '1':
-      dbType = 'postgres';
-      defaultPort = '5432';
-      break;
-    case '2':
-      dbType = 'mysql';
-      defaultPort = '3306';
-      break;
-    case '3':
-      dbType = 'sqlite';
-      defaultPort = '';
-      break;
-    default:
-      throw new CliError('INVALID_PARAMS', 'Invalid database type selection');
-  }
+  const defaultPort = dbType === 'postgres' ? '5432' : dbType === 'mysql' ? '3306' : '';
 
   // SQLite only needs a file path
   if (dbType === 'sqlite') {
