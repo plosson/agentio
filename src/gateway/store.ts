@@ -226,6 +226,7 @@ export function inboxMessageExists(service: ServiceName, profile: string, platfo
 export function getInboxMessages(options: {
   service?: ServiceName;
   profile?: string;
+  conversationId?: string;
   status?: InboxStatus;
   limit?: number;
 }): InboundMessage[] {
@@ -240,6 +241,10 @@ export function getInboxMessages(options: {
   if (options.profile) {
     conditions.push('profile = ?');
     params.push(options.profile);
+  }
+  if (options.conversationId) {
+    conditions.push('conversation_id = ?');
+    params.push(options.conversationId);
   }
   if (options.status) {
     conditions.push('status = ?');

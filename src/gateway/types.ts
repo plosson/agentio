@@ -86,6 +86,7 @@ export const DEFAULT_GATEWAY_CONFIG: Required<GatewayConfig> = {
 export interface InboxPullRequest {
   service?: ServiceName;
   profile?: string;
+  conversationId?: string;  // Filter by conversation/group
   limit?: number;
   status?: InboxStatus;
 }
@@ -221,4 +222,102 @@ export interface WhatsAppPairResponse {
   phoneNumber?: string;    // Phone number if connected
   displayName?: string;    // Display name if available
   message?: string;        // Status message
+}
+
+/**
+ * WhatsApp Group API types
+ */
+import type {
+  WhatsAppGroup,
+  WhatsAppGroupCreateOptions,
+  WhatsAppGroupUpdateOptions,
+  WhatsAppParticipantAction,
+} from '../types/whatsapp';
+
+export interface WhatsAppGroupListRequest {
+  profile: string;
+}
+
+export interface WhatsAppGroupListResponse {
+  groups: WhatsAppGroup[];
+}
+
+export interface WhatsAppGroupGetRequest {
+  profile: string;
+  groupId: string;
+}
+
+export interface WhatsAppGroupGetResponse {
+  group: WhatsAppGroup;
+}
+
+export interface WhatsAppGroupCreateRequest {
+  profile: string;
+  name: string;
+  participants: string[];
+}
+
+export interface WhatsAppGroupCreateResponse {
+  group: WhatsAppGroup;
+}
+
+export interface WhatsAppGroupUpdateRequest {
+  profile: string;
+  groupId: string;
+  subject?: string;
+  description?: string;
+}
+
+export interface WhatsAppGroupUpdateResponse {
+  success: boolean;
+}
+
+export interface WhatsAppGroupParticipantsRequest {
+  profile: string;
+  groupId: string;
+  participants: string[];
+  action: WhatsAppParticipantAction;
+}
+
+export interface WhatsAppGroupParticipantsResponse {
+  success: boolean;
+  results?: { participant: string; status: string }[];
+}
+
+export interface WhatsAppGroupLeaveRequest {
+  profile: string;
+  groupId: string;
+}
+
+export interface WhatsAppGroupLeaveResponse {
+  success: boolean;
+}
+
+export interface WhatsAppGroupInviteRequest {
+  profile: string;
+  groupId: string;
+}
+
+export interface WhatsAppGroupInviteResponse {
+  inviteCode: string;
+  inviteLink: string;
+}
+
+export interface WhatsAppGroupJoinRequest {
+  profile: string;
+  inviteCode: string;
+}
+
+export interface WhatsAppGroupJoinResponse {
+  groupId: string;
+}
+
+export interface WhatsAppGroupResolveRequest {
+  profile: string;
+  nameOrId: string;
+}
+
+export interface WhatsAppGroupResolveResponse {
+  groupId: string | null;
+  groupName: string | null;
 }
