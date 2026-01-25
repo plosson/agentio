@@ -1,0 +1,23 @@
+# Caddy configuration for Agentio Gateway
+# Uses TLS-ALPN-01 challenge (only port 443 required)
+
+{
+	# Disable HTTP port - only use HTTPS with TLS-ALPN-01
+	http_port 0
+
+	# Store certificates in persistent volume
+	storage file_system /certs
+}
+
+{$DOMAIN} {
+	reverse_proxy localhost:{$GATEWAY_PORT:7890}
+
+	# Optional: Add email for Let's Encrypt notifications
+	# tls {$ACME_EMAIL:}
+
+	# Logging
+	log {
+		output stderr
+		format console
+	}
+}
