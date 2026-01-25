@@ -77,22 +77,25 @@ export class WhatsAppAdapter extends BaseAdapter {
 
     const { state, saveCreds } = connection.authState;
 
+    // Create a silent logger that satisfies Baileys' requirements
+    const silentLogger: any = {
+      level: 'silent',
+      trace: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: console.warn,
+      error: console.error,
+      fatal: console.error,
+    };
+    // child() must return a logger with all methods
+    silentLogger.child = () => silentLogger;
+
     // Create socket with auth state
     const socket = makeWASocket({
       auth: state,
       printQRInTerminal: false, // We'll handle QR ourselves
       browser: ['agentio', 'Chrome', '120.0.0'],
-      // Reduce logging noise
-      logger: {
-        level: 'silent',
-        child: () => ({ level: 'silent' } as any),
-        trace: () => {},
-        debug: () => {},
-        info: () => {},
-        warn: console.warn,
-        error: console.error,
-        fatal: console.error,
-      } as any,
+      logger: silentLogger,
     });
 
     connection.socket = socket;
