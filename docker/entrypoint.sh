@@ -15,6 +15,21 @@ else
     echo "Gateway will start but may not have service credentials"
 fi
 
+# Function to monitor two background processes
+# Exits when either process terminates
+monitor_processes() {
+    PID1=$1
+    PID2=$2
+
+    while kill -0 "$PID1" 2>/dev/null && kill -0 "$PID2" 2>/dev/null; do
+        sleep 1
+    done
+
+    # One process died, kill the other
+    kill "$PID1" "$PID2" 2>/dev/null || true
+    wait "$PID1" "$PID2" 2>/dev/null || true
+}
+
 # Detect mode and start appropriate services
 if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
     echo "Mode: Cloudflare Tunnel"
@@ -34,13 +49,8 @@ if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
     # Handle shutdown
     trap "kill $GATEWAY_PID $CLOUDFLARED_PID 2>/dev/null; exit 0" SIGTERM SIGINT
 
-    # Wait for either process to exit
-    wait -n $GATEWAY_PID $CLOUDFLARED_PID
-    EXIT_CODE=$?
-
-    # If one exits, stop the other
-    kill $GATEWAY_PID $CLOUDFLARED_PID 2>/dev/null || true
-    exit $EXIT_CODE
+    # Monitor both processes
+    monitor_processes $GATEWAY_PID $CLOUDFLARED_PID
 
 elif [ -n "$DOMAIN" ]; then
     echo "Mode: Caddy (TLS-ALPN-01)"
@@ -63,13 +73,8 @@ elif [ -n "$DOMAIN" ]; then
     # Handle shutdown
     trap "kill $GATEWAY_PID $CADDY_PID 2>/dev/null; exit 0" SIGTERM SIGINT
 
-    # Wait for either process to exit
-    wait -n $GATEWAY_PID $CADDY_PID
-    EXIT_CODE=$?
-
-    # If one exits, stop the other
-    kill $GATEWAY_PID $CADDY_PID 2>/dev/null || true
-    exit $EXIT_CODE
+    # Monitor both processes
+    monitor_processes $GATEWAY_PID $CADDY_PID
 
 else
     echo "Mode: Plain HTTP"

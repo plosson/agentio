@@ -6,21 +6,26 @@
 
 FROM oven/bun:1-alpine AS base
 
+# Architecture for multi-platform builds
+ARG TARGETARCH
+
 # Install runtime dependencies
 RUN apk add --no-cache \
     ca-certificates \
     curl \
     tini
 
-# Install Caddy
-RUN curl -fsSL https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz \
-    | tar -xz -C /usr/local/bin caddy \
-    && chmod +x /usr/local/bin/caddy
+# Install Caddy (multi-arch)
+RUN CADDY_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
+    curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_${CADDY_ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin caddy && \
+    chmod +x /usr/local/bin/caddy
 
-# Install cloudflared
-RUN curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    -o /usr/local/bin/cloudflared \
-    && chmod +x /usr/local/bin/cloudflared
+# Install cloudflared (multi-arch)
+RUN CF_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" \
+    -o /usr/local/bin/cloudflared && \
+    chmod +x /usr/local/bin/cloudflared
 
 # Create non-root user
 RUN addgroup -g 1000 agentio \
