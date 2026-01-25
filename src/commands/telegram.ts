@@ -1,11 +1,22 @@
 import { Command } from 'commander';
 import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
+import { setProfile, resolveProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
+import { getGatewayClient, isGatewayAvailable } from '../gateway/client';
+import {
+  printInboxMessageList,
+  printInboxMessage,
+  printInboxStats,
+  printInboxAckResult,
+  printInboxReplyResult,
+  printOutboxMessageList,
+  printOutboxMessage,
+  printOutboxSendResult,
+} from '../utils/output';
 import type { TelegramCredentials, TelegramSendOptions } from '../types/telegram';
 
 const getTelegramClient = createClientGetter<TelegramCredentials, TelegramClient>({
@@ -165,6 +176,203 @@ export function registerTelegramCommands(program: Command): void {
 
         console.log(`\nProfile "${profileName}" configured!`);
         console.log(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Inbox subcommands (requires gateway)
+  const inbox = telegram.command('inbox').description('Inbox operations (requires gateway)');
+
+  inbox
+    .command('pull')
+    .description('Get pending messages from inbox')
+    .option('--profile <name>', 'Profile name')
+    .option('--limit <n>', 'Maximum messages to retrieve', '50')
+    .option('--status <status>', 'Filter by status: pending or done', 'pending')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+        const messages = await client.inboxPull({
+          service: 'telegram',
+          profile: profileResult.profile,
+          limit: parseInt(options.limit, 10),
+          status: options.status as 'pending' | 'done',
+        });
+        printInboxMessageList(messages);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  inbox
+    .command('get')
+    .description('Get a specific inbox message')
+    .argument('<id>', 'Message ID')
+    .action(async (id: string) => {
+      try {
+        const client = await getGatewayClient();
+        const message = await client.inboxGet(id);
+        if (!message) {
+          throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+        }
+        printInboxMessage(message);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  inbox
+    .command('ack')
+    .description('Mark a message as done')
+    .argument('<id>', 'Message ID')
+    .action(async (id: string) => {
+      try {
+        const client = await getGatewayClient();
+        const success = await client.inboxAck(id);
+        printInboxAckResult(success, id);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  inbox
+    .command('reply')
+    .description('Reply to an inbox message')
+    .argument('<id>', 'Message ID to reply to')
+    .argument('[message]', 'Reply text (or pipe via stdin)')
+    .action(async (id: string, message: string | undefined) => {
+      try {
+        let text = message;
+        if (!text) {
+          text = await readStdin() || undefined;
+        }
+        if (!text) {
+          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+        }
+
+        const client = await getGatewayClient();
+        const result = await client.inboxReply(id, text);
+        printInboxReplyResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  inbox
+    .command('stats')
+    .description('Get inbox statistics')
+    .option('--profile <name>', 'Profile name')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        const client = await getGatewayClient();
+        const stats = await client.inboxStats({
+          service: 'telegram',
+          profile: profileResult.profile ?? undefined,
+        });
+        printInboxStats(stats);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Outbox subcommands (requires gateway)
+  const outbox = telegram.command('outbox').description('Outbox operations (requires gateway)');
+
+  outbox
+    .command('send')
+    .description('Queue a message for sending')
+    .option('--profile <name>', 'Profile name')
+    .option('--to <chat-id>', 'Destination chat ID (required)')
+    .option('--parse-mode <mode>', 'Message format: html or markdown')
+    .argument('[message]', 'Message text (or pipe via stdin)')
+    .action(async (message: string | undefined, options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        if (!options.to) {
+          throw new CliError('INVALID_PARAMS', 'Destination chat ID is required. Use --to <chat-id>');
+        }
+
+        let text = message;
+        if (!text) {
+          text = await readStdin() || undefined;
+        }
+        if (!text) {
+          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+        }
+
+        const metadata: Record<string, unknown> = {};
+        if (options.parseMode) {
+          const mode = options.parseMode.toLowerCase();
+          if (mode === 'html') metadata.parse_mode = 'HTML';
+          else if (mode === 'markdown') metadata.parse_mode = 'MarkdownV2';
+          else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
+        }
+
+        const client = await getGatewayClient();
+        const result = await client.outboxSend({
+          service: 'telegram',
+          profile: profileResult.profile,
+          conversationId: options.to,
+          content: text,
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        });
+        printOutboxSendResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  outbox
+    .command('status')
+    .description('Check send status of a message')
+    .argument('<id>', 'Outbox message ID')
+    .action(async (id: string) => {
+      try {
+        const client = await getGatewayClient();
+        const message = await client.outboxStatus(id);
+        if (!message) {
+          throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+        }
+        printOutboxMessage(message);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  outbox
+    .command('list')
+    .description('List outbox messages')
+    .option('--profile <name>', 'Profile name')
+    .option('--status <status>', 'Filter by status: pending, sending, sent, or failed')
+    .option('--limit <n>', 'Maximum messages to retrieve', '50')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        const client = await getGatewayClient();
+        const messages = await client.outboxList({
+          service: 'telegram',
+          profile: profileResult.profile ?? undefined,
+          status: options.status as 'pending' | 'sending' | 'sent' | 'failed' | undefined,
+          limit: parseInt(options.limit, 10),
+        });
+        printOutboxMessageList(messages);
       } catch (error) {
         handleError(error);
       }

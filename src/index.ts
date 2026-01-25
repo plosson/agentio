@@ -16,6 +16,7 @@ import { registerConfigCommands } from './commands/config';
 import { registerClaudeCommands } from './commands/claude';
 import { registerStatusCommand } from './commands/status';
 import { registerDocsCommand } from './commands/docs';
+import { registerGatewayCommands } from './commands/gateway';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -50,5 +51,6 @@ registerConfigCommands(program);
 registerClaudeCommands(program);
 registerStatusCommand(program);
 registerDocsCommand(program);
+registerGatewayCommands(program);
 
 program.parse();

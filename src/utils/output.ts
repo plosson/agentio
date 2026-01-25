@@ -482,3 +482,138 @@ export function printGDriveUploaded(result: GDriveUploadResult): void {
   console.log(`  Type: ${result.mimeType}`);
   if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
 }
+
+// Gateway inbox/outbox formatters
+import type { InboundMessage, OutboundMessage } from '../gateway/types';
+
+function formatTimestamp(ts: number): string {
+  return new Date(ts).toISOString().replace('T', ' ').split('.')[0];
+}
+
+export function printInboxMessageList(messages: InboundMessage[]): void {
+  if (messages.length === 0) {
+    console.log('No messages');
+    return;
+  }
+
+  console.log(`Messages (${messages.length})\n`);
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const statusIcon = msg.status === 'pending' ? '○' : '●';
+    const senderDisplay = msg.senderName || msg.senderHandle || msg.senderId;
+
+    console.log(`[${i + 1}] ${statusIcon} ${msg.id.slice(0, 8)}`);
+    console.log(`    Service: ${msg.service}:${msg.profile}`);
+    console.log(`    From: ${senderDisplay}`);
+    console.log(`    Chat: ${msg.conversationId}`);
+    console.log(`    Date: ${formatTimestamp(msg.receivedAt)}`);
+    if (msg.content) {
+      const preview = msg.content.length > 100 ? msg.content.slice(0, 100) + '...' : msg.content;
+      console.log(`    > ${preview}`);
+    }
+    if (msg.mediaType) {
+      console.log(`    Media: ${msg.mediaType}`);
+    }
+    console.log('');
+  }
+}
+
+export function printInboxMessage(msg: InboundMessage): void {
+  console.log(`ID: ${msg.id}`);
+  console.log(`Service: ${msg.service}`);
+  console.log(`Profile: ${msg.profile}`);
+  console.log(`Status: ${msg.status}`);
+  console.log(`Conversation: ${msg.conversationId}`);
+  console.log(`Platform ID: ${msg.platformId}`);
+  console.log('');
+  console.log(`From: ${msg.senderName || 'Unknown'}`);
+  if (msg.senderHandle) console.log(`Handle: ${msg.senderHandle}`);
+  console.log(`Sender ID: ${msg.senderId}`);
+  console.log('');
+  console.log(`Received: ${formatTimestamp(msg.receivedAt)}`);
+  if (msg.doneAt) console.log(`Done: ${formatTimestamp(msg.doneAt)}`);
+  if (msg.replyToId) console.log(`Reply To: ${msg.replyToId}`);
+  if (msg.mediaType) {
+    console.log(`Media Type: ${msg.mediaType}`);
+    if (msg.mediaPath) console.log(`Media: ${msg.mediaPath}`);
+  }
+  console.log('---');
+  console.log(msg.content || '[No text content]');
+}
+
+export function printInboxStats(stats: { pending: number; done: number; total: number }): void {
+  console.log('Inbox Statistics');
+  console.log(`  Pending: ${stats.pending}`);
+  console.log(`  Done: ${stats.done}`);
+  console.log(`  Total: ${stats.total}`);
+}
+
+export function printOutboxMessageList(messages: OutboundMessage[]): void {
+  if (messages.length === 0) {
+    console.log('No messages');
+    return;
+  }
+
+  console.log(`Messages (${messages.length})\n`);
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    let statusIcon = '○';
+    if (msg.status === 'sending') statusIcon = '◐';
+    else if (msg.status === 'sent') statusIcon = '●';
+    else if (msg.status === 'failed') statusIcon = '✗';
+
+    console.log(`[${i + 1}] ${statusIcon} ${msg.id.slice(0, 8)} [${msg.status}]`);
+    console.log(`    Service: ${msg.service}:${msg.profile}`);
+    console.log(`    To: ${msg.conversationId}`);
+    console.log(`    Queued: ${formatTimestamp(msg.queuedAt)}`);
+    if (msg.sentAt) console.log(`    Sent: ${formatTimestamp(msg.sentAt)}`);
+    if (msg.error) console.log(`    Error: ${msg.error}`);
+    if (msg.content) {
+      const preview = msg.content.length > 80 ? msg.content.slice(0, 80) + '...' : msg.content;
+      console.log(`    > ${preview}`);
+    }
+    console.log('');
+  }
+}
+
+export function printOutboxMessage(msg: OutboundMessage): void {
+  console.log(`ID: ${msg.id}`);
+  console.log(`Service: ${msg.service}`);
+  console.log(`Profile: ${msg.profile}`);
+  console.log(`Status: ${msg.status}`);
+  console.log(`Conversation: ${msg.conversationId}`);
+  console.log('');
+  console.log(`Queued: ${formatTimestamp(msg.queuedAt)}`);
+  if (msg.sentAt) console.log(`Sent: ${formatTimestamp(msg.sentAt)}`);
+  if (msg.platformId) console.log(`Platform ID: ${msg.platformId}`);
+  if (msg.error) console.log(`Error: ${msg.error}`);
+  if (msg.replyToPlatformId) console.log(`Reply To: ${msg.replyToPlatformId}`);
+  if (msg.mediaType) {
+    console.log(`Media Type: ${msg.mediaType}`);
+    if (msg.mediaPath) console.log(`Media: ${msg.mediaPath}`);
+  }
+  console.log('---');
+  console.log(msg.content || '[No text content]');
+}
+
+export function printOutboxSendResult(result: { id: string; status: string }): void {
+  console.log('Message queued');
+  console.log(`  ID: ${result.id}`);
+  console.log(`  Status: ${result.status}`);
+}
+
+export function printInboxAckResult(success: boolean, id: string): void {
+  if (success) {
+    console.log(`Acknowledged: ${id}`);
+  } else {
+    console.log(`Already acknowledged or not found: ${id}`);
+  }
+}
+
+export function printInboxReplyResult(result: { outboxId: string; status: string }): void {
+  console.log('Reply queued');
+  console.log(`  Outbox ID: ${result.outboxId}`);
+  console.log(`  Status: ${result.status}`);
+}
