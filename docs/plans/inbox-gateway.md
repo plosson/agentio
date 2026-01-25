@@ -257,30 +257,32 @@ CLI connects to gateway via HTTP API. Gateway URL configured via:
 - Flag: `--gateway <url>`
 
 ```bash
-# Inbox operations (service-scoped)
+# Inbox operations (per profile)
 agentio whatsapp inbox pull [--profile P] [--limit N] [--status pending|done]
-agentio whatsapp inbox get <id>
-agentio whatsapp inbox ack <id>
-agentio whatsapp inbox reply <id> <message>
-agentio whatsapp inbox stats
+agentio whatsapp inbox get <id> [--profile P]
+agentio whatsapp inbox ack <id> [--profile P]
+agentio whatsapp inbox reply <id> <message> [--profile P]
+agentio whatsapp inbox stats [--profile P]
 
 agentio telegram inbox pull [--profile P] [--limit N] [--status pending|done]
-agentio telegram inbox get <id>
-agentio telegram inbox ack <id>
-agentio telegram inbox reply <id> <message>
-agentio telegram inbox stats
+agentio telegram inbox get <id> [--profile P]
+agentio telegram inbox ack <id> [--profile P]
+agentio telegram inbox reply <id> <message> [--profile P]
+agentio telegram inbox stats [--profile P]
 
-# Send operations (route through gateway outbox)
-agentio whatsapp send <message> [--to <conversation>] [--profile P]
-agentio telegram send <message> [--to <chat-id>] [--profile P]
+# Send operations (per profile, routes through outbox)
+agentio whatsapp send <message> --to <conversation> [--profile P]
+agentio telegram send <message> --to <chat-id> [--profile P]
 
-# Outbox operations (service-scoped)
-agentio whatsapp outbox status <id>
-agentio whatsapp outbox list [--status pending|sent|failed]
+# Outbox operations (per profile)
+agentio whatsapp outbox status <id> [--profile P]
+agentio whatsapp outbox list [--profile P] [--status pending|sent|failed]
 
-agentio telegram outbox status <id>
-agentio telegram outbox list [--status pending|sent|failed]
+agentio telegram outbox status <id> [--profile P]
+agentio telegram outbox list [--profile P] [--status pending|sent|failed]
 ```
+
+**Note**: `--profile` defaults to the service's default profile if not specified.
 
 **Behavior**:
 - `send` commands push to outbox, return immediately with queue ID
@@ -371,20 +373,21 @@ agentio gateway stop                     # Stop daemon
 agentio gateway reload                   # Reload config, reconnect services
 
 # === Inbox Operations (from any client) ===
-agentio whatsapp inbox pull              # Get pending messages
-agentio whatsapp inbox pull --limit 5    # Limit results
-agentio whatsapp inbox get <id>          # Get specific message
-agentio whatsapp inbox ack <id>          # Mark as done
-agentio whatsapp inbox reply <id> "Thanks!"  # Reply and mark done
-agentio whatsapp inbox stats             # Show inbox statistics
+agentio whatsapp inbox pull                          # Default profile
+agentio whatsapp inbox pull --profile pierre         # Specific profile
+agentio whatsapp inbox pull --profile pierre --limit 5
+agentio whatsapp inbox get abc123 --profile pierre
+agentio whatsapp inbox ack abc123 --profile pierre
+agentio whatsapp inbox reply abc123 "Thanks!" --profile pierre
+agentio whatsapp inbox stats --profile pierre
 
-# === Send Operations (routed through gateway) ===
-agentio whatsapp send "Hello" --to +15551234567
-agentio telegram send "Hello" --to 123456789
+# === Send Operations (routed through gateway outbox) ===
+agentio whatsapp send "Hello" --to +15551234567 --profile pierre
+agentio telegram send "Hello" --to 123456789 --profile mybot
 
-# === Outbox Operations (service-scoped) ===
-agentio whatsapp outbox status <id>      # Check if message was sent
-agentio whatsapp outbox list --status failed  # List failed sends
+# === Outbox Operations (per profile) ===
+agentio whatsapp outbox status xyz789 --profile pierre
+agentio whatsapp outbox list --profile pierre --status failed
 ```
 
 ## Future Considerations
