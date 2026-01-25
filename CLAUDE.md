@@ -1,13 +1,14 @@
 # agentio - Agent I/O CLI
 
-A CLI designed for LLM agents to interact with communication services (Gmail, Telegram, Slack) and tracking systems (JIRA, Linear). Features multi-profile support and encrypted credential storage.
+A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a gateway daemon for real-time messaging.
 
 ## Tech Stack
 
 - **Runtime**: Bun
 - **Language**: TypeScript
 - **CLI Framework**: Commander.js
-- **APIs**: googleapis (Gmail), Telegram Bot API (fetch-based)
+- **Database**: SQLite (for gateway message storage and WhatsApp auth state)
+- **APIs**: googleapis, Telegram Bot API, Baileys (WhatsApp), Slack Web API, JIRA REST API, GitHub API
 
 ## Running the CLI
 
@@ -30,35 +31,319 @@ bun run build:native       # Native executable
 src/
 ├── index.ts                 # CLI entry point, registers all commands
 ├── commands/                # Command handlers (one file per service)
-│   ├── gmail.ts             # Gmail commands + profile management
-│   └── telegram.ts          # Telegram commands + profile management
+│   ├── gmail.ts             # Gmail commands
+│   ├── gdocs.ts             # Google Docs commands
+│   ├── gdrive.ts            # Google Drive commands
+│   ├── telegram.ts          # Telegram commands
+│   ├── gchat.ts             # Google Chat commands
+│   ├── github.ts            # GitHub commands
+│   ├── jira.ts              # JIRA commands
+│   ├── slack.ts             # Slack commands
+│   ├── rss.ts               # RSS feed commands
+│   ├── discourse.ts         # Discourse forum commands
+│   ├── sql.ts               # SQL database commands
+│   ├── whatsapp.ts          # WhatsApp commands
+│   ├── gateway.ts           # Gateway daemon commands
+│   ├── config.ts            # Configuration management
+│   ├── status.ts            # Profile status display
+│   ├── update.ts            # CLI self-update
+│   ├── docs.ts              # Documentation generator
+│   └── claude.ts            # Claude Code plugin operations
 ├── services/                # API clients (one folder per service)
 │   ├── gmail/client.ts      # Gmail API wrapper
-│   └── telegram/client.ts   # Telegram Bot API wrapper
+│   ├── gdocs/client.ts      # Google Docs API wrapper
+│   ├── gdrive/client.ts     # Google Drive API wrapper
+│   ├── telegram/client.ts   # Telegram Bot API wrapper
+│   ├── gchat/client.ts      # Google Chat API wrapper
+│   ├── github/client.ts     # GitHub API wrapper
+│   ├── jira/client.ts       # JIRA API wrapper
+│   ├── slack/client.ts      # Slack API wrapper
+│   ├── rss/client.ts        # RSS feed parser
+│   ├── discourse/client.ts  # Discourse API wrapper
+│   └── sql/client.ts        # SQL database client
+├── gateway/                 # Gateway daemon for real-time messaging
+│   ├── daemon.ts            # Daemon lifecycle management
+│   ├── api.ts               # HTTP API server
+│   ├── client.ts            # Gateway client for CLI
+│   ├── store.ts             # SQLite message storage
+│   ├── webhook.ts           # Outbound webhook notifications
+│   ├── types.ts             # Gateway type definitions
+│   └── adapters/            # Service adapters
+│       ├── types.ts         # Base adapter interface
+│       ├── whatsapp.ts      # WhatsApp adapter (Baileys)
+│       ├── whatsapp-auth.ts # WhatsApp auth state management
+│       └── telegram.ts      # Telegram adapter
 ├── auth/                    # Authentication logic
-│   ├── oauth.ts             # Google OAuth flow (browser-based)
+│   ├── oauth.ts             # Google OAuth flow
+│   ├── oauth-server.ts      # OAuth callback server
+│   ├── github-oauth.ts      # GitHub OAuth flow
+│   ├── jira-oauth.ts        # JIRA OAuth flow
 │   ├── token-manager.ts     # Token validation/refresh
 │   └── token-store.ts       # Encrypted credential storage
 ├── config/
-│   └── config-manager.ts    # Profile configuration
+│   ├── config-manager.ts    # Profile configuration
+│   └── credentials.ts       # Credential helpers
 ├── types/                   # TypeScript interfaces
 │   ├── config.ts            # Config and ServiceName types
 │   ├── tokens.ts            # Credential storage types
-│   ├── gmail.ts             # Gmail message types
-│   └── telegram.ts          # Telegram API types
+│   ├── gmail.ts             # Gmail types
+│   ├── gdocs.ts             # Google Docs types
+│   ├── gdrive.ts            # Google Drive types
+│   ├── telegram.ts          # Telegram types
+│   ├── gchat.ts             # Google Chat types
+│   ├── github.ts            # GitHub types
+│   ├── jira.ts              # JIRA types
+│   ├── slack.ts             # Slack types
+│   ├── rss.ts               # RSS types
+│   ├── discourse.ts         # Discourse types
+│   ├── sql.ts               # SQL types
+│   ├── whatsapp.ts          # WhatsApp types
+│   └── service.ts           # Generic service types
 └── utils/
     ├── errors.ts            # CliError class and error handling
     ├── output.ts            # Output formatting functions
-    └── stdin.ts             # Stdin reading utility
+    ├── stdin.ts             # Stdin reading utility
+    ├── interactive.ts       # Interactive prompts
+    ├── client-factory.ts    # Generic client factory
+    ├── profile-commands.ts  # Profile command helpers
+    └── obscure.ts           # Credential obfuscation
 ```
 
-## Key Patterns
+## Commands Reference
 
-### Multi-Profile Architecture
+### Gmail
+
+```bash
+agentio gmail list [--limit N] [--query Q] [--label L]
+agentio gmail get <message-id> [--format text|html|raw] [--body-only]
+agentio gmail search --query <query> [--limit N]
+agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>]
+agentio gmail reply --thread-id <id> [--body <body>]
+agentio gmail archive <message-id...>
+agentio gmail mark <message-id...> --read|--unread
+agentio gmail attachment <message-id> [--output <dir>]
+agentio gmail export <message-id> [--output <path>]  # Export as PDF
+agentio gmail profile add|list|remove
+```
+
+### Google Docs
+
+```bash
+agentio gdocs list [--limit N]
+agentio gdocs get <doc-id-or-url> [--format markdown|text|html]
+agentio gdocs create --title <title> [--content <markdown>] [--folder <id>]
+agentio gdocs profile add|list|remove
+```
+
+### Google Drive
+
+```bash
+agentio gdrive list [--limit N] [--folder <id>] [--type <mime-type>]
+agentio gdrive folders [--parent <id>]
+agentio gdrive get <file-id-or-url>
+agentio gdrive search --query <query> [--limit N]
+agentio gdrive download <file-id-or-url> [--output <path>] [--format <type>]
+agentio gdrive put <file-path> [--folder <id>] [--name <name>]
+agentio gdrive profile add|list|remove
+```
+
+### Telegram
+
+```bash
+agentio telegram send [message] [--parse-mode html|markdown] [--silent]
+agentio telegram profile add|list|remove
+
+# Gateway-based operations
+agentio telegram inbox pull [--limit N] [--status pending|done]
+agentio telegram inbox get <id>
+agentio telegram inbox ack <id>
+agentio telegram inbox reply <id> [message]
+agentio telegram outbox send --to <chat-id> [message]
+agentio telegram outbox status <id>
+agentio telegram outbox list [--status pending|sending|sent|failed]
+```
+
+### Google Chat
+
+```bash
+agentio gchat send [message] [--profile <name>]
+agentio gchat list [--limit N]           # OAuth profiles only
+agentio gchat get <message-id>           # OAuth profiles only
+agentio gchat spaces                     # OAuth profiles only
+agentio gchat profile add|list|remove
+```
+
+### GitHub
+
+```bash
+agentio github install <repo>    # Install AGENTIO_KEY and AGENTIO_CONFIG as secrets
+agentio github uninstall <repo>  # Remove secrets from repository
+agentio github profile add|list|remove
+```
+
+### JIRA
+
+```bash
+agentio jira projects [--limit N]
+agentio jira search --jql <query> [--limit N]
+agentio jira get <issue-key>
+agentio jira comment <issue-key> [body]
+agentio jira transitions <issue-key>
+agentio jira transition <issue-key> <transition-id>
+agentio jira profile add|list|remove
+```
+
+### Slack
+
+```bash
+agentio slack send [message] [--channel <id>]
+agentio slack profile add|list|remove
+```
+
+### RSS
+
+```bash
+agentio rss articles <url> [--limit N]
+agentio rss get <url> <article-id>
+agentio rss info <url>
+```
+
+### Discourse
+
+```bash
+agentio discourse list [--limit N] [--category <id>]
+agentio discourse get <topic-id> [--limit N]  # Posts limit
+agentio discourse categories
+agentio discourse profile add|list|remove
+```
+
+### SQL
+
+```bash
+agentio sql query [query] [--limit N] [--format table|json|csv]
+agentio sql profile add|list|remove
+```
+
+### WhatsApp (requires gateway)
+
+```bash
+# Profile & Pairing
+agentio whatsapp profile add|list|remove
+agentio whatsapp pair [--poll]           # Display QR code for pairing
+
+# Inbox (receiving messages)
+agentio whatsapp inbox pull [--limit N] [--status pending|done] [--conversation <name>]
+agentio whatsapp inbox get <id>
+agentio whatsapp inbox ack <id>
+agentio whatsapp inbox reply <id> [message]
+agentio whatsapp inbox stats
+
+# Outbox (sending messages)
+agentio whatsapp outbox send --to <phone> [message] [--attachment <path>] [--type image|video|audio|document]
+agentio whatsapp outbox send --group <name> [message]
+agentio whatsapp outbox status <id>
+agentio whatsapp outbox list [--status pending|sending|sent|failed]
+
+# Group Management
+agentio whatsapp group list
+agentio whatsapp group get <id-or-name>
+agentio whatsapp group create <name> --participants <phones...> [--picture <path>]
+agentio whatsapp group update <id-or-name> [--name <name>] [--description <text>] [--picture <path>]
+agentio whatsapp group add <id-or-name> <phones...>
+agentio whatsapp group remove <id-or-name> <phones...>
+agentio whatsapp group promote <id-or-name> <phones...>
+agentio whatsapp group demote <id-or-name> <phones...>
+agentio whatsapp group leave <id-or-name>
+agentio whatsapp group invite <id-or-name>    # Get invite link
+agentio whatsapp group join <code-or-link>
+```
+
+### Gateway
+
+The gateway is a background daemon that maintains persistent connections to real-time messaging services (WhatsApp, Telegram).
+
+```bash
+agentio gateway start [--foreground]
+agentio gateway stop
+agentio gateway status
+agentio gateway reload
+agentio gateway logs [--follow] [--lines N]
+agentio gateway profile add|list|remove    # Gateway identity for remote access
+agentio gateway teleport <url>             # Transfer auth state to remote gateway
+```
+
+### Configuration
+
+```bash
+agentio config export [--file <path>]      # Export as env vars or encrypted file
+agentio config import [file]               # Import from file or AGENTIO_CONFIG env var
+agentio config env set|get|list|remove     # Manage environment variables
+agentio config clear [--force]             # Clear all config and credentials
+```
+
+### Utility Commands
+
+```bash
+agentio status [--no-test] [--json]        # Show all profiles and test credentials
+agentio update [--force]                   # Update CLI to latest version
+agentio docs [--format markdown|json]      # Output CLI reference for LLMs
+agentio claude docs|agentio-json           # Claude Code plugin operations
+```
+
+## Key Architecture
+
+### Multi-Profile Support
 
 Each service supports multiple named profiles. Config and credentials are stored separately:
 - **Config**: `~/.config/agentio/config.json` - profile names and defaults
 - **Credentials**: `~/.config/agentio/tokens.enc` - encrypted with AES-256-GCM
+
+### Gateway Architecture
+
+The gateway daemon provides:
+- **Persistent connections**: Maintains WebSocket connections to WhatsApp/Telegram
+- **Message queuing**: Inbox (received) and outbox (to send) message queues
+- **SQLite storage**: Messages stored in `~/.config/agentio/gateway.db`
+- **HTTP API**: RESTful API on port 7890 for CLI communication
+- **Webhook notifications**: Optional outbound webhooks for new messages
+- **Media handling**: Downloads and stores media attachments locally
+
+### WhatsApp Integration
+
+WhatsApp uses the Baileys library (unofficial WhatsApp Web API):
+- QR code pairing via `whatsapp pair --poll`
+- Auth state stored in SQLite database
+- Supports text, images, videos, audio, and documents
+- Full group management (create, update, participants, admin controls)
+- Profile pictures for groups
+
+### Security
+
+- **Machine-bound encryption**: Credentials encrypted with key derived from hostname+username
+- **No plain-text secrets**: All sensitive data encrypted at rest
+- **Embedded OAuth**: Google services use embedded OAuth credentials (no user setup)
+- **Token refresh**: Automatic token refresh for OAuth services
+
+## Design Decisions
+
+- **Embedded OAuth credentials**: Gmail/GDocs/GDrive use embedded OAuth client (no user setup required)
+- **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
+- **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
+- **Stdin support**: Commands like `send` and `reply` accept body via pipe
+- **Gateway for real-time**: WhatsApp/Telegram real-time features require the gateway daemon
+- **Group name resolution**: WhatsApp commands accept group names (fuzzy matched) or JIDs
+
+## Service Development Guidelines
+
+### File Organization
+
+Each service consists of 2-3 files:
+
+| File | Purpose |
+|------|---------|
+| `src/types/{service}.ts` | TypeScript interfaces |
+| `src/services/{service}/client.ts` | API client class |
+| `src/commands/{service}.ts` | CLI commands and profile management |
 
 ### Adding a New Service
 
@@ -69,6 +354,8 @@ Each service supports multiple named profiles. Config and credentials are stored
    - Service operations (list, get, send, etc.)
    - Profile subcommands (add, list, remove)
 5. Register commands in `src/index.ts`
+6. Add output formatters to `src/utils/output.ts`
+7. Update status command if service has testable credentials
 
 ### Error Handling
 
@@ -77,245 +364,22 @@ Use `CliError` for all user-facing errors:
 throw new CliError('ERROR_CODE', 'message', 'suggestion');
 ```
 
-Wrap command actions with `try/catch` and call `handleError(error)`.
+**Error codes:**
+- `AUTH_FAILED` - Invalid credentials or authentication failure
+- `PROFILE_NOT_FOUND` - Profile doesn't exist
+- `INVALID_PARAMS` - Invalid user input
+- `NOT_FOUND` - Resource not found
+- `PERMISSION_DENIED` - Insufficient permissions
+- `RATE_LIMITED` - Rate limit exceeded
+- `API_ERROR` - Generic API error
+- `NETWORK_ERROR` - Network/connection error
+- `CONFIG_ERROR` - Configuration error
 
 ### Output Convention
 
 - **Success**: Print to stdout (human-readable format optimized for LLM consumption)
 - **Errors/Progress**: Print to stderr
 - Use formatting functions from `src/utils/output.ts`
-
-## Current Commands
-
-```
-agentio gmail list [--limit N] [--query Q] [--label L]
-agentio gmail get <message-id> [--format text|html|raw] [--body-only]
-agentio gmail search --query <query> [--limit N]
-agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>]
-agentio gmail reply --thread-id <id> [--body <body>]
-agentio gmail archive <message-id>
-agentio gmail mark <message-id> --read|--unread
-agentio gmail profile add [--profile <name>]
-agentio gmail profile list
-agentio gmail profile remove --profile <name>
-
-agentio telegram send <message> [--parse-mode html|markdown] [--silent]
-agentio telegram profile add [--profile <name>]
-agentio telegram profile list
-agentio telegram profile remove --profile <name>
-```
-
-## Design Decisions
-
-- **Embedded OAuth credentials**: Gmail uses embedded OAuth client ID/secret (no user setup required)
-- **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
-- **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
-- **Stdin support**: Commands like `send` and `reply` accept body via pipe
-
-## Service Development Guidelines
-
-These guidelines are derived from the existing Gmail, Telegram, and GChat implementations.
-
-### File Organization
-
-Each service consists of exactly 3 files:
-
-| File | Purpose |
-|------|---------|
-| `src/types/{service}.ts` | TypeScript interfaces (no imports from project) |
-| `src/services/{service}/client.ts` | API client class |
-| `src/commands/{service}.ts` | CLI commands and profile management |
-
-### Naming Conventions
-
-**Functions:**
-- Entry point: `register{Service}Commands(program: Command)`
-- Client factory: `get{Service}Client(profileName?): Promise<{client, profile}>`
-- Setup helpers: `setup{Type}Profile(profileName)` (e.g., `setupWebhookProfile`)
-
-**Types:**
-- Credentials: `{Service}Credentials` (use discriminated union if multiple auth types)
-- Messages: `{Service}Message`
-- Options: `{Service}SendOptions`, `{Service}ListOptions`, etc.
-- Results: `{Service}SendResult`
-
-**Client:**
-- Class name: `{Service}Client`
-- Public methods: verb-based (`send`, `list`, `get`, `archive`, `mark`)
-- Private methods: `parse{Entity}()`, `build{Thing}()`, `get{Resource}()`
-
-### API Client Pattern
-
-```typescript
-export class {Service}Client {
-  private credentials: {Service}Credentials;
-
-  constructor(credentials: {Service}Credentials) {
-    this.credentials = credentials;
-  }
-
-  // Public: one method per operation
-  async send(options: {Service}SendOptions): Promise<{Service}SendResult> { }
-  async list(options?: {Service}ListOptions): Promise<{Service}Message[]> { }
-  async get(id: string): Promise<{Service}Message> { }
-
-  // Private: helpers and request wrappers
-  private async request<T>(method: string, params?: Record<string, unknown>): Promise<T> { }
-  private parseMessage(raw: unknown): {Service}Message { }
-}
-```
-
-**For services with multiple auth types** (like GChat with webhook/oauth):
-- Use discriminated union: `type {Service}Credentials = WebhookCreds | OAuthCreds`
-- Add `type` field to each variant
-- Dispatch in public methods based on credential type
-
-### Command Structure
-
-```typescript
-export function register{Service}Commands(program: Command): void {
-  const {service} = program
-    .command('{service}')
-    .description('{Service} operations');
-
-  // Operation commands
-  {service}
-    .command('send')
-    .argument('[message]', 'Message text')
-    .option('--profile <name>', 'Profile name')
-    .option('--option <value>', 'Description', 'default')
-    .action(async (message, options) => {
-      try {
-        const { client } = await get{Service}Client(options.profile);
-        // Handle stdin fallback
-        const text = message || await readStdin();
-        if (!text) throw new CliError('INVALID_PARAMS', 'Message required');
-        const result = await client.send({ text, ...options });
-        print{Service}SendResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  // Profile subcommands (add, list, remove)
-  const profile = {service}.command('profile').description('Manage profiles');
-  profile.command('add')...
-  profile.command('list')...
-  profile.command('remove')...
-}
-```
-
-### Error Handling
-
-**Error codes** (use consistently across all services):
-- `AUTH_FAILED` - Invalid credentials or authentication failure
-- `PROFILE_NOT_FOUND` - Profile doesn't exist
-- `INVALID_PARAMS` - Invalid user input
-- `NOT_FOUND` - Resource not found (HTTP 404)
-- `PERMISSION_DENIED` - Insufficient permissions (HTTP 403)
-- `RATE_LIMITED` - Rate limit exceeded (HTTP 429)
-- `API_ERROR` - Generic API error
-- `NETWORK_ERROR` - Network/connection error
-
-**HTTP status mapping in client:**
-```typescript
-private getErrorCode(status: number): string {
-  if (status === 401) return 'AUTH_FAILED';
-  if (status === 403) return 'PERMISSION_DENIED';
-  if (status === 404) return 'NOT_FOUND';
-  if (status === 429) return 'RATE_LIMITED';
-  return 'API_ERROR';
-}
-```
-
-### Profile Management
-
-**Three required subcommands:**
-1. `profile add` - Interactive setup, validate credentials, store encrypted
-2. `profile list` - Show all profiles with default marker and metadata
-3. `profile remove` - Delete config and credentials
-
-**Client factory pattern:**
-```typescript
-async function get{Service}Client(profileName?: string): Promise<{ client: {Service}Client; profile: string }> {
-  const profile = await getProfile('{service}', profileName);
-  if (!profile) {
-    throw new CliError('PROFILE_NOT_FOUND', 'No profile configured', 'Run: agentio {service} profile add');
-  }
-
-  const credentials = await getCredentials<{Service}Credentials>('{service}', profile);
-  if (!credentials) {
-    throw new CliError('AUTH_FAILED', 'Credentials not found', `Run: agentio {service} profile add --profile ${profile}`);
-  }
-
-  return { client: new {Service}Client(credentials), profile };
-}
-```
-
-### Type Patterns
-
-**Credentials interface:**
-```typescript
-export interface {Service}Credentials {
-  // Required fields for API access
-  token: string;
-  // Optional metadata for display
-  username?: string;
-  displayName?: string;
-}
-
-// For multiple auth types:
-export type {Service}Credentials = {Service}TokenCredentials | {Service}OAuthCredentials;
-
-export interface {Service}TokenCredentials {
-  type: 'token';
-  token: string;
-}
-
-export interface {Service}OAuthCredentials {
-  type: 'oauth';
-  accessToken: string;
-  refreshToken: string;
-  expiryDate: number;
-}
-```
-
-**Options interfaces:**
-```typescript
-export interface {Service}SendOptions {
-  // Required fields (no ?)
-  text: string;
-  // Optional fields
-  format?: 'text' | 'html';
-  silent?: boolean;
-}
-```
-
-### Output Conventions
-
-**Create formatters in `src/utils/output.ts`:**
-```typescript
-export function print{Service}SendResult(result: {Service}SendResult): void
-export function print{Service}MessageList(messages: {Service}Message[]): void
-export function print{Service}Message(message: {Service}Message): void
-```
-
-**Routing:**
-- `console.log()` - Success output (stdout, for LLM parsing)
-- `console.error()` - Progress, prompts, setup instructions (stderr)
-
-### Input Handling
-
-**Support both argument and stdin:**
-```typescript
-let text = argument;
-if (!text) {
-  text = await readStdin();
-}
-if (!text) {
-  throw new CliError('INVALID_PARAMS', 'Message required', 'Provide message as argument or pipe via stdin');
-}
-```
 
 ### Checklist for New Service
 
@@ -327,5 +391,5 @@ if (!text) {
 - [ ] Register commands in `src/index.ts`
 - [ ] Test all operations: send, list, get (as applicable)
 - [ ] Test profile management: add, list, remove
-- [ ] Make sure status command gives the status for the service (if relevant) 
+- [ ] Update status command for the service (if relevant)
 - [ ] Create an associated skill in claude/skills (look at the others for inspiration)
