@@ -10,8 +10,9 @@ export interface Config {
     telegram?: string[];
     discourse?: string[];
     sql?: string[];
+    whatsapp?: string[];
   };
   env?: Record<string, string>;
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gchat' | 'github' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gchat' | 'github' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql' | 'whatsapp';

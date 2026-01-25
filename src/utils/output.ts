@@ -482,3 +482,52 @@ export function printGDriveUploaded(result: GDriveUploadResult): void {
   console.log(`  Type: ${result.mimeType}`);
   if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
 }
+
+// WhatsApp specific formatters
+import type { WhatsAppSendResult, WhatsAppChat } from '../types/whatsapp';
+
+export function printWhatsAppSendResult(result: WhatsAppSendResult): void {
+  console.log('Message sent');
+  console.log(`ID: ${result.messageId}`);
+  console.log(`To: ${result.to}`);
+  console.log(`Time: ${new Date(result.timestamp * 1000).toISOString()}`);
+}
+
+export function printWhatsAppChatList(chats: WhatsAppChat[]): void {
+  if (chats.length === 0) {
+    console.log('No chats found');
+    return;
+  }
+
+  console.log(`Chats (${chats.length})\n`);
+
+  for (let i = 0; i < chats.length; i++) {
+    const chat = chats[i];
+    const typeLabel = chat.isGroup ? '[group]' : '[dm]';
+    const unreadLabel = chat.unreadCount > 0 ? ` (${chat.unreadCount} unread)` : '';
+
+    console.log(`[${i + 1}] ${chat.name || chat.id} ${typeLabel}${unreadLabel}`);
+    console.log(`    ID: ${chat.id}`);
+    if (chat.lastMessage) {
+      const snippet = chat.lastMessage.length > 60
+        ? chat.lastMessage.substring(0, 60) + '...'
+        : chat.lastMessage;
+      console.log(`    > ${snippet}`);
+    }
+    if (chat.lastMessageTime) {
+      console.log(`    Last: ${new Date(chat.lastMessageTime * 1000).toISOString()}`);
+    }
+    console.log('');
+  }
+}
+
+export function printWhatsAppCheckResult(phone: string, result: { exists: boolean; jid?: string }): void {
+  if (result.exists) {
+    console.log(`${phone} is registered on WhatsApp`);
+    if (result.jid) {
+      console.log(`JID: ${result.jid}`);
+    }
+  } else {
+    console.log(`${phone} is NOT registered on WhatsApp`);
+  }
+}
