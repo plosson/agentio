@@ -259,19 +259,17 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
 
   if (!options.foreground) {
     // Fork to background
-    // Find the script path - handle both direct invocation and 'bun run' cases
-    let scriptPath = process.argv[1];
+    // Find the script path from argv or use import.meta to get current file location
+    let scriptPath: string;
 
-    // If invoked via 'bun run', argv[1] is 'run' and we need to find the actual script
-    if (scriptPath === 'run') {
-      // Find src/index.ts in argv or use default
-      const scriptIndex = process.argv.findIndex(arg => arg.endsWith('index.ts') || arg.endsWith('index.js'));
-      if (scriptIndex !== -1) {
-        scriptPath = process.argv[scriptIndex];
-      } else {
-        // Fallback: use the package.json bin entry path relative to cwd
-        scriptPath = join(process.cwd(), 'src', 'index.ts');
-      }
+    // import.meta.path gives us the current file path, navigate to index.ts
+    const currentFile = import.meta.path || import.meta.url.replace('file://', '');
+    const srcDir = join(currentFile, '..', '..');
+    scriptPath = join(srcDir, 'index.ts');
+
+    // Verify the path exists, fallback to cwd-based path
+    if (!existsSync(scriptPath)) {
+      scriptPath = join(process.cwd(), 'src', 'index.ts');
     }
 
     const child = spawn(process.execPath, [scriptPath, 'gateway', 'start', '--foreground'], {
