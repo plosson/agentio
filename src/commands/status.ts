@@ -25,6 +25,8 @@ import type { GChatCredentials } from '../types/gchat';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
+import type { WhatsAppCredentials } from '../types/whatsapp';
+import { isGatewayAvailable, getGatewayClient } from '../gateway/client';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -148,6 +150,61 @@ async function createServiceClient(
     case 'sql': {
       const creds = credentials as SqlCredentials;
       return new SqlClient(creds);
+    }
+
+    case 'whatsapp': {
+      const creds = credentials as WhatsAppCredentials;
+      return {
+        validate: async (): Promise<ValidationResult> => {
+          // Check if gateway is running
+          const gatewayAvailable = await isGatewayAvailable();
+          if (!gatewayAvailable) {
+            if (creds.paired) {
+              return {
+                valid: true,
+                info: `${creds.phoneNumber || 'paired'} (gateway not running)`,
+              };
+            }
+            return { valid: false, error: 'not paired (gateway not running)' };
+          }
+
+          // Check connection status via gateway - this is the source of truth
+          try {
+            const client = await getGatewayClient();
+            const status = await client.status();
+            const adapter = status.adapters.find(
+              (a) => a.service === 'whatsapp' && a.profile === profileName
+            );
+
+            if (adapter?.connected) {
+              // Connected via gateway = working
+              return { valid: true, info: creds.phoneNumber || 'connected' };
+            } else if (adapter) {
+              // Adapter exists but not connected
+              return {
+                valid: true,
+                info: `${creds.phoneNumber || 'configured'} (disconnected)`,
+              };
+            } else if (creds.paired) {
+              // Has paired credentials but no adapter in gateway
+              return {
+                valid: true,
+                info: `${creds.phoneNumber || 'paired'} (not loaded in gateway)`,
+              };
+            } else {
+              return { valid: false, error: 'not paired' };
+            }
+          } catch {
+            if (creds.paired) {
+              return {
+                valid: true,
+                info: `${creds.phoneNumber || 'paired'} (gateway error)`,
+              };
+            }
+            return { valid: false, error: 'gateway error' };
+          }
+        },
+      };
     }
 
     default:
