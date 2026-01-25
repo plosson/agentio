@@ -21,6 +21,8 @@ export interface GatewayRetentionConfig {
 }
 
 export interface GatewayConfig {
+  name?: string;           // Gateway identity name
+  secret?: string;         // Shared secret for API auth and teleport
   api?: GatewayApiConfig;
   webhook?: GatewayWebhookConfig;
   media?: GatewayMediaConfig;

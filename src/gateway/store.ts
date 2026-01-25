@@ -562,4 +562,71 @@ export function cleanupOutbox(daysOld: number): number {
   return result.changes;
 }
 
+// ============ WHATSAPP AUTH STATE EXPORT/IMPORT ============
+
+export interface WhatsAppAuthExport {
+  profile: string;
+  creds: string | null;  // JSON string
+  keys: { type: string; keyId: string; data: string }[];
+}
+
+/**
+ * Export WhatsApp auth state for teleport
+ */
+export async function exportWhatsAppAuthState(profile: string): Promise<WhatsAppAuthExport | null> {
+  const db = getDatabase();
+
+  // Get credentials
+  const credsRow = db.query<{ data: string }, [string]>(
+    'SELECT data FROM whatsapp_auth_creds WHERE profile = ?'
+  ).get(profile);
+
+  // Get all keys
+  const keysRows = db.query<{ type: string; key_id: string; data: string }, [string]>(
+    'SELECT type, key_id, data FROM whatsapp_auth_keys WHERE profile = ?'
+  ).all(profile);
+
+  if (!credsRow && keysRows.length === 0) {
+    return null;
+  }
+
+  return {
+    profile,
+    creds: credsRow?.data || null,
+    keys: keysRows.map(row => ({
+      type: row.type,
+      keyId: row.key_id,
+      data: row.data,
+    })),
+  };
+}
+
+/**
+ * Import WhatsApp auth state from teleport
+ */
+export async function importWhatsAppAuthState(authExport: WhatsAppAuthExport): Promise<void> {
+  const db = getDatabase();
+  const { profile, creds, keys } = authExport;
+
+  // Clear existing auth state for this profile
+  db.run('DELETE FROM whatsapp_auth_creds WHERE profile = ?', [profile]);
+  db.run('DELETE FROM whatsapp_auth_keys WHERE profile = ?', [profile]);
+
+  // Import credentials
+  if (creds) {
+    db.run(
+      'INSERT INTO whatsapp_auth_creds (profile, data, updated_at) VALUES (?, ?, ?)',
+      [profile, creds, Date.now()]
+    );
+  }
+
+  // Import keys
+  for (const key of keys) {
+    db.run(
+      'INSERT INTO whatsapp_auth_keys (profile, type, key_id, data) VALUES (?, ?, ?, ?)',
+      [profile, key.type, key.keyId, key.data]
+    );
+  }
+}
+
 export { DATABASE_FILE };

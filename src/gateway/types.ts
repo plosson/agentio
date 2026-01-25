@@ -58,6 +58,8 @@ export type InboxStatus = 'pending' | 'done';
 export type OutboxStatus = 'pending' | 'sending' | 'sent' | 'failed';
 
 export const DEFAULT_GATEWAY_CONFIG: Required<GatewayConfig> = {
+  name: '',
+  secret: '',
   api: {
     port: 7890,
     host: '127.0.0.1',

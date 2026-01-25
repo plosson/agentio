@@ -31,6 +31,8 @@ import {
   queueOutboxMessage,
   getOutboxMessage,
   getOutboxMessages,
+  importWhatsAppAuthState,
+  type WhatsAppAuthExport,
 } from './store';
 import type { ServiceAdapter } from './adapters/types';
 import type { WhatsAppAdapter } from './adapters/whatsapp';
@@ -355,6 +357,37 @@ function handleWhatsAppPair(profile: string): Response {
 }
 
 /**
+ * Handle WhatsApp auth import (for teleport)
+ */
+async function handleWhatsAppImport(profile: string, request: Request): Promise<Response> {
+  try {
+    const authExport = await parseJsonBody<WhatsAppAuthExport>(request);
+
+    if (!authExport || !authExport.profile) {
+      return jsonError('Invalid auth export data');
+    }
+
+    // Import the auth state
+    await importWhatsAppAuthState({
+      ...authExport,
+      profile, // Use URL profile, not body profile (security)
+    });
+
+    // Disconnect and reconnect WhatsApp adapter to use new credentials
+    const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+    if (whatsappAdapter) {
+      await whatsappAdapter.disconnect(profile);
+      // Note: reconnection will happen on next daemon cycle or manual reload
+    }
+
+    return jsonResponse({ success: true, message: 'Auth state imported. Reload gateway to reconnect.' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Import failed';
+    return jsonError(message, 500);
+  }
+}
+
+/**
  * Main request handler
  */
 async function handleRequest(request: Request): Promise<Response> {
@@ -405,6 +438,11 @@ async function handleRequest(request: Request): Promise<Response> {
     if (path === '/outbox/send') return handleOutboxSend(request);
     if (path === '/outbox/status') return handleOutboxStatus(request);
     if (path === '/outbox/list') return handleOutboxList(request);
+    // Teleport import endpoints
+    if (path.startsWith('/import/whatsapp/')) {
+      const profile = decodeURIComponent(path.slice('/import/whatsapp/'.length));
+      return handleWhatsAppImport(profile, request);
+    }
   }
 
   return jsonError('Not found', 404);
