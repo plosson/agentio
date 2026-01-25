@@ -87,8 +87,7 @@ CREATE TABLE inbox (
   media_path TEXT,                  -- local path if downloaded
 
   received_at INTEGER NOT NULL,     -- unix timestamp
-  status TEXT DEFAULT 'pending',    -- pending | claimed | done
-  claimed_at INTEGER,
+  status TEXT DEFAULT 'pending',    -- pending | done
   done_at INTEGER,
 
   reply_to_id TEXT,                 -- if this is a reply
@@ -134,12 +133,23 @@ agentio gateway reload                  # Reload config, reconnect services
 agentio gateway logs [--follow]         # View daemon logs
 ```
 
+**Process Management**:
+- **Background mode**: Fork process, write PID to `~/.config/agentio/gateway.pid`
+- **Logs**: `~/.config/agentio/gateway.log` (stdout when `--foreground`)
+- **Stop**: Read PID file, send SIGTERM
+
 **Responsibilities**:
 - Maintain persistent connections to services (Telegram long-poll, WhatsApp socket)
+- Connect to ALL configured profiles per service (isolated inboxes)
 - Write inbound messages to inbox table
 - Process outbox queue and relay messages to services
 - Fire webhook on new inbound messages (debounced)
-- Handle reconnection/retry on failures
+- Handle reconnection/retry on failures (simple retry with backoff)
+
+**Credentials**:
+- Gateway reads service credentials from existing agentio config
+- User sets up profiles via `agentio {service} profile add` before starting gateway
+- Or imports config via `agentio config import` / environment variables
 
 **Config** (`~/.config/agentio/config.json`):
 ```json
@@ -187,17 +197,23 @@ CLI communicates with gateway via authenticated HTTP API.
 
 **Endpoints**:
 ```
-POST /inbox/pull      - Get pending messages
+POST /inbox/pull      - Get pending messages (FIFO order)
 POST /inbox/get       - Get specific message by ID
 POST /inbox/ack       - Mark message as done
 POST /inbox/reply     - Reply to message (auto-infers conversation, marks done)
 POST /inbox/stats     - Get inbox statistics
-POST /outbox/send     - Queue outbound message
+POST /outbox/send     - Queue outbound message (supports attachments)
 POST /outbox/status   - Check send status
 POST /outbox/list     - List outbox messages
+GET  /media/<id>      - Serve media file by inbox message ID
 GET  /health          - Gateway health check
 GET  /status          - Connected services status
 ```
+
+**Media Handling**:
+- If service provides a public URL (no auth needed), return `media_url` in response
+- If media is downloaded locally, client fetches via `GET /media/<id>`
+- For outbound: client can POST multipart form data or reference local path on gateway
 
 **Example - Pull inbox**:
 ```bash
@@ -219,12 +235,16 @@ curl -X POST http://gateway:7890/inbox/pull \
       "sender_id": "+15551234567",
       "sender_name": "John",
       "content": "Hey, are you there?",
+      "media_type": "image",
+      "media_url": "https://..." ,
       "received_at": 1706189234,
       "status": "pending"
     }
   ]
 }
 ```
+
+**Note**: `media_url` is either a public service URL or `http://gateway:7890/media/uuid-123`
 
 **Example - Send message**:
 ```bash
@@ -280,18 +300,18 @@ CLI connects to gateway via HTTP API. Gateway URL configured via:
 agentio whatsapp inbox pull [--profile P] [--limit N] [--status pending|done]
 agentio whatsapp inbox get <id> [--profile P]
 agentio whatsapp inbox ack <id> [--profile P]
-agentio whatsapp inbox reply <id> <message> [--profile P]
+agentio whatsapp inbox reply <id> <message> [--profile P] [--attachment <path>]
 agentio whatsapp inbox stats [--profile P]
 
 agentio telegram inbox pull [--profile P] [--limit N] [--status pending|done]
 agentio telegram inbox get <id> [--profile P]
 agentio telegram inbox ack <id> [--profile P]
-agentio telegram inbox reply <id> <message> [--profile P]
+agentio telegram inbox reply <id> <message> [--profile P] [--attachment <path>]
 agentio telegram inbox stats [--profile P]
 
 # Send operations (per profile, routes through outbox)
-agentio whatsapp send <message> --to <conversation> [--profile P]
-agentio telegram send <message> --to <chat-id> [--profile P]
+agentio whatsapp send <message> --to <conversation> [--profile P] [--attachment <path>]
+agentio telegram send <message> --to <chat-id> [--profile P] [--attachment <path>]
 
 # Outbox operations (per profile)
 agentio whatsapp outbox status <id> [--profile P]
@@ -305,6 +325,12 @@ agentio telegram outbox list [--profile P] [--status pending|sent|failed]
 - `--profile` defaults to the service's default profile if not specified
 - `inbox reply` auto-infers conversation from the inbox message (no `--to` needed)
 - `inbox reply` also marks the message as done (implicit ack)
+- `--attachment` can be a local file path (uploaded to gateway) or URL
+
+**Telegram Direct Mode**:
+- Telegram `send` can work directly (no gateway) since auth isn't device-bound
+- Telegram `inbox` commands require gateway (need persistent listener for incoming)
+- If gateway not configured, `telegram send` falls back to direct API call
 
 **Behavior**:
 - `send` commands push to outbox, return immediately with queue ID
