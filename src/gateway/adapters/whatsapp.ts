@@ -7,11 +7,41 @@ import makeWASocket, {
   jidNormalizedUser,
   isJidGroup,
   getContentType,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
+import { join } from 'path';
+import { mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import type { ServiceName } from '../../types/config';
 import type { WhatsAppCredentials } from '../../types/whatsapp';
+import { CONFIG_DIR } from '../../config/config-manager';
 import { BaseAdapter, type AdapterInboundMessage, type AdapterOutboundMessage, type SendResult, type ConnectionState as AdapterConnectionState } from './types';
 import { useSQLiteAuthState, hasAuthState } from './whatsapp-auth';
+
+// Media storage directory
+const MEDIA_DIR = join(CONFIG_DIR, 'media');
+
+// Ensure media directory exists
+async function ensureMediaDir(): Promise<void> {
+  if (!existsSync(MEDIA_DIR)) {
+    await mkdir(MEDIA_DIR, { recursive: true });
+  }
+}
+
+// Get file extension for media type
+function getMediaExtension(mediaType: string, mimeType?: string): string {
+  if (mimeType) {
+    const ext = mimeType.split('/')[1]?.split(';')[0];
+    if (ext) return `.${ext}`;
+  }
+  switch (mediaType) {
+    case 'image': return '.jpg';
+    case 'video': return '.mp4';
+    case 'audio': return '.ogg';
+    case 'document': return '.bin';
+    default: return '.bin';
+  }
+}
 
 interface ProfileConnection {
   socket: WASocket | null;
@@ -186,14 +216,21 @@ export class WhatsAppAdapter extends BaseAdapter {
       // Skip status broadcasts
       if (msg.key.remoteJid === 'status@broadcast') continue;
 
-      const message = this.parseMessage(profile, msg);
-      if (message) {
-        this.emitMessage(profile, message);
-      }
+      // Process message asynchronously (for media download)
+      this.processMessage(profile, msg, connection.socket).catch((error) => {
+        console.error(`[whatsapp:${profile}] Error processing message:`, error);
+      });
     }
   }
 
-  private parseMessage(profile: string, msg: WAMessage): AdapterInboundMessage | null {
+  private async processMessage(profile: string, msg: WAMessage, socket: WASocket | null): Promise<void> {
+    const message = await this.parseMessage(profile, msg, socket);
+    if (message) {
+      this.emitMessage(profile, message);
+    }
+  }
+
+  private async parseMessage(profile: string, msg: WAMessage, socket: WASocket | null): Promise<AdapterInboundMessage | null> {
     const remoteJid = msg.key.remoteJid;
     if (!remoteJid) return null;
 
@@ -216,7 +253,8 @@ export class WhatsAppAdapter extends BaseAdapter {
     // Extract message content
     let content: string | undefined;
     let mediaType: AdapterInboundMessage['mediaType'];
-    let mediaUrl: string | undefined;
+    let mediaPath: string | undefined;
+    let mimeType: string | undefined;
 
     const contentType = getContentType(messageContent);
 
@@ -230,22 +268,52 @@ export class WhatsAppAdapter extends BaseAdapter {
       case 'imageMessage':
         mediaType = 'image';
         content = messageContent.imageMessage?.caption || undefined;
-        // mediaUrl would need to be downloaded
+        mimeType = messageContent.imageMessage?.mimetype || undefined;
         break;
       case 'videoMessage':
         mediaType = 'video';
         content = messageContent.videoMessage?.caption || undefined;
+        mimeType = messageContent.videoMessage?.mimetype || undefined;
         break;
       case 'audioMessage':
         mediaType = 'audio';
+        mimeType = messageContent.audioMessage?.mimetype || undefined;
         break;
       case 'documentMessage':
         mediaType = 'document';
         content = messageContent.documentMessage?.caption || undefined;
+        mimeType = messageContent.documentMessage?.mimetype || undefined;
         break;
       default:
         // Unsupported message type
         return null;
+    }
+
+    // Download media if present
+    if (mediaType && socket) {
+      try {
+        await ensureMediaDir();
+        const buffer = await downloadMediaMessage(
+          msg,
+          'buffer',
+          {},
+          {
+            logger: { level: 'silent', child: () => ({ level: 'silent' }) } as any,
+            reuploadRequest: socket.updateMediaMessage,
+          }
+        );
+
+        if (buffer) {
+          const extension = getMediaExtension(mediaType, mimeType);
+          const filename = `${msg.key.id || Date.now()}${extension}`;
+          mediaPath = join(MEDIA_DIR, filename);
+          await Bun.write(mediaPath, buffer);
+          console.log(`[whatsapp:${profile}] Downloaded media: ${filename}`);
+        }
+      } catch (error) {
+        console.error(`[whatsapp:${profile}] Failed to download media:`, error);
+        // Continue without media - message still gets stored
+      }
     }
 
     return {
@@ -256,12 +324,13 @@ export class WhatsAppAdapter extends BaseAdapter {
       senderHandle: jidToPhone(senderId),
       content,
       mediaType,
-      mediaUrl,
+      mediaUrl: mediaPath, // Store local path as mediaUrl
       receivedAt: (msg.messageTimestamp as number) * 1000 || Date.now(),
       replyToId: messageContent.extendedTextMessage?.contextInfo?.stanzaId ?? undefined,
       metadata: {
         isGroup: isJidGroup(remoteJid),
         pushName: msg.pushName,
+        mimeType,
       },
     };
   }
@@ -303,12 +372,56 @@ export class WhatsAppAdapter extends BaseAdapter {
         jid = phoneToJid(jid);
       }
 
-      // Send the message - Baileys expects specific content types
       let result;
-      if (message.content) {
+
+      // Handle media attachments
+      if (message.mediaPath) {
+        const file = Bun.file(message.mediaPath);
+        if (!await file.exists()) {
+          return { success: false, error: `File not found: ${message.mediaPath}` };
+        }
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const mimeType = file.type || 'application/octet-stream';
+        const filename = message.mediaPath.split('/').pop() || 'file';
+
+        switch (message.mediaType) {
+          case 'image':
+            result = await connection.socket.sendMessage(jid, {
+              image: buffer,
+              caption: message.content,
+              mimetype: mimeType,
+            });
+            break;
+          case 'video':
+            result = await connection.socket.sendMessage(jid, {
+              video: buffer,
+              caption: message.content,
+              mimetype: mimeType,
+            });
+            break;
+          case 'audio':
+            result = await connection.socket.sendMessage(jid, {
+              audio: buffer,
+              mimetype: mimeType,
+              ptt: mimeType.includes('ogg'), // Voice note if ogg
+            });
+            break;
+          case 'document':
+          default:
+            result = await connection.socket.sendMessage(jid, {
+              document: buffer,
+              fileName: filename,
+              caption: message.content,
+              mimetype: mimeType,
+            });
+            break;
+        }
+      } else if (message.content) {
+        // Text-only message
         result = await connection.socket.sendMessage(jid, { text: message.content });
       } else {
-        return { success: false, error: 'No content to send' };
+        return { success: false, error: 'No content or media to send' };
       }
 
       return {

@@ -319,7 +319,9 @@ export function registerWhatsAppCommands(program: Command): void {
     .description('Queue a message for sending')
     .option('--profile <name>', 'Profile name')
     .option('--to <phone>', 'Destination phone number (with country code, e.g., +1234567890)')
-    .argument('[message]', 'Message text (or pipe via stdin)')
+    .option('--attachment <path>', 'Path to file attachment (image, video, audio, or document)')
+    .option('--type <type>', 'Media type: image, video, audio, document (auto-detected if not specified)')
+    .argument('[message]', 'Message text or caption (or pipe via stdin)')
     .action(async (message: string | undefined, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
@@ -338,8 +340,25 @@ export function registerWhatsAppCommands(program: Command): void {
         if (!text) {
           text = await readStdin() || undefined;
         }
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+
+        // Validate: need either text or attachment
+        if (!text && !options.attachment) {
+          throw new CliError('INVALID_PARAMS', 'Message or attachment is required.');
+        }
+
+        // Auto-detect media type from file extension if not specified
+        let mediaType = options.type as 'image' | 'video' | 'audio' | 'document' | undefined;
+        if (options.attachment && !mediaType) {
+          const ext = options.attachment.toLowerCase().split('.').pop();
+          if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) {
+            mediaType = 'image';
+          } else if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext || '')) {
+            mediaType = 'video';
+          } else if (['mp3', 'ogg', 'wav', 'm4a', 'opus'].includes(ext || '')) {
+            mediaType = 'audio';
+          } else {
+            mediaType = 'document';
+          }
         }
 
         const client = await getGatewayClient();
@@ -348,6 +367,8 @@ export function registerWhatsAppCommands(program: Command): void {
           profile: profileResult.profile,
           conversationId: options.to,
           content: text,
+          mediaPath: options.attachment,
+          mediaType,
         });
         printOutboxSendResult(result);
       } catch (error) {
