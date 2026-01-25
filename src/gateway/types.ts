@@ -205,3 +205,18 @@ export interface DaemonState {
   startedAt: number;
   adapters: string[];  // Format: "service:profile"
 }
+
+/**
+ * WhatsApp pairing request/response types
+ */
+export interface WhatsAppPairRequest {
+  profile: string;
+}
+
+export interface WhatsAppPairResponse {
+  status: 'waiting_qr' | 'connected' | 'connecting' | 'not_configured';
+  qrCode?: string;         // QR code string for Baileys
+  phoneNumber?: string;    // Phone number if connected
+  displayName?: string;    // Display name if available
+  message?: string;        // Status message
+}

@@ -22,6 +22,7 @@ import type {
   OutboxListResponse,
   GatewayStatusResponse,
   HealthResponse,
+  WhatsAppPairResponse,
   InboundMessage,
   OutboundMessage,
   MediaType,
@@ -255,6 +256,13 @@ export class GatewayClient {
       throw new CliError('CONFIG_ERROR', 'Gateway not configured');
     }
     return `${cachedConfig.url}/media/${messageId}`;
+  }
+
+  /**
+   * Get WhatsApp pairing status and QR code
+   */
+  async whatsappPair(profile: string): Promise<WhatsAppPairResponse> {
+    return request<WhatsAppPairResponse>('GET', `/whatsapp/pair/${encodeURIComponent(profile)}`);
   }
 }
 

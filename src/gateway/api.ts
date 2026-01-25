@@ -20,6 +20,7 @@ import type {
   OutboxListResponse,
   GatewayStatusResponse,
   HealthResponse,
+  WhatsAppPairResponse,
 } from './types';
 import { DEFAULT_GATEWAY_CONFIG } from './types';
 import {
@@ -32,6 +33,7 @@ import {
   getOutboxMessages,
 } from './store';
 import type { ServiceAdapter } from './adapters/types';
+import type { WhatsAppAdapter } from './adapters/whatsapp';
 
 let server: Server<unknown> | null = null;
 let apiSecret: string = '';
@@ -311,6 +313,48 @@ function handleMedia(id: string): Response {
 }
 
 /**
+ * Handle WhatsApp pairing request
+ */
+function handleWhatsAppPair(profile: string): Response {
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+
+  if (!whatsappAdapter) {
+    const response: WhatsAppPairResponse = {
+      status: 'not_configured',
+      message: 'WhatsApp is not configured. Add a profile first.',
+    };
+    return jsonResponse(response);
+  }
+
+  const state = whatsappAdapter.getWhatsAppState(profile);
+
+  if (state.connected) {
+    const response: WhatsAppPairResponse = {
+      status: 'connected',
+      phoneNumber: state.phoneNumber,
+      displayName: undefined, // Will be filled if available
+      message: `Connected as ${state.phoneNumber || 'WhatsApp user'}`,
+    };
+    return jsonResponse(response);
+  }
+
+  if (state.qrCode) {
+    const response: WhatsAppPairResponse = {
+      status: 'waiting_qr',
+      qrCode: state.qrCode,
+      message: 'Scan QR code with WhatsApp on your phone',
+    };
+    return jsonResponse(response);
+  }
+
+  const response: WhatsAppPairResponse = {
+    status: 'connecting',
+    message: state.error || 'Connecting to WhatsApp...',
+  };
+  return jsonResponse(response);
+}
+
+/**
  * Main request handler
  */
 async function handleRequest(request: Request): Promise<Response> {
@@ -345,6 +389,10 @@ async function handleRequest(request: Request): Promise<Response> {
     if (path.startsWith('/media/')) {
       const id = path.slice('/media/'.length);
       return handleMedia(id);
+    }
+    if (path.startsWith('/whatsapp/pair/')) {
+      const profile = decodeURIComponent(path.slice('/whatsapp/pair/'.length));
+      return handleWhatsAppPair(profile);
     }
   }
 

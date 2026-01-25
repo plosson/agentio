@@ -15,6 +15,7 @@ import {
   printOutboxSendResult,
 } from '../utils/output';
 import type { WhatsAppCredentials } from '../types/whatsapp';
+import qrcode from 'qrcode-terminal';
 
 export function registerWhatsAppCommands(program: Command): void {
   const whatsapp = program
@@ -124,6 +125,83 @@ export function registerWhatsAppCommands(program: Command): void {
 
         console.log(`Profile "${profileName}" removed`);
         console.log('Note: Restart the gateway to fully disconnect this session.');
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Pairing command
+  whatsapp
+    .command('pair')
+    .description('Pair WhatsApp by scanning QR code (requires gateway)')
+    .option('--profile <name>', 'Profile name')
+    .option('--poll', 'Keep polling until connected', false)
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+        let lastQr = '';
+
+        const checkPairing = async (): Promise<boolean> => {
+          const result = await client.whatsappPair(profileResult.profile!);
+
+          switch (result.status) {
+            case 'connected':
+              console.log(`\nConnected to WhatsApp!`);
+              if (result.phoneNumber) {
+                console.log(`Phone: ${result.phoneNumber}`);
+              }
+              if (result.displayName) {
+                console.log(`Name: ${result.displayName}`);
+              }
+              return true;
+
+            case 'waiting_qr':
+              if (result.qrCode && result.qrCode !== lastQr) {
+                lastQr = result.qrCode;
+                console.clear();
+                console.log('\nScan this QR code with WhatsApp on your phone:\n');
+                console.log('1. Open WhatsApp on your phone');
+                console.log('2. Tap Menu (⋮) or Settings');
+                console.log('3. Tap "Linked Devices"');
+                console.log('4. Tap "Link a Device"');
+                console.log('5. Point your phone at this screen\n');
+                qrcode.generate(result.qrCode, { small: true });
+                console.log('\nWaiting for scan...');
+              }
+              return false;
+
+            case 'connecting':
+              console.error(`Status: ${result.message || 'Connecting...'}`);
+              return false;
+
+            case 'not_configured':
+              throw new CliError('CONFIG_ERROR', result.message || 'WhatsApp not configured');
+          }
+        };
+
+        if (options.poll) {
+          // Poll until connected
+          console.error('Polling for QR code... (Ctrl+C to cancel)\n');
+          while (true) {
+            const connected = await checkPairing();
+            if (connected) break;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } else {
+          // Single check
+          const connected = await checkPairing();
+          if (!connected) {
+            console.log('\nRun with --poll to keep checking until connected.');
+          }
+        }
       } catch (error) {
         handleError(error);
       }
