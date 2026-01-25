@@ -143,6 +143,11 @@ agentio gateway logs [--follow]         # View daemon logs
 ```json
 {
   "gateway": {
+    "api": {
+      "port": 7890,
+      "host": "0.0.0.0",
+      "secret": "your-api-secret"
+    },
     "webhook": {
       "url": "https://example.com/notify",
       "secret": "hmac-secret",
@@ -156,7 +161,74 @@ agentio gateway logs [--follow]         # View daemon logs
 }
 ```
 
-### 3. Service Adapters
+### 3. Gateway HTTP API
+
+CLI communicates with gateway via authenticated HTTP API.
+
+**Authentication**:
+- Header: `Authorization: Bearer <secret>`
+- Secret from config or `AGENTIO_GATEWAY_SECRET` env var
+
+**Endpoints**:
+```
+POST /inbox/pull      - Get pending messages
+POST /inbox/ack       - Mark message as done
+POST /inbox/stats     - Get inbox statistics
+POST /outbox/send     - Queue outbound message
+POST /outbox/status   - Check send status
+GET  /health          - Gateway health check
+GET  /status          - Connected services status
+```
+
+**Example - Pull inbox**:
+```bash
+curl -X POST http://gateway:7890/inbox/pull \
+  -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"service": "whatsapp", "profile": "pierre", "limit": 10}'
+```
+
+**Response**:
+```json
+{
+  "messages": [
+    {
+      "id": "uuid-123",
+      "service": "whatsapp",
+      "profile": "pierre",
+      "conversation_id": "+15551234567",
+      "sender_id": "+15551234567",
+      "sender_name": "John",
+      "content": "Hey, are you there?",
+      "received_at": 1706189234,
+      "status": "pending"
+    }
+  ]
+}
+```
+
+**Example - Send message**:
+```bash
+curl -X POST http://gateway:7890/outbox/send \
+  -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service": "whatsapp",
+    "profile": "pierre",
+    "conversation_id": "+15551234567",
+    "content": "Hello!"
+  }'
+```
+
+**Response**:
+```json
+{
+  "id": "uuid-456",
+  "status": "pending"
+}
+```
+
+### 4. Service Adapters
 
 Each service implements an adapter interface:
 
@@ -177,31 +249,52 @@ interface ServiceAdapter {
 }
 ```
 
-### 4. CLI Commands (Client Mode)
+### 5. CLI Commands (Client Mode)
 
-When gateway is running, CLI commands route through it:
+CLI connects to gateway via HTTP API. Gateway URL configured via:
+- Config: `~/.config/agentio/config.json` → `gateway.url`
+- Env: `AGENTIO_GATEWAY_URL` (e.g., `http://localhost:7890`)
+- Flag: `--gateway <url>`
 
 ```bash
-# Inbox operations
-agentio inbox pull [--service S] [--profile P] [--limit N] [--status pending|done]
-agentio inbox get <id>
-agentio inbox ack <id>              # Mark as done
-agentio inbox stats
+# Inbox operations (service-scoped)
+agentio whatsapp inbox pull [--profile P] [--limit N] [--status pending|done]
+agentio whatsapp inbox get <id>
+agentio whatsapp inbox ack <id>
+agentio whatsapp inbox reply <id> <message>
+agentio whatsapp inbox stats
+
+agentio telegram inbox pull [--profile P] [--limit N] [--status pending|done]
+agentio telegram inbox get <id>
+agentio telegram inbox ack <id>
+agentio telegram inbox reply <id> <message>
+agentio telegram inbox stats
 
 # Send operations (route through gateway outbox)
-agentio telegram send <message> [--profile P]   # → queues in outbox
-agentio whatsapp send <message> [--profile P]   # → queues in outbox
+agentio whatsapp send <message> [--to <conversation>] [--profile P]
+agentio telegram send <message> [--to <chat-id>] [--profile P]
 
-# Reply to inbox message
-agentio inbox reply <inbox-id> <message>        # → queues reply in outbox
+# Outbox operations (cross-service)
+agentio outbox status <id>          # Check send status
+agentio outbox list [--service S] [--status pending|sent|failed]
 ```
 
 **Behavior**:
 - `send` commands push to outbox, return immediately with queue ID
 - Gateway processes outbox asynchronously
-- CLI can check send status: `agentio outbox status <id>`
+- CLI polls `outbox status` to check delivery
 
-### 5. Webhook Notification
+**CLI Config** (client side):
+```json
+{
+  "gateway": {
+    "url": "http://192.168.1.100:7890",
+    "secret": "your-api-secret"
+  }
+}
+```
+
+### 6. Webhook Notification
 
 Fired when new messages arrive in inbox (debounced).
 
@@ -228,69 +321,73 @@ Fired when new messages arrive in inbox (debounced).
 
 ## Implementation Plan
 
-### Phase 1: Core Infrastructure
-- [x] Create `src/inbox/types.ts` - Shared types
-- [x] Create `src/inbox/store.ts` - SQLite inbox store
-- [x] Create `src/inbox/commands.ts` - Shared CLI command builder
-- [ ] Create `src/inbox/index.ts` - Exports
-
-### Phase 2: WhatsApp Integration
-- [ ] Add `WhatsAppListener` class to `src/services/whatsapp/listener.ts`
-- [ ] Add inbox commands to `src/commands/whatsapp.ts`
-- [ ] Implement reply functionality via WhatsApp client
-
-### Phase 3: Telegram Integration
-- [ ] Add `TelegramListener` class to `src/services/telegram/listener.ts`
-- [ ] Add inbox commands to `src/commands/telegram.ts`
-- [ ] Implement reply functionality via Telegram client
-
-### Phase 4: Gateway Daemon
-- [ ] Create `src/gateway/daemon.ts` - Main daemon logic
+### Phase 1: Gateway Core
+- [ ] Create `src/gateway/types.ts` - Gateway types (InboundMessage, OutboundMessage, etc.)
+- [ ] Create `src/gateway/store.ts` - SQLite store with inbox/outbox tables
+- [ ] Create `src/gateway/api.ts` - HTTP API server with auth
+- [ ] Create `src/gateway/daemon.ts` - Daemon lifecycle (start/stop/reload)
 - [ ] Create `src/gateway/webhook.ts` - Webhook notifier with debouncing
-- [ ] Create `src/commands/gateway.ts` - Gateway CLI commands
+
+### Phase 2: Service Adapters
+- [ ] Create `src/gateway/adapters/types.ts` - ServiceAdapter interface
+- [ ] Create `src/gateway/adapters/whatsapp.ts` - WhatsApp adapter (using Baileys)
+- [ ] Create `src/gateway/adapters/telegram.ts` - Telegram adapter (long-polling)
+
+### Phase 3: Gateway CLI
+- [ ] Create `src/commands/gateway.ts` - Gateway management commands
+  - `gateway start [--foreground]`
+  - `gateway stop`
+  - `gateway status`
+  - `gateway reload`
+  - `gateway logs [--follow]`
 - [ ] Register in `src/index.ts`
 
-### Phase 5: Testing & Documentation
-- [ ] Test WhatsApp inbox flow
-- [ ] Test Telegram inbox flow
-- [ ] Test gateway with webhook
-- [ ] Update README with inbox/gateway docs
+### Phase 4: Client CLI
+- [ ] Create `src/gateway/client.ts` - HTTP client for gateway API
+- [ ] Add inbox subcommands to `src/commands/whatsapp.ts`
+- [ ] Add inbox subcommands to `src/commands/telegram.ts`
+- [ ] Update send commands to route through gateway
+- [ ] Create `src/commands/outbox.ts` - Outbox status/list commands
 
-## Message ID Format
-
-```
-{profile}:{conversation}:{platformMessageId}
-```
-
-Examples:
-- `bot1:-100123456:789` (Telegram)
-- `pierre:+15551234567:ABC123DEF` (WhatsApp)
-- `workspace1:C0123CHAN:1706189234.123456` (Slack)
+### Phase 5: Testing & Polish
+- [ ] End-to-end test: WhatsApp receive → inbox → ack
+- [ ] End-to-end test: send → outbox → WhatsApp deliver
+- [ ] End-to-end test: Telegram flow
+- [ ] Webhook integration test
+- [ ] Update README and skills
 
 ## CLI Examples
 
 ```bash
-# Start gateway daemon
-agentio gateway start
+# === Gateway Management (on gateway host) ===
+agentio gateway start                    # Start daemon in background
+agentio gateway start --foreground       # Run in foreground (for debugging)
+agentio gateway status                   # Show connected services
+agentio gateway stop                     # Stop daemon
+agentio gateway reload                   # Reload config, reconnect services
 
-# Check WhatsApp inbox
-agentio whatsapp inbox pull
-agentio whatsapp inbox pull --profile pierre --limit 5
+# === Inbox Operations (from any client) ===
+agentio whatsapp inbox pull              # Get pending messages
+agentio whatsapp inbox pull --limit 5    # Limit results
+agentio whatsapp inbox get <id>          # Get specific message
+agentio whatsapp inbox ack <id>          # Mark as done
+agentio whatsapp inbox reply <id> "Thanks!"  # Reply and mark done
+agentio whatsapp inbox stats             # Show inbox statistics
 
-# Reply to a message
-agentio whatsapp inbox reply "pierre:+1555123:ABC" "Thanks for your message!"
+# === Send Operations (routed through gateway) ===
+agentio whatsapp send "Hello" --to +15551234567
+agentio telegram send "Hello" --to 123456789
 
-# Mark as processed without replying
-agentio whatsapp inbox ack "pierre:+1555123:ABC"
-
-# Check stats
-agentio whatsapp inbox stats
+# === Outbox Operations ===
+agentio outbox status <id>               # Check if message was sent
+agentio outbox list --status failed      # List failed sends
 ```
 
 ## Future Considerations
 
-1. **Remote Queue** - Support Redis/PostgreSQL for distributed setups
-2. **Multi-tenant** - Separate config directories per tenant
-3. **Message Retention** - Auto-cleanup of old processed messages
-4. **Attachments** - Download and store media files locally
-5. **Rate Limiting** - Per-conversation reply rate limits
+1. **TLS** - HTTPS support for gateway API
+2. **Message Retention** - Auto-cleanup of old processed messages
+3. **Attachments** - Download and store media files locally
+4. **Rate Limiting** - Per-conversation send rate limits
+5. **Metrics** - Prometheus endpoint for monitoring
+6. **Clustering** - Multiple gateway instances with shared store
