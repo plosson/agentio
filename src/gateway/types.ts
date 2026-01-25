@@ -255,6 +255,7 @@ export interface WhatsAppGroupCreateRequest {
   profile: string;
   name: string;
   participants: string[];
+  picture?: string;  // Path to profile picture image
 }
 
 export interface WhatsAppGroupCreateResponse {
@@ -266,6 +267,7 @@ export interface WhatsAppGroupUpdateRequest {
   groupId: string;
   subject?: string;
   description?: string;
+  picture?: string;  // Path to profile picture image
 }
 
 export interface WhatsAppGroupUpdateResponse {

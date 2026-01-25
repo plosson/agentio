@@ -522,6 +522,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .argument('<name>', 'Group name')
     .option('--profile <name>', 'Profile name')
     .option('--participants <phones...>', 'Participant phone numbers')
+    .option('--picture <path>', 'Path to group profile picture')
     .action(async (name: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
@@ -540,7 +541,8 @@ export function registerWhatsAppCommands(program: Command): void {
         const group = await client.whatsappGroupCreate(
           profileResult.profile,
           name,
-          options.participants
+          options.participants,
+          options.picture
         );
         printWhatsAppGroupCreated(group);
       } catch (error) {
@@ -555,6 +557,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .option('--profile <name>', 'Profile name')
     .option('--name <name>', 'New group name')
     .option('--description <text>', 'New group description')
+    .option('--picture <path>', 'Path to new group profile picture')
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
@@ -565,8 +568,8 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        if (!options.name && options.description === undefined) {
-          throw new CliError('INVALID_PARAMS', 'Provide --name or --description to update.');
+        if (!options.name && options.description === undefined && !options.picture) {
+          throw new CliError('INVALID_PARAMS', 'Provide --name, --description, or --picture to update.');
         }
 
         const client = await getGatewayClient();
@@ -584,6 +587,7 @@ export function registerWhatsAppCommands(program: Command): void {
         await client.whatsappGroupUpdate(profileResult.profile, groupId, {
           subject: options.name,
           description: options.description,
+          picture: options.picture,
         });
         console.log('Group updated');
       } catch (error) {

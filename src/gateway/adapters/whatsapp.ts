@@ -541,7 +541,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   /**
    * Create a new group
    */
-  async createGroup(profile: string, name: string, participants: string[]): Promise<WhatsAppGroup> {
+  async createGroup(profile: string, name: string, participants: string[], picturePath?: string): Promise<WhatsAppGroup> {
     const connection = this.profiles.get(profile);
     if (!connection?.socket) {
       throw new Error('Profile not connected');
@@ -550,7 +550,30 @@ export class WhatsAppAdapter extends BaseAdapter {
     const jids = participants.map((p) => (p.includes('@') ? p : phoneToJid(p)));
     const result = await connection.socket.groupCreate(name, jids);
 
+    // Set profile picture if provided
+    if (picturePath) {
+      await this.updateGroupPicture(profile, result.id, picturePath);
+    }
+
     return this.getGroup(profile, result.id);
+  }
+
+  /**
+   * Update group profile picture
+   */
+  async updateGroupPicture(profile: string, groupId: string, picturePath: string): Promise<void> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const file = Bun.file(picturePath);
+    if (!await file.exists()) {
+      throw new Error(`File not found: ${picturePath}`);
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await connection.socket.updateProfilePicture(groupId, buffer);
   }
 
   /**

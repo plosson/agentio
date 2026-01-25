@@ -483,7 +483,7 @@ async function handleWhatsAppGroupCreate(request: Request): Promise<Response> {
   }
 
   try {
-    const group = await whatsappAdapter.createGroup(body.profile, body.name, body.participants);
+    const group = await whatsappAdapter.createGroup(body.profile, body.name, body.participants, body.picture);
     const response: WhatsAppGroupCreateResponse = { group };
     return jsonResponse(response);
   } catch (error) {
@@ -516,6 +516,9 @@ async function handleWhatsAppGroupUpdate(request: Request): Promise<Response> {
     }
     if (body.description !== undefined) {
       await whatsappAdapter.updateGroupDescription(body.profile, body.groupId, body.description);
+    }
+    if (body.picture) {
+      await whatsappAdapter.updateGroupPicture(body.profile, body.groupId, body.picture);
     }
     const response: WhatsAppGroupUpdateResponse = { success: true };
     return jsonResponse(response);

@@ -309,8 +309,8 @@ export class GatewayClient {
   /**
    * Create a WhatsApp group
    */
-  async whatsappGroupCreate(profile: string, name: string, participants: string[]): Promise<WhatsAppGroup> {
-    const body: WhatsAppGroupCreateRequest = { profile, name, participants };
+  async whatsappGroupCreate(profile: string, name: string, participants: string[], picture?: string): Promise<WhatsAppGroup> {
+    const body: WhatsAppGroupCreateRequest = { profile, name, participants, picture };
     const response = await request<WhatsAppGroupCreateResponse>('POST', '/whatsapp/groups/create', body);
     return response.group;
   }
@@ -321,7 +321,7 @@ export class GatewayClient {
   async whatsappGroupUpdate(
     profile: string,
     groupId: string,
-    options: { subject?: string; description?: string }
+    options: { subject?: string; description?: string; picture?: string }
   ): Promise<boolean> {
     const body: WhatsAppGroupUpdateRequest = { profile, groupId, ...options };
     const response = await request<WhatsAppGroupUpdateResponse>('POST', '/whatsapp/groups/update', body);
