@@ -617,3 +617,103 @@ export function printInboxReplyResult(result: { outboxId: string; status: string
   console.log(`  Outbox ID: ${result.outboxId}`);
   console.log(`  Status: ${result.status}`);
 }
+
+// WhatsApp Group formatters
+import type { WhatsAppGroup } from '../types/whatsapp';
+
+export function printWhatsAppGroupList(groups: WhatsAppGroup[]): void {
+  if (groups.length === 0) {
+    console.log('No groups found');
+    return;
+  }
+
+  console.log(`Groups (${groups.length})\n`);
+
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const adminBadge = group.isSuperAdmin ? ' [owner]' : group.isAdmin ? ' [admin]' : '';
+    const flags: string[] = [];
+    if (group.announce) flags.push('announce');
+    if (group.restrict) flags.push('restricted');
+    const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+
+    console.log(`[${i + 1}] ${group.name}${adminBadge}${flagStr}`);
+    console.log(`    ID: ${group.id}`);
+    console.log(`    Participants: ${group.participantCount}`);
+    if (group.description) {
+      const desc = group.description.length > 80
+        ? group.description.slice(0, 80) + '...'
+        : group.description;
+      console.log(`    > ${desc}`);
+    }
+    console.log('');
+  }
+}
+
+export function printWhatsAppGroup(group: WhatsAppGroup): void {
+  console.log(`Name: ${group.name}`);
+  console.log(`ID: ${group.id}`);
+
+  const roles: string[] = [];
+  if (group.isSuperAdmin) roles.push('owner');
+  else if (group.isAdmin) roles.push('admin');
+  if (roles.length > 0) console.log(`Your Role: ${roles.join(', ')}`);
+
+  console.log(`Participants: ${group.participantCount}`);
+
+  const settings: string[] = [];
+  if (group.announce) settings.push('only admins can send');
+  if (group.restrict) settings.push('only admins can edit info');
+  if (settings.length > 0) console.log(`Settings: ${settings.join(', ')}`);
+
+  if (group.owner) console.log(`Owner: ${group.owner}`);
+  if (group.creation) {
+    console.log(`Created: ${new Date(group.creation * 1000).toISOString().split('T')[0]}`);
+  }
+
+  if (group.description) {
+    console.log('---');
+    console.log(group.description);
+  }
+
+  if (group.participants && group.participants.length > 0) {
+    console.log('\nParticipants:');
+    for (const p of group.participants) {
+      const role = p.isSuperAdmin ? ' (owner)' : p.isAdmin ? ' (admin)' : '';
+      const name = p.name ? ` - ${p.name}` : '';
+      console.log(`  ${p.phone}${name}${role}`);
+    }
+  }
+}
+
+export function printWhatsAppGroupCreated(group: WhatsAppGroup): void {
+  console.log('Group created');
+  console.log(`  Name: ${group.name}`);
+  console.log(`  ID: ${group.id}`);
+  console.log(`  Participants: ${group.participantCount}`);
+}
+
+export function printWhatsAppGroupInvite(result: { inviteCode: string; inviteLink: string }): void {
+  console.log('Group invite link:');
+  console.log(`  ${result.inviteLink}`);
+  console.log(`  Code: ${result.inviteCode}`);
+}
+
+export function printWhatsAppGroupJoined(groupId: string): void {
+  console.log('Joined group');
+  console.log(`  ID: ${groupId}`);
+}
+
+export function printWhatsAppGroupLeft(groupId: string): void {
+  console.log(`Left group: ${groupId}`);
+}
+
+export function printWhatsAppParticipantsResult(
+  action: string,
+  results: { participant: string; status: string }[]
+): void {
+  console.log(`Participants ${action}:`);
+  for (const r of results) {
+    console.log(`  ${r.participant}: ${r.status}`);
+  }
+}

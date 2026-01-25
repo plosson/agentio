@@ -13,6 +13,13 @@ import {
   printOutboxMessageList,
   printOutboxMessage,
   printOutboxSendResult,
+  printWhatsAppGroupList,
+  printWhatsAppGroup,
+  printWhatsAppGroupCreated,
+  printWhatsAppGroupInvite,
+  printWhatsAppGroupJoined,
+  printWhatsAppGroupLeft,
+  printWhatsAppParticipantsResult,
 } from '../utils/output';
 import type { WhatsAppCredentials } from '../types/whatsapp';
 import qrcode from 'qrcode-terminal';
@@ -216,6 +223,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .option('--profile <name>', 'Profile name')
     .option('--limit <n>', 'Maximum messages to retrieve', '50')
     .option('--status <status>', 'Filter by status: pending or done', 'pending')
+    .option('--conversation <id>', 'Filter by conversation/group (name or JID)')
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
@@ -227,9 +235,21 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         const client = await getGatewayClient();
+
+        // Resolve conversation name to JID if needed
+        let conversationId = options.conversation;
+        if (conversationId && !conversationId.includes('@')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, conversationId);
+          if (resolved.groupId) {
+            conversationId = resolved.groupId;
+          }
+          // If not found as group, keep original (might be a phone number)
+        }
+
         const messages = await client.inboxPull({
           service: 'whatsapp',
           profile: profileResult.profile,
+          conversationId,
           limit: parseInt(options.limit, 10),
           status: options.status as 'pending' | 'done',
         });
@@ -319,6 +339,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .description('Queue a message for sending')
     .option('--profile <name>', 'Profile name')
     .option('--to <phone>', 'Destination phone number (with country code, e.g., +1234567890)')
+    .option('--group <name>', 'Destination group (name or JID)')
     .option('--attachment <path>', 'Path to file attachment (image, video, audio, or document)')
     .option('--type <type>', 'Media type: image, video, audio, document (auto-detected if not specified)')
     .argument('[message]', 'Message text or caption (or pipe via stdin)')
@@ -332,8 +353,12 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        if (!options.to) {
-          throw new CliError('INVALID_PARAMS', 'Destination phone number is required. Use --to <phone>');
+        if (!options.to && !options.group) {
+          throw new CliError('INVALID_PARAMS', 'Destination required. Use --to <phone> or --group <name>');
+        }
+
+        if (options.to && options.group) {
+          throw new CliError('INVALID_PARAMS', 'Use either --to or --group, not both.');
         }
 
         let text = message;
@@ -362,10 +387,27 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         const client = await getGatewayClient();
+
+        // Resolve destination
+        let conversationId = options.to;
+        if (options.group) {
+          // Resolve group name to JID
+          if (options.group.includes('@g.us')) {
+            conversationId = options.group;
+          } else {
+            const resolved = await client.whatsappGroupResolve(profileResult.profile, options.group);
+            if (!resolved.groupId) {
+              throw new CliError('NOT_FOUND', `Group not found: ${options.group}`, 'Run: agentio whatsapp group list');
+            }
+            conversationId = resolved.groupId;
+            console.error(`Resolved group "${options.group}" to ${resolved.groupId}`);
+          }
+        }
+
         const result = await client.outboxSend({
           service: 'whatsapp',
           profile: profileResult.profile,
-          conversationId: options.to,
+          conversationId,
           content: text,
           mediaPath: options.attachment,
           mediaType,
@@ -410,6 +452,414 @@ export function registerWhatsAppCommands(program: Command): void {
           limit: parseInt(options.limit, 10),
         });
         printOutboxMessageList(messages);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  // Group subcommands
+  const group = whatsapp.command('group').description('Group management (requires gateway)');
+
+  group
+    .command('list')
+    .description('List all groups')
+    .option('--profile <name>', 'Profile name')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+        const groups = await client.whatsappGroupList(profileResult.profile);
+        printWhatsAppGroupList(groups);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('get')
+    .description('Get group details')
+    .argument('<id>', 'Group ID or name')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const group = await client.whatsappGroupGet(profileResult.profile, groupId);
+        printWhatsAppGroup(group);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('create')
+    .description('Create a new group')
+    .argument('<name>', 'Group name')
+    .option('--profile <name>', 'Profile name')
+    .option('--participants <phones...>', 'Participant phone numbers')
+    .action(async (name: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        if (!options.participants || options.participants.length === 0) {
+          throw new CliError('INVALID_PARAMS', 'At least one participant is required. Use --participants <phone...>');
+        }
+
+        const client = await getGatewayClient();
+        const group = await client.whatsappGroupCreate(
+          profileResult.profile,
+          name,
+          options.participants
+        );
+        printWhatsAppGroupCreated(group);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('update')
+    .description('Update group info')
+    .argument('<id>', 'Group ID or name')
+    .option('--profile <name>', 'Profile name')
+    .option('--name <name>', 'New group name')
+    .option('--description <text>', 'New group description')
+    .action(async (id: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        if (!options.name && options.description === undefined) {
+          throw new CliError('INVALID_PARAMS', 'Provide --name or --description to update.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        await client.whatsappGroupUpdate(profileResult.profile, groupId, {
+          subject: options.name,
+          description: options.description,
+        });
+        console.log('Group updated');
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('add')
+    .description('Add participants to group')
+    .argument('<id>', 'Group ID or name')
+    .argument('<phones...>', 'Phone numbers to add')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, phones: string[], options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const result = await client.whatsappGroupParticipants(
+          profileResult.profile,
+          groupId,
+          phones,
+          'add'
+        );
+        if (result.results) {
+          printWhatsAppParticipantsResult('added', result.results);
+        } else {
+          console.log('Participants added');
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('remove')
+    .description('Remove participants from group')
+    .argument('<id>', 'Group ID or name')
+    .argument('<phones...>', 'Phone numbers to remove')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, phones: string[], options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const result = await client.whatsappGroupParticipants(
+          profileResult.profile,
+          groupId,
+          phones,
+          'remove'
+        );
+        if (result.results) {
+          printWhatsAppParticipantsResult('removed', result.results);
+        } else {
+          console.log('Participants removed');
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('promote')
+    .description('Promote participants to admin')
+    .argument('<id>', 'Group ID or name')
+    .argument('<phones...>', 'Phone numbers to promote')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, phones: string[], options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const result = await client.whatsappGroupParticipants(
+          profileResult.profile,
+          groupId,
+          phones,
+          'promote'
+        );
+        if (result.results) {
+          printWhatsAppParticipantsResult('promoted', result.results);
+        } else {
+          console.log('Participants promoted to admin');
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('demote')
+    .description('Demote admins to regular participants')
+    .argument('<id>', 'Group ID or name')
+    .argument('<phones...>', 'Phone numbers to demote')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, phones: string[], options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const result = await client.whatsappGroupParticipants(
+          profileResult.profile,
+          groupId,
+          phones,
+          'demote'
+        );
+        if (result.results) {
+          printWhatsAppParticipantsResult('demoted', result.results);
+        } else {
+          console.log('Admins demoted to regular participants');
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('leave')
+    .description('Leave a group')
+    .argument('<id>', 'Group ID or name')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        // Confirm before leaving
+        const confirmed = await confirm(`Leave group ${id}?`);
+        if (!confirmed) {
+          console.log('Cancelled');
+          return;
+        }
+
+        await client.whatsappGroupLeave(profileResult.profile, groupId);
+        printWhatsAppGroupLeft(groupId);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('invite')
+    .description('Get group invite link')
+    .argument('<id>', 'Group ID or name')
+    .option('--profile <name>', 'Profile name')
+    .action(async (id: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+
+        // Resolve name to ID if needed
+        let groupId = id;
+        if (!id.includes('@g.us')) {
+          const resolved = await client.whatsappGroupResolve(profileResult.profile, id);
+          if (!resolved.groupId) {
+            throw new CliError('NOT_FOUND', `Group not found: ${id}`);
+          }
+          groupId = resolved.groupId;
+        }
+
+        const result = await client.whatsappGroupInvite(profileResult.profile, groupId);
+        printWhatsAppGroupInvite(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  group
+    .command('join')
+    .description('Join group via invite code or link')
+    .argument('<code>', 'Invite code or full link (https://chat.whatsapp.com/...)')
+    .option('--profile <name>', 'Profile name')
+    .action(async (code: string, options) => {
+      try {
+        const profileResult = await resolveProfile('whatsapp', options.profile);
+        if (!profileResult.profile) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
+          }
+          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+        }
+
+        const client = await getGatewayClient();
+        const groupId = await client.whatsappGroupJoin(profileResult.profile, code);
+        printWhatsAppGroupJoined(groupId);
       } catch (error) {
         handleError(error);
       }

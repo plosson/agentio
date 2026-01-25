@@ -28,7 +28,26 @@ import type {
   MediaType,
   InboxStatus,
   OutboxStatus,
+  WhatsAppGroupListRequest,
+  WhatsAppGroupListResponse,
+  WhatsAppGroupGetRequest,
+  WhatsAppGroupGetResponse,
+  WhatsAppGroupCreateRequest,
+  WhatsAppGroupCreateResponse,
+  WhatsAppGroupUpdateRequest,
+  WhatsAppGroupUpdateResponse,
+  WhatsAppGroupParticipantsRequest,
+  WhatsAppGroupParticipantsResponse,
+  WhatsAppGroupLeaveRequest,
+  WhatsAppGroupLeaveResponse,
+  WhatsAppGroupInviteRequest,
+  WhatsAppGroupInviteResponse,
+  WhatsAppGroupJoinRequest,
+  WhatsAppGroupJoinResponse,
+  WhatsAppGroupResolveRequest,
+  WhatsAppGroupResolveResponse,
 } from './types';
+import type { WhatsAppGroup, WhatsAppParticipantAction } from '../types/whatsapp';
 
 let cachedConfig: { url: string; secret: string } | null = null;
 
@@ -130,12 +149,14 @@ export class GatewayClient {
   async inboxPull(options: {
     service?: ServiceName;
     profile?: string;
+    conversationId?: string;
     limit?: number;
     status?: InboxStatus;
   }): Promise<InboundMessage[]> {
     const body: InboxPullRequest = {
       service: options.service,
       profile: options.profile,
+      conversationId: options.conversationId,
       limit: options.limit,
       status: options.status,
     };
@@ -263,6 +284,98 @@ export class GatewayClient {
    */
   async whatsappPair(profile: string): Promise<WhatsAppPairResponse> {
     return request<WhatsAppPairResponse>('GET', `/whatsapp/pair/${encodeURIComponent(profile)}`);
+  }
+
+  // ============ WHATSAPP GROUP METHODS ============
+
+  /**
+   * List all WhatsApp groups
+   */
+  async whatsappGroupList(profile: string): Promise<WhatsAppGroup[]> {
+    const body: WhatsAppGroupListRequest = { profile };
+    const response = await request<WhatsAppGroupListResponse>('POST', '/whatsapp/groups/list', body);
+    return response.groups;
+  }
+
+  /**
+   * Get WhatsApp group details
+   */
+  async whatsappGroupGet(profile: string, groupId: string): Promise<WhatsAppGroup> {
+    const body: WhatsAppGroupGetRequest = { profile, groupId };
+    const response = await request<WhatsAppGroupGetResponse>('POST', '/whatsapp/groups/get', body);
+    return response.group;
+  }
+
+  /**
+   * Create a WhatsApp group
+   */
+  async whatsappGroupCreate(profile: string, name: string, participants: string[]): Promise<WhatsAppGroup> {
+    const body: WhatsAppGroupCreateRequest = { profile, name, participants };
+    const response = await request<WhatsAppGroupCreateResponse>('POST', '/whatsapp/groups/create', body);
+    return response.group;
+  }
+
+  /**
+   * Update WhatsApp group info
+   */
+  async whatsappGroupUpdate(
+    profile: string,
+    groupId: string,
+    options: { subject?: string; description?: string }
+  ): Promise<boolean> {
+    const body: WhatsAppGroupUpdateRequest = { profile, groupId, ...options };
+    const response = await request<WhatsAppGroupUpdateResponse>('POST', '/whatsapp/groups/update', body);
+    return response.success;
+  }
+
+  /**
+   * Update WhatsApp group participants
+   */
+  async whatsappGroupParticipants(
+    profile: string,
+    groupId: string,
+    participants: string[],
+    action: WhatsAppParticipantAction
+  ): Promise<{ success: boolean; results?: { participant: string; status: string }[] }> {
+    const body: WhatsAppGroupParticipantsRequest = { profile, groupId, participants, action };
+    const response = await request<WhatsAppGroupParticipantsResponse>('POST', '/whatsapp/groups/participants', body);
+    return response;
+  }
+
+  /**
+   * Leave a WhatsApp group
+   */
+  async whatsappGroupLeave(profile: string, groupId: string): Promise<boolean> {
+    const body: WhatsAppGroupLeaveRequest = { profile, groupId };
+    const response = await request<WhatsAppGroupLeaveResponse>('POST', '/whatsapp/groups/leave', body);
+    return response.success;
+  }
+
+  /**
+   * Get WhatsApp group invite link
+   */
+  async whatsappGroupInvite(profile: string, groupId: string): Promise<{ inviteCode: string; inviteLink: string }> {
+    const body: WhatsAppGroupInviteRequest = { profile, groupId };
+    const response = await request<WhatsAppGroupInviteResponse>('POST', '/whatsapp/groups/invite', body);
+    return response;
+  }
+
+  /**
+   * Join WhatsApp group via invite code
+   */
+  async whatsappGroupJoin(profile: string, inviteCode: string): Promise<string> {
+    const body: WhatsAppGroupJoinRequest = { profile, inviteCode };
+    const response = await request<WhatsAppGroupJoinResponse>('POST', '/whatsapp/groups/join', body);
+    return response.groupId;
+  }
+
+  /**
+   * Resolve group name to JID or vice versa
+   */
+  async whatsappGroupResolve(profile: string, nameOrId: string): Promise<{ groupId: string | null; groupName: string | null }> {
+    const body: WhatsAppGroupResolveRequest = { profile, nameOrId };
+    const response = await request<WhatsAppGroupResolveResponse>('POST', '/whatsapp/groups/resolve', body);
+    return response;
   }
 }
 

@@ -13,7 +13,12 @@ import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import type { ServiceName } from '../../types/config';
-import type { WhatsAppCredentials } from '../../types/whatsapp';
+import type {
+  WhatsAppCredentials,
+  WhatsAppGroup,
+  WhatsAppGroupParticipant,
+  WhatsAppParticipantAction,
+} from '../../types/whatsapp';
 import { CONFIG_DIR } from '../../config/config-manager';
 import { BaseAdapter, type AdapterInboundMessage, type AdapterOutboundMessage, type SendResult, type ConnectionState as AdapterConnectionState } from './types';
 import { useSQLiteAuthState, hasAuthState } from './whatsapp-auth';
@@ -465,5 +470,231 @@ export class WhatsAppAdapter extends BaseAdapter {
       phoneNumber: connection?.credentials.phoneNumber,
       paired: connection?.credentials.paired ?? false,
     };
+  }
+
+  // ============ GROUP OPERATIONS ============
+
+  /**
+   * List all groups the user is participating in
+   */
+  async listGroups(profile: string): Promise<WhatsAppGroup[]> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const groups = await connection.socket.groupFetchAllParticipating();
+    const myJid = connection.socket.user?.id;
+
+    return Object.values(groups).map((g) => {
+      const myParticipant = g.participants?.find((p) => p.id === myJid);
+      return {
+        id: g.id,
+        name: g.subject,
+        description: g.desc ?? undefined,
+        owner: g.owner ?? undefined,
+        creation: g.creation,
+        participantCount: g.participants?.length ?? 0,
+        isAdmin: myParticipant?.admin === 'admin' || myParticipant?.admin === 'superadmin',
+        isSuperAdmin: myParticipant?.admin === 'superadmin',
+        announce: g.announce ?? false,
+        restrict: g.restrict ?? false,
+      };
+    });
+  }
+
+  /**
+   * Get detailed group information
+   */
+  async getGroup(profile: string, groupId: string): Promise<WhatsAppGroup> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const metadata = await connection.socket.groupMetadata(groupId);
+    const myJid = connection.socket.user?.id;
+    const myParticipant = metadata.participants?.find((p) => p.id === myJid);
+
+    const participants: WhatsAppGroupParticipant[] = metadata.participants.map((p) => ({
+      id: p.id,
+      phone: jidToPhone(p.id),
+      isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
+      isSuperAdmin: p.admin === 'superadmin',
+    }));
+
+    return {
+      id: metadata.id,
+      name: metadata.subject,
+      description: metadata.desc ?? undefined,
+      owner: metadata.owner ?? undefined,
+      creation: metadata.creation,
+      participantCount: metadata.participants.length,
+      participants,
+      isAdmin: myParticipant?.admin === 'admin' || myParticipant?.admin === 'superadmin',
+      isSuperAdmin: myParticipant?.admin === 'superadmin',
+      announce: metadata.announce ?? false,
+      restrict: metadata.restrict ?? false,
+    };
+  }
+
+  /**
+   * Create a new group
+   */
+  async createGroup(profile: string, name: string, participants: string[]): Promise<WhatsAppGroup> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const jids = participants.map((p) => (p.includes('@') ? p : phoneToJid(p)));
+    const result = await connection.socket.groupCreate(name, jids);
+
+    return this.getGroup(profile, result.id);
+  }
+
+  /**
+   * Update group subject (name)
+   */
+  async updateGroupSubject(profile: string, groupId: string, subject: string): Promise<void> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    await connection.socket.groupUpdateSubject(groupId, subject);
+  }
+
+  /**
+   * Update group description
+   */
+  async updateGroupDescription(profile: string, groupId: string, description: string): Promise<void> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    await connection.socket.groupUpdateDescription(groupId, description);
+  }
+
+  /**
+   * Update group participants (add, remove, promote, demote)
+   */
+  async updateParticipants(
+    profile: string,
+    groupId: string,
+    participants: string[],
+    action: WhatsAppParticipantAction
+  ): Promise<{ participant: string; status: string }[]> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const jids = participants.map((p) => (p.includes('@') ? p : phoneToJid(p)));
+    const results = await connection.socket.groupParticipantsUpdate(groupId, jids, action);
+
+    return results.map((r) => ({
+      participant: r.jid ?? 'unknown',
+      status: r.status,
+    }));
+  }
+
+  /**
+   * Leave a group
+   */
+  async leaveGroup(profile: string, groupId: string): Promise<void> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    await connection.socket.groupLeave(groupId);
+  }
+
+  /**
+   * Get group invite code
+   */
+  async getGroupInviteCode(profile: string, groupId: string): Promise<string> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    const code = await connection.socket.groupInviteCode(groupId);
+    if (!code) {
+      throw new Error('Failed to get invite code');
+    }
+    return code;
+  }
+
+  /**
+   * Join a group via invite code
+   */
+  async joinGroupViaInvite(profile: string, inviteCode: string): Promise<string> {
+    const connection = this.profiles.get(profile);
+    if (!connection?.socket) {
+      throw new Error('Profile not connected');
+    }
+
+    // Extract code from full URL if provided
+    let code = inviteCode;
+    if (inviteCode.includes('chat.whatsapp.com/')) {
+      code = inviteCode.split('chat.whatsapp.com/').pop() || inviteCode;
+    }
+
+    const groupId = await connection.socket.groupAcceptInvite(code);
+    if (!groupId) {
+      throw new Error('Failed to join group');
+    }
+    return groupId;
+  }
+
+  /**
+   * Resolve group name to JID or JID to name
+   * Returns groupId if input looks like a JID, or searches for matching group name
+   */
+  async resolveGroup(profile: string, nameOrId: string): Promise<{ groupId: string | null; groupName: string | null }> {
+    // If it looks like a group JID, get the name
+    if (nameOrId.includes('@g.us')) {
+      try {
+        const group = await this.getGroup(profile, nameOrId);
+        return { groupId: nameOrId, groupName: group.name };
+      } catch {
+        return { groupId: nameOrId, groupName: null };
+      }
+    }
+
+    // Otherwise, search for group by name
+    const groups = await this.listGroups(profile);
+    const lowerName = nameOrId.toLowerCase();
+
+    // Exact match first
+    const exactMatch = groups.find((g) => g.name.toLowerCase() === lowerName);
+    if (exactMatch) {
+      return { groupId: exactMatch.id, groupName: exactMatch.name };
+    }
+
+    // Partial match
+    const partialMatch = groups.find((g) => g.name.toLowerCase().includes(lowerName));
+    if (partialMatch) {
+      return { groupId: partialMatch.id, groupName: partialMatch.name };
+    }
+
+    return { groupId: null, groupName: null };
+  }
+
+  /**
+   * Get cached group name for a JID (for display purposes)
+   * This is a quick lookup that doesn't make API calls
+   */
+  async getGroupNameCached(profile: string, groupId: string): Promise<string | null> {
+    try {
+      const groups = await this.listGroups(profile);
+      const group = groups.find((g) => g.id === groupId);
+      return group?.name ?? null;
+    } catch {
+      return null;
+    }
   }
 }

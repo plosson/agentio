@@ -64,3 +64,53 @@ export interface WhatsAppMessage {
 export interface WhatsAppSendOptions {
   quotedMessageId?: string;
 }
+
+/**
+ * WhatsApp group information
+ */
+export interface WhatsAppGroup {
+  id: string;              // Group JID (e.g., "120363xxx@g.us")
+  name: string;            // Group subject/name
+  description?: string;
+  owner?: string;          // Owner JID
+  creation?: number;       // Creation timestamp
+  participantCount: number;
+  participants?: WhatsAppGroupParticipant[];
+  isAdmin: boolean;        // Whether current user is admin
+  isSuperAdmin: boolean;   // Whether current user is super admin (creator)
+  announce: boolean;       // Only admins can send messages
+  restrict: boolean;       // Only admins can modify group info
+  inviteCode?: string;
+}
+
+/**
+ * WhatsApp group participant
+ */
+export interface WhatsAppGroupParticipant {
+  id: string;              // Participant JID
+  name?: string;           // Push name
+  phone: string;           // Phone number
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+}
+
+/**
+ * Options for creating a group
+ */
+export interface WhatsAppGroupCreateOptions {
+  name: string;
+  participants: string[];  // Phone numbers or JIDs
+}
+
+/**
+ * Options for updating a group
+ */
+export interface WhatsAppGroupUpdateOptions {
+  subject?: string;        // Group name
+  description?: string;    // Group description
+}
+
+/**
+ * Participant update action
+ */
+export type WhatsAppParticipantAction = 'add' | 'remove' | 'promote' | 'demote';

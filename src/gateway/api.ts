@@ -21,6 +21,24 @@ import type {
   GatewayStatusResponse,
   HealthResponse,
   WhatsAppPairResponse,
+  WhatsAppGroupListRequest,
+  WhatsAppGroupListResponse,
+  WhatsAppGroupGetRequest,
+  WhatsAppGroupGetResponse,
+  WhatsAppGroupCreateRequest,
+  WhatsAppGroupCreateResponse,
+  WhatsAppGroupUpdateRequest,
+  WhatsAppGroupUpdateResponse,
+  WhatsAppGroupParticipantsRequest,
+  WhatsAppGroupParticipantsResponse,
+  WhatsAppGroupLeaveRequest,
+  WhatsAppGroupLeaveResponse,
+  WhatsAppGroupInviteRequest,
+  WhatsAppGroupInviteResponse,
+  WhatsAppGroupJoinRequest,
+  WhatsAppGroupJoinResponse,
+  WhatsAppGroupResolveRequest,
+  WhatsAppGroupResolveResponse,
 } from './types';
 import { DEFAULT_GATEWAY_CONFIG } from './types';
 import {
@@ -95,6 +113,7 @@ async function handleInboxPull(request: Request): Promise<Response> {
   const messages = getInboxMessages({
     service: body?.service,
     profile: body?.profile,
+    conversationId: body?.conversationId,
     status: body?.status ?? 'pending',
     limit: body?.limit ?? 50,
   });
@@ -387,6 +406,279 @@ async function handleWhatsAppImport(profile: string, request: Request): Promise<
   }
 }
 
+// ============ WHATSAPP GROUP HANDLERS ============
+
+/**
+ * Handle WhatsApp group list request
+ */
+async function handleWhatsAppGroupList(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupListRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const groups = await whatsappAdapter.listGroups(body.profile);
+    const response: WhatsAppGroupListResponse = { groups };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to list groups';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group get request
+ */
+async function handleWhatsAppGroupGet(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupGetRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.groupId) {
+    return jsonError('Group ID is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const group = await whatsappAdapter.getGroup(body.profile, body.groupId);
+    const response: WhatsAppGroupGetResponse = { group };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to get group';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group create request
+ */
+async function handleWhatsAppGroupCreate(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupCreateRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.name) {
+    return jsonError('Group name is required');
+  }
+  if (!body?.participants || body.participants.length === 0) {
+    return jsonError('At least one participant is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const group = await whatsappAdapter.createGroup(body.profile, body.name, body.participants);
+    const response: WhatsAppGroupCreateResponse = { group };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create group';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group update request
+ */
+async function handleWhatsAppGroupUpdate(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupUpdateRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.groupId) {
+    return jsonError('Group ID is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    if (body.subject) {
+      await whatsappAdapter.updateGroupSubject(body.profile, body.groupId, body.subject);
+    }
+    if (body.description !== undefined) {
+      await whatsappAdapter.updateGroupDescription(body.profile, body.groupId, body.description);
+    }
+    const response: WhatsAppGroupUpdateResponse = { success: true };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update group';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group participants update request
+ */
+async function handleWhatsAppGroupParticipants(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupParticipantsRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.groupId) {
+    return jsonError('Group ID is required');
+  }
+  if (!body?.participants || body.participants.length === 0) {
+    return jsonError('At least one participant is required');
+  }
+  if (!body?.action) {
+    return jsonError('Action is required (add, remove, promote, demote)');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const results = await whatsappAdapter.updateParticipants(
+      body.profile,
+      body.groupId,
+      body.participants,
+      body.action
+    );
+    const response: WhatsAppGroupParticipantsResponse = { success: true, results };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update participants';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group leave request
+ */
+async function handleWhatsAppGroupLeave(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupLeaveRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.groupId) {
+    return jsonError('Group ID is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    await whatsappAdapter.leaveGroup(body.profile, body.groupId);
+    const response: WhatsAppGroupLeaveResponse = { success: true };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to leave group';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group invite code request
+ */
+async function handleWhatsAppGroupInvite(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupInviteRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.groupId) {
+    return jsonError('Group ID is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const inviteCode = await whatsappAdapter.getGroupInviteCode(body.profile, body.groupId);
+    const response: WhatsAppGroupInviteResponse = {
+      inviteCode,
+      inviteLink: `https://chat.whatsapp.com/${inviteCode}`,
+    };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to get invite code';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group join request
+ */
+async function handleWhatsAppGroupJoin(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupJoinRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.inviteCode) {
+    return jsonError('Invite code is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const groupId = await whatsappAdapter.joinGroupViaInvite(body.profile, body.inviteCode);
+    const response: WhatsAppGroupJoinResponse = { groupId };
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to join group';
+    return jsonError(message, 500);
+  }
+}
+
+/**
+ * Handle WhatsApp group resolve request (name to JID or JID to name)
+ */
+async function handleWhatsAppGroupResolve(request: Request): Promise<Response> {
+  const body = await parseJsonBody<WhatsAppGroupResolveRequest>(request);
+
+  if (!body?.profile) {
+    return jsonError('Profile is required');
+  }
+  if (!body?.nameOrId) {
+    return jsonError('Name or ID is required');
+  }
+
+  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!whatsappAdapter) {
+    return jsonError('WhatsApp not configured', 404);
+  }
+
+  try {
+    const result = await whatsappAdapter.resolveGroup(body.profile, body.nameOrId);
+    const response: WhatsAppGroupResolveResponse = result;
+    return jsonResponse(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve group';
+    return jsonError(message, 500);
+  }
+}
+
 /**
  * Main request handler
  */
@@ -443,6 +735,16 @@ async function handleRequest(request: Request): Promise<Response> {
       const profile = decodeURIComponent(path.slice('/import/whatsapp/'.length));
       return handleWhatsAppImport(profile, request);
     }
+    // WhatsApp group endpoints
+    if (path === '/whatsapp/groups/list') return handleWhatsAppGroupList(request);
+    if (path === '/whatsapp/groups/get') return handleWhatsAppGroupGet(request);
+    if (path === '/whatsapp/groups/create') return handleWhatsAppGroupCreate(request);
+    if (path === '/whatsapp/groups/update') return handleWhatsAppGroupUpdate(request);
+    if (path === '/whatsapp/groups/participants') return handleWhatsAppGroupParticipants(request);
+    if (path === '/whatsapp/groups/leave') return handleWhatsAppGroupLeave(request);
+    if (path === '/whatsapp/groups/invite') return handleWhatsAppGroupInvite(request);
+    if (path === '/whatsapp/groups/join') return handleWhatsAppGroupJoin(request);
+    if (path === '/whatsapp/groups/resolve') return handleWhatsAppGroupResolve(request);
   }
 
   return jsonError('Not found', 404);
