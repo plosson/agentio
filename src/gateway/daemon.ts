@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { readFile, writeFile, unlink } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, openSync, closeSync, constants } from 'fs';
 import { spawn } from 'child_process';
 import type { ServiceName } from '../types/config';
 import type { GatewayConfig, DaemonState, DEFAULT_GATEWAY_CONFIG } from './types';
@@ -272,18 +272,20 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
       scriptPath = join(process.cwd(), 'src', 'index.ts');
     }
 
+    // Open log file for appending - child writes directly to file
+    const logFd = openSync(LOG_FILE, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND, 0o644);
+
     const child = spawn(process.execPath, [scriptPath, 'gateway', 'start', '--foreground'], {
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', logFd, logFd],
       env: process.env,
     });
 
-    // Write logs to file
-    const logStream = Bun.file(LOG_FILE).writer();
-    child.stdout?.on('data', (data) => logStream.write(data));
-    child.stderr?.on('data', (data) => logStream.write(data));
-
     child.unref();
+
+    // Close the fd in parent - child has its own copy
+    closeSync(logFd);
+
     console.log(`Gateway started in background (PID ${child.pid})`);
     console.log(`Logs: ${LOG_FILE}`);
     return;
