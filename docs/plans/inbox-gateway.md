@@ -55,8 +55,9 @@ This architecture is required because:
 1. **Gateway as Post Office** - All external service communication flows through gateway
 2. **Queue-Based** - Inbox (inbound) and Outbox (outbound) queues for reliability
 3. **CLI as Client** - CLI never talks directly to services, only to gateway
-4. **Webhook Optional** - Simple "you've got mail" notification, no business logic
-5. **Single Device** - Gateway runs persistently on one authenticated device
+4. **Config-Driven Activation** - Gateway auto-activates adapters for services with configured profiles
+5. **Webhook Optional** - Simple "you've got mail" notification, no business logic
+6. **Single Device** - Gateway runs persistently on one authenticated device
 
 ## Components
 
@@ -152,14 +153,16 @@ agentio gateway logs [--follow]         # View daemon logs
       "url": "https://example.com/notify",
       "secret": "hmac-secret",
       "debounceMs": 2000
-    },
-    "services": {
-      "telegram": ["bot1", "bot2"],
-      "whatsapp": ["pierre"]
     }
   }
 }
 ```
+
+**Service Activation**:
+- Gateway reads existing service profiles from config
+- Only services with at least one configured profile are activated
+- Example: If `telegram` has profiles `["bot1"]` and `whatsapp` has no profiles, only Telegram adapter starts
+- No explicit `services` list needed - presence of profiles determines activation
 
 ### 3. Gateway HTTP API
 
