@@ -37,5 +37,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .worktrees
 
 # local docs
-docs
 TODO.md
