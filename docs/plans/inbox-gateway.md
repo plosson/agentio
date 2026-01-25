@@ -274,15 +274,18 @@ agentio telegram inbox stats
 agentio whatsapp send <message> [--to <conversation>] [--profile P]
 agentio telegram send <message> [--to <chat-id>] [--profile P]
 
-# Outbox operations (cross-service)
-agentio outbox status <id>          # Check send status
-agentio outbox list [--service S] [--status pending|sent|failed]
+# Outbox operations (service-scoped)
+agentio whatsapp outbox status <id>
+agentio whatsapp outbox list [--status pending|sent|failed]
+
+agentio telegram outbox status <id>
+agentio telegram outbox list [--status pending|sent|failed]
 ```
 
 **Behavior**:
 - `send` commands push to outbox, return immediately with queue ID
 - Gateway processes outbox asynchronously
-- CLI polls `outbox status` to check delivery
+- CLI polls `{service} outbox status` to check delivery
 
 **CLI Config** (client side):
 ```json
@@ -345,9 +348,10 @@ Fired when new messages arrive in inbox (debounced).
 ### Phase 4: Client CLI
 - [ ] Create `src/gateway/client.ts` - HTTP client for gateway API
 - [ ] Add inbox subcommands to `src/commands/whatsapp.ts`
+- [ ] Add outbox subcommands to `src/commands/whatsapp.ts`
 - [ ] Add inbox subcommands to `src/commands/telegram.ts`
+- [ ] Add outbox subcommands to `src/commands/telegram.ts`
 - [ ] Update send commands to route through gateway
-- [ ] Create `src/commands/outbox.ts` - Outbox status/list commands
 
 ### Phase 5: Testing & Polish
 - [ ] End-to-end test: WhatsApp receive → inbox → ack
@@ -378,9 +382,9 @@ agentio whatsapp inbox stats             # Show inbox statistics
 agentio whatsapp send "Hello" --to +15551234567
 agentio telegram send "Hello" --to 123456789
 
-# === Outbox Operations ===
-agentio outbox status <id>               # Check if message was sent
-agentio outbox list --status failed      # List failed sends
+# === Outbox Operations (service-scoped) ===
+agentio whatsapp outbox status <id>      # Check if message was sent
+agentio whatsapp outbox list --status failed  # List failed sends
 ```
 
 ## Future Considerations
