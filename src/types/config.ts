@@ -37,6 +37,7 @@ export interface Config {
     jira?: string[];
     slack?: string[];
     telegram?: string[];
+    whatsapp?: string[];
     discourse?: string[];
     sql?: string[];
   };
@@ -44,4 +45,4 @@ export interface Config {
   gateway?: GatewayConfig;
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gchat' | 'github' | 'jira' | 'slack' | 'telegram' | 'discourse' | 'sql';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gchat' | 'github' | 'jira' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';

@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "^8.2.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "commander": "^14.0.2",
     "googleapis": "^169.0.0",
     "libsodium-wrappers": "^0.8.1",

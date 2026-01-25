@@ -11,7 +11,9 @@ import { startApiServer, stopApiServer } from './api';
 import { configureWebhook, queueWebhookNotification, flushWebhook, stopWebhook } from './webhook';
 import type { ServiceAdapter, AdapterInboundMessage } from './adapters/types';
 import { TelegramAdapter } from './adapters/telegram';
+import { WhatsAppAdapter } from './adapters/whatsapp';
 import type { TelegramCredentials } from '../types/telegram';
+import type { WhatsAppCredentials } from '../types/whatsapp';
 
 const PID_FILE = join(CONFIG_DIR, 'gateway.pid');
 const LOG_FILE = join(CONFIG_DIR, 'gateway.log');
@@ -205,7 +207,29 @@ async function initializeAdapters(): Promise<void> {
     adapters.set('telegram', telegramAdapter);
   }
 
-  // Add more adapters here as they are implemented
+  // Initialize WhatsApp adapter if profiles exist
+  const whatsappProfiles = config.profiles.whatsapp || [];
+  if (whatsappProfiles.length > 0) {
+    const whatsappAdapter = new WhatsAppAdapter();
+    whatsappAdapter.onMessage = (profile, message) => {
+      handleInboundMessage('whatsapp', profile, message);
+    };
+
+    for (const profile of whatsappProfiles) {
+      try {
+        const credentials = await getCredentials<WhatsAppCredentials>('whatsapp', profile);
+        if (credentials) {
+          await whatsappAdapter.connect(profile, credentials);
+        } else {
+          console.error(`[whatsapp] No credentials for profile: ${profile}`);
+        }
+      } catch (error) {
+        console.error(`[whatsapp] Failed to connect ${profile}:`, error instanceof Error ? error.message : error);
+      }
+    }
+
+    adapters.set('whatsapp', whatsappAdapter);
+  }
 }
 
 /**

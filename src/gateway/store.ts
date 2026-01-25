@@ -86,6 +86,29 @@ export async function initDatabase(): Promise<Database> {
   db.run('CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(service, profile, status)');
   db.run('CREATE INDEX IF NOT EXISTS idx_outbox_queued ON outbox(queued_at)');
 
+  // WhatsApp auth state tables (for Baileys)
+  // Stores authentication credentials (keys, registration info)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS whatsapp_auth_creds (
+      profile TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // Stores session keys (pre-keys, sender keys, etc.)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS whatsapp_auth_keys (
+      profile TEXT NOT NULL,
+      type TEXT NOT NULL,
+      key_id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      PRIMARY KEY (profile, type, key_id)
+    )
+  `);
+
+  db.run('CREATE INDEX IF NOT EXISTS idx_whatsapp_keys ON whatsapp_auth_keys(profile, type)');
+
   return db;
 }
 
