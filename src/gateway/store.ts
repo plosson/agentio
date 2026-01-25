@@ -257,10 +257,24 @@ export function getInboxMessages(options: {
 }
 
 /**
- * Get a single inbox message by ID
+ * Get a single inbox message by ID (supports partial ID prefix matching)
  */
 export function getInboxMessage(id: string): InboundMessage | null {
   const db = getDatabase();
+
+  // Full UUID is 36 characters, if shorter try prefix match
+  if (id.length < 36) {
+    const rows = db.query<InboxRow, [string]>(
+      'SELECT * FROM inbox WHERE id LIKE ? LIMIT 2'
+    ).all(`${id}%`);
+
+    // Only return if exactly one match (avoid ambiguity)
+    if (rows.length === 1) {
+      return rowToInboundMessage(rows[0]);
+    }
+    return null;
+  }
+
   const row = db.query<InboxRow, [string]>(
     'SELECT * FROM inbox WHERE id = ?'
   ).get(id);
@@ -269,13 +283,22 @@ export function getInboxMessage(id: string): InboundMessage | null {
 }
 
 /**
- * Mark an inbox message as done
+ * Mark an inbox message as done (supports partial ID prefix matching)
  */
 export function ackInboxMessage(id: string): boolean {
   const db = getDatabase();
+
+  // Full UUID is 36 characters, if shorter resolve full ID first
+  let fullId = id;
+  if (id.length < 36) {
+    const message = getInboxMessage(id);
+    if (!message) return false;
+    fullId = message.id;
+  }
+
   const result = db.run(
     'UPDATE inbox SET status = ?, done_at = ? WHERE id = ? AND status = ?',
-    ['done', Date.now(), id, 'pending']
+    ['done', Date.now(), fullId, 'pending']
   );
   return result.changes > 0;
 }
@@ -466,10 +489,24 @@ export function getOutboxMessages(options: {
 }
 
 /**
- * Get a single outbox message by ID
+ * Get a single outbox message by ID (supports partial ID prefix matching)
  */
 export function getOutboxMessage(id: string): OutboundMessage | null {
   const db = getDatabase();
+
+  // Full UUID is 36 characters, if shorter try prefix match
+  if (id.length < 36) {
+    const rows = db.query<OutboxRow, [string]>(
+      'SELECT * FROM outbox WHERE id LIKE ? LIMIT 2'
+    ).all(`${id}%`);
+
+    // Only return if exactly one match (avoid ambiguity)
+    if (rows.length === 1) {
+      return rowToOutboundMessage(rows[0]);
+    }
+    return null;
+  }
+
   const row = db.query<OutboxRow, [string]>(
     'SELECT * FROM outbox WHERE id = ?'
   ).get(id);
