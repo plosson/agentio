@@ -63,7 +63,8 @@ This architecture is required because:
 
 ### 1. Message Store
 
-**Location**: `~/.config/agentio/gateway.db`
+**Database**: `~/.config/agentio/gateway.db`
+**Media**: `~/.config/agentio/media/{service}/{profile}/` (downloaded attachments)
 
 Single SQLite database with unified schema for all services.
 
@@ -153,10 +154,22 @@ agentio gateway logs [--follow]         # View daemon logs
       "url": "https://example.com/notify",
       "secret": "hmac-secret",
       "debounceMs": 2000
+    },
+    "media": {
+      "download": true,
+      "maxSizeMb": 50
+    },
+    "retention": {
+      "doneMessagesDays": 30,
+      "sentMessagesDays": 7
     }
   }
 }
 ```
+
+**Retention**: Configurable auto-cleanup of processed messages:
+- `doneMessagesDays`: Delete inbox messages with status "done" after N days (0 = never)
+- `sentMessagesDays`: Delete outbox messages with status "sent" after N days (0 = never)
 
 **Service Activation**:
 - Gateway reads existing service profiles from config
@@ -175,10 +188,13 @@ CLI communicates with gateway via authenticated HTTP API.
 **Endpoints**:
 ```
 POST /inbox/pull      - Get pending messages
+POST /inbox/get       - Get specific message by ID
 POST /inbox/ack       - Mark message as done
+POST /inbox/reply     - Reply to message (auto-infers conversation, marks done)
 POST /inbox/stats     - Get inbox statistics
 POST /outbox/send     - Queue outbound message
 POST /outbox/status   - Check send status
+POST /outbox/list     - List outbox messages
 GET  /health          - Gateway health check
 GET  /status          - Connected services status
 ```
@@ -285,10 +301,14 @@ agentio telegram outbox status <id> [--profile P]
 agentio telegram outbox list [--profile P] [--status pending|sent|failed]
 ```
 
-**Note**: `--profile` defaults to the service's default profile if not specified.
+**Notes**:
+- `--profile` defaults to the service's default profile if not specified
+- `inbox reply` auto-infers conversation from the inbox message (no `--to` needed)
+- `inbox reply` also marks the message as done (implicit ack)
 
 **Behavior**:
 - `send` commands push to outbox, return immediately with queue ID
+- `inbox reply` looks up the inbox message, extracts conversation_id, queues reply
 - Gateway processes outbox asynchronously
 - CLI polls `{service} outbox status` to check delivery
 
@@ -396,8 +416,6 @@ agentio whatsapp outbox list --profile pierre --status failed
 ## Future Considerations
 
 1. **TLS** - HTTPS support for gateway API
-2. **Message Retention** - Auto-cleanup of old processed messages
-3. **Attachments** - Download and store media files locally
-4. **Rate Limiting** - Per-conversation send rate limits
-5. **Metrics** - Prometheus endpoint for monitoring
-6. **Clustering** - Multiple gateway instances with shared store
+2. **Rate Limiting** - Per-conversation send rate limits
+3. **Metrics** - Prometheus endpoint for monitoring
+4. **Clustering** - Multiple gateway instances with shared store
