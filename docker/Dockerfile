@@ -27,9 +27,9 @@ RUN CF_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") && \
     -o /usr/local/bin/cloudflared && \
     chmod +x /usr/local/bin/cloudflared
 
-# Create non-root user
-RUN addgroup -g 1000 agentio \
-    && adduser -u 1000 -G agentio -h /home/agentio -D agentio
+# Create non-root user (use different IDs to avoid conflicts with base image)
+RUN addgroup -g 1001 agentio \
+    && adduser -u 1001 -G agentio -h /home/agentio -D agentio
 
 # Set up directories
 RUN mkdir -p /app /data /certs \
