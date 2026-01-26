@@ -16,7 +16,7 @@
     Skip adding installation directory to PATH.
 
 .EXAMPLE
-    iwr -useb https://agentio.work/install.ps1 | iex
+    iwr -useb https://agentio.me/install.ps1 | iex
 
 .EXAMPLE
     .\install.ps1 -InstallDir "C:\tools\agentio" -Version "0.1.8"

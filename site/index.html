@@ -549,14 +549,14 @@
         </div>
         <div class="install-content active" data-content="unix">
           <div class="install-command">
-            <code>curl -LsSf https://agentio.work/install | sh</code>
-            <button class="copy-btn" onclick="copyCommand(this, 'curl -LsSf https://agentio.work/install | sh')">Copy</button>
+            <code>curl -LsSf https://agentio.me/install | sh</code>
+            <button class="copy-btn" onclick="copyCommand(this, 'curl -LsSf https://agentio.me/install | sh')">Copy</button>
           </div>
         </div>
         <div class="install-content" data-content="windows">
           <div class="install-command">
-            <code>iwr -useb https://agentio.work/install.ps1 | iex</code>
-            <button class="copy-btn" onclick="copyCommand(this, 'iwr -useb https://agentio.work/install.ps1 | iex')">Copy</button>
+            <code>iwr -useb https://agentio.me/install.ps1 | iex</code>
+            <button class="copy-btn" onclick="copyCommand(this, 'iwr -useb https://agentio.me/install.ps1 | iex')">Copy</button>
           </div>
         </div>
         <div class="update-hint">
@@ -617,7 +617,7 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: curl -LsSf https://agentio.work/install | sh
+      - run: curl -LsSf https://agentio.me/install | sh
       - run: npm install -g @anthropic-ai/claude-code
       - run: agentio config import && agentio claude install
       - run: claude -p "$(cat prompt.md)" --max-turns 30</code></pre>

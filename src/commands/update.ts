@@ -275,9 +275,9 @@ export function registerUpdateCommand(program: Command): void {
           console.error('Automatic update failed. You can update manually:');
           console.error('');
           if (os.platform() === 'win32') {
-            console.error('  iwr -useb https://agentio.work/install.ps1 | iex');
+            console.error('  iwr -useb https://agentio.me/install.ps1 | iex');
           } else {
-            console.error('  curl -LsSf https://agentio.work/install | sh');
+            console.error('  curl -LsSf https://agentio.me/install | sh');
           }
           console.error('');
           throw error;
