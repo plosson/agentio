@@ -9,22 +9,36 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
+      /* Backgrounds */
       --bg: #f8f9fa;
       --surface: #ffffff;
+      --code-bg: #f6f8fa;
+
+      /* Borders */
+      --border: #d1d9e0;
+      --border-light: #e8ecf0;
+
+      /* Text */
       --text: #1f2328;
       --text-secondary: #656d76;
       --text-muted: #8b949e;
-      --border: #d1d9e0;
-      --border-light: #e8ecf0;
+
+      /* Accent */
       --accent: #0969da;
-      --code-bg: #f6f8fa;
+      --accent-hover: #0860ca;
+      --accent-bg: #ddf4ff;
+
+      /* Layout */
+      --radius: 8px;
+      --radius-lg: 12px;
+      --transition: 0.15s ease;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      line-height: 1.7;
+      line-height: 1.6;
       color: var(--text);
       background: var(--bg);
       -webkit-font-smoothing: antialiased;
@@ -43,7 +57,8 @@
     .back a {
       color: var(--text-secondary);
       text-decoration: none;
-      font-size: 0.9rem;
+      font-size: 0.875rem;
+      transition: color var(--transition);
     }
 
     .back a:hover {
@@ -65,7 +80,7 @@
 
     .updated {
       color: var(--text-muted);
-      font-size: 0.85rem;
+      font-size: 0.8125rem;
     }
 
     section {
@@ -73,14 +88,14 @@
     }
 
     h2 {
-      font-size: 1.1rem;
+      font-size: 1.125rem;
       font-weight: 600;
       margin-bottom: 16px;
       color: var(--text);
     }
 
     h3 {
-      font-size: 0.95rem;
+      font-size: 1rem;
       font-weight: 600;
       margin: 24px 0 12px;
       color: var(--text-secondary);
@@ -89,7 +104,7 @@
     p {
       color: var(--text-secondary);
       margin-bottom: 16px;
-      font-size: 0.95rem;
+      font-size: 0.875rem;
     }
 
     ul {
@@ -102,7 +117,7 @@
       padding-left: 18px;
       margin-bottom: 8px;
       color: var(--text-secondary);
-      font-size: 0.95rem;
+      font-size: 0.875rem;
     }
 
     li::before {
@@ -122,7 +137,7 @@
       background: var(--code-bg);
       padding: 2px 6px;
       border-radius: 4px;
-      font-size: 0.85rem;
+      font-size: 0.8125rem;
       border: 1px solid var(--border-light);
     }
 
