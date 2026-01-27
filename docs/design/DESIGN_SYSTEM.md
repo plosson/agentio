@@ -1,8 +1,6 @@
-# Me Inc. Design System
+# Design System
 
-This document contains the design guidelines, colors, typography, and component patterns for Me Inc. Use this as a reference when building new features or modifying existing UI to maintain visual consistency.
-
-The **Alpine theme** (located in `worker/public/alpine/`) serves as the reference implementation for this design system. All patterns and examples in this document are taken from the Alpine theme.
+This document defines the design tokens, component patterns, and visual guidelines for building consistent user interfaces. Use this as the single source of truth when implementing UI components.
 
 ---
 
@@ -10,7 +8,7 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
 
 ### Font Families
 - **Primary (Sans-serif):** `IBM Plex Sans` - Used for all body text and UI elements
-- **Monospace:** `IBM Plex Mono` - Used for code, technical identifiers, cron expressions, and log output
+- **Monospace:** `IBM Plex Mono` - Used for code, technical identifiers, and log output
 
 **CDN Import:**
 ```css
@@ -74,10 +72,17 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
   --warning-bg: #fff8c5;
   --error: #cf222e;
   --error-bg: #ffebe9;
+
+  /* Layout */
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow: 0 1px 3px rgba(31, 35, 40, 0.04);
+  --shadow-md: 0 3px 6px rgba(31, 35, 40, 0.08);
+  --transition: 0.15s ease;
 }
 ```
 
-### Dark Mode (via `skins/dark.css`)
+### Dark Mode
 ```css
 :root {
   --bg: #0d1117;
@@ -97,13 +102,9 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
   --error: #f85149;
   --error-bg: rgba(248, 81, 73, 0.15);
   --code-bg: #0d1117;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 3px 6px rgba(0, 0, 0, 0.4);
 }
-```
-
-### Shadows
-```css
---shadow: 0 1px 3px rgba(31, 35, 40, 0.04);     /* Subtle elevation */
---shadow-md: 0 3px 6px rgba(31, 35, 40, 0.08); /* Dropdowns, modals */
 ```
 
 ---
@@ -120,23 +121,26 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
 | `50%` | - | Avatars, circular elements |
 
 ### Spacing Scale
-- 0.25rem (4px) - Tight gaps
-- 0.5rem (8px) - Small gaps, badge padding
-- 0.75rem (12px) - Card meta gaps
-- 1rem (16px) - Section spacing, card padding
-- 1.5rem (24px) - Large section spacing
-- 2rem (32px) - Main content padding
-- 3rem (48px) - Empty state padding
-- 4rem (64px) - Main vertical padding
+| Token | Value | Usage |
+|-------|-------|-------|
+| `0.25rem` | 4px | Tight gaps, badge internal spacing |
+| `0.5rem` | 8px | Small gaps, icon-text spacing |
+| `0.75rem` | 12px | Card meta gaps |
+| `1rem` | 16px | Section spacing, standard padding |
+| `1.25rem` | 20px | Card padding |
+| `1.5rem` | 24px | Large section spacing |
+| `2rem` | 32px | Main content padding |
+| `3rem` | 48px | Empty state padding |
+| `4rem` | 64px | Main vertical padding |
 
 ### Layout Structure
 
-#### Standard Page (Dashboard)
+#### Standard Page Layout
 ```
 ┌─────────────────────────────────────────────────┐
 │  Header (64px height, sticky)                   │
 │  ┌─────────────────────────────────────────┐    │
-│  │ Logo │ Workspace Selector │ User Menu   │    │
+│  │ Logo │ Navigation │ User Menu           │    │
 │  └─────────────────────────────────────────┘    │
 ├─────────────────────────────────────────────────┤
 │  Main Content (.container max-width: 900px)     │
@@ -145,28 +149,26 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
 └─────────────────────────────────────────────────┘
 ```
 
-#### Workspace/Agent Page (Sidebar Layout)
+#### Sidebar Layout
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  Header (64px height, sticky)                            │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │ Hamburger │ Logo │ Workspace Selector │ User Menu  │  │
+│  │ Hamburger │ Logo │ Navigation │ User Menu          │  │
 │  └────────────────────────────────────────────────────┘  │
 ├──────────────┬───────────────────────────────────────────┤
-│  Sidebar     │  Main Content (.app-main)                 │
+│  Sidebar     │  Main Content                             │
 │  (240px)     │  max-width: 800px                         │
 │  ┌────────┐  │  ┌───────────────────────────────────┐    │
-│  │ Agents │  │  │ Page header + actions             │    │
-│  │ ─────  │  │  ├───────────────────────────────────┤    │
-│  │ Item 1 │  │  │ Content cards                     │    │
+│  │ Nav    │  │  │ Page header + actions             │    │
+│  │ Group  │  │  ├───────────────────────────────────┤    │
+│  │ ─────  │  │  │ Content                           │    │
+│  │ Item 1 │  │  │                                   │    │
 │  │ Item 2 │  │  │                                   │    │
 │  │ + Add  │  │  │                                   │    │
 │  ├────────┤  │  │                                   │    │
-│  │ Tools  │  │  └───────────────────────────────────┘    │
-│  │ ─────  │  │                                           │
-│  │ History│  │                                           │
-│  │ Secrets│  │                                           │
-│  │ etc.   │  │                                           │
+│  │ Nav    │  │  └───────────────────────────────────┘    │
+│  │ Group  │  │                                           │
 │  └────────┘  │                                           │
 └──────────────┴───────────────────────────────────────────┘
 ```
@@ -176,7 +178,7 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
 |---------|------|
 | Header height | 64px (56px on mobile) |
 | Sidebar width | 240px |
-| Container max-width | 900px (dashboard), 800px (app-main) |
+| Container max-width | 900px (standard), 800px (with sidebar) |
 | Button height | ~38px (padding-based) |
 | Input height | ~38px (padding-based) |
 | Card padding | 1.25rem (20px) |
@@ -186,70 +188,41 @@ The **Alpine theme** (located in `worker/public/alpine/`) serves as the referenc
 ## 4. Icons
 
 ### Icon Approach
-Me Inc. uses **inline SVG icons** rather than an icon font library. Icons are embedded directly in HTML with `viewBox="0 0 16 16"` or `viewBox="0 0 24 24"`.
+Use **inline SVG icons** rather than an icon font library. Icons are embedded directly in HTML with consistent viewBox dimensions.
 
 ### Icon Sizing
 ```html
 <!-- 16x16 (small, inline with text) -->
 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">...</svg>
 
-<!-- 24x24 (logo, hamburger menu) -->
+<!-- 24x24 (larger icons, logo) -->
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">...</svg>
 ```
 
 ### Common Icons
 | Usage | Description |
 |-------|-------------|
-| Logo | Stacked layers (stroke-based) |
 | Chevron down | Dropdown indicators |
 | Plus | Add/create actions |
-| Play | Run action |
+| Play | Run/execute action |
 | Pencil | Edit action |
 | Trash | Delete action |
 | Hamburger | Mobile menu toggle |
 | External link | External navigation |
 | Caret right | Expandable items |
+| X / Close | Dismiss, close modal |
+| Check | Success, confirmation |
 
 ### Icon Style Guidelines
 - Use `fill="currentColor"` to inherit text color
 - Stroke icons use `stroke="currentColor"` with `stroke-width="2"`
-- Icons in buttons should have 0.5rem gap from text
+- Icons in buttons should have `0.5rem` gap from text
 - Sidebar icons: 16x16
 - Button icons: 16x16 or 14x14
 
 ---
 
-## 5. Logo
-
-The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
-
-```html
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-</svg>
-```
-
-### Logo Usage
-- Header: 28x28px with "Me Inc." text
-- Text follows immediately after icon with 0.5rem gap
-- Logo links to dashboard (`dashboard.html`)
-
-### Logo + Title Style
-```css
-.header-logo {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 600;
-  font-size: 1.125rem;
-  color: var(--text);
-  text-decoration: none;
-}
-```
-
----
-
-## 6. Component Styles
+## 5. Components
 
 ### Buttons
 
@@ -276,12 +249,52 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--transition);
+  text-decoration: none;
 }
 
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.btn:hover { text-decoration: none; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--code-bg);
+  border-color: var(--text-muted);
+}
+
+.btn-danger {
+  background: var(--surface);
+  color: var(--error);
+  border-color: var(--border);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--error-bg);
+  border-color: var(--error);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+  padding: 0.5rem 0.75rem;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--code-bg);
+  color: var(--text);
 }
 ```
 
@@ -291,6 +304,13 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
 | Default | `.btn` | 0.625rem 1rem |
 | Small | `.btn-sm` | 0.375rem 0.625rem |
 | Icon only | `.btn-icon` | 0.5rem |
+
+```css
+.btn-sm { padding: 0.375rem 0.625rem; font-size: 0.8125rem; }
+.btn-icon { padding: 0.5rem; }
+```
+
+---
 
 ### Form Inputs
 
@@ -305,13 +325,19 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: all 0.15s ease;
+  transition: all var(--transition);
 }
 
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.form-textarea {
+  font-family: 'IBM Plex Mono', monospace;
+  resize: vertical;
+  min-height: 120px;
 }
 ```
 
@@ -334,6 +360,8 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
 }
 ```
 
+---
+
 ### Cards
 
 ```css
@@ -342,9 +370,15 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 1.25rem;
-  transition: all 0.15s ease;
+  transition: all var(--transition);
 }
 
+.card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.card-link:hover { text-decoration: none; }
 .card-link:hover .card {
   border-color: var(--accent);
   box-shadow: var(--shadow-md);
@@ -372,6 +406,8 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
 }
 ```
 
+---
+
 ### Status Badges
 
 ```css
@@ -391,6 +427,8 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
 .badge-neutral { background: var(--code-bg); color: var(--text-secondary); }
 ```
 
+---
+
 ### Sidebar
 
 ```css
@@ -405,6 +443,14 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   position: sticky;
   top: 64px;
   height: calc(100vh - 64px);
+}
+
+.sidebar-section {
+  padding: 1rem 0;
+}
+
+.sidebar-section:not(:last-child) {
+  border-bottom: 1px solid var(--border-light);
 }
 
 .sidebar-header {
@@ -423,12 +469,19 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   padding: 0.5rem 1rem 0.5rem 1.5rem;
   font-size: 0.875rem;
   color: var(--text-secondary);
-  transition: all 0.15s ease;
+  text-decoration: none;
+  transition: all var(--transition);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
 }
 
 .sidebar-item:hover {
   background: var(--code-bg);
   color: var(--text);
+  text-decoration: none;
 }
 
 .sidebar-item.active {
@@ -436,7 +489,15 @@ The Me Inc. logo is a simple stroke-based SVG depicting stacked layers:
   color: var(--accent);
   font-weight: 500;
 }
+
+.sidebar-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
 ```
+
+---
 
 ### Tables
 
@@ -469,10 +530,13 @@ th {
   letter-spacing: 0.025em;
 }
 
+tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--code-bg); }
 ```
 
-### Banners/Alerts
+---
+
+### Banners / Alerts
 
 ```css
 .banner {
@@ -497,7 +561,15 @@ tr:hover td { background: var(--code-bg); }
   color: var(--accent);
   border: 1px solid #80ccff;
 }
+
+.banner-error {
+  background: var(--error-bg);
+  color: var(--error);
+  border: 1px solid var(--error);
+}
 ```
+
+---
 
 ### Toast Notifications
 
@@ -527,6 +599,8 @@ tr:hover td { background: var(--code-bg); }
 .toast.success { background: var(--success); }
 ```
 
+---
+
 ### Modals
 
 ```css
@@ -538,6 +612,14 @@ tr:hover td { background: var(--code-bg); }
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.modal-overlay.visible {
+  opacity: 1;
+  visibility: visible;
 }
 
 .modal {
@@ -546,6 +628,12 @@ tr:hover td { background: var(--code-bg); }
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  transform: scale(0.95);
+  transition: transform 0.2s ease;
+}
+
+.modal-overlay.visible .modal {
+  transform: scale(1);
 }
 
 .modal-header {
@@ -556,7 +644,22 @@ tr:hover td { background: var(--code-bg); }
   border-bottom: 1px solid var(--border);
 }
 
-.modal-body { padding: 1.25rem; }
+.modal-header h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 1.25rem;
+}
+
+.modal-body p {
+  margin-bottom: 0.5rem;
+}
+.modal-body p:last-child {
+  margin-bottom: 0;
+}
 
 .modal-footer {
   display: flex;
@@ -576,28 +679,77 @@ tr:hover td { background: var(--code-bg); }
   max-width: 1200px;
   background: var(--surface);
   border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
 }
 
+.modal-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
 .modal-editor-textarea {
   flex: 1;
+  width: 100%;
   padding: 1.25rem;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.9375rem;
   line-height: 1.6;
+  color: var(--text);
+  background: var(--surface);
   border: none;
   resize: none;
   outline: none;
 }
+
+.modal-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
 ```
+
+---
 
 ### Dropdowns
 
 ```css
-.workspace-dropdown, .user-menu {
+.dropdown {
+  position: relative;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.dropdown-trigger:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.dropdown-menu {
   position: absolute;
   top: calc(100% + 4px);
+  left: 0;
+  right: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -605,30 +757,44 @@ tr:hover td { background: var(--code-bg); }
   max-height: 300px;
   overflow-y: auto;
   display: none;
+  z-index: 100;
 }
 
-.workspace-dropdown.open, .user-menu.open {
+.dropdown-menu.open {
   display: block;
 }
 
-.workspace-option, .user-menu-item {
+.dropdown-item {
   display: block;
   padding: 0.625rem 0.75rem;
   font-size: 0.875rem;
   color: var(--text);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--transition);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
 }
 
-.workspace-option:hover, .user-menu-item:hover {
+.dropdown-item:hover {
   background: var(--code-bg);
+  text-decoration: none;
 }
 
-.workspace-option.active, .user-menu-item.active {
+.dropdown-item.active {
   background: var(--accent-bg);
   color: var(--accent);
 }
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 0.25rem 0;
+}
 ```
+
+---
 
 ### Empty States
 
@@ -643,6 +809,8 @@ tr:hover td { background: var(--code-bg); }
   margin-bottom: 1rem;
 }
 ```
+
+---
 
 ### Loading States
 
@@ -669,7 +837,7 @@ tr:hover td { background: var(--code-bg); }
 
 ---
 
-## 7. Animations
+## 6. Animations
 
 ### Transitions
 Default transition: `0.15s ease` (stored in `--transition`)
@@ -690,31 +858,6 @@ Used for:
 }
 ```
 
-### Modal Transitions
-```css
-/* Modal fade in */
-.modal-overlay {
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
-}
-
-.modal-overlay.visible {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* Modal scale in */
-.modal-editor {
-  transform: scale(0.95);
-  transition: transform 0.2s ease;
-}
-
-.modal-overlay.visible .modal-editor {
-  transform: scale(1);
-}
-```
-
 ### Toast Animation
 ```css
 .toast {
@@ -731,7 +874,7 @@ Used for:
 
 ---
 
-## 8. UI Patterns
+## 7. UI Patterns
 
 ### Section Headers
 Used to introduce content sections with optional actions:
@@ -742,11 +885,28 @@ Used to introduce content sections with optional actions:
 </div>
 ```
 
+```css
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+```
+
 ### Grid Layouts
 ```css
 .grid { display: grid; gap: 1rem; }
 .grid-2 { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .stack { display: flex; flex-direction: column; gap: 1rem; }
+.stack-sm { gap: 0.5rem; }
+.stack-lg { gap: 1.5rem; }
 ```
 
 ### Danger Zone
@@ -761,6 +921,12 @@ Destructive actions are placed in a visually distinct section:
 .danger-zone h4 {
   color: var(--error);
   margin-bottom: 0.5rem;
+}
+
+.danger-zone p {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
 }
 ```
 
@@ -786,82 +952,81 @@ Editable fields show a pencil icon on hover and switch to input mode on click:
 Action button with dropdown for additional options:
 ```html
 <div class="action-dropdown">
-  <button class="btn btn-primary" style="border-radius: ... 0 0 ...;">
-    Run
+  <button class="btn btn-primary" style="border-top-right-radius: 0; border-bottom-right-radius: 0;">
+    Primary Action
   </button>
-  <button class="btn btn-primary" style="border-radius: 0 ... ... 0;">
-    <svg><!-- chevron --></svg>
+  <button class="btn btn-primary" style="border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255,255,255,0.2);">
+    <svg><!-- chevron down --></svg>
   </button>
-  <div class="action-menu">
-    <button>Run</button>
-    <button>Onboard</button>
+  <div class="dropdown-menu">
+    <button class="dropdown-item">Option 1</button>
+    <button class="dropdown-item">Option 2</button>
   </div>
 </div>
 ```
 
 ---
 
-## 9. Skin System
+## 8. Theming
 
-Me Inc. supports visual theming through a skin system. Skins are CSS files that override the root CSS variables.
+### Theme Implementation
+Themes are implemented by overriding CSS custom properties in `:root`. Create separate CSS files for each theme that override the default values.
 
-### Skin Location
-Skins are stored in `worker/public/alpine/skins/`:
-- `dark.css` - Dark mode theme
-- `clean-corporate-clean.css`
-- `clean-modern-saas-minimal.css`
-- `bold-neo-brutalist.css`
-- etc.
-
-### Screenshots
-Each skin has a corresponding screenshot in `skins/screenshots/` for the skin picker UI.
-
-### How Skins Work
-Skins are loaded dynamically and override `:root` CSS variables:
-```javascript
-// From common.js
-MeInc.skin.set('dark');  // Loads skins/dark.css
-MeInc.skin.set('');      // Removes skin, returns to default
+### Example Theme File
+```css
+/* dark-theme.css */
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --border-light: #21262d;
+  --text: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --accent-bg: rgba(56, 139, 253, 0.15);
+  --success: #3fb950;
+  --success-bg: rgba(46, 160, 67, 0.15);
+  --warning: #d29922;
+  --warning-bg: rgba(187, 128, 9, 0.15);
+  --error: #f85149;
+  --error-bg: rgba(248, 81, 73, 0.15);
+  --code-bg: #0d1117;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 3px 6px rgba(0, 0, 0, 0.4);
+}
 ```
 
-### Creating a New Skin
-1. Create a CSS file in `worker/public/alpine/skins/`
-2. Override the `:root` variables
-3. Add a screenshot to `skins/screenshots/`
-4. Register in `skins.html`
+### Loading Themes Dynamically
+```javascript
+function setTheme(themeId) {
+  // Remove existing theme
+  const existing = document.getElementById('theme-stylesheet');
+  if (existing) existing.remove();
 
-Example skin structure:
-```css
-/* my-skin.css */
-:root {
-  --bg: #...;
-  --surface: #...;
-  --border: #...;
-  /* ... override all variables ... */
+  // Apply new theme
+  if (themeId) {
+    const link = document.createElement('link');
+    link.id = 'theme-stylesheet';
+    link.rel = 'stylesheet';
+    link.href = `themes/${themeId}.css`;
+    document.head.appendChild(link);
+  }
+
+  // Persist preference
+  localStorage.setItem('theme', themeId);
 }
 ```
 
 ---
 
-## 10. Tech Stack Reference
-
-| Category | Technology |
-|----------|------------|
-| Runtime | Cloudflare Workers |
-| Framework | Alpine.js 3.x |
-| Styling | Vanilla CSS (custom properties) |
-| Fonts | IBM Plex Sans, IBM Plex Mono (Google Fonts) |
-| Icons | Inline SVG |
-| Build | No build step (static files) |
-
----
-
-## 11. Responsive Design
+## 9. Responsive Design
 
 ### Breakpoints
 | Breakpoint | Width | Changes |
 |------------|-------|---------|
-| Mobile | < 640px | Header shrinks, username hidden |
+| Mobile | < 640px | Header shrinks, usernames hidden |
 | Tablet | < 768px | Sidebar becomes overlay, hamburger visible |
 | Desktop | >= 768px | Full layout with sticky sidebar |
 
@@ -872,28 +1037,72 @@ Example skin structure:
 
   .app-sidebar {
     position: fixed;
-    transform: translateX(-100%);
+    top: 0;
+    left: 0;
+    bottom: 0;
     z-index: 160;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    height: 100vh;
   }
 
   .app-sidebar.open {
     transform: translateX(0);
   }
 
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 150;
+  }
+
   .sidebar-overlay.visible {
     display: block;
+  }
+
+  .app-main {
+    padding: 1.5rem 1rem;
   }
 }
 
 @media (max-width: 640px) {
   .header-main { height: 56px; }
   .user-trigger span { display: none; }
-  .workspace-trigger span {
+
+  .dropdown-trigger span {
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
+```
+
+---
+
+## 10. Utility Classes
+
+```css
+/* Text colors */
+.text-muted { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+
+/* Text sizes */
+.text-sm { font-size: 0.875rem; }
+.text-xs { font-size: 0.8125rem; }
+
+/* Font */
+.font-mono { font-family: 'IBM Plex Mono', monospace; }
+
+/* Margins */
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-3 { margin-bottom: 1.5rem; }
 ```
 
 ---
@@ -905,7 +1114,7 @@ Example skin structure:
 ```html
 <!-- Primary button with icon -->
 <button class="btn btn-primary">
-  <svg>...</svg>
+  <svg width="16" height="16">...</svg>
   Create
 </button>
 
@@ -913,9 +1122,9 @@ Example skin structure:
 <a href="..." class="card-link">
   <div class="card">
     <div class="card-title">Title</div>
-    <div class="card-description">Description</div>
+    <div class="card-description">Description text</div>
     <div class="card-meta">
-      <span class="badge badge-neutral">v1.0.0</span>
+      <span class="badge badge-neutral">Tag</span>
     </div>
   </div>
 </a>
@@ -932,20 +1141,45 @@ Example skin structure:
 
 <!-- Section with header and action -->
 <div class="section-header">
-  <h2>Agents</h2>
-  <button class="btn btn-primary btn-sm">New Agent</button>
+  <h2>Section Title</h2>
+  <button class="btn btn-primary btn-sm">New Item</button>
 </div>
-```
 
-### Utility Classes
-```css
-.text-muted    /* var(--text-muted) */
-.text-secondary /* var(--text-secondary) */
-.text-sm       /* 0.875rem */
-.text-xs       /* 0.8125rem */
-.font-mono     /* IBM Plex Mono */
-.mt-1, .mt-2, .mt-3  /* margin-top: 0.5rem, 1rem, 1.5rem */
-.mb-1, .mb-2, .mb-3  /* margin-bottom: 0.5rem, 1rem, 1.5rem */
+<!-- Sidebar navigation item -->
+<a href="..." class="sidebar-item active">
+  <svg width="16" height="16">...</svg>
+  <span>Navigation Item</span>
+</a>
+
+<!-- Table -->
+<div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Column 1</th>
+        <th>Column 2</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Value 1</td>
+        <td>Value 2</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Banner -->
+<div class="banner banner-warning">
+  <span>Warning message here</span>
+  <button class="btn btn-sm">Action</button>
+</div>
+
+<!-- Empty state -->
+<div class="empty-state">
+  <p>No items found.</p>
+  <button class="btn btn-primary">Create First Item</button>
+</div>
 ```
 
 ---

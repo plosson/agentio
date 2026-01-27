@@ -2,26 +2,29 @@
 // Polyfills must be imported first (before any code that uses protobufjs)
 import './polyfills';
 import { Command } from 'commander';
-import { registerGmailCommands } from './commands/gmail';
+// Services (alphabetical)
+import { registerDiscourseCommands } from './commands/discourse';
+import { registerGCalCommands } from './commands/gcal';
+import { registerGChatCommands } from './commands/gchat';
 import { registerGDocsCommands } from './commands/gdocs';
 import { registerGDriveCommands } from './commands/gdrive';
-import { registerGCalCommands } from './commands/gcal';
-import { registerGTasksCommands } from './commands/gtasks';
-import { registerTelegramCommands } from './commands/telegram';
-import { registerGChatCommands } from './commands/gchat';
 import { registerGitHubCommands } from './commands/github';
+import { registerGmailCommands } from './commands/gmail';
+import { registerGTasksCommands } from './commands/gtasks';
 import { registerJiraCommands } from './commands/jira';
-import { registerSlackCommands } from './commands/slack';
 import { registerRssCommands } from './commands/rss';
-import { registerDiscourseCommands } from './commands/discourse';
+import { registerSlackCommands } from './commands/slack';
 import { registerSqlCommands } from './commands/sql';
-import { registerUpdateCommand } from './commands/update';
-import { registerConfigCommands } from './commands/config';
+import { registerTelegramCommands } from './commands/telegram';
+import { registerWhatsAppCommands } from './commands/whatsapp';
+
+// Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
-import { registerStatusCommand } from './commands/status';
+import { registerConfigCommands } from './commands/config';
 import { registerDocsCommand } from './commands/docs';
 import { registerGatewayCommands } from './commands/gateway';
-import { registerWhatsAppCommands } from './commands/whatsapp';
+import { registerStatusCommand } from './commands/status';
+import { registerUpdateCommand } from './commands/update';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -40,25 +43,28 @@ program
   .description('CLI for LLM agents to interact with communication and tracking services')
   .version(getVersion());
 
-registerGmailCommands(program);
+// Services (alphabetical)
+registerDiscourseCommands(program);
+registerGCalCommands(program);
+registerGChatCommands(program);
 registerGDocsCommands(program);
 registerGDriveCommands(program);
-registerGCalCommands(program);
-registerGTasksCommands(program);
-registerTelegramCommands(program);
-registerGChatCommands(program);
 registerGitHubCommands(program);
+registerGmailCommands(program);
+registerGTasksCommands(program);
 registerJiraCommands(program);
-registerSlackCommands(program);
 registerRssCommands(program);
-registerDiscourseCommands(program);
+registerSlackCommands(program);
 registerSqlCommands(program);
-registerUpdateCommand(program);
-registerConfigCommands(program);
+registerTelegramCommands(program);
+registerWhatsAppCommands(program);
+
+// Agentio utilities
 registerClaudeCommands(program);
-registerStatusCommand(program);
+registerConfigCommands(program);
 registerDocsCommand(program);
 registerGatewayCommands(program);
-registerWhatsAppCommands(program);
+registerStatusCommand(program);
+registerUpdateCommand(program);
 
 program.parse();
