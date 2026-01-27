@@ -39,16 +39,22 @@ const GCAL_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
 ];
 
-const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal', string[]> = {
+const GTASKS_SCOPES = [
+  'https://www.googleapis.com/auth/tasks',              // full access to tasks
+  'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
+];
+
+const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks', string[]> = {
   gmail: GMAIL_SCOPES,
   gchat: GCHAT_SCOPES,
   gdocs: GDOCS_SCOPES,
   'gdrive-readonly': GDRIVE_READONLY_SCOPES,
   'gdrive-full': GDRIVE_FULL_SCOPES,
   gcal: GCAL_SCOPES,
+  gtasks: GTASKS_SCOPES,
 };
 
-export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal';
+export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks';
 
 export async function performOAuthFlow(
   service: OAuthService

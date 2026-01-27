@@ -8,6 +8,7 @@ import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
 import { GDriveClient } from '../services/gdrive/client';
 import { GCalClient } from '../services/gcal/client';
+import { GTasksClient } from '../services/gtasks/client';
 import { GitHubClient } from '../services/github/client';
 import { JiraClient } from '../services/jira/client';
 import { GChatClient } from '../services/gchat/client';
@@ -23,6 +24,7 @@ import type { JiraCredentials } from '../types/jira';
 import type { GDocsCredentials } from '../types/gdocs';
 import type { GDriveCredentials } from '../types/gdrive';
 import type { GCalCredentials } from '../types/gcal';
+import type { GTasksCredentials } from '../types/gtasks';
 import type { GChatCredentials } from '../types/gchat';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
@@ -74,6 +76,18 @@ async function createServiceClient(
         scope: creds.scope,
       });
       return new GCalClient(auth);
+    }
+
+    case 'gtasks': {
+      const creds = credentials as GTasksCredentials;
+      const auth = createGoogleAuth({
+        access_token: creds.access_token,
+        refresh_token: creds.refresh_token,
+        expiry_date: creds.expiry_date,
+        token_type: creds.token_type || 'Bearer',
+        scope: creds.scope,
+      });
+      return new GTasksClient(auth);
     }
 
     case 'telegram': {
