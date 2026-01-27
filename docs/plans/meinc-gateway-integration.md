@@ -17,7 +17,7 @@ This plan describes how **meinc** (the agent orchestration platform) integrates 
 - **meinc**: Dedicated server (Bun/Node) running alongside agentio gateway
 - **Trigger**: Real-time messages via webhook from gateway
 - **Execution**: Local Claude Code execution with sub-second latency
-- **Storage**: Conversations stored in git (workspace repo)
+- **Storage**: Full Claude Code sessions stored in git (workspace repo)
 
 ## Architecture
 
@@ -81,11 +81,12 @@ This plan describes how **meinc** (the agent orchestration platform) integrates 
 2. **Workspace = Git Repo** - Each workspace is a cloned GitHub repository
 3. **Claude Does the Work** - meinc is thin orchestration; Claude handles conversation logic
 4. **Localhost Communication** - Gateway and meinc communicate via localhost webhook
-5. **No New Storage** - Conversations stored as markdown files in git, not a database
+5. **No New Storage** - Sessions stored in git, not a database
+6. **Full Session Continuity** - Claude resumes with complete history (thinking, tool calls, reasoning)
 
 ## Workspace Structure
 
-Each workspace (git repo) gains a `conversations/` directory:
+Each workspace (git repo) stores full Claude Code sessions:
 
 ```
 workspace-repo/
@@ -95,20 +96,117 @@ workspace-repo/
 │       ├── meinc.json            # Agent config (triggers, etc.)
 │       └── prompt.md             # Agent system prompt
 │
-├── conversations/                # NEW: Message history
+├── sessions/                     # Full Claude Code sessions (NEW)
 │   ├── whatsapp/
-│   │   ├── +1234567890.md        # Conversation with this sender
-│   │   └── +0987654321.md
+│   │   ├── +1234567890/
+│   │   │   ├── session.jsonl     # Full Claude Code transcript
+│   │   │   └── metadata.json     # Session ID, last activity
+│   │   └── +0987654321/
+│   │       └── ...
 │   └── telegram/
-│       └── @username.md
+│       └── @username/
+│           └── ...
+│
+├── conversations/                # Human-readable logs (optional, derived)
+│   └── whatsapp/
+│       └── +1234567890.md        # Markdown summary for review
 │
 └── .github/workflows/
     └── ...                       # Existing scheduled workflows
 ```
 
-## Conversation File Format
+## Session Storage: The Key Insight
 
-Each conversation is a single markdown file, appended to over time:
+**Why store full sessions instead of just conversation logs?**
+
+### Conversation Log (Limited)
+
+```
+User: What's on my calendar?
+Claude: You have 3 meetings...
+```
+
+Claude only sees text. It loses context of *how* it answered.
+
+### Full Session (Complete)
+
+```jsonl
+{"type":"user","content":"What's on my calendar?"}
+{"type":"thinking","content":"Let me check the calendar using agentio..."}
+{"type":"tool_use","name":"bash","input":"agentio gcal events --date today"}
+{"type":"tool_result","output":"10:00 Team standup\n14:00 Product review\n16:00 1:1 with Sarah"}
+{"type":"thinking","content":"I found 3 meetings. Let me format this nicely..."}
+{"type":"assistant","content":"You have 3 meetings today:\n- 10:00 AM: Team standup\n- 2:00 PM: Product review\n- 4:00 PM: 1:1 with Sarah"}
+```
+
+Claude remembers *everything*:
+- Its reasoning process
+- What tools it called
+- What results it got
+- Failed attempts and learnings
+- Full context for follow-up questions
+
+### Benefits
+
+- **True continuity**: Claude doesn't repeat mistakes or forget discoveries
+- **Contextual responses**: "Last time I checked your calendar..." is possible
+- **Portable**: Move meinc to new server, sessions come with it (they're in git)
+- **Auditable**: Full trace of what Claude did and why
+- **Resumable**: `claude --resume session-id` works with full history
+
+## Claude Code Session Management
+
+### How Sessions Work
+
+Claude Code stores sessions as JSONL files in `~/.claude/projects/<project>/`.
+
+Key CLI features:
+```bash
+claude --resume          # Interactive session picker
+claude --resume name     # Resume specific session by name
+claude -c                # Continue most recent session
+```
+
+### Session Sync Strategy
+
+After each Claude run, sync session to git:
+
+```bash
+# Copy session from Claude's storage to workspace
+cp ~/.claude/projects/workspace/sessions/john-whatsapp.jsonl \
+   workspace/sessions/whatsapp/+1234567890/session.jsonl
+
+# Commit
+git add sessions/ && git commit -m "[meinc] Session: John"
+git push
+```
+
+On new machine, restore:
+
+```bash
+# Clone workspace
+git clone repo workspace
+
+# Restore sessions to Claude's storage
+mkdir -p ~/.claude/projects/workspace/sessions/
+cp workspace/sessions/whatsapp/+1234567890/session.jsonl \
+   ~/.claude/projects/workspace/sessions/john-whatsapp.jsonl
+```
+
+### Session Naming Convention
+
+```
+{service}-{sender-handle}
+
+Examples:
+- whatsapp-+1234567890
+- telegram-@alice
+- slack-U12345678
+```
+
+## Human-Readable Logs (Optional)
+
+For easy review, also generate markdown summaries:
 
 `conversations/whatsapp/+1234567890.md`:
 
@@ -116,14 +214,13 @@ Each conversation is a single markdown file, appended to over time:
 # Conversation: John (+1234567890)
 
 Started: 2026-01-27
+Session: whatsapp-+1234567890
 
 ---
 
 ## 2026-01-27 14:30:52 [incoming]
 
 What's on my calendar today?
-
----
 
 ## 2026-01-27 14:30:58 [response]
 
@@ -132,28 +229,24 @@ You have 3 meetings today:
 - 2:00 PM: Product review
 - 4:00 PM: 1:1 with Sarah
 
+*[Claude checked calendar via agentio gcal events]*
+
 ---
 
 ## 2026-01-27 14:35:12 [incoming]
 
 Cancel the 4pm
 
----
-
 ## 2026-01-27 14:35:18 [response]
 
 Done. I've cancelled your 4:00 PM 1:1 with Sarah and notified her via email.
 
+*[Claude ran: agentio gcal delete <event-id>, agentio gmail send ...]*
+
 ---
 ```
 
-### Benefits
-
-- Human-readable conversation history
-- Full git history for audit trail
-- Easy to review/edit in any text editor
-- Searchable via grep/git log
-- Portable (it's just files)
+These are **derived** from the session JSONL, not the source of truth.
 
 ## Agent Configuration
 
@@ -257,94 +350,175 @@ async function processMessage(msg: InboxMessage) {
 }
 ```
 
-### Step 3: Append to Conversation & Commit
+### Step 3: Handle Message with Session
 
 ```typescript
 async function handleMessage(workspace: Workspace, agent: Agent, msg: InboxMessage) {
   const workspacePath = workspace.localPath;
-  const convPath = `conversations/${msg.service}/${msg.sender.handle}.md`;
-  const fullPath = path.join(workspacePath, convPath);
+  const sessionName = `${msg.service}-${msg.sender.handle}`;
+  const sessionDir = `sessions/${msg.service}/${msg.sender.handle}`;
 
-  // Ensure directory exists
-  await fs.mkdir(path.dirname(fullPath), { recursive: true });
+  // Ensure session directory exists
+  await fs.mkdir(path.join(workspacePath, sessionDir), { recursive: true });
 
-  // Append incoming message
-  const timestamp = new Date(msg.received_at * 1000).toISOString();
-  const entry = `
----
+  // Check if session exists
+  const sessionExists = await checkSessionExists(workspacePath, sessionName);
 
-## ${timestamp} [incoming]
+  // Run Claude Code (resume or new)
+  await runClaudeCode(workspace, agent, msg, sessionName, sessionExists);
 
-${msg.content}
-`;
+  // Sync session from Claude's storage to workspace
+  await syncSessionToWorkspace(workspacePath, sessionName, sessionDir);
 
-  await fs.appendFile(fullPath, entry);
+  // Generate human-readable log (optional)
+  await generateConversationLog(workspacePath, sessionDir, msg);
 
-  // Commit
-  await exec(`git add . && git commit -m "[meinc] Incoming from ${msg.sender.name}"`, {
+  // Commit and push
+  await exec(`git add . && git commit -m "[meinc] Session: ${msg.sender.name}"`, {
     cwd: workspacePath
   });
-
-  // Run Claude Code
-  await runClaudeCode(workspace, agent, msg, convPath);
-
-  // Push changes (including Claude's response commit)
   await exec(`git push`, { cwd: workspacePath });
+}
+
+async function checkSessionExists(workspacePath: string, sessionName: string): boolean {
+  const claudeSessionPath = path.join(
+    os.homedir(),
+    '.claude/projects',
+    path.basename(workspacePath),
+    'sessions',
+    `${sessionName}.jsonl`
+  );
+  return await fs.exists(claudeSessionPath);
+}
+
+async function syncSessionToWorkspace(
+  workspacePath: string,
+  sessionName: string,
+  sessionDir: string
+) {
+  const claudeSessionPath = path.join(
+    os.homedir(),
+    '.claude/projects',
+    path.basename(workspacePath),
+    'sessions',
+    `${sessionName}.jsonl`
+  );
+  const targetPath = path.join(workspacePath, sessionDir, 'session.jsonl');
+
+  await fs.copyFile(claudeSessionPath, targetPath);
+
+  // Update metadata
+  const metadata = {
+    sessionName,
+    lastUpdated: new Date().toISOString(),
+    messageCount: await countMessages(targetPath)
+  };
+  await fs.writeFile(
+    path.join(workspacePath, sessionDir, 'metadata.json'),
+    JSON.stringify(metadata, null, 2)
+  );
 }
 ```
 
-### Step 4: Run Claude Code
+### Step 4: Run Claude Code (Resume or New)
 
 ```typescript
 async function runClaudeCode(
   workspace: Workspace,
   agent: Agent,
   msg: InboxMessage,
-  convPath: string
+  sessionName: string,
+  sessionExists: boolean
 ) {
   const agentPrompt = await fs.readFile(
     path.join(workspace.localPath, `agents/${agent.id}/prompt.md`),
     'utf-8'
   );
 
-  const systemPrompt = `
+  const messagePrompt = `
+New message from ${msg.sender.name} (${msg.sender.handle}):
+
+"${msg.content}"
+${msg.media_path ? `\nAttachment: ${msg.media_path}` : ''}
+
+Reply using: agentio ${msg.service} inbox reply ${msg.id} "<your response>"
+`;
+
+  if (sessionExists) {
+    // RESUME existing session - Claude has full history
+    await exec(
+      `claude --resume ${sessionName} -p "${escapeForShell(messagePrompt)}"`,
+      {
+        cwd: workspace.localPath,
+        timeout: 120000
+      }
+    );
+  } else {
+    // NEW session - include system prompt
+    const systemPrompt = `
 ${agentPrompt}
 
-## Current Task
+## Your Role
 
-A new message has arrived. You must:
-1. Read the conversation history from: ${convPath}
-2. Formulate an appropriate response
-3. Append your response to the conversation file in this format:
-   ---
+You are responding to messages via ${msg.service}. The user is ${msg.sender.name} (${msg.sender.handle}).
 
-   ## {timestamp} [response]
+## How to Respond
 
-   {your response}
-4. Send the response: agentio ${msg.service} inbox reply ${msg.id} "{response}"
-5. Commit your changes: git commit -am "[meinc] Response to ${msg.sender.name}"
-
-## Message Details
-
-- Service: ${msg.service}
-- Sender: ${msg.sender.name} (${msg.sender.handle})
-- Message ID: ${msg.id}
-- Content: "${msg.content}"
-${msg.media_path ? `- Attachment: ${msg.media_path}` : ''}
+1. Use agentio CLI to access calendar, email, and other services
+2. Send your response: agentio ${msg.service} inbox reply <message-id> "<response>"
+3. Keep responses concise (appropriate for ${msg.service})
 
 ## Available Tools
 
-You have access to agentio CLI for:
 - Calendar: agentio gcal events, agentio gcal create
 - Email: agentio gmail list, agentio gmail send
-- Messages: agentio ${msg.service} inbox reply
-- And more (run: agentio --help)
+- Reply: agentio ${msg.service} inbox reply
+- And more: agentio --help
 `;
 
-  await exec(`claude -p "${escapeForShell(systemPrompt)}"`, {
-    cwd: workspace.localPath,
-    timeout: 120000  // 2 minute timeout
-  });
+    await exec(
+      `claude -p "${escapeForShell(messagePrompt)}" ` +
+      `--append-system-prompt "${escapeForShell(systemPrompt)}" ` +
+      `--session ${sessionName}`,
+      {
+        cwd: workspace.localPath,
+        timeout: 120000
+      }
+    );
+  }
+}
+```
+
+### Session Restoration on New Machine
+
+When meinc starts or a workspace is synced:
+
+```typescript
+async function restoreWorkspaceSessions(workspace: Workspace) {
+  const sessionsDir = path.join(workspace.localPath, 'sessions');
+  if (!await fs.exists(sessionsDir)) return;
+
+  const claudeProjectDir = path.join(
+    os.homedir(),
+    '.claude/projects',
+    path.basename(workspace.localPath),
+    'sessions'
+  );
+  await fs.mkdir(claudeProjectDir, { recursive: true });
+
+  // Walk sessions directory and restore each
+  for await (const service of await fs.readdir(sessionsDir)) {
+    const servicePath = path.join(sessionsDir, service);
+    for await (const sender of await fs.readdir(servicePath)) {
+      const sessionFile = path.join(servicePath, sender, 'session.jsonl');
+      if (await fs.exists(sessionFile)) {
+        const sessionName = `${service}-${sender}`;
+        const targetPath = path.join(claudeProjectDir, `${sessionName}.jsonl`);
+        await fs.copyFile(sessionFile, targetPath);
+        console.log(`Restored session: ${sessionName}`);
+      }
+    }
+  }
 }
 ```
 
@@ -463,28 +637,34 @@ async function syncWorkspace(owner: string, repo: string) {
 - Web UI works as before
 - Can clone/sync workspaces locally
 
-### Phase 3: Conversation Storage
+### Phase 3: Session Storage & Sync
 
-**Files to modify:**
-- `server/conversations.ts` - Read/write conversation files
-- Update workspace sync to handle conversations/
-
-**Acceptance criteria:**
-- Incoming messages appended to conversation file
-- Commits created with proper messages
-- Git history shows full conversation trail
-
-### Phase 4: Claude Code Integration
+**Files to create:**
+- `server/sessions.ts` - Session sync logic (Claude ↔ workspace)
+- `server/restore.ts` - Session restoration on startup
 
 **Implementation:**
-- Build prompt from agent config + conversation history
-- Execute Claude Code in workspace directory
+- After each Claude run, copy session JSONL to workspace
+- On startup, restore sessions from workspace to Claude's storage
+- Optionally generate human-readable markdown logs
+
+**Acceptance criteria:**
+- Sessions stored in `sessions/{service}/{sender}/session.jsonl`
+- Sessions survive meinc restart
+- Sessions portable to new machines via git
+
+### Phase 4: Claude Code Integration with Resume
+
+**Implementation:**
+- Check if session exists for sender
+- If yes: `claude --resume {session} -p "new message"`
+- If no: `claude -p "..." --session {session}` with system prompt
 - Handle timeouts and errors gracefully
 
 **Acceptance criteria:**
-- Claude Code runs in workspace context
+- Claude Code resumes with full history (thinking, tool calls, etc.)
+- New conversations start with agent's system prompt
 - Uses agentio to read data and send replies
-- Commits response to conversation file
 
 ### Phase 5: Routing & Multi-Agent
 
@@ -594,22 +774,36 @@ WantedBy=multi-user.target
 
 ## Open Questions
 
-1. **Conversation context window**: How much history to include in prompt?
-   - Option A: Last N messages
-   - Option B: Token-based truncation
-   - Option C: Summary + recent messages
+1. **Session size over time**: Sessions grow indefinitely. How to manage?
+   - Option A: Let Claude Code handle context window internally
+   - Option B: Periodically archive old sessions, start fresh with summary
+   - Option C: Use Claude's built-in session summarization (if available)
+   - **Note**: This is less urgent than with conversation logs since Claude Code manages context
 
 2. **Concurrent messages**: What if user sends multiple messages quickly?
-   - Option A: Queue and process sequentially
-   - Option B: Batch into single Claude call
-   - Option C: Process in parallel (may cause confusion)
+   - Option A: Queue and process sequentially (recommended)
+   - Option B: Batch into single Claude call (loses granularity)
+   - Option C: Process in parallel (may cause session corruption)
+   - **Recommendation**: Lock per-session, queue messages
 
 3. **Error handling**: What if Claude Code fails?
    - Option A: Silent failure (log only)
    - Option B: Send error message to user
    - Option C: Retry with backoff
+   - **Recommendation**: Send brief error message, log full details
 
 4. **Git conflicts**: What if webhook arrives during Claude execution?
-   - Option A: Lock per-conversation
+   - Option A: Lock per-conversation (recommended)
    - Option B: Git rebase on conflict
    - Option C: Queue messages per-conversation
+   - **Note**: Session files are per-sender, so conflicts only occur if same sender sends rapidly
+
+5. **Session portability**: Claude Code sessions tied to project path
+   - If workspace moves to different path, sessions may not match
+   - May need to update session metadata or re-import
+   - **TODO**: Test session restoration across different machines/paths
+
+6. **Session export format**: Claude Code doesn't have native export
+   - Currently using raw JSONL from `~/.claude/projects/`
+   - May need community tools (cctrace, etc.) for reliable export
+   - **Risk**: Format may change between Claude Code versions
