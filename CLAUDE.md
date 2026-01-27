@@ -227,9 +227,8 @@ agentio sql profile add|list|remove
 ### WhatsApp (requires gateway)
 
 ```bash
-# Profile & Pairing
+# Profile (includes QR pairing flow if gateway is running)
 agentio whatsapp profile add|list|remove
-agentio whatsapp pair [--poll]           # Display QR code for pairing
 
 # Inbox (receiving messages)
 agentio whatsapp inbox pull [--limit N] [--status pending|done] [--conversation <name>]
