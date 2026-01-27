@@ -3,6 +3,8 @@ import { Command } from 'commander';
 import { registerGmailCommands } from './commands/gmail';
 import { registerGDocsCommands } from './commands/gdocs';
 import { registerGDriveCommands } from './commands/gdrive';
+import { registerGCalCommands } from './commands/gcal';
+import { registerGTasksCommands } from './commands/gtasks';
 import { registerTelegramCommands } from './commands/telegram';
 import { registerGChatCommands } from './commands/gchat';
 import { registerGitHubCommands } from './commands/github';
@@ -39,6 +41,8 @@ program
 registerGmailCommands(program);
 registerGDocsCommands(program);
 registerGDriveCommands(program);
+registerGCalCommands(program);
+registerGTasksCommands(program);
 registerTelegramCommands(program);
 registerGChatCommands(program);
 registerGitHubCommands(program);
