@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// Polyfills must be imported first (before any code that uses protobufjs)
+import './polyfills';
 import { Command } from 'commander';
 import { registerGmailCommands } from './commands/gmail';
 import { registerGDocsCommands } from './commands/gdocs';
