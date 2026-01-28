@@ -7,6 +7,7 @@ import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { getGatewayClient, isGatewayAvailable } from '../gateway/client';
+import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
   printInboxMessage,
@@ -59,7 +60,8 @@ export function registerTelegramCommands(program: Command): void {
           sendOptions.disable_notification = true;
         }
 
-        const { client } = await getTelegramClient(options.profile);
+        const { client, profile } = await getTelegramClient(options.profile);
+        await enforceWriteAccess('telegram', profile, 'send message');
         const result = await client.sendMessage(text, sendOptions);
 
         console.log('Message sent');
@@ -81,6 +83,7 @@ export function registerTelegramCommands(program: Command): void {
     .command('add')
     .description('Add a new Telegram bot profile')
     .option('--profile <name>', 'Profile name (auto-detected from bot username if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('\nTelegram Bot Setup\n');
@@ -171,10 +174,13 @@ export function registerTelegramCommands(program: Command): void {
           channelName: channelName,
         };
 
-        await setProfile('telegram', profileName);
+        await setProfile('telegram', profileName, { readOnly: options.readOnly });
         await setCredentials('telegram', profileName, credentials);
 
         console.log(`\nProfile "${profileName}" configured!`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
       } catch (error) {
         handleError(error);
@@ -260,6 +266,11 @@ export function registerTelegramCommands(program: Command): void {
         }
 
         const client = await getGatewayClient();
+        // Get the inbox message to determine the profile for read-only check
+        const inboxMessage = await client.inboxGet(id);
+        if (inboxMessage) {
+          await enforceWriteAccess('telegram', inboxMessage.profile, 'reply to message');
+        }
         const result = await client.inboxReply(id, text);
         printInboxReplyResult(result);
       } catch (error) {
@@ -325,6 +336,7 @@ export function registerTelegramCommands(program: Command): void {
           else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
         }
 
+        await enforceWriteAccess('telegram', profileResult.profile, 'send message');
         const client = await getGatewayClient();
         const result = await client.outboxSend({
           service: 'telegram',

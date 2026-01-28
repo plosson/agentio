@@ -8,7 +8,7 @@ import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
-import type { Config, ServiceName } from '../types/config';
+import type { Config, ServiceName, ProfileValue } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
 interface ProfileSelection {
@@ -126,8 +126,9 @@ export function registerConfigCommands(program: Command): void {
         const allProfiles: ProfileSelection[] = [];
         for (const [service, profiles] of Object.entries(configData.profiles)) {
           if (profiles) {
-            for (const profile of profiles) {
-              allProfiles.push({ service: service as ServiceName, profile });
+            for (const entry of profiles) {
+              const profileName = typeof entry === 'string' ? entry : entry.name;
+              allProfiles.push({ service: service as ServiceName, profile: profileName });
             }
           }
         }
@@ -309,11 +310,16 @@ export function registerConfigCommands(program: Command): void {
           for (const [service, profiles] of Object.entries(exportData.config.profiles)) {
             if (profiles) {
               if (!currentConfig.profiles[service as keyof typeof currentConfig.profiles]) {
-                (currentConfig.profiles as Record<string, string[]>)[service] = [];
+                (currentConfig.profiles as Record<string, ProfileValue[]>)[service] = [];
               }
-              for (const profile of profiles) {
-                if (!(currentConfig.profiles as Record<string, string[]>)[service].includes(profile)) {
-                  (currentConfig.profiles as Record<string, string[]>)[service].push(profile);
+              for (const entry of profiles) {
+                const profileName = typeof entry === 'string' ? entry : entry.name;
+                const currentProfiles = (currentConfig.profiles as Record<string, ProfileValue[]>)[service];
+                const exists = currentProfiles.some((p) =>
+                  (typeof p === 'string' ? p : p.name) === profileName
+                );
+                if (!exists) {
+                  currentProfiles.push(entry);
                 }
               }
             }

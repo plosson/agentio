@@ -12,6 +12,7 @@ import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList } from '../utils/output';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
 const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
@@ -95,7 +96,8 @@ export function registerGChatCommands(program: Command): void {
           }
         }
 
-        const { client } = await getGChatClient(options.profile);
+        const { client, profile } = await getGChatClient(options.profile);
+        await enforceWriteAccess('gchat', profile, 'send message');
         const result = await client.send({
           text,
           payload,
@@ -185,6 +187,7 @@ export function registerGChatCommands(program: Command): void {
     .command('add')
     .description('Add a new Google Chat profile (webhook or OAuth)')
     .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('\nGoogle Chat Setup\n');
@@ -205,9 +208,9 @@ export function registerGChatCommands(program: Command): void {
               'Run: agentio gchat profile add --profile <name>'
             );
           }
-          await setupWebhookProfile(options.profile);
+          await setupWebhookProfile(options.profile, options.readOnly);
         } else {
-          await setupOAuthProfile(options.profile);
+          await setupOAuthProfile(options.profile, options.readOnly);
         }
       } catch (error) {
         handleError(error);
@@ -215,13 +218,16 @@ export function registerGChatCommands(program: Command): void {
     });
 }
 
-function printProfileSetupSuccess(profileName: string, authType: 'webhook' | 'oauth'): void {
+function printProfileSetupSuccess(profileName: string, authType: 'webhook' | 'oauth', readOnly?: boolean): void {
   const typeLabel = authType.charAt(0).toUpperCase() + authType.slice(1);
   console.log(`\nSuccess! ${typeLabel} profile "${profileName}" configured.`);
+  if (readOnly) {
+    console.log(`   Access: read-only`);
+  }
   console.log(`   Test with: agentio gchat send --profile ${profileName} "Hello from agentio"`);
 }
 
-async function setupWebhookProfile(profileName: string): Promise<void> {
+async function setupWebhookProfile(profileName: string, readOnly?: boolean): Promise<void> {
   console.error('Webhook Setup\n');
   console.error('1. In Google Chat, find or create a space');
   console.error('2. Go to Space Settings → Webhooks');
@@ -264,13 +270,13 @@ async function setupWebhookProfile(profileName: string): Promise<void> {
     webhookUrl: webhookUrl,
   };
 
-  await setProfile('gchat', profileName);
+  await setProfile('gchat', profileName, { readOnly });
   await setCredentials('gchat', profileName, credentials);
 
-  printProfileSetupSuccess(profileName, 'webhook');
+  printProfileSetupSuccess(profileName, 'webhook', readOnly);
 }
 
-async function setupOAuthProfile(profileNameOverride?: string): Promise<void> {
+async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolean): Promise<void> {
   console.error('OAuth Setup\n');
   console.error('Starting OAuth flow for Google Chat profile...\n');
 
@@ -320,8 +326,8 @@ async function setupOAuthProfile(profileNameOverride?: string): Promise<void> {
     email: userEmail,
   };
 
-  await setProfile('gchat', profileName);
+  await setProfile('gchat', profileName, { readOnly });
   await setCredentials('gchat', profileName, credentials);
 
-  printProfileSetupSuccess(profileName, 'oauth');
+  printProfileSetupSuccess(profileName, 'oauth', readOnly);
 }

@@ -243,6 +243,7 @@ async function createServiceClient(
 interface ProfileStatus {
   service: string;
   profile: string;
+  readOnly?: boolean;
   status: 'ok' | 'invalid' | 'no-creds' | 'skipped';
   info?: string;
   error?: string;
@@ -265,13 +266,14 @@ export function registerStatusCommand(program: Command): void {
         const statuses: ProfileStatus[] = [];
 
         for (const { service, profiles } of allProfiles) {
-          for (const name of profiles) {
-            const credentials = await getCredentials(service, name);
+          for (const entry of profiles) {
+            const credentials = await getCredentials(service, entry.name);
 
             if (!credentials) {
               statuses.push({
                 service,
-                profile: name,
+                profile: entry.name,
+                readOnly: entry.readOnly,
                 status: 'no-creds',
               });
               continue;
@@ -280,13 +282,14 @@ export function registerStatusCommand(program: Command): void {
             if (options.test === false) {
               statuses.push({
                 service,
-                profile: name,
+                profile: entry.name,
+                readOnly: entry.readOnly,
                 status: 'skipped',
               });
               continue;
             }
 
-            const client = await createServiceClient(service, credentials, name);
+            const client = await createServiceClient(service, credentials, entry.name);
             let result: ValidationResult;
 
             if (client) {
@@ -297,7 +300,8 @@ export function registerStatusCommand(program: Command): void {
 
             statuses.push({
               service,
-              profile: name,
+              profile: entry.name,
+              readOnly: entry.readOnly,
               status: result.valid ? 'ok' : 'invalid',
               info: result.info,
               error: result.error,
@@ -344,7 +348,9 @@ export function registerStatusCommand(program: Command): void {
         // Print each profile on one line
         for (const s of statuses) {
           const servicePad = s.service.padEnd(serviceWidth);
-          const profilePad = s.profile.padEnd(profileWidth);
+          const readOnlyIndicator = s.readOnly ? ' [RO]' : '';
+          const profileWithRo = s.profile + readOnlyIndicator;
+          const profilePad = profileWithRo.padEnd(profileWidth + 5); // +5 for [RO]
 
           let statusStr: string;
           let details: string;

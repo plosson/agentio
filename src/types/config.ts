@@ -29,22 +29,30 @@ export interface GatewayConfig {
   retention?: GatewayRetentionConfig;
 }
 
+export interface ProfileEntry {
+  name: string;
+  readOnly?: boolean;
+}
+
+// Helper type for backward compatibility during migration
+export type ProfileValue = string | ProfileEntry;
+
 export interface Config {
   profiles: {
-    gdocs?: string[];
-    gdrive?: string[];
-    gmail?: string[];
-    gcal?: string[];
-    gtasks?: string[];
-    gchat?: string[];
-    gsheets?: string[];
-    github?: string[];
-    jira?: string[];
-    slack?: string[];
-    telegram?: string[];
-    whatsapp?: string[];
-    discourse?: string[];
-    sql?: string[];
+    gdocs?: ProfileValue[];
+    gdrive?: ProfileValue[];
+    gmail?: ProfileValue[];
+    gcal?: ProfileValue[];
+    gtasks?: ProfileValue[];
+    gchat?: ProfileValue[];
+    gsheets?: ProfileValue[];
+    github?: ProfileValue[];
+    jira?: ProfileValue[];
+    slack?: ProfileValue[];
+    telegram?: ProfileValue[];
+    whatsapp?: ProfileValue[];
+    discourse?: ProfileValue[];
+    sql?: ProfileValue[];
   };
   env?: Record<string, string>;
   gateway?: GatewayConfig;

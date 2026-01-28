@@ -4,6 +4,7 @@ import { setProfile, resolveProfile, removeProfile } from '../config/config-mana
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
 import { getGatewayClient, isGatewayAvailable } from '../gateway/client';
+import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
   printInboxMessage,
@@ -86,6 +87,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .command('add')
     .description('Add a new WhatsApp profile and pair via QR code')
     .option('--profile <name>', 'Profile name')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('\nWhatsApp Profile Setup\n');
@@ -111,10 +113,13 @@ export function registerWhatsAppCommands(program: Command): void {
           paired: false,
         };
 
-        await setProfile('whatsapp', profileName);
+        await setProfile('whatsapp', profileName, { readOnly: options.readOnly });
         await setCredentials('whatsapp', profileName, credentials);
 
         console.log(`Profile "${profileName}" created.`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
 
         // Check if gateway is running
         const gatewayRunning = await isGatewayAvailable();
@@ -151,12 +156,13 @@ export function registerWhatsAppCommands(program: Command): void {
 
         console.log(`WhatsApp profiles (${profiles.length}):\n`);
 
-        for (const name of profiles) {
-          const creds = await getCredentials<WhatsAppCredentials>('whatsapp', name);
+        for (const entry of profiles) {
+          const creds = await getCredentials<WhatsAppCredentials>('whatsapp', entry.name);
           const status = creds?.paired ? 'paired' : 'not paired';
           const phone = creds?.phoneNumber ? ` (${creds.phoneNumber})` : '';
           const displayName = creds?.displayName ? ` - ${creds.displayName}` : '';
-          console.log(`  ${name}${phone}${displayName} [${status}]`);
+          const readOnlyIndicator = entry.readOnly ? ' [read-only]' : '';
+          console.log(`  ${entry.name}${readOnlyIndicator}${phone}${displayName} [${status}]`);
         }
       } catch (error) {
         handleError(error);
@@ -288,6 +294,11 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         const client = await getGatewayClient();
+        // Get the inbox message to determine the profile for read-only check
+        const inboxMessage = await client.inboxGet(id);
+        if (inboxMessage) {
+          await enforceWriteAccess('whatsapp', inboxMessage.profile, 'reply to message');
+        }
         const result = await client.inboxReply(id, text);
         printInboxReplyResult(result);
       } catch (error) {
@@ -368,6 +379,7 @@ export function registerWhatsAppCommands(program: Command): void {
           }
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'send message');
         const client = await getGatewayClient();
 
         // Resolve destination
@@ -519,6 +531,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'At least one participant is required. Use --participants <phone...>');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'create group');
         const client = await getGatewayClient();
         const group = await client.whatsappGroupCreate(
           profileResult.profile,
@@ -554,6 +567,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Provide --name, --description, or --picture to update.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'update group');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -593,6 +607,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'add participants');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -637,6 +652,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'remove participants');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -681,6 +697,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'promote participants');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -725,6 +742,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'demote participants');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -768,6 +786,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'leave group');
         const client = await getGatewayClient();
 
         // Resolve name to ID if needed
@@ -843,6 +862,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
+        await enforceWriteAccess('whatsapp', profileResult.profile, 'join group');
         const client = await getGatewayClient();
         const groupId = await client.whatsappGroupJoin(profileResult.profile, code);
         printWhatsAppGroupJoined(groupId);

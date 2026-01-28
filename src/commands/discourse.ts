@@ -88,6 +88,7 @@ export function registerDiscourseCommands(program: Command): void {
     .command('add')
     .description('Add a new Discourse profile')
     .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('\nDiscourse Setup\n');
@@ -173,10 +174,13 @@ export function registerDiscourseCommands(program: Command): void {
         const profileName = options.profile || username.trim();
 
         // Save credentials
-        await setProfile('discourse', profileName);
+        await setProfile('discourse', profileName, { readOnly: options.readOnly });
         await setCredentials('discourse', profileName, credentials);
 
         console.log(`\nProfile "${profileName}" configured!`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio discourse list --profile ${profileName}`);
       } catch (error) {
         handleError(error);

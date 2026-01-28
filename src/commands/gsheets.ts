@@ -18,6 +18,7 @@ import {
   printGSheetsCreated,
 } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { GSheetsCredentials } from '../types/gsheets';
 
 const getGSheetsClient = createClientGetter<GSheetsCredentials, GSheetsClient>({
@@ -152,7 +153,8 @@ Input Options:
     .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
       try {
         const values = parseValues(valueArgs, options.valuesJson);
-        const { client } = await getGSheetsClient(options.profile);
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'update values');
         const result = await client.update(spreadsheetId, range, values, {
           valueInputOption: options.input,
         });
@@ -192,7 +194,8 @@ Insert Options:
     .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
       try {
         const values = parseValues(valueArgs, options.valuesJson);
-        const { client } = await getGSheetsClient(options.profile);
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'append values');
         const result = await client.append(spreadsheetId, range, values, {
           valueInputOption: options.input,
           insertDataOption: options.insert,
@@ -211,7 +214,8 @@ Insert Options:
     .option('--profile <name>', 'Profile name')
     .action(async (spreadsheetId: string, range: string, options) => {
       try {
-        const { client } = await getGSheetsClient(options.profile);
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'clear values');
         const result = await client.clear(spreadsheetId, range);
         printGSheetsClearResult(result);
       } catch (error) {
@@ -242,7 +246,8 @@ Insert Options:
     .option('--sheets <names>', 'Comma-separated sheet names to create')
     .action(async (title: string, options) => {
       try {
-        const { client } = await getGSheetsClient(options.profile);
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'create spreadsheet');
         const sheetNames = options.sheets ? options.sheets.split(',').map((n: string) => n.trim()) : undefined;
         const result = await client.create(title, sheetNames);
         printGSheetsCreated(result);
@@ -260,7 +265,8 @@ Insert Options:
     .option('--parent <folder-id>', 'Destination folder ID')
     .action(async (spreadsheetId: string, title: string, options) => {
       try {
-        const { client } = await getGSheetsClient(options.profile);
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'copy spreadsheet');
         const result = await client.copy(spreadsheetId, title, options.parent);
         printGSheetsCreated(result);
       } catch (error) {
@@ -320,6 +326,7 @@ Examples:
     .command('add')
     .description('Add a new Google Sheets profile')
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Starting OAuth flow for Google Sheets...\n');
@@ -352,11 +359,14 @@ Examples:
           email: userEmail,
         };
 
-        await setProfile('gsheets', profileName);
+        await setProfile('gsheets', profileName, { readOnly: options.readOnly });
         await setCredentials('gsheets', profileName, credentials);
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${userEmail}`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio gsheets list --profile ${profileName}`);
       } catch (error) {
         handleError(error);

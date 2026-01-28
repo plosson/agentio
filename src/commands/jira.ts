@@ -7,6 +7,7 @@ import { JiraClient } from '../services/jira/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
+import { enforceWriteAccess } from '../utils/read-only';
 import {
   printJiraProjectList,
   printJiraIssueList,
@@ -163,7 +164,8 @@ export function registerJiraCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Comment body is required. Provide as argument or pipe via stdin.');
         }
 
-        const { client } = await getJiraClient(options.profile);
+        const { client, profile } = await getJiraClient(options.profile);
+        await enforceWriteAccess('jira', profile, 'add comment');
         const result = await client.addComment(issueKey, text);
         printJiraCommentResult(result);
       } catch (error) {
@@ -196,7 +198,8 @@ export function registerJiraCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (issueKey: string, transitionId: string, options) => {
       try {
-        const { client } = await getJiraClient(options.profile);
+        const { client, profile } = await getJiraClient(options.profile);
+        await enforceWriteAccess('jira', profile, 'transition issue');
         const result = await client.transitionIssue(issueKey, transitionId);
         printJiraTransitionResult(result);
       } catch (error) {
@@ -215,6 +218,7 @@ export function registerJiraCommands(program: Command): void {
     .command('add')
     .description('Add a new JIRA profile with OAuth authentication')
     .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('\nJIRA OAuth Setup\n');
@@ -248,10 +252,13 @@ export function registerJiraCommands(program: Command): void {
           siteUrl: result.siteUrl,
         };
 
-        await setProfile('jira', profileName);
+        await setProfile('jira', profileName, { readOnly: options.readOnly });
         await setCredentials('jira', profileName, credentials);
 
         console.log(`\nProfile "${profileName}" configured!`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio jira projects --profile ${profileName}`);
       } catch (error) {
         handleError(error);

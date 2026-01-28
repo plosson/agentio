@@ -19,6 +19,7 @@ import {
 } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
+import { enforceWriteAccess } from '../utils/read-only';
 
 async function getGTasksClient(profileName?: string): Promise<{ client: GTasksClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gtasks', profileName);
@@ -60,7 +61,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (title: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'create task list');
         const taskList = await client.createTaskList(title);
         printGTaskListCreated(taskList);
       } catch (error) {
@@ -75,7 +77,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (tasklistId: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'delete task list');
         await client.deleteTaskList(tasklistId);
         printGTaskListDeleted(tasklistId);
       } catch (error) {
@@ -146,7 +149,8 @@ export function registerGTasksCommands(program: Command): void {
           if (stdin) notes = stdin;
         }
 
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'create task');
         const task = await client.createTask({
           tasklistId,
           title: options.title,
@@ -182,7 +186,8 @@ export function registerGTasksCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', `Invalid status: ${options.status}`, 'Use: needsAction or completed');
         }
 
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'update task');
         const task = await client.updateTask({
           tasklistId,
           taskId,
@@ -205,7 +210,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (tasklistId: string, taskId: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'complete task');
         const task = await client.completeTask(tasklistId, taskId);
         console.log(`Task completed: ${task.title}`);
         console.log(`ID: ${task.id}`);
@@ -223,7 +229,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (tasklistId: string, taskId: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'uncomplete task');
         const task = await client.uncompleteTask(tasklistId, taskId);
         console.log(`Task uncompleted: ${task.title}`);
         console.log(`ID: ${task.id}`);
@@ -240,7 +247,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (tasklistId: string, taskId: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'delete task');
         await client.deleteTask(tasklistId, taskId);
         printGTaskDeleted(tasklistId, taskId);
       } catch (error) {
@@ -255,7 +263,8 @@ export function registerGTasksCommands(program: Command): void {
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (tasklistId: string, options) => {
       try {
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'clear tasks');
         await client.clearCompleted(tasklistId);
         printGTasksCleared(tasklistId);
       } catch (error) {
@@ -275,7 +284,8 @@ export function registerGTasksCommands(program: Command): void {
         if (!options.parent && !options.previous) {
           throw new CliError('INVALID_PARAMS', 'At least one of --parent or --previous is required');
         }
-        const { client } = await getGTasksClient(options.profile);
+        const { client, profile } = await getGTasksClient(options.profile);
+        await enforceWriteAccess('gtasks', profile, 'move task');
         const task = await client.moveTask(tasklistId, taskId, options.parent, options.previous);
         console.log(`Task moved: ${task.title}`);
         console.log(`ID: ${task.id}`);
@@ -296,6 +306,7 @@ export function registerGTasksCommands(program: Command): void {
     .command('add')
     .description('Add a new Google Tasks profile')
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Starting OAuth flow for Google Tasks...\n');
@@ -314,11 +325,14 @@ export function registerGTasksCommands(program: Command): void {
 
         const profileName = options.profile || email;
 
-        await setProfile('gtasks', profileName);
+        await setProfile('gtasks', profileName, { readOnly: options.readOnly });
         await setCredentials('gtasks', profileName, { ...tokens, email });
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${email}`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
       } catch (error) {
         handleError(error);
       }

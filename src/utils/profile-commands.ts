@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { listProfiles, removeProfile } from '../config/config-manager';
+import { listProfiles, removeProfile, setProfileReadOnly } from '../config/config-manager';
 import { removeCredentials, getCredentials } from '../auth/token-store';
-import { handleError } from './errors';
+import { handleError, CliError } from './errors';
 import type { ServiceName } from '../types/config';
 
 export interface ProfileCommandsOptions<T> {
@@ -31,11 +31,42 @@ export function createProfileCommands<T>(
         if (profiles.length === 0) {
           console.log('No profiles configured');
         } else {
-          for (const name of profiles) {
-            const credentials = await getCredentials<T>(service, name);
+          for (const entry of profiles) {
+            const credentials = await getCredentials<T>(service, entry.name);
             const extraInfo = getExtraInfo ? getExtraInfo(credentials) : '';
-            console.log(`${name}${extraInfo}`);
+            const readOnlyIndicator = entry.readOnly ? ' [read-only]' : '';
+            console.log(`${entry.name}${readOnlyIndicator}${extraInfo}`);
           }
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  profile
+    .command('update')
+    .description(`Update a ${displayName} profile`)
+    .requiredOption('--profile <name>', 'Profile name')
+    .option('--read-only', 'Set profile as read-only')
+    .option('--no-read-only', 'Remove read-only restriction')
+    .action(async (opts) => {
+      try {
+        const profileName = opts.profile;
+
+        // Check if read-only flag is explicitly set or unset
+        if (opts.readOnly === undefined) {
+          throw new CliError('INVALID_PARAMS', 'No update specified', 'Use --read-only or --no-read-only');
+        }
+
+        const updated = await setProfileReadOnly(service, profileName, opts.readOnly);
+        if (!updated) {
+          throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found`);
+        }
+
+        if (opts.readOnly) {
+          console.log(`Profile "${profileName}" is now read-only`);
+        } else {
+          console.log(`Profile "${profileName}" read-only restriction removed`);
         }
       } catch (error) {
         handleError(error);

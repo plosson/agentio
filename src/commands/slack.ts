@@ -8,6 +8,7 @@ import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { printSlackSendResult } from '../utils/output';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { SlackCredentials, SlackWebhookCredentials } from '../types/slack';
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
@@ -89,7 +90,8 @@ export function registerSlackCommands(program: Command): void {
           }
         }
 
-        const { client } = await getSlackClient(options.profile);
+        const { client, profile } = await getSlackClient(options.profile);
+        await enforceWriteAccess('slack', profile, 'send message');
         const result = await client.send({
           text,
           payload,
@@ -112,16 +114,17 @@ export function registerSlackCommands(program: Command): void {
     .command('add')
     .description('Add a new Slack profile (webhook)')
     .requiredOption('--profile <name>', 'Profile name (required)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await setupWebhookProfile(options.profile);
+        await setupWebhookProfile(options.profile, options.readOnly);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-async function setupWebhookProfile(profileName: string): Promise<void> {
+async function setupWebhookProfile(profileName: string, readOnly?: boolean): Promise<void> {
   console.error('\nSlack Webhook Setup\n');
   console.error('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
   console.error('2. Enable "Incoming Webhooks" in Features');
@@ -177,9 +180,12 @@ async function setupWebhookProfile(profileName: string): Promise<void> {
     channelName: channelName || undefined,
   };
 
-  await setProfile('slack', profileName);
+  await setProfile('slack', profileName, { readOnly });
   await setCredentials('slack', profileName, credentials);
 
   console.log(`\nSuccess! Webhook profile "${profileName}" configured.`);
+  if (readOnly) {
+    console.log(`   Access: read-only`);
+  }
   console.log(`   Test with: agentio slack send --profile ${profileName} "Hello from agentio"`);
 }

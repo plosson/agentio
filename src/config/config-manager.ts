@@ -2,12 +2,26 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import type { Config, ServiceName } from '../types/config';
+import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
 const CONFIG_DIR = join(homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
-const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gchat', 'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql'];
+const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql'];
+
+/**
+ * Normalize a profile value to ProfileEntry format
+ */
+function normalizeProfile(entry: ProfileValue): ProfileEntry {
+  return typeof entry === 'string' ? { name: entry } : entry;
+}
+
+/**
+ * Get the profile name from a ProfileValue
+ */
+function getProfileName(entry: ProfileValue): string {
+  return typeof entry === 'string' ? entry : entry.name;
+}
 
 const DEFAULT_CONFIG: Config = {
   profiles: {},
@@ -54,7 +68,8 @@ export async function getProfile(
   const config = await loadConfig();
 
   const serviceProfiles = config.profiles[service] || [];
-  if (!serviceProfiles.includes(profileName)) {
+  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
+  if (!found) {
     return null;
   }
 
@@ -66,20 +81,23 @@ export async function getProfile(
  * - If profileName is provided, validates it exists
  * - If not provided and exactly 1 profile exists, returns that profile
  * - Returns null if no profiles exist or if multiple profiles exist without explicit selection
+ * - Also returns the readOnly status of the resolved profile
  */
 export async function resolveProfile(
   service: ServiceName,
   profileName?: string
-): Promise<{ profile: string | null; error?: 'none' | 'multiple' }> {
+): Promise<{ profile: string | null; readOnly?: boolean; error?: 'none' | 'multiple' }> {
   const config = await loadConfig();
   const serviceProfiles = config.profiles[service] || [];
 
   if (profileName) {
     // Explicit profile requested - validate it exists
-    if (!serviceProfiles.includes(profileName)) {
+    const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
+    if (!found) {
       return { profile: null };
     }
-    return { profile: profileName };
+    const entry = normalizeProfile(found);
+    return { profile: entry.name, readOnly: entry.readOnly };
   }
 
   // No profile specified - check if we can auto-select
@@ -88,16 +106,22 @@ export async function resolveProfile(
   }
 
   if (serviceProfiles.length === 1) {
-    return { profile: serviceProfiles[0] };
+    const entry = normalizeProfile(serviceProfiles[0]);
+    return { profile: entry.name, readOnly: entry.readOnly };
   }
 
   // Multiple profiles exist - user must specify
   return { profile: null, error: 'multiple' };
 }
 
+export interface SetProfileOptions {
+  readOnly?: boolean;
+}
+
 export async function setProfile(
   service: ServiceName,
-  profileName: string
+  profileName: string,
+  options?: SetProfileOptions
 ): Promise<void> {
   const config = await loadConfig();
 
@@ -105,8 +129,20 @@ export async function setProfile(
     config.profiles[service] = [];
   }
 
-  if (!config.profiles[service]!.includes(profileName)) {
-    config.profiles[service]!.push(profileName);
+  const existingIndex = config.profiles[service]!.findIndex(
+    (p) => getProfileName(p) === profileName
+  );
+
+  const entry: ProfileEntry = {
+    name: profileName,
+    ...(options?.readOnly ? { readOnly: true } : {}),
+  };
+
+  if (existingIndex === -1) {
+    config.profiles[service]!.push(entry);
+  } else {
+    // Update existing profile
+    config.profiles[service]![existingIndex] = entry;
   }
 
   await saveConfig(config);
@@ -119,11 +155,18 @@ export async function removeProfile(
   const config = await loadConfig();
 
   const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles || !serviceProfiles.includes(profileName)) {
+  if (!serviceProfiles) {
     return false;
   }
 
-  config.profiles[service] = serviceProfiles.filter((p) => p !== profileName);
+  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
+  if (!found) {
+    return false;
+  }
+
+  config.profiles[service] = serviceProfiles.filter(
+    (p) => getProfileName(p) !== profileName
+  );
 
   await saveConfig(config);
   return true;
@@ -131,14 +174,14 @@ export async function removeProfile(
 
 export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
-  profiles: string[];
+  profiles: ProfileEntry[];
 }[]> {
   const config = await loadConfig();
   const services = service ? [service] : ALL_SERVICES;
 
   return services.map((svc) => ({
     service: svc,
-    profiles: config.profiles[svc] || [],
+    profiles: (config.profiles[svc] || []).map(normalizeProfile),
   }));
 }
 
@@ -169,6 +212,53 @@ export async function unsetEnv(key: string): Promise<boolean> {
 export async function listEnv(): Promise<Record<string, string>> {
   const config = await loadConfig();
   return config.env || {};
+}
+
+/**
+ * Check if a profile is read-only
+ */
+export async function isProfileReadOnly(
+  service: ServiceName,
+  profileName: string
+): Promise<boolean> {
+  const config = await loadConfig();
+  const serviceProfiles = config.profiles[service] || [];
+  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
+  if (!found) {
+    return false;
+  }
+  return normalizeProfile(found).readOnly === true;
+}
+
+/**
+ * Set the read-only status of a profile
+ */
+export async function setProfileReadOnly(
+  service: ServiceName,
+  profileName: string,
+  readOnly: boolean
+): Promise<boolean> {
+  const config = await loadConfig();
+  const serviceProfiles = config.profiles[service];
+  if (!serviceProfiles) {
+    return false;
+  }
+
+  const index = serviceProfiles.findIndex((p) => getProfileName(p) === profileName);
+  if (index === -1) {
+    return false;
+  }
+
+  const entry = normalizeProfile(serviceProfiles[index]);
+  if (readOnly) {
+    entry.readOnly = true;
+  } else {
+    delete entry.readOnly;
+  }
+  serviceProfiles[index] = entry;
+
+  await saveConfig(config);
+  return true;
 }
 
 export { CONFIG_DIR, CONFIG_FILE };

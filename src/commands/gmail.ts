@@ -11,6 +11,7 @@ import { GmailClient } from '../services/gmail/client';
 import { printMessageList, printMessage, printSendResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { GmailAttachment } from '../types/gmail';
 
 function escapeHtml(text: string): string {
@@ -228,7 +229,8 @@ Query Syntax Examples:
             ? [...regularAttachments, ...inlineAttachments]
             : undefined;
 
-        const { client } = await getGmailClient(options.profile);
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'send email');
         const result = await client.send({
           to: options.to,
           cc: options.cc.length ? options.cc : undefined,
@@ -263,7 +265,8 @@ Query Syntax Examples:
           throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
         }
 
-        const { client } = await getGmailClient(options.profile);
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'reply to email');
         const result = await client.reply({
           threadId: options.threadId,
           body,
@@ -282,7 +285,8 @@ Query Syntax Examples:
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
     .action(async (messageIds: string[], options) => {
       try {
-        const { client } = await getGmailClient(options.profile);
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'archive email');
         for (const messageId of messageIds) {
           await client.archive(messageId);
           printArchived(messageId);
@@ -308,7 +312,8 @@ Query Syntax Examples:
           throw new CliError('INVALID_PARAMS', 'Cannot specify both --read and --unread');
         }
 
-        const { client } = await getGmailClient(options.profile);
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'mark email');
         for (const messageId of messageIds) {
           await client.mark(messageId, options.read);
           printMarked(messageId, options.read);
@@ -458,6 +463,7 @@ ${emailHeader}
     .command('add')
     .description('Add a new Gmail profile')
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Starting OAuth flow for Gmail...\n');
@@ -476,11 +482,14 @@ ${emailHeader}
 
         const profileName = options.profile || email;
 
-        await setProfile('gmail', profileName);
+        await setProfile('gmail', profileName, { readOnly: options.readOnly });
         await setCredentials('gmail', profileName, { ...tokens, email });
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${email}`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
       } catch (error) {
         handleError(error);
       }

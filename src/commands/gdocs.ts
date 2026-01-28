@@ -11,6 +11,7 @@ import { GDocsClient } from '../services/gdocs/client';
 import { printGDocsList, printGDocCreated, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { GDocsCredentials } from '../types/gdocs';
 
 const getGDocsClient = createClientGetter<GDocsCredentials, GDocsClient>({
@@ -77,7 +78,8 @@ export function registerGDocsCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'No content provided', 'Provide --content or pipe markdown via stdin');
         }
 
-        const { client } = await getGDocsClient(options.profile);
+        const { client, profile } = await getGDocsClient(options.profile);
+        await enforceWriteAccess('gdocs', profile, 'create document');
         const result = await client.create(options.title, content, options.folder);
 
         printGDocCreated(result);
@@ -138,6 +140,7 @@ Query Syntax Examples:
     .command('add')
     .description('Add a new Google Docs profile')
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Starting OAuth flow for Google Docs...\n');
@@ -174,11 +177,14 @@ Query Syntax Examples:
           email: userEmail,
         };
 
-        await setProfile('gdocs', profileName);
+        await setProfile('gdocs', profileName, { readOnly: options.readOnly });
         await setCredentials('gdocs', profileName, credentials);
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${userEmail}`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio gdocs list --profile ${profileName}`);
       } catch (error) {
         handleError(error);

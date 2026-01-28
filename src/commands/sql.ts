@@ -7,6 +7,8 @@ import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
+import { enforceWriteAccess } from '../utils/read-only';
+import { isProfileReadOnly } from '../config/config-manager';
 import type { SqlCredentials } from '../types/sql';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
@@ -51,8 +53,18 @@ export function registerSqlCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Limit must be a positive number');
         }
 
-        const { client: sqlClient } = await getSqlClient(options.profile);
+        const { client: sqlClient, profile } = await getSqlClient(options.profile);
         client = sqlClient;
+
+        // Check if the query is a write operation when profile is read-only
+        const trimmedQuery = queryText.trim().toUpperCase();
+        const isWriteQuery = !trimmedQuery.startsWith('SELECT') &&
+                            !trimmedQuery.startsWith('SHOW') &&
+                            !trimmedQuery.startsWith('DESCRIBE') &&
+                            !trimmedQuery.startsWith('EXPLAIN');
+        if (isWriteQuery) {
+          await enforceWriteAccess('sql', profile, 'execute write query');
+        }
 
         const result = await client.query({ query: queryText, limit });
         console.log(client.formatResult(result));
@@ -75,6 +87,7 @@ export function registerSqlCommands(program: Command): void {
     .description('Add a new SQL database profile')
     .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
     .option('--interactive', 'Interactive mode: prompt for individual connection components')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         let url: string;
@@ -124,10 +137,13 @@ export function registerSqlCommands(program: Command): void {
           displayName,
         };
 
-        await setProfile('sql', profileName);
+        await setProfile('sql', profileName, { readOnly: options.readOnly });
         await setCredentials('sql', profileName, credentials);
 
         console.log(`\nProfile "${profileName}" configured!`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
         console.log(`   Test with: agentio sql query --profile ${profileName} "SELECT 1"`);
       } catch (error) {
         handleError(error);

@@ -10,6 +10,7 @@ import { GDriveClient } from '../services/gdrive/client';
 import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
+import { enforceWriteAccess } from '../utils/read-only';
 import type { GDriveCredentials, GDriveAccessLevel } from '../types/gdrive';
 
 const getGDriveClient = createClientGetter<GDriveCredentials, GDriveClient>({
@@ -189,7 +190,8 @@ Examples:
 `)
     .action(async (filePath: string, options) => {
       try {
-        const { client } = await getGDriveClient(options.profile);
+        const { client, profile } = await getGDriveClient(options.profile);
+        await enforceWriteAccess('gdrive', profile, 'upload file');
         const result = await client.upload({
           filePath,
           name: options.name,
@@ -220,6 +222,7 @@ Examples:
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
     .option('--readonly', 'Create a read-only profile (skip access level prompt)')
     .option('--full', 'Create a full access profile (skip access level prompt)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Google Drive Setup\n');
@@ -274,12 +277,15 @@ Examples:
           accessLevel,
         };
 
-        await setProfile('gdrive', profileName);
+        await setProfile('gdrive', profileName, { readOnly: options.readOnly });
         await setCredentials('gdrive', profileName, credentials);
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${userEmail}`);
-        console.log(`   Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}`);
+        console.log(`   API Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}`);
+        if (options.readOnly) {
+          console.log(`   Profile Access: read-only`);
+        }
         console.log(`   Test with: agentio gdrive list --profile ${profileName}`);
       } catch (error) {
         handleError(error);

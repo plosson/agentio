@@ -191,16 +191,17 @@ async function initializeAdapters(): Promise<void> {
       handleInboundMessage('telegram', profile, message);
     };
 
-    for (const profile of telegramProfiles) {
+    for (const entry of telegramProfiles) {
+      const profileName = typeof entry === 'string' ? entry : entry.name;
       try {
-        const credentials = await getCredentials<TelegramCredentials>('telegram', profile);
+        const credentials = await getCredentials<TelegramCredentials>('telegram', profileName);
         if (credentials) {
-          await telegramAdapter.connect(profile, credentials);
+          await telegramAdapter.connect(profileName, credentials);
         } else {
-          console.error(`[telegram] No credentials for profile: ${profile}`);
+          console.error(`[telegram] No credentials for profile: ${profileName}`);
         }
       } catch (error) {
-        console.error(`[telegram] Failed to connect ${profile}:`, error instanceof Error ? error.message : error);
+        console.error(`[telegram] Failed to connect ${profileName}:`, error instanceof Error ? error.message : error);
       }
     }
 
@@ -215,16 +216,17 @@ async function initializeAdapters(): Promise<void> {
       handleInboundMessage('whatsapp', profile, message);
     };
 
-    for (const profile of whatsappProfiles) {
+    for (const entry of whatsappProfiles) {
+      const profileName = typeof entry === 'string' ? entry : entry.name;
       try {
-        const credentials = await getCredentials<WhatsAppCredentials>('whatsapp', profile);
+        const credentials = await getCredentials<WhatsAppCredentials>('whatsapp', profileName);
         if (credentials) {
-          await whatsappAdapter.connect(profile, credentials);
+          await whatsappAdapter.connect(profileName, credentials);
         } else {
-          console.error(`[whatsapp] No credentials for profile: ${profile}`);
+          console.error(`[whatsapp] No credentials for profile: ${profileName}`);
         }
       } catch (error) {
-        console.error(`[whatsapp] Failed to connect ${profile}:`, error instanceof Error ? error.message : error);
+        console.error(`[whatsapp] Failed to connect ${profileName}:`, error instanceof Error ? error.message : error);
       }
     }
 

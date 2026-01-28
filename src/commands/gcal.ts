@@ -9,6 +9,7 @@ import { GCalClient } from '../services/gcal/client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
+import { enforceWriteAccess } from '../utils/read-only';
 
 async function getGCalClient(profileName?: string): Promise<{ client: GCalClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gcal', profileName);
@@ -155,7 +156,8 @@ export function registerGCalCommands(program: Command): void {
           return { method: method as 'email' | 'popup', minutes: parseInt(minutes, 10) };
         });
 
-        const { client } = await getGCalClient(options.profile);
+        const { client, profile } = await getGCalClient(options.profile);
+        await enforceWriteAccess('gcal', profile, 'create event');
         const event = await client.createEvent({
           calendarId: calendarId || 'primary',
           summary: options.summary,
@@ -210,7 +212,8 @@ export function registerGCalCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Cannot use both --attendee and --add-attendee');
         }
 
-        const { client } = await getGCalClient(options.profile);
+        const { client, profile } = await getGCalClient(options.profile);
+        await enforceWriteAccess('gcal', profile, 'update event');
         const event = await client.updateEvent({
           calendarId,
           eventId,
@@ -243,7 +246,8 @@ export function registerGCalCommands(program: Command): void {
     .option('--send-updates <mode>', 'Send notifications: all, externalOnly, none', 'all')
     .action(async (calendarId: string, eventId: string, options) => {
       try {
-        const { client } = await getGCalClient(options.profile);
+        const { client, profile } = await getGCalClient(options.profile);
+        await enforceWriteAccess('gcal', profile, 'delete event');
         await client.deleteEvent(calendarId, eventId, options.sendUpdates);
         printGCalEventDeleted(calendarId, eventId);
       } catch (error) {
@@ -300,7 +304,8 @@ export function registerGCalCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', `Invalid status: ${options.status}`, 'Use: accepted, declined, or tentative');
         }
 
-        const { client } = await getGCalClient(options.profile);
+        const { client, profile } = await getGCalClient(options.profile);
+        await enforceWriteAccess('gcal', profile, 'respond to event');
         const event = await client.respond({
           calendarId,
           eventId,
@@ -353,6 +358,7 @@ export function registerGCalCommands(program: Command): void {
     .command('add')
     .description('Add a new Google Calendar profile')
     .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         console.error('Starting OAuth flow for Google Calendar...\n');
@@ -371,11 +377,14 @@ export function registerGCalCommands(program: Command): void {
 
         const profileName = options.profile || email;
 
-        await setProfile('gcal', profileName);
+        await setProfile('gcal', profileName, { readOnly: options.readOnly });
         await setCredentials('gcal', profileName, { ...tokens, email });
 
         console.log(`\nSuccess! Profile "${profileName}" configured.`);
         console.log(`   Email: ${email}`);
+        if (options.readOnly) {
+          console.log(`   Access: read-only`);
+        }
       } catch (error) {
         handleError(error);
       }
