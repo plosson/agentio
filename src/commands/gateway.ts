@@ -222,9 +222,10 @@ export function registerGatewayCommands(program: Command): void {
         if (options.service === 'all' || options.service === 'whatsapp') {
           const profiles = config.profiles.whatsapp || [];
 
-          for (const profile of profiles) {
-            console.log(`  Exporting whatsapp:${profile}...`);
-            const authState = await exportWhatsAppAuthState(profile);
+          for (const entry of profiles) {
+            const profileName = typeof entry === 'string' ? entry : entry.name;
+            console.log(`  Exporting whatsapp:${profileName}...`);
+            const authState = await exportWhatsAppAuthState(profileName);
 
             if (!authState) {
               console.log(`    No auth state found, skipping`);
@@ -232,7 +233,7 @@ export function registerGatewayCommands(program: Command): void {
             }
 
             // Send to remote gateway
-            const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profile)}`, {
+            const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profileName)}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
