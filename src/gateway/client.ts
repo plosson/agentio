@@ -49,20 +49,20 @@ import type {
 } from './types';
 import type { WhatsAppGroup, WhatsAppParticipantAction } from '../types/whatsapp';
 
-let cachedConfig: { url: string; secret: string } | null = null;
+let cachedConfig: { url: string; apiKey: string } | null = null;
 
 /**
- * Get gateway URL and secret from config or environment
+ * Get gateway URL and API key from config or environment
  */
-async function getGatewayConnection(): Promise<{ url: string; secret: string }> {
+async function getGatewayConnection(): Promise<{ url: string; apiKey: string }> {
   if (cachedConfig) return cachedConfig;
 
   // Check environment variables first
   const envUrl = process.env.AGENTIO_GATEWAY_URL || await getEnv('AGENTIO_GATEWAY_URL');
-  const envSecret = process.env.AGENTIO_GATEWAY_SECRET || await getEnv('AGENTIO_GATEWAY_SECRET');
+  const envApiKey = process.env.AGENTIO_GATEWAY_API_KEY || await getEnv('AGENTIO_GATEWAY_API_KEY');
 
   if (envUrl) {
-    cachedConfig = { url: envUrl, secret: envSecret || '' };
+    cachedConfig = { url: envUrl, apiKey: envApiKey || '' };
     return cachedConfig;
   }
 
@@ -70,16 +70,19 @@ async function getGatewayConnection(): Promise<{ url: string; secret: string }> 
   const config = await loadConfig() as unknown as { gateway?: GatewayConfig };
   const gatewayConfig = config.gateway;
 
-  if (!gatewayConfig?.api) {
-    throw new CliError('CONFIG_ERROR', 'Gateway not configured', 'Set AGENTIO_GATEWAY_URL or configure gateway in config');
+  // Priority: apiUrl > construct from server host:port
+  if (gatewayConfig?.apiUrl) {
+    cachedConfig = { url: gatewayConfig.apiUrl, apiKey: gatewayConfig.apiKey ?? '' };
+    return cachedConfig;
   }
 
-  const host = gatewayConfig.api.host ?? '127.0.0.1';
-  const port = gatewayConfig.api.port ?? 7890;
+  // Fallback for local gateway (construct URL from server host:port)
+  const host = gatewayConfig?.server?.host ?? '127.0.0.1';
+  const port = gatewayConfig?.server?.port ?? 7890;
   const url = `http://${host}:${port}`;
-  const secret = gatewayConfig.api.secret ?? '';
+  const apiKey = gatewayConfig?.apiKey ?? '';
 
-  cachedConfig = { url, secret };
+  cachedConfig = { url, apiKey };
   return cachedConfig;
 }
 
@@ -87,14 +90,14 @@ async function getGatewayConnection(): Promise<{ url: string; secret: string }> 
  * Make a request to the gateway API
  */
 async function request<T>(method: string, endpoint: string, body?: unknown): Promise<T> {
-  const { url, secret } = await getGatewayConnection();
+  const { url, apiKey } = await getGatewayConnection();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
 
-  if (secret) {
-    headers['Authorization'] = `Bearer ${secret}`;
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
   }
 
   try {
@@ -106,7 +109,7 @@ async function request<T>(method: string, endpoint: string, body?: unknown): Pro
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new CliError('AUTH_FAILED', 'Gateway authentication failed', 'Check AGENTIO_GATEWAY_SECRET');
+        throw new CliError('AUTH_FAILED', 'Gateway authentication failed', 'Check AGENTIO_GATEWAY_API_KEY');
       }
 
       const errorData = await response.json().catch(() => ({})) as { error?: string };

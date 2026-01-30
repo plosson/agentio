@@ -56,7 +56,7 @@ import type { ServiceAdapter } from './adapters/types';
 import type { WhatsAppAdapter } from './adapters/whatsapp';
 
 let server: Server<unknown> | null = null;
-let apiSecret: string = '';
+let apiKey: string = '';
 let startTime: number = 0;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
 
@@ -81,16 +81,13 @@ function jsonResponse<T>(data: T, status: number = 200): Response {
 }
 
 /**
- * Verify authorization header
+ * Verify X-API-Key header
  */
 function verifyAuth(request: Request): boolean {
-  if (!apiSecret) return true; // No auth configured
+  if (!apiKey) return true; // No auth configured
 
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) return false;
-
-  const [type, token] = authHeader.split(' ');
-  return type === 'Bearer' && token === apiSecret;
+  const key = request.headers.get('X-API-Key');
+  return key === apiKey;
 }
 
 /**
@@ -756,10 +753,10 @@ async function handleRequest(request: Request): Promise<Response> {
 /**
  * Start the API server
  */
-export function startApiServer(config: GatewayConfig['api'], serviceAdapters: Map<ServiceName, ServiceAdapter>): Server<unknown> {
-  const port = config?.port ?? DEFAULT_GATEWAY_CONFIG.api.port;
-  const host = config?.host ?? DEFAULT_GATEWAY_CONFIG.api.host;
-  apiSecret = config?.secret ?? '';
+export function startApiServer(config: GatewayConfig, serviceAdapters: Map<ServiceName, ServiceAdapter>): Server<unknown> {
+  const port = config?.server?.port ?? DEFAULT_GATEWAY_CONFIG.server.port;
+  const host = config?.server?.host ?? DEFAULT_GATEWAY_CONFIG.server.host;
+  apiKey = config?.apiKey ?? '';
   startTime = Date.now();
   adapters = serviceAdapters;
 

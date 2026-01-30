@@ -59,11 +59,11 @@ export type OutboxStatus = 'pending' | 'sending' | 'sent' | 'failed';
 
 export const DEFAULT_GATEWAY_CONFIG: Required<GatewayConfig> = {
   name: '',
-  secret: '',
-  api: {
+  apiUrl: '',
+  apiKey: '',
+  server: {
     port: 7890,
-    host: '127.0.0.1',
-    secret: '',
+    host: '0.0.0.0',  // Bind to all interfaces by default for server
   },
   webhook: {
     url: '',

@@ -1,10 +1,8 @@
 import { join } from 'path';
-import { readFile, writeFile, unlink } from 'fs/promises';
-import { existsSync, openSync, closeSync, constants } from 'fs';
-import { spawn } from 'child_process';
-import type { ServiceName } from '../types/config';
-import type { GatewayConfig, DaemonState, DEFAULT_GATEWAY_CONFIG } from './types';
-import { CONFIG_DIR, loadConfig } from '../config/config-manager';
+import { randomBytes } from 'crypto';
+import type { ServiceName, Config } from '../types/config';
+import type { GatewayConfig } from './types';
+import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { initDatabase, closeDatabase, insertInboxMessage, inboxMessageExists, getPendingOutboxMessages, updateOutboxStatus, cleanupInbox, cleanupOutbox } from './store';
 import { startApiServer, stopApiServer } from './api';
@@ -15,10 +13,8 @@ import { WhatsAppAdapter } from './adapters/whatsapp';
 import type { TelegramCredentials } from '../types/telegram';
 import type { WhatsAppCredentials } from '../types/whatsapp';
 
-const PID_FILE = join(CONFIG_DIR, 'gateway.pid');
 const LOG_FILE = join(CONFIG_DIR, 'gateway.log');
 
-let isRunning = false;
 let shutdownRequested = false;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
 let outboxInterval: ReturnType<typeof setInterval> | null = null;
@@ -30,46 +26,6 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 export async function getGatewayConfig(): Promise<GatewayConfig> {
   const config = await loadConfig();
   return (config as unknown as { gateway?: GatewayConfig }).gateway ?? {};
-}
-
-/**
- * Check if daemon is running
- */
-export async function isDaemonRunning(): Promise<{ running: boolean; pid?: number }> {
-  if (!existsSync(PID_FILE)) {
-    return { running: false };
-  }
-
-  try {
-    const pidStr = await readFile(PID_FILE, 'utf-8');
-    const pid = parseInt(pidStr.trim(), 10);
-
-    // Check if process is still running
-    try {
-      process.kill(pid, 0); // Doesn't kill, just checks
-      return { running: true, pid };
-    } catch {
-      // Process not running, clean up stale PID file
-      await unlink(PID_FILE).catch(() => {});
-      return { running: false };
-    }
-  } catch {
-    return { running: false };
-  }
-}
-
-/**
- * Write PID file
- */
-async function writePidFile(): Promise<void> {
-  await writeFile(PID_FILE, process.pid.toString(), { mode: 0o600 });
-}
-
-/**
- * Remove PID file
- */
-async function removePidFile(): Promise<void> {
-  await unlink(PID_FILE).catch(() => {});
 }
 
 /**
@@ -250,52 +206,10 @@ async function shutdownAdapters(): Promise<void> {
 }
 
 /**
- * Start the gateway daemon
+ * Start the gateway server (runs in foreground, managed by systemd)
  */
-export async function startDaemon(options: { foreground?: boolean } = {}): Promise<void> {
-  // Check if already running
-  const status = await isDaemonRunning();
-  if (status.running) {
-    throw new Error(`Gateway already running (PID ${status.pid})`);
-  }
-
-  if (!options.foreground) {
-    // Fork to background
-    // Find the script path from argv or use import.meta to get current file location
-    let scriptPath: string;
-
-    // import.meta.path gives us the current file path, navigate to index.ts
-    const currentFile = import.meta.path || import.meta.url.replace('file://', '');
-    const srcDir = join(currentFile, '..', '..');
-    scriptPath = join(srcDir, 'index.ts');
-
-    // Verify the path exists, fallback to cwd-based path
-    if (!existsSync(scriptPath)) {
-      scriptPath = join(process.cwd(), 'src', 'index.ts');
-    }
-
-    // Open log file for appending - child writes directly to file
-    const logFd = openSync(LOG_FILE, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND, 0o644);
-
-    const child = spawn(process.execPath, [scriptPath, 'gateway', 'start', '--foreground'], {
-      detached: true,
-      stdio: ['ignore', logFd, logFd],
-      env: process.env,
-    });
-
-    child.unref();
-
-    // Close the fd in parent - child has its own copy
-    closeSync(logFd);
-
-    console.log(`Gateway started in background (PID ${child.pid})`);
-    console.log(`Logs: ${LOG_FILE}`);
-    return;
-  }
-
-  // Running in foreground
-  isRunning = true;
-  console.log(`Gateway starting (PID ${process.pid})`);
+export async function startGateway(): Promise<void> {
+  console.log(`agentio-gateway starting (PID ${process.pid})`);
 
   // Handle shutdown signals
   const shutdown = async (signal: string) => {
@@ -321,9 +235,6 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
     // Close database
     closeDatabase();
 
-    // Remove PID file
-    await removePidFile();
-
     console.log('Gateway stopped');
     process.exit(0);
   };
@@ -332,11 +243,20 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   try {
-    // Write PID file
-    await writePidFile();
+    // Load config and auto-generate API key on first run
+    const config = await loadConfig() as Config;
+    let gatewayConfig = config.gateway ?? {};
 
-    // Load config
-    const gatewayConfig = await getGatewayConfig();
+    if (!gatewayConfig.apiKey) {
+      const generatedKey = `gw_${randomBytes(24).toString('base64url')}`;
+      gatewayConfig = {
+        ...gatewayConfig,
+        apiKey: generatedKey,
+      };
+      config.gateway = gatewayConfig;
+      await saveConfig(config);
+      console.log(`First run - generated API key: ${generatedKey}`);
+    }
 
     // Initialize database
     await initDatabase();
@@ -352,7 +272,7 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
     await initializeAdapters();
 
     // Start API server
-    startApiServer(gatewayConfig.api, adapters);
+    startApiServer(gatewayConfig, adapters);
 
     // Start outbox processor (every 2 seconds)
     outboxInterval = setInterval(processOutbox, 2000);
@@ -366,98 +286,8 @@ export async function startDaemon(options: { foreground?: boolean } = {}): Promi
     await new Promise(() => {}); // Wait forever
   } catch (error) {
     console.error('Gateway error:', error instanceof Error ? error.message : error);
-    await removePidFile();
     process.exit(1);
   }
 }
 
-/**
- * Stop the gateway daemon
- */
-export async function stopDaemon(): Promise<void> {
-  const status = await isDaemonRunning();
-  if (!status.running || !status.pid) {
-    console.log('Gateway is not running');
-    return;
-  }
-
-  try {
-    process.kill(status.pid, 'SIGTERM');
-    console.log(`Sent SIGTERM to gateway (PID ${status.pid})`);
-
-    // Wait for process to stop
-    for (let i = 0; i < 30; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      try {
-        process.kill(status.pid, 0);
-      } catch {
-        console.log('Gateway stopped');
-        return;
-      }
-    }
-
-    // Force kill if still running
-    try {
-      process.kill(status.pid, 'SIGKILL');
-      console.log('Gateway force killed');
-    } catch {
-      console.log('Gateway stopped');
-    }
-  } catch (error) {
-    console.error('Failed to stop gateway:', error instanceof Error ? error.message : error);
-  }
-}
-
-/**
- * Get daemon status
- */
-export async function getDaemonStatus(): Promise<{
-  running: boolean;
-  pid?: number;
-  adapters?: { service: string; profile: string; connected: boolean }[];
-}> {
-  const status = await isDaemonRunning();
-  if (!status.running) {
-    return { running: false };
-  }
-
-  // Try to get status from API
-  const gatewayConfig = await getGatewayConfig();
-  const port = gatewayConfig.api?.port ?? 7890;
-  const host = gatewayConfig.api?.host ?? '127.0.0.1';
-
-  try {
-    const response = await fetch(`http://${host}:${port}/status`, {
-      headers: gatewayConfig.api?.secret ? { Authorization: `Bearer ${gatewayConfig.api.secret}` } : {},
-    });
-
-    if (response.ok) {
-      const data = await response.json() as { adapters: { service: string; profile: string; connected: boolean }[] };
-      return {
-        running: true,
-        pid: status.pid,
-        adapters: data.adapters,
-      };
-    }
-  } catch {
-    // API not responding, but process exists
-  }
-
-  return { running: true, pid: status.pid };
-}
-
-/**
- * Reload daemon configuration
- */
-export async function reloadDaemon(): Promise<void> {
-  const status = await isDaemonRunning();
-  if (!status.running || !status.pid) {
-    throw new Error('Gateway is not running');
-  }
-
-  // Send SIGHUP to trigger reload
-  process.kill(status.pid, 'SIGHUP');
-  console.log(`Sent reload signal to gateway (PID ${status.pid})`);
-}
-
-export { PID_FILE, LOG_FILE };
+export { LOG_FILE };
