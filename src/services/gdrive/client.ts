@@ -132,15 +132,25 @@ export class GDriveClient implements ServiceClient {
       }
 
       const q = queryParts.join(' and ') || undefined;
+      const allFiles: GDriveFile[] = [];
+      let pageToken: string | undefined;
 
-      const response = await this.drive.files.list({
-        pageSize: Math.min(limit, 100),
-        q,
-        fields: 'files(id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description)',
-        orderBy,
-      });
+      // Paginate through results until we have enough or no more pages
+      do {
+        const response = await this.drive.files.list({
+          pageSize: Math.min(limit - allFiles.length, 100),
+          pageToken,
+          q,
+          fields: 'nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description)',
+          orderBy,
+        });
 
-      return (response.data.files || []).map(this.parseFile);
+        const files = (response.data.files || []).map(this.parseFile);
+        allFiles.push(...files);
+        pageToken = response.data.nextPageToken || undefined;
+      } while (pageToken && allFiles.length < limit);
+
+      return allFiles.slice(0, limit);
     } catch (err) {
       this.throwApiError(err, 'list files');
     }

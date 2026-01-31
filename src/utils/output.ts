@@ -515,22 +515,15 @@ export function printGDriveFileList(files: GDriveFile[], title: string = 'Files'
 
   console.log(`${title} (${files.length})\n`);
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+  for (const file of files) {
     const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
-    const typeIndicator = isFolder ? '[folder]' : `[${getShortMimeType(file.mimeType)}]`;
-    const flags: string[] = [];
-    if (file.starred) flags.push('*');
-    if (file.shared) flags.push('shared');
-    const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
-
-    console.log(`[${i + 1}] ${file.name} ${typeIndicator}${flagStr}`);
-    console.log(`    ID: ${file.id}`);
-    if (file.size) console.log(`    Size: ${formatBytes(file.size)}`);
-    if (file.owners?.length) console.log(`    Owner: ${file.owners[0]}`);
-    if (file.modifiedTime) console.log(`    Modified: ${file.modifiedTime}`);
-    if (file.webViewLink) console.log(`    Link: ${file.webViewLink}`);
-    console.log('');
+    const type = getShortMimeType(file.mimeType).padEnd(7);
+    const size = file.size ? formatBytes(file.size).padStart(8) : '       -';
+    const date = file.modifiedTime ? file.modifiedTime.slice(0, 10) : '          ';
+    const flags = (file.starred ? '*' : '') + (file.shared ? '⇄' : '');
+    const name = isFolder ? `${file.name}/` : file.name;
+    console.log(`${type} ${size}  ${date}  ${flags.padEnd(2)} ${name}`);
+    console.log(`  ${file.id}`);
   }
 }
 
