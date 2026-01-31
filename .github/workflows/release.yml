@@ -101,14 +101,6 @@ jobs:
       - name: Build binary
         run: bun build src/index.ts --compile --target=bun-${{ matrix.target }} --minify --sourcemap --bytecode --define BUILD_VERSION="\"${{ needs.validate.outputs.version }}\"" --outfile=${{ matrix.artifact }}
 
-      - name: Compress with UPX (Linux only)
-        if: contains(matrix.target, 'linux')
-        run: |
-          # Install UPX
-          curl -sL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz | tar -xJ
-          ./upx-4.2.4-amd64_linux/upx --best --lzma ${{ matrix.artifact }}
-          ls -lh ${{ matrix.artifact }}
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
