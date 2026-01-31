@@ -79,16 +79,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: darwin-x64
-            artifact: agentio-darwin-x64
           - target: darwin-arm64
             artifact: agentio-darwin-arm64
           - target: linux-x64
             artifact: agentio-linux-x64
           - target: linux-arm64
             artifact: agentio-linux-arm64
-          - target: windows-x64
-            artifact: agentio-windows-x64.exe
 
     steps:
       - name: Checkout
@@ -105,8 +101,8 @@ jobs:
       - name: Build binary
         run: bun build src/index.ts --compile --target=bun-${{ matrix.target }} --minify --sourcemap --bytecode --define BUILD_VERSION="\"${{ needs.validate.outputs.version }}\"" --outfile=${{ matrix.artifact }}
 
-      - name: Compress with UPX (Linux/Windows only)
-        if: contains(matrix.target, 'linux') || contains(matrix.target, 'windows')
+      - name: Compress with UPX (Linux only)
+        if: contains(matrix.target, 'linux')
         run: |
           # Install UPX
           curl -sL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz | tar -xJ
