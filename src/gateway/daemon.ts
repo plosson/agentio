@@ -255,8 +255,10 @@ export async function startGateway(): Promise<void> {
       };
       config.gateway = gatewayConfig;
       await saveConfig(config);
-      console.log(`First run - generated API key: ${generatedKey}`);
     }
+
+    // Always display API key for easy access (e.g., Docker logs)
+    console.log(`API Key: ${gatewayConfig.apiKey}`);
 
     // Initialize database
     await initDatabase();
