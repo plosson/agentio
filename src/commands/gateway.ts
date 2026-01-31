@@ -80,7 +80,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${binaryPath} gateway start
+ExecStart=${binaryPath} gateway start --foreground
 Restart=always
 RestartSec=5
 Environment=HOME=${process.env.HOME}
@@ -190,9 +190,13 @@ export function registerGatewayCommands(program: Command): void {
   gateway
     .command('start')
     .description('Start the gateway')
-    .action(async () => {
+    .option('--foreground', 'Run in foreground (used by systemd)')
+    .action(async (options) => {
       try {
-        if (isServiceInstalled()) {
+        if (options.foreground) {
+          // Run directly in foreground (called by systemd or for dev)
+          await startGateway();
+        } else if (isServiceInstalled()) {
           // Use systemctl
           const { isRoot } = checkRoot();
           const result = runCommand(['systemctl', 'start', SERVICE_NAME], !isRoot);
