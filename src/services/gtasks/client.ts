@@ -1,4 +1,4 @@
-import { google, tasks_v1 } from 'googleapis';
+import { tasks, type tasks_v1 } from '@googleapis/tasks';
 import type { OAuth2Client } from 'google-auth-library';
 import type {
   GTaskList,
@@ -15,7 +15,7 @@ export class GTasksClient implements ServiceClient {
   private userEmail: string | null = null;
 
   constructor(auth: OAuth2Client) {
-    this.tasks = google.tasks({ version: 'v1', auth });
+    this.tasks = tasks({ version: 'v1', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {

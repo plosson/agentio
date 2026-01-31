@@ -1,5 +1,5 @@
-import { google } from 'googleapis';
-import type { chat_v1 } from 'googleapis';
+import { chat as gchat, type chat_v1 } from '@googleapis/chat';
+import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
@@ -31,7 +31,7 @@ export class GChatClient implements ServiceClient {
     try {
       const oauthCreds = this.credentials as GChatOAuthCredentials;
       const auth = this.createOAuthClient(oauthCreds);
-      const chat = google.chat({ version: 'v1', auth });
+      const chat = gchat({ version: 'v1', auth: auth as any });
       await chat.spaces.list({ pageSize: 1 });
       return { valid: true, info: 'oauth' };
     } catch (error) {
@@ -161,7 +161,7 @@ export class GChatClient implements ServiceClient {
   private async sendViaOAuth(options: GChatSendOptions & { spaceId?: string }): Promise<GChatSendResult> {
     const oauthCreds = this.credentials as GChatOAuthCredentials;
     const auth = this.createOAuthClient(oauthCreds);
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = gchat({ version: 'v1', auth: auth as any });
 
     if (!options.spaceId) {
       throw new CliError(
@@ -202,7 +202,7 @@ export class GChatClient implements ServiceClient {
   private async listViaOAuth(options: GChatListOptions): Promise<GChatMessage[]> {
     const oauthCreds = this.credentials as GChatOAuthCredentials;
     const auth = this.createOAuthClient(oauthCreds);
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = gchat({ version: 'v1', auth: auth as any });
 
     try {
       // Build filter from options
@@ -258,7 +258,7 @@ export class GChatClient implements ServiceClient {
   private async getViaOAuth(options: GChatGetOptions): Promise<GChatMessage> {
     const oauthCreds = this.credentials as GChatOAuthCredentials;
     const auth = this.createOAuthClient(oauthCreds);
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = gchat({ version: 'v1', auth: auth as any });
 
     try {
       const response = await chat.spaces.messages.get({
@@ -303,7 +303,7 @@ export class GChatClient implements ServiceClient {
   private async listSpacesViaOAuth(): Promise<GChatSpace[]> {
     const oauthCreds = this.credentials as GChatOAuthCredentials;
     const auth = this.createOAuthClient(oauthCreds);
-    const chat = google.chat({ version: 'v1', auth });
+    const chat = gchat({ version: 'v1', auth: auth as any });
 
     try {
       const response = await chat.spaces.list({});
@@ -353,7 +353,7 @@ export class GChatClient implements ServiceClient {
   }
 
   private createOAuthClient(credentials: GChatOAuthCredentials) {
-    const oauth2Client = new google.auth.OAuth2(
+    const oauth2Client = new OAuth2Client(
       GOOGLE_OAUTH_CONFIG.clientId,
       GOOGLE_OAUTH_CONFIG.clientSecret
     );

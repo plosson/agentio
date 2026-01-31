@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { google } from 'googleapis';
-import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
+import { calendar } from '@googleapis/calendar';
+import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
@@ -365,13 +365,11 @@ export function registerGCalCommands(program: Command): void {
 
         const tokens = await performOAuthFlow('gcal');
 
-        // Fetch the user's email from calendar settings
-        const auth = createGoogleAuth(tokens);
-        const calendar = google.calendar({ version: 'v3', auth });
-        const settings = await calendar.calendarList.get({ calendarId: 'primary' });
-        const email = settings.data.id;
-
-        if (!email) {
+        // Fetch the user's email
+        let email: string;
+        try {
+          email = await fetchGoogleUserEmail(tokens.access_token);
+        } catch (error) {
           throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
         }
 

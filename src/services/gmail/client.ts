@@ -1,4 +1,4 @@
-import { google, gmail_v1 } from 'googleapis';
+import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
 import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
@@ -44,7 +44,7 @@ export class GmailClient implements ServiceClient {
   private userEmail: string | null = null;
 
   constructor(auth: OAuth2Client) {
-    this.gmail = google.gmail({ version: 'v1', auth });
+    this.gmail = gmail({ version: 'v1', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {

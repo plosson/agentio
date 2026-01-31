@@ -1,4 +1,4 @@
-import { google, calendar_v3 } from 'googleapis';
+import { calendar, type calendar_v3 } from '@googleapis/calendar';
 import type { OAuth2Client } from 'google-auth-library';
 import type {
   GCalCalendar,
@@ -18,7 +18,7 @@ export class GCalClient implements ServiceClient {
   private userEmail: string | null = null;
 
   constructor(auth: OAuth2Client) {
-    this.calendar = google.calendar({ version: 'v3', auth });
+    this.calendar = calendar({ version: 'v3', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {

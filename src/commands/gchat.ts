@@ -1,12 +1,12 @@
 import { Command } from 'commander';
-import { google } from 'googleapis';
+import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
-import { createGoogleAuth } from '../auth/token-manager';
+import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { GChatClient } from '../services/gchat/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
@@ -286,12 +286,7 @@ async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolea
   // Fetch user email for profile naming
   let userEmail: string;
   try {
-    const oauth2 = google.oauth2({ version: 'v2', auth });
-    const userInfo = await oauth2.userinfo.get();
-    userEmail = userInfo.data.email || '';
-    if (!userEmail) {
-      throw new Error('No email returned');
-    }
+    userEmail = await fetchGoogleUserEmail(tokens.access_token);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new CliError(
@@ -303,8 +298,8 @@ async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolea
 
   // Validate the token works with Chat API
   try {
-    const chat = google.chat({ version: 'v1', auth });
-    await chat.spaces.list({ pageSize: 1 });
+    const chatApi = gchat({ version: 'v1', auth: auth as any });
+    await chatApi.spaces.list({ pageSize: 1 });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new CliError(

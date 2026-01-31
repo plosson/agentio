@@ -1,5 +1,6 @@
-import { google } from 'googleapis';
-import type { sheets_v4, drive_v3 } from 'googleapis';
+import { sheets, type sheets_v4 } from '@googleapis/sheets';
+import { drive, type drive_v3 } from '@googleapis/drive';
+import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
@@ -27,8 +28,8 @@ export class GSheetsClient implements ServiceClient {
   constructor(credentials: GSheetsCredentials) {
     this.credentials = credentials;
     const auth = this.createOAuthClient();
-    this.sheets = google.sheets({ version: 'v4', auth });
-    this.drive = google.drive({ version: 'v3', auth });
+    this.sheets = sheets({ version: 'v4', auth: auth as any });
+    this.drive = drive({ version: 'v3', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {
@@ -318,7 +319,7 @@ export class GSheetsClient implements ServiceClient {
   }
 
   private createOAuthClient() {
-    const oauth2Client = new google.auth.OAuth2(
+    const oauth2Client = new OAuth2Client(
       GOOGLE_OAUTH_CONFIG.clientId,
       GOOGLE_OAUTH_CONFIG.clientSecret
     );

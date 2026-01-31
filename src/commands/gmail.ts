@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { basename, join } from 'path';
 import { tmpdir } from 'os';
-import { google } from 'googleapis';
-import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
+import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
@@ -471,12 +470,10 @@ ${emailHeader}
         const tokens = await performOAuthFlow('gmail');
 
         // Fetch the user's email to store with the profile
-        const auth = createGoogleAuth(tokens);
-        const gmailApi = google.gmail({ version: 'v1', auth });
-        const userProfile = await gmailApi.users.getProfile({ userId: 'me' });
-        const email = userProfile.data.emailAddress;
-
-        if (!email) {
+        let email: string;
+        try {
+          email = await fetchGoogleUserEmail(tokens.access_token);
+        } catch (error) {
           throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
         }
 

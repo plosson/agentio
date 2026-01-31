@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { writeFile } from 'fs/promises';
-import { google } from 'googleapis';
-import { createGoogleAuth } from '../auth/token-manager';
+import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
@@ -332,17 +331,11 @@ Examples:
         console.error('Starting OAuth flow for Google Sheets...\n');
 
         const tokens = await performOAuthFlow('gsheets');
-        const auth = createGoogleAuth(tokens);
 
         // Fetch user email for profile naming
         let userEmail: string;
         try {
-          const oauth2 = google.oauth2({ version: 'v2', auth });
-          const userInfo = await oauth2.userinfo.get();
-          userEmail = userInfo.data.email || '';
-          if (!userEmail) {
-            throw new Error('No email returned');
-          }
+          userEmail = await fetchGoogleUserEmail(tokens.access_token);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');

@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { OAuth2Client } from 'google-auth-library';
 import { getCredentials, setCredentials } from './token-store';
 import { resolveProfile } from '../config/config-manager';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
@@ -56,7 +56,7 @@ async function refreshTokens(
   profileName: string,
   tokens: OAuthTokens
 ): Promise<OAuthTokens> {
-  const oauth2Client = new google.auth.OAuth2(
+  const oauth2Client = new OAuth2Client(
     GOOGLE_OAUTH_CONFIG.clientId,
     GOOGLE_OAUTH_CONFIG.clientSecret
   );
@@ -89,7 +89,7 @@ async function refreshTokens(
 }
 
 export function createGoogleAuth(tokens: OAuthTokens) {
-  const oauth2Client = new google.auth.OAuth2(
+  const oauth2Client = new OAuth2Client(
     GOOGLE_OAUTH_CONFIG.clientId,
     GOOGLE_OAUTH_CONFIG.clientSecret
   );
@@ -101,4 +101,26 @@ export function createGoogleAuth(tokens: OAuthTokens) {
   });
 
   return oauth2Client;
+}
+
+/**
+ * Fetch user email from Google's userinfo endpoint
+ */
+export async function fetchGoogleUserEmail(accessToken: string): Promise<string> {
+  const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user info: ${response.status}`);
+  }
+
+  const data = await response.json() as { email?: string };
+  if (!data.email) {
+    throw new Error('No email returned from userinfo endpoint');
+  }
+
+  return data.email;
 }

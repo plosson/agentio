@@ -1,6 +1,5 @@
 import { Command } from 'commander';
-import { google } from 'googleapis';
-import { getValidTokens, createGoogleAuth } from '../auth/token-manager';
+import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
@@ -313,13 +312,11 @@ export function registerGTasksCommands(program: Command): void {
 
         const tokens = await performOAuthFlow('gtasks');
 
-        // Fetch user email via oauth2 userinfo
-        const auth = createGoogleAuth(tokens);
-        const oauth2 = google.oauth2({ version: 'v2', auth });
-        const userInfo = await oauth2.userinfo.get();
-        const email = userInfo.data.email;
-
-        if (!email) {
+        // Fetch user email
+        let email: string;
+        try {
+          email = await fetchGoogleUserEmail(tokens.access_token);
+        } catch (error) {
           throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
         }
 

@@ -1,7 +1,7 @@
 import { readFile, writeFile, stat } from 'fs/promises';
 import { basename } from 'path';
-import { google } from 'googleapis';
-import type { drive_v3 } from 'googleapis';
+import { drive, type drive_v3 } from '@googleapis/drive';
+import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
@@ -97,7 +97,7 @@ export class GDriveClient implements ServiceClient {
   constructor(credentials: GDriveCredentials) {
     this.credentials = credentials;
     const auth = this.createOAuthClient();
-    this.drive = google.drive({ version: 'v3', auth });
+    this.drive = drive({ version: 'v3', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {
@@ -375,7 +375,7 @@ export class GDriveClient implements ServiceClient {
   }
 
   private createOAuthClient() {
-    const oauth2Client = new google.auth.OAuth2(
+    const oauth2Client = new OAuth2Client(
       GOOGLE_OAUTH_CONFIG.clientId,
       GOOGLE_OAUTH_CONFIG.clientSecret
     );

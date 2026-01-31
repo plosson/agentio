@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import { findAvailablePort, startOAuthCallbackServer, launchBrowser } from './oauth-server';
 import type { OAuthTokens } from '../types/tokens';
@@ -70,7 +70,7 @@ export async function performOAuthFlow(
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}/callback`;
 
-  const oauth2Client = new google.auth.OAuth2(
+  const oauth2Client = new OAuth2Client(
     GOOGLE_OAUTH_CONFIG.clientId,
     GOOGLE_OAUTH_CONFIG.clientSecret,
     redirectUri
