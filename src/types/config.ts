@@ -1,7 +1,7 @@
-export interface GatewayApiConfig {
-  port?: number;
-  host?: string;
-  secret?: string;
+export interface GatewayServerConfig {
+  // Server binding (for running a gateway daemon)
+  port?: number;          // Port to bind (default: 7890)
+  host?: string;          // Host to bind (default: 0.0.0.0 for server)
 }
 
 export interface GatewayWebhookConfig {
@@ -21,9 +21,10 @@ export interface GatewayRetentionConfig {
 }
 
 export interface GatewayConfig {
-  name?: string;           // Gateway identity name
-  secret?: string;         // Shared secret for API auth and teleport
-  api?: GatewayApiConfig;
+  name?: string;           // Gateway identity name (for local server identification)
+  apiUrl?: string;         // Gateway URL (e.g., "https://gateway.example.com:7890")
+  apiKey?: string;         // API key for authentication
+  server?: GatewayServerConfig;  // Server binding settings (for running daemon)
   webhook?: GatewayWebhookConfig;
   media?: GatewayMediaConfig;
   retention?: GatewayRetentionConfig;
