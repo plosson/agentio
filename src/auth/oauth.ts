@@ -7,6 +7,7 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',  // search & read emails
   'https://www.googleapis.com/auth/gmail.send',      // send emails
   'https://www.googleapis.com/auth/gmail.compose',   // create/update drafts
+  'https://www.googleapis.com/auth/userinfo.email',  // get email for profile naming
 ];
 
 const GCHAT_SCOPES = [
