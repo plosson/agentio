@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
 import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
+import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
@@ -309,7 +309,16 @@ async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolea
     );
   }
 
-  const profileName = profileNameOverride || userEmail;
+  // Determine profile name: use explicit override, or email, or email-readonly if conflict
+  let profileName: string;
+  if (profileNameOverride) {
+    profileName = profileNameOverride;
+  } else if (readOnly && await getProfile('gchat', userEmail)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${userEmail}-readonly`;
+  } else {
+    profileName = userEmail;
+  }
 
   const credentials: GChatOAuthCredentials = {
     type: 'oauth',

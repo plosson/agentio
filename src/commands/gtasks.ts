@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
+import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GTasksClient } from '../services/gtasks/client';
@@ -320,7 +320,16 @@ export function registerGTasksCommands(program: Command): void {
           throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
         }
 
-        const profileName = options.profile || email;
+        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+        let profileName: string;
+        if (options.profile) {
+          profileName = options.profile;
+        } else if (options.readOnly && await getProfile('gtasks', email)) {
+          // Profile with email already exists, use -readonly suffix
+          profileName = `${email}-readonly`;
+        } else {
+          profileName = email;
+        }
 
         await setProfile('gtasks', profileName, { readOnly: options.readOnly });
         await setCredentials('gtasks', profileName, { ...tokens, email });

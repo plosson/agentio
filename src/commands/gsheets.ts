@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { writeFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
+import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
@@ -341,7 +341,16 @@ Examples:
           throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
         }
 
-        const profileName = options.profile || userEmail;
+        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+        let profileName: string;
+        if (options.profile) {
+          profileName = options.profile;
+        } else if (options.readOnly && await getProfile('gsheets', userEmail)) {
+          // Profile with email already exists, use -readonly suffix
+          profileName = `${userEmail}-readonly`;
+        } else {
+          profileName = userEmail;
+        }
 
         const credentials: GSheetsCredentials = {
           accessToken: tokens.access_token,

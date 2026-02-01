@@ -3,7 +3,7 @@ import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
+import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
@@ -477,7 +477,16 @@ ${emailHeader}
           throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
         }
 
-        const profileName = options.profile || email;
+        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+        let profileName: string;
+        if (options.profile) {
+          profileName = options.profile;
+        } else if (options.readOnly && await getProfile('gmail', email)) {
+          // Profile with email already exists, use -readonly suffix
+          profileName = `${email}-readonly`;
+        } else {
+          profileName = email;
+        }
 
         await setProfile('gmail', profileName, { readOnly: options.readOnly });
         await setCredentials('gmail', profileName, { ...tokens, email });
