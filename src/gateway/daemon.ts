@@ -274,7 +274,7 @@ export async function startGateway(): Promise<void> {
     await initializeAdapters();
 
     // Start API server
-    startApiServer(gatewayConfig, adapters);
+    startApiServer(gatewayConfig, adapters, handleInboundMessage);
 
     // Start outbox processor (every 2 seconds)
     outboxInterval = setInterval(processOutbox, 2000);

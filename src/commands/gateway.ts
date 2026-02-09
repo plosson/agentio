@@ -7,7 +7,7 @@ import { password } from '@inquirer/prompts';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { startGateway, getGatewayConfig, LOG_FILE } from '../gateway/daemon';
-import { exportWhatsAppAuthState } from '../gateway/store';
+import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../gateway/store';
 import { isInteractive } from '../utils/interactive';
 import type { Config } from '../types/config';
 
@@ -518,32 +518,40 @@ export function registerGatewayCommands(program: Command): void {
         if (options.service === 'all' || options.service === 'whatsapp') {
           const profiles = config.profiles.whatsapp || [];
 
-          for (const entry of profiles) {
-            const profileName = typeof entry === 'string' ? entry : entry.name;
-            console.log(`  Exporting whatsapp:${profileName}...`);
-            const authState = await exportWhatsAppAuthState(profileName);
+          if (profiles.length > 0) {
+            await initDatabase();
+          }
 
-            if (!authState) {
-              console.log('    No auth state found, skipping');
-              continue;
+          try {
+            for (const entry of profiles) {
+              const profileName = typeof entry === 'string' ? entry : entry.name;
+              console.log(`  Exporting whatsapp:${profileName}...`);
+              const authState = await exportWhatsAppAuthState(profileName);
+
+              if (!authState) {
+                console.log('    No auth state found, skipping');
+                continue;
+              }
+
+              // Send to remote gateway
+              const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profileName)}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-API-Key': key,
+                },
+                body: JSON.stringify(authState),
+              });
+
+              if (!response.ok) {
+                const error = await response.text();
+                throw new CliError('API_ERROR', `Failed to import to remote: ${error}`);
+              }
+
+              console.log('    Transferred successfully');
             }
-
-            // Send to remote gateway
-            const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profileName)}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-API-Key': key,
-              },
-              body: JSON.stringify(authState),
-            });
-
-            if (!response.ok) {
-              const error = await response.text();
-              throw new CliError('API_ERROR', `Failed to import to remote: ${error}`);
-            }
-
-            console.log('    Transferred successfully');
+          } finally {
+            closeDatabase();
           }
         }
 

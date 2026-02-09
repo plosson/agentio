@@ -52,13 +52,31 @@ import {
   importWhatsAppAuthState,
   type WhatsAppAuthExport,
 } from './store';
-import type { ServiceAdapter } from './adapters/types';
-import type { WhatsAppAdapter } from './adapters/whatsapp';
+import type { ServiceAdapter, AdapterInboundMessage } from './adapters/types';
+import { WhatsAppAdapter } from './adapters/whatsapp';
 
 let server: Server<unknown> | null = null;
 let apiKey: string = '';
 let startTime: number = 0;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
+let onAdapterMessage: ((service: ServiceName, profile: string, message: AdapterInboundMessage) => void) | null = null;
+
+/**
+ * Get or lazily create the WhatsApp adapter
+ */
+function getOrCreateWhatsAppAdapter(): WhatsAppAdapter {
+  let adapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+  if (!adapter) {
+    adapter = new WhatsAppAdapter();
+    adapter.onMessage = (profile, message) => {
+      if (onAdapterMessage) {
+        onAdapterMessage('whatsapp', profile, message);
+      }
+    };
+    adapters.set('whatsapp', adapter);
+  }
+  return adapter;
+}
 
 /**
  * JSON error response helper
@@ -333,18 +351,38 @@ function handleMedia(id: string): Response {
 /**
  * Handle WhatsApp pairing request
  */
-function handleWhatsAppPair(profile: string): Response {
-  const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
+async function handleWhatsAppPair(profile: string): Promise<Response> {
+  const whatsappAdapter = getOrCreateWhatsAppAdapter();
 
-  if (!whatsappAdapter) {
+  // If the profile isn't known to the adapter yet, start connecting it
+  const state = whatsappAdapter.getWhatsAppState(profile);
+  if (!state.connected && !whatsappAdapter.hasProfile(profile)) {
+    try {
+      await whatsappAdapter.connect(profile, { paired: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start pairing';
+      const response: WhatsAppPairResponse = {
+        status: 'connecting',
+        message,
+      };
+      return jsonResponse(response);
+    }
+    // Re-check state after connect
+    const newState = whatsappAdapter.getWhatsAppState(profile);
+    if (newState.qrCode) {
+      const response: WhatsAppPairResponse = {
+        status: 'waiting_qr',
+        qrCode: newState.qrCode,
+        message: 'Scan QR code with WhatsApp on your phone',
+      };
+      return jsonResponse(response);
+    }
     const response: WhatsAppPairResponse = {
-      status: 'not_configured',
-      message: 'WhatsApp is not configured. Add a profile first.',
+      status: 'connecting',
+      message: newState.error || 'Connecting to WhatsApp...',
     };
     return jsonResponse(response);
   }
-
-  const state = whatsappAdapter.getWhatsAppState(profile);
 
   if (state.connected) {
     const response: WhatsAppPairResponse = {
@@ -390,13 +428,14 @@ async function handleWhatsAppImport(profile: string, request: Request): Promise<
     });
 
     // Disconnect and reconnect WhatsApp adapter to use new credentials
-    const whatsappAdapter = adapters.get('whatsapp') as WhatsAppAdapter | undefined;
-    if (whatsappAdapter) {
+    const whatsappAdapter = getOrCreateWhatsAppAdapter();
+    if (whatsappAdapter.hasProfile(profile)) {
       await whatsappAdapter.disconnect(profile);
-      // Note: reconnection will happen on next daemon cycle or manual reload
     }
+    // Reconnect with imported auth state
+    await whatsappAdapter.connect(profile, { paired: true });
 
-    return jsonResponse({ success: true, message: 'Auth state imported. Reload gateway to reconnect.' });
+    return jsonResponse({ success: true, message: 'Auth state imported and reconnecting.' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Import failed';
     return jsonError(message, 500);
@@ -753,12 +792,17 @@ async function handleRequest(request: Request): Promise<Response> {
 /**
  * Start the API server
  */
-export function startApiServer(config: GatewayConfig, serviceAdapters: Map<ServiceName, ServiceAdapter>): Server<unknown> {
+export function startApiServer(
+  config: GatewayConfig,
+  serviceAdapters: Map<ServiceName, ServiceAdapter>,
+  messageHandler?: (service: ServiceName, profile: string, message: AdapterInboundMessage) => void,
+): Server<unknown> {
   const port = config?.server?.port ?? DEFAULT_GATEWAY_CONFIG.server.port;
   const host = config?.server?.host ?? DEFAULT_GATEWAY_CONFIG.server.host;
   apiKey = config?.apiKey ?? '';
   startTime = Date.now();
   adapters = serviceAdapters;
+  onAdapterMessage = messageHandler ?? null;
 
   server = Bun.serve({
     port,

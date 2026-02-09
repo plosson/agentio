@@ -75,6 +75,10 @@ export class WhatsAppAdapter extends BaseAdapter {
 
   private profiles: Map<string, ProfileConnection> = new Map();
 
+  hasProfile(profile: string): boolean {
+    return this.profiles.has(profile);
+  }
+
   async connect(profile: string, credentials: unknown): Promise<void> {
     const creds = credentials as WhatsAppCredentials;
 
