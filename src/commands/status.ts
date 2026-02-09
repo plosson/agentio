@@ -14,6 +14,7 @@ import { JiraClient } from '../services/jira/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
+import { GSheetsClient } from '../services/gsheets/client';
 import { SqlClient } from '../services/sql/client';
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
@@ -26,6 +27,7 @@ import type { GDriveCredentials } from '../types/gdrive';
 import type { GCalCredentials } from '../types/gcal';
 import type { GTasksCredentials } from '../types/gtasks';
 import type { GChatCredentials } from '../types/gchat';
+import type { GSheetsCredentials } from '../types/gsheets';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
@@ -64,6 +66,11 @@ async function createServiceClient(
     case 'gdrive': {
       const creds = credentials as GDriveCredentials;
       return new GDriveClient(creds);
+    }
+
+    case 'gsheets': {
+      const creds = credentials as GSheetsCredentials;
+      return new GSheetsClient(creds);
     }
 
     case 'gcal': {
@@ -240,13 +247,65 @@ async function createServiceClient(
   }
 }
 
-interface ProfileStatus {
-  service: string;
+export interface ProfileStatus {
+  service: ServiceName;
   profile: string;
   readOnly?: boolean;
   status: 'ok' | 'invalid' | 'no-creds' | 'skipped';
   info?: string;
   error?: string;
+}
+
+export async function getProfileStatuses(options?: { test?: boolean }): Promise<ProfileStatus[]> {
+  const shouldTest = options?.test !== false;
+  const allProfiles = await listProfiles();
+  const statuses: ProfileStatus[] = [];
+
+  for (const { service, profiles } of allProfiles) {
+    for (const entry of profiles) {
+      const credentials = await getCredentials(service, entry.name);
+
+      if (!credentials) {
+        statuses.push({
+          service,
+          profile: entry.name,
+          readOnly: entry.readOnly,
+          status: 'no-creds',
+        });
+        continue;
+      }
+
+      if (!shouldTest) {
+        statuses.push({
+          service,
+          profile: entry.name,
+          readOnly: entry.readOnly,
+          status: 'skipped',
+        });
+        continue;
+      }
+
+      const client = await createServiceClient(service, credentials, entry.name);
+      let result: ValidationResult;
+
+      if (client) {
+        result = await client.validate();
+      } else {
+        result = { valid: true, info: 'unknown service' };
+      }
+
+      statuses.push({
+        service,
+        profile: entry.name,
+        readOnly: entry.readOnly,
+        status: result.valid ? 'ok' : 'invalid',
+        info: result.info,
+        error: result.error,
+      });
+    }
+  }
+
+  return statuses;
 }
 
 export function registerStatusCommand(program: Command): void {
@@ -257,57 +316,11 @@ export function registerStatusCommand(program: Command): void {
     .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
-        const allProfiles = await listProfiles();
         const version = program.version();
         const envVars = await listEnv();
         const envKeys = Object.keys(envVars).sort();
 
-        // Collect all profile statuses
-        const statuses: ProfileStatus[] = [];
-
-        for (const { service, profiles } of allProfiles) {
-          for (const entry of profiles) {
-            const credentials = await getCredentials(service, entry.name);
-
-            if (!credentials) {
-              statuses.push({
-                service,
-                profile: entry.name,
-                readOnly: entry.readOnly,
-                status: 'no-creds',
-              });
-              continue;
-            }
-
-            if (options.test === false) {
-              statuses.push({
-                service,
-                profile: entry.name,
-                readOnly: entry.readOnly,
-                status: 'skipped',
-              });
-              continue;
-            }
-
-            const client = await createServiceClient(service, credentials, entry.name);
-            let result: ValidationResult;
-
-            if (client) {
-              result = await client.validate();
-            } else {
-              result = { valid: true, info: 'unknown service' };
-            }
-
-            statuses.push({
-              service,
-              profile: entry.name,
-              readOnly: entry.readOnly,
-              status: result.valid ? 'ok' : 'invalid',
-              info: result.info,
-              error: result.error,
-            });
-          }
-        }
+        const statuses = await getProfileStatuses({ test: options.test });
 
         // JSON output mode
         if (options.json) {

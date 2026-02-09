@@ -33,7 +33,7 @@ export class GChatClient implements ServiceClient {
       const auth = this.createOAuthClient(oauthCreds);
       const chat = gchat({ version: 'v1', auth: auth as any });
       await chat.spaces.list({ pageSize: 1 });
-      return { valid: true, info: 'oauth' };
+      return { valid: true, info: oauthCreds.email || 'oauth' };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       if (message.includes('invalid_grant') || message.includes('Token has been expired or revoked')) {

@@ -24,6 +24,7 @@ import { registerClaudeCommands } from './commands/claude';
 import { registerConfigCommands } from './commands/config';
 import { registerDocsCommand } from './commands/docs';
 import { registerGatewayCommands } from './commands/gateway';
+import { registerReauthCommand } from './commands/reauth';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 
@@ -66,6 +67,7 @@ registerClaudeCommands(program);
 registerConfigCommands(program);
 registerDocsCommand(program);
 registerGatewayCommands(program);
+registerReauthCommand(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 
