@@ -325,8 +325,9 @@ export class GmailClient implements ServiceClient {
     body: string;
     isHtml?: boolean;
     attachments: GmailAttachment[];
+    extraHeaders?: string[];
   }): Promise<string> {
-    const { from, to, cc, bcc, subject, body, isHtml, attachments } = options;
+    const { from, to, cc, bcc, subject, body, isHtml, attachments, extraHeaders } = options;
 
     // Separate inline and regular attachments
     const inlineAttachments = attachments.filter(a => a.contentId);
@@ -347,6 +348,11 @@ export class GmailClient implements ServiceClient {
     if (cc?.length) lines.push(`Cc: ${cc.join(', ')}`);
     if (bcc?.length) lines.push(`Bcc: ${bcc.join(', ')}`);
     lines.push(`Subject: ${subject}`);
+    if (extraHeaders) {
+      for (const header of extraHeaders) {
+        lines.push(header);
+      }
+    }
     lines.push('MIME-Version: 1.0');
 
     if (hasRegular && hasInline) {
@@ -465,7 +471,7 @@ export class GmailClient implements ServiceClient {
   }
 
   async reply(options: GmailReplyOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {
-    const { threadId, body, isHtml } = options;
+    const { threadId, body, isHtml, attachments } = options;
 
     // Get the thread to find the last message
     try {
@@ -489,18 +495,35 @@ export class GmailClient implements ServiceClient {
         : `Re: ${headers['subject'] || '(no subject)'}`;
       const messageId = headers['message-id'] || '';
 
-      const rawHeaders = [
-        `From: ${userEmail}`,
-        `To: ${replyTo}`,
-        `Subject: ${subject}`,
-        messageId ? `In-Reply-To: ${messageId}` : '',
-        messageId ? `References: ${messageId}` : '',
-        `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
-        '',
-        body,
-      ].filter(Boolean).join('\r\n');
+      let rawMessage: string;
 
-      const encodedMessage = Buffer.from(rawHeaders).toString('base64url');
+      if (attachments && attachments.length > 0) {
+        rawMessage = await this.buildMultipartMessage({
+          from: userEmail,
+          to: [replyTo],
+          subject,
+          body,
+          isHtml,
+          attachments,
+          extraHeaders: [
+            ...(messageId ? [`In-Reply-To: ${messageId}`] : []),
+            ...(messageId ? [`References: ${messageId}`] : []),
+          ],
+        });
+      } else {
+        rawMessage = [
+          `From: ${userEmail}`,
+          `To: ${replyTo}`,
+          `Subject: ${subject}`,
+          messageId ? `In-Reply-To: ${messageId}` : '',
+          messageId ? `References: ${messageId}` : '',
+          `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
+          '',
+          body,
+        ].filter(Boolean).join('\r\n');
+      }
+
+      const encodedMessage = Buffer.from(rawMessage).toString('base64url');
 
       const response = await this.gmail.users.messages.send({
         userId: 'me',

@@ -252,6 +252,7 @@ Query Syntax Examples:
     .requiredOption('--thread-id <id>', 'Thread ID')
     .option('--body <body>', 'Reply body (or pipe via stdin)')
     .option('--html', 'Treat body as HTML')
+    .option('--attachment <path>', 'File to attach (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .action(async (options) => {
       try {
         let body = options.body;
@@ -264,12 +265,21 @@ Query Syntax Examples:
           throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
         }
 
+        const attachments: GmailAttachment[] | undefined =
+          options.attachment.length
+            ? options.attachment.map((path: string) => ({
+                path,
+                filename: basename(path),
+              }))
+            : undefined;
+
         const { client, profile } = await getGmailClient(options.profile);
         await enforceWriteAccess('gmail', profile, 'reply to email');
         const result = await client.reply({
           threadId: options.threadId,
           body,
           isHtml: options.html,
+          attachments,
         });
         printSendResult(result);
       } catch (error) {
