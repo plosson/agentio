@@ -117,8 +117,8 @@ src/
 agentio gmail list [--limit N] [--query Q] [--label L]
 agentio gmail get <message-id> [--format text|html|raw] [--body-only]
 agentio gmail search --query <query> [--limit N]
-agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>]
-agentio gmail reply --thread-id <id> [--body <body>]
+agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]
+agentio gmail draft --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]
 agentio gmail archive <message-id...>
 agentio gmail mark <message-id...> --read|--unread
 agentio gmail attachment <message-id> [--output <dir>]

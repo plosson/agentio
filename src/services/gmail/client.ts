@@ -1,7 +1,7 @@
 import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailReplyOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
 
@@ -265,14 +265,57 @@ export class GmailClient implements ServiceClient {
     return this.list({ query, limit });
   }
 
-  async send(options: GmailSendOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {
-    const { to, cc, bcc, subject, body, isHtml, attachments } = options;
+  private async resolveReplyContext(threadId: string): Promise<{
+    to: string[];
+    subject: string;
+    extraHeaders: string[];
+  }> {
+    const thread = await this.gmail.users.threads.get({
+      userId: 'me',
+      id: threadId,
+    });
+
+    const messages = thread.data.messages || [];
+    if (messages.length === 0) {
+      throw new CliError('NOT_FOUND', `Thread not found: ${threadId}`);
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    const headers = this.parseHeaders(lastMessage.payload?.headers);
+
+    const to = [headers['reply-to'] || headers['from'] || ''];
+    const subject = headers['subject']?.startsWith('Re:')
+      ? headers['subject']
+      : `Re: ${headers['subject'] || '(no subject)'}`;
+    const messageId = headers['message-id'] || '';
+
+    const extraHeaders: string[] = [];
+    if (messageId) {
+      extraHeaders.push(`In-Reply-To: ${messageId}`);
+      extraHeaders.push(`References: ${messageId}`);
+    }
+
+    return { to, subject, extraHeaders };
+  }
+
+  private async buildEncodedMessage(options: GmailSendOptions): Promise<string> {
+    const { cc, bcc, body, isHtml, attachments, replyTo } = options;
     const userEmail = await this.getUserEmail();
+
+    let to = options.to;
+    let subject = options.subject;
+    let extraHeaders: string[] | undefined;
+
+    if (replyTo) {
+      const replyContext = await this.resolveReplyContext(replyTo);
+      if (!to.length) to = replyContext.to;
+      if (!subject) subject = replyContext.subject;
+      extraHeaders = replyContext.extraHeaders;
+    }
 
     let rawMessage: string;
 
     if (attachments && attachments.length > 0) {
-      // Build multipart MIME message with attachments
       rawMessage = await this.buildMultipartMessage({
         from: userEmail,
         to,
@@ -282,27 +325,35 @@ export class GmailClient implements ServiceClient {
         body,
         isHtml,
         attachments,
+        extraHeaders,
       });
     } else {
-      // Simple message without attachments
       rawMessage = [
         `From: ${userEmail}`,
         `To: ${to.join(', ')}`,
         cc?.length ? `Cc: ${cc.join(', ')}` : null,
         bcc?.length ? `Bcc: ${bcc.join(', ')}` : null,
         `Subject: ${subject}`,
+        ...(extraHeaders || []),
         `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
         '',
         body,
       ].filter((line): line is string => line !== null).join('\r\n');
     }
 
-    const encodedMessage = Buffer.from(rawMessage).toString('base64url');
+    return Buffer.from(rawMessage).toString('base64url');
+  }
+
+  async send(options: GmailSendOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {
+    const encodedMessage = await this.buildEncodedMessage(options);
 
     try {
       const response = await this.gmail.users.messages.send({
         userId: 'me',
-        requestBody: { raw: encodedMessage },
+        requestBody: {
+          raw: encodedMessage,
+          ...(options.replyTo ? { threadId: options.replyTo } : {}),
+        },
       });
 
       return {
@@ -313,6 +364,30 @@ export class GmailClient implements ServiceClient {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new CliError('API_ERROR', `Failed to send email: ${message}`);
+    }
+  }
+
+  async draft(options: GmailSendOptions): Promise<{ id: string; messageId: string }> {
+    const encodedMessage = await this.buildEncodedMessage(options);
+
+    try {
+      const response = await this.gmail.users.drafts.create({
+        userId: 'me',
+        requestBody: {
+          message: {
+            raw: encodedMessage,
+            ...(options.replyTo ? { threadId: options.replyTo } : {}),
+          },
+        },
+      });
+
+      return {
+        id: response.data.id!,
+        messageId: response.data.message?.id || '',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to create draft: ${message}`);
     }
   }
 
@@ -467,81 +542,6 @@ export class GmailClient implements ServiceClient {
       if (error instanceof CliError) throw error;
       const message = error instanceof Error ? error.message : String(error);
       throw new CliError('API_ERROR', `Failed to read attachment ${attachment.path}: ${message}`);
-    }
-  }
-
-  async reply(options: GmailReplyOptions): Promise<{ id: string; threadId: string; labelIds: string[] }> {
-    const { threadId, body, isHtml, attachments } = options;
-
-    // Get the thread to find the last message
-    try {
-      const thread = await this.gmail.users.threads.get({
-        userId: 'me',
-        id: threadId,
-      });
-
-      const messages = thread.data.messages || [];
-      if (messages.length === 0) {
-        throw new CliError('NOT_FOUND', `Thread not found: ${threadId}`);
-      }
-
-      const lastMessage = messages[messages.length - 1];
-      const headers = this.parseHeaders(lastMessage.payload?.headers);
-
-      const userEmail = await this.getUserEmail();
-      const replyTo = headers['reply-to'] || headers['from'] || '';
-      const subject = headers['subject']?.startsWith('Re:')
-        ? headers['subject']
-        : `Re: ${headers['subject'] || '(no subject)'}`;
-      const messageId = headers['message-id'] || '';
-
-      let rawMessage: string;
-
-      if (attachments && attachments.length > 0) {
-        rawMessage = await this.buildMultipartMessage({
-          from: userEmail,
-          to: [replyTo],
-          subject,
-          body,
-          isHtml,
-          attachments,
-          extraHeaders: [
-            ...(messageId ? [`In-Reply-To: ${messageId}`] : []),
-            ...(messageId ? [`References: ${messageId}`] : []),
-          ],
-        });
-      } else {
-        rawMessage = [
-          `From: ${userEmail}`,
-          `To: ${replyTo}`,
-          `Subject: ${subject}`,
-          messageId ? `In-Reply-To: ${messageId}` : '',
-          messageId ? `References: ${messageId}` : '',
-          `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
-          '',
-          body,
-        ].filter(Boolean).join('\r\n');
-      }
-
-      const encodedMessage = Buffer.from(rawMessage).toString('base64url');
-
-      const response = await this.gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedMessage,
-          threadId,
-        },
-      });
-
-      return {
-        id: response.data.id!,
-        threadId: response.data.threadId!,
-        labelIds: response.data.labelIds || ['SENT'],
-      };
-    } catch (error) {
-      if (error instanceof CliError) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      throw new CliError('API_ERROR', `Failed to send reply: ${message}`);
     }
   }
 

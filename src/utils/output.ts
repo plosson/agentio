@@ -86,6 +86,13 @@ export function printSendResult(result: { id: string; threadId: string }): void 
   console.log(`Thread: ${result.threadId}`);
 }
 
+// Format draft creation result
+export function printDraftResult(result: { id: string; messageId: string }): void {
+  console.log('Draft created');
+  console.log(`Draft ID: ${result.id}`);
+  console.log(`Message ID: ${result.messageId}`);
+}
+
 // Format archive confirmation
 export function printArchived(messageId: string): void {
   console.log(`Archived: ${messageId}`);

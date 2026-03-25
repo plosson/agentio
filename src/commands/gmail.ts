@@ -7,11 +7,94 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
-import type { GmailAttachment } from '../types/gmail';
+import type { GmailAttachment, GmailSendOptions } from '../types/gmail';
+
+function addComposeOptions(cmd: Command): Command {
+  return cmd
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .option('--to <email>', 'Recipient (repeatable, required unless --reply-to)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--cc <email>', 'CC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--bcc <email>', 'BCC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--subject <subject>', 'Email subject (required unless --reply-to)')
+    .option('--body <body>', 'Email body (or pipe via stdin)')
+    .option('--html', 'Treat body as HTML')
+    .option('--reply-to <thread-id>', 'Thread ID to reply to (derives to/subject from thread)')
+    .option('--attachment <path>', 'File to attach (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--inline <cid:path>', 'Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)', (val: string, acc: string[]) => [...acc, val], []);
+}
+
+async function parseBody(body: string | undefined): Promise<string> {
+  if (!body) {
+    body = await readStdin() ?? undefined;
+  }
+  if (!body) {
+    throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
+  }
+  return body;
+}
+
+function parseAttachments(paths: string[]): GmailAttachment[] {
+  return paths.map((path: string) => ({
+    path,
+    filename: basename(path),
+  }));
+}
+
+function parseInlineAttachments(specs: string[]): GmailAttachment[] {
+  return specs.map((spec: string) => {
+    const colonIndex = spec.indexOf(':');
+    if (colonIndex === -1) {
+      throw new CliError('INVALID_PARAMS', `Invalid inline format: ${spec}`, 'Use format: contentId:filepath (e.g., logo:./logo.png)');
+    }
+    const contentId = spec.substring(0, colonIndex);
+    const path = spec.substring(colonIndex + 1);
+    return {
+      path,
+      filename: basename(path),
+      contentId,
+    };
+  });
+}
+
+async function parseSendOptions(options: Record<string, unknown>): Promise<GmailSendOptions> {
+  const replyTo = options.replyTo as string | undefined;
+  const to = options.to as string[];
+  const subject = options.subject as string | undefined;
+
+  if (!replyTo) {
+    if (!to.length) {
+      throw new CliError('INVALID_PARAMS', '--to is required (unless using --reply-to)');
+    }
+    if (!subject) {
+      throw new CliError('INVALID_PARAMS', '--subject is required (unless using --reply-to)');
+    }
+  }
+
+  const body = await parseBody(options.body as string | undefined);
+
+  const regularAttachments = parseAttachments(options.attachment as string[]);
+  const inlineAttachments = parseInlineAttachments(options.inline as string[]);
+
+  const attachments: GmailAttachment[] | undefined =
+    regularAttachments.length || inlineAttachments.length
+      ? [...regularAttachments, ...inlineAttachments]
+      : undefined;
+
+  return {
+    to,
+    cc: (options.cc as string[]).length ? options.cc as string[] : undefined,
+    bcc: (options.bcc as string[]).length ? options.bcc as string[] : undefined,
+    subject: subject || '',
+    body,
+    isHtml: options.html as boolean | undefined,
+    attachments,
+    replyTo,
+  };
+}
 
 function escapeHtml(text: string): string {
   return text
@@ -176,112 +259,27 @@ Query Syntax Examples:
       }
     });
 
-  gmail
-    .command('send')
-    .description('Send an email')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--to <email>', 'Recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
-    .option('--cc <email>', 'CC recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
-    .option('--bcc <email>', 'BCC recipient (repeatable)', (val, acc: string[]) => [...acc, val], [])
-    .requiredOption('--subject <subject>', 'Email subject')
-    .option('--body <body>', 'Email body (or pipe via stdin)')
-    .option('--html', 'Treat body as HTML')
-    .option('--attachment <path>', 'File to attach (repeatable)', (val, acc: string[]) => [...acc, val], [])
-    .option('--inline <cid:path>', 'Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)', (val, acc: string[]) => [...acc, val], [])
+  addComposeOptions(gmail.command('send').description('Send an email'))
     .action(async (options) => {
       try {
-        let body = options.body;
-
-        // Check for stdin if no body provided
-        if (!body) {
-          body = await readStdin();
-        }
-
-        if (!body) {
-          throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
-        }
-
-        // Process regular attachments
-        const regularAttachments: GmailAttachment[] = options.attachment.map((path: string) => ({
-          path,
-          filename: basename(path),
-        }));
-
-        // Process inline images (format: contentId:filepath)
-        const inlineAttachments: GmailAttachment[] = options.inline.map((spec: string) => {
-          const colonIndex = spec.indexOf(':');
-          if (colonIndex === -1) {
-            throw new CliError('INVALID_PARAMS', `Invalid inline format: ${spec}`, 'Use format: contentId:filepath (e.g., logo:./logo.png)');
-          }
-          const contentId = spec.substring(0, colonIndex);
-          const path = spec.substring(colonIndex + 1);
-          return {
-            path,
-            filename: basename(path),
-            contentId,
-          };
-        });
-
-        // Combine attachments
-        const attachments: GmailAttachment[] | undefined =
-          regularAttachments.length || inlineAttachments.length
-            ? [...regularAttachments, ...inlineAttachments]
-            : undefined;
-
+        const sendOptions = await parseSendOptions(options);
         const { client, profile } = await getGmailClient(options.profile);
         await enforceWriteAccess('gmail', profile, 'send email');
-        const result = await client.send({
-          to: options.to,
-          cc: options.cc.length ? options.cc : undefined,
-          bcc: options.bcc.length ? options.bcc : undefined,
-          subject: options.subject,
-          body,
-          isHtml: options.html,
-          attachments,
-        });
+        const result = await client.send(sendOptions);
         printSendResult(result);
       } catch (error) {
         handleError(error);
       }
     });
 
-  gmail
-    .command('reply')
-    .description('Reply to a thread')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--thread-id <id>', 'Thread ID')
-    .option('--body <body>', 'Reply body (or pipe via stdin)')
-    .option('--html', 'Treat body as HTML')
-    .option('--attachment <path>', 'File to attach (repeatable)', (val, acc: string[]) => [...acc, val], [])
+  addComposeOptions(gmail.command('draft').description('Create an email draft'))
     .action(async (options) => {
       try {
-        let body = options.body;
-
-        if (!body) {
-          body = await readStdin();
-        }
-
-        if (!body) {
-          throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
-        }
-
-        const attachments: GmailAttachment[] | undefined =
-          options.attachment.length
-            ? options.attachment.map((path: string) => ({
-                path,
-                filename: basename(path),
-              }))
-            : undefined;
-
+        const sendOptions = await parseSendOptions(options);
         const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'reply to email');
-        const result = await client.reply({
-          threadId: options.threadId,
-          body,
-          isHtml: options.html,
-          attachments,
-        });
-        printSendResult(result);
+        await enforceWriteAccess('gmail', profile, 'create draft');
+        const result = await client.draft(sendOptions);
+        printDraftResult(result);
       } catch (error) {
         handleError(error);
       }

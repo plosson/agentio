@@ -40,11 +40,5 @@ export interface GmailSendOptions {
   body: string;
   isHtml?: boolean;
   attachments?: GmailAttachment[];
-}
-
-export interface GmailReplyOptions {
-  threadId: string;
-  body: string;
-  isHtml?: boolean;
-  attachments?: GmailAttachment[];
+  replyTo?: string; // Thread ID to reply to
 }

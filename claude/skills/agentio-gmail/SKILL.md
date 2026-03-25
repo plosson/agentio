@@ -1,6 +1,6 @@
 ---
 name: agentio-gmail
-description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), reply, archive, mark, download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
+description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), draft, reply (via --reply-to), archive, mark, download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
 ---
 
 # Gmail Operations with agentio
@@ -53,14 +53,23 @@ agentio gmail send --to <email> --subject <subject> [--body <body>] [options]
 ```
 
 Options:
-- `--to <email>`: Recipient (repeatable)
+- `--to <email>`: Recipient (repeatable, required unless --reply-to)
 - `--cc <email>`: CC recipient (repeatable)
 - `--bcc <email>`: BCC recipient (repeatable)
-- `--subject <subject>`: Email subject
+- `--subject <subject>`: Email subject (required unless --reply-to)
 - `--body <body>`: Email body (or pipe via stdin)
 - `--html`: Treat body as HTML
+- `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
 - `--attachment <path>`: File to attach (repeatable)
 - `--inline <cid:path>`: Inline image (repeatable). Supports PNG, JPG, GIF only (not SVG)
+
+### Replying to a Thread
+
+```bash
+agentio gmail send --reply-to <thread-id> --body "Thanks!"
+```
+
+When using `--reply-to`, the recipient and subject are derived from the thread. You can override them with explicit `--to`/`--subject`.
 
 ### Inline Images
 
@@ -77,10 +86,16 @@ agentio gmail send \
 
 Reference inline images in HTML using `src="cid:<contentId>"`.
 
-## Reply to a Thread
+## Create a Draft
 
 ```bash
-agentio gmail reply --thread-id <id> [--body <body>] [--html]
+agentio gmail draft --to <email> --subject <subject> [--body <body>] [options]
+```
+
+Takes the same options as `send`. Supports `--reply-to` for draft replies:
+
+```bash
+agentio gmail draft --reply-to <thread-id> --body "Draft reply"
 ```
 
 ## Archive a Message
