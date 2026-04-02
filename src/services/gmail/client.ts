@@ -5,6 +5,13 @@ import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment,
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
 
+// RFC 2047 encode a header value if it contains non-ASCII characters
+function encodeHeaderValue(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  return `=?UTF-8?B?${Buffer.from(value, 'utf-8').toString('base64')}?=`;
+}
+
 // Common MIME types by extension
 const MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain',
@@ -333,7 +340,7 @@ export class GmailClient implements ServiceClient {
         `To: ${to.join(', ')}`,
         cc?.length ? `Cc: ${cc.join(', ')}` : null,
         bcc?.length ? `Bcc: ${bcc.join(', ')}` : null,
-        `Subject: ${subject}`,
+        `Subject: ${encodeHeaderValue(subject)}`,
         ...(extraHeaders || []),
         `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
         '',
@@ -422,7 +429,7 @@ export class GmailClient implements ServiceClient {
     lines.push(`To: ${to.join(', ')}`);
     if (cc?.length) lines.push(`Cc: ${cc.join(', ')}`);
     if (bcc?.length) lines.push(`Bcc: ${bcc.join(', ')}`);
-    lines.push(`Subject: ${subject}`);
+    lines.push(`Subject: ${encodeHeaderValue(subject)}`);
     if (extraHeaders) {
       for (const header of extraHeaders) {
         lines.push(header);
