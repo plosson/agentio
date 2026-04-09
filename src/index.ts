@@ -22,6 +22,7 @@ import { registerWhatsAppCommands } from './commands/whatsapp';
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
 import { registerConfigCommands } from './commands/config';
+import { registerMcpCommands } from './commands/mcp';
 import { registerDocsCommand } from './commands/docs';
 import { registerGatewayCommands } from './commands/gateway';
 import { registerReauthCommand } from './commands/reauth';
@@ -65,6 +66,7 @@ registerWhatsAppCommands(program);
 // Agentio utilities
 registerClaudeCommands(program);
 registerConfigCommands(program);
+registerMcpCommands(program);
 registerDocsCommand(program);
 registerGatewayCommands(program);
 registerReauthCommand(program);
