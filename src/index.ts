@@ -73,4 +73,9 @@ registerReauthCommand(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 
+// Show help (exit 0) when no command is provided
+program.action(() => {
+  program.help();
+});
+
 program.parse();
