@@ -96,6 +96,11 @@ export function registerGChatCommands(program: Command): void {
           }
         }
 
+        // Unescape shell-escaped characters (e.g. zsh history expansion: \! → !)
+        if (text) {
+          text = text.replace(/\\!/g, '!');
+        }
+
         const { client, profile } = await getGChatClient(options.profile);
         await enforceWriteAccess('gchat', profile, 'send message');
         const result = await client.send({
