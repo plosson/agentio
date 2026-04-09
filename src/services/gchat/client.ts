@@ -306,15 +306,29 @@ export class GChatClient implements ServiceClient {
     const chat = gchat({ version: 'v1', auth: auth as any });
 
     try {
-      const response = await chat.spaces.list({});
+      const allSpaces: GChatSpace[] = [];
+      let pageToken: string | undefined;
 
-      const spaces = response.data.spaces || [];
-      return spaces.map((space: chat_v1.Schema$Space) => ({
-        name: space.name || '',
-        displayName: space.displayName || 'Unnamed',
-        type: (space.type as 'ROOM' | 'DM') || 'ROOM',
-        description: space.spaceDetails?.description || undefined,
-      }));
+      do {
+        const response = await chat.spaces.list({
+          pageSize: 100,
+          pageToken,
+        });
+
+        const spaces = response.data.spaces || [];
+        for (const space of spaces) {
+          allSpaces.push({
+            name: space.name || '',
+            displayName: space.displayName || 'Unnamed',
+            type: (space.type as 'ROOM' | 'DM') || 'ROOM',
+            description: space.spaceDetails?.description || undefined,
+          });
+        }
+
+        pageToken = response.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      return allSpaces;
     } catch (err) {
       const code = this.getErrorCode(err);
       const message = this.getErrorMessage(err);
