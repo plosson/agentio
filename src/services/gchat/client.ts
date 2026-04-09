@@ -15,8 +15,14 @@ import type {
   GChatSpace,
 } from '../../types/gchat';
 
+interface ResolvedUser {
+  displayName: string;
+  email?: string;
+}
+
 export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
+  private userCache = new Map<string, ResolvedUser>();
 
   constructor(credentials: GChatCredentials) {
     this.credentials = credentials;
@@ -223,6 +229,11 @@ export class GChatClient implements ServiceClient {
       });
 
       const messages = response.data.messages || [];
+
+      // Resolve unique sender IDs to display names via People API
+      const senderIds = [...new Set(messages.map(m => m.sender?.name).filter(Boolean))] as string[];
+      await this.resolveUsers(senderIds, auth);
+
       return messages.map((msg: chat_v1.Schema$Message) => {
         const gchatMsg: GChatMessage = {
           name: msg.name || '',
@@ -231,12 +242,7 @@ export class GChatClient implements ServiceClient {
           updateTime: (msg as Record<string, unknown>).lastUpdateTime as string || new Date().toISOString(),
         };
         if (msg.text) gchatMsg.text = msg.text;
-        if (msg.sender?.name) {
-          gchatMsg.sender = {
-            name: msg.sender.name,
-            displayName: msg.sender.displayName || msg.sender.name,
-          };
-        }
+        gchatMsg.sender = this.enrichSender(msg);
         if (msg.thread?.name) {
           gchatMsg.thread = {
             name: msg.thread.name,
@@ -270,6 +276,12 @@ export class GChatClient implements ServiceClient {
       }
 
       const msg = response.data as chat_v1.Schema$Message;
+
+      // Resolve sender
+      if (msg.sender?.name) {
+        await this.resolveUsers([msg.sender.name], auth);
+      }
+
       const gchatMsg: GChatMessage = {
         name: msg.name || '',
         createTime: msg.createTime || new Date().toISOString(),
@@ -277,12 +289,7 @@ export class GChatClient implements ServiceClient {
         updateTime: (msg as Record<string, unknown>).lastUpdateTime as string || new Date().toISOString(),
       };
       if (msg.text) gchatMsg.text = msg.text;
-      if (msg.sender?.name) {
-        gchatMsg.sender = {
-          name: msg.sender.name,
-          displayName: msg.sender.displayName || msg.sender.name,
-        };
-      }
+      gchatMsg.sender = this.enrichSender(msg);
       if (msg.thread?.name) {
         gchatMsg.thread = {
           name: msg.thread.name,
@@ -338,6 +345,45 @@ export class GChatClient implements ServiceClient {
         'Check that OAuth token is valid and has Chat scope'
       );
     }
+  }
+
+  private async resolveUsers(userIds: string[], auth: OAuth2Client): Promise<void> {
+    const unknown = userIds.filter(id => !this.userCache.has(id));
+    if (unknown.length === 0) return;
+
+    const token = await auth.getAccessToken();
+    if (!token.token) return;
+
+    // Resolve users in parallel via People API
+    await Promise.all(unknown.map(async (userId) => {
+      try {
+        // userId is like "users/123456", extract the numeric part
+        const personId = userId.replace('users/', '');
+        const res = await fetch(
+          `https://people.googleapis.com/v1/people/${personId}?personFields=names,emailAddresses`,
+          { headers: { Authorization: `Bearer ${token.token}` } }
+        );
+        if (!res.ok) return;
+        const data = await res.json() as Record<string, any>;
+        const name = data.names?.[0]?.displayName;
+        const email = data.emailAddresses?.[0]?.value;
+        if (name) {
+          this.userCache.set(userId, { displayName: name, email });
+        }
+      } catch {
+        // Silently skip unresolvable users
+      }
+    }));
+  }
+
+  private enrichSender(msg: chat_v1.Schema$Message): GChatMessage['sender'] {
+    if (!msg.sender?.name) return undefined;
+    const cached = this.userCache.get(msg.sender.name);
+    return {
+      name: msg.sender.name,
+      displayName: cached?.displayName || msg.sender.displayName || msg.sender.name,
+      email: cached?.email,
+    };
   }
 
   private getErrorCode(err: unknown): ErrorCode {

@@ -132,7 +132,10 @@ export function printGChatMessageList(messages: GChatMessage[]): void {
     const msg = messages[i];
     console.log(`[${i + 1}] ${msg.name}`);
     if (msg.sender) {
-      console.log(`    From: ${msg.sender.displayName || 'Unknown'}`);
+      const from = msg.sender.email
+        ? `${msg.sender.displayName} <${msg.sender.email}>`
+        : msg.sender.displayName || 'Unknown';
+      console.log(`    From: ${from}`);
     }
     if (msg.text) {
       const snippet = msg.text.length > 100 ? msg.text.substring(0, 100) + '...' : msg.text;
@@ -146,7 +149,10 @@ export function printGChatMessageList(messages: GChatMessage[]): void {
 export function printGChatMessage(msg: GChatMessage): void {
   console.log(`ID: ${msg.name}`);
   if (msg.sender) {
-    console.log(`From: ${msg.sender.displayName || 'Unknown'}`);
+    const from = msg.sender.email
+      ? `${msg.sender.displayName} <${msg.sender.email}>`
+      : msg.sender.displayName || 'Unknown';
+    console.log(`From: ${from}`);
   }
   console.log(`Date: ${msg.createTime}`);
   if (msg.thread) {
