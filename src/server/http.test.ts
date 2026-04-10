@@ -221,10 +221,13 @@ describe('handleRequest — concurrency (sanity)', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* /mcp stub (bearer-protected, Phase 3g)                              */
+/* /mcp bearer-auth gate (Phase 3g)                                    */
+/* The actual MCP transport behavior lives in mcp-http.test.ts and     */
+/* mcp-e2e.test.ts — these tests just lock in that the bearer check   */
+/* runs before the request ever reaches the transport.                */
 /* ------------------------------------------------------------------ */
 
-describe('handleRequest — /mcp (bearer-protected stub)', () => {
+describe('handleRequest — /mcp bearer gate', () => {
   test('GET /mcp without Authorization → 401 with WWW-Authenticate', async () => {
     const res = await dispatch(req('/mcp'));
     expect(res.status).toBe(401);
@@ -239,33 +242,15 @@ describe('handleRequest — /mcp (bearer-protected stub)', () => {
     expect(res.status).toBe(401);
   });
 
-  test('GET /mcp with valid bearer → 200 stub body', async () => {
-    // Use a fresh context with a known token in the store.
-    const ctx: ServerContext = {
-      apiKey: 'srv_test',
-      oauthStore: createOAuthStore({ save: async () => {} }),
-    };
-    const issued = await ctx.oauthStore.issueToken({
-      clientId: 'cli_x',
-      scope: 'gchat:default',
-    });
-    const res = await handleRequest(
-      new Request('http://localhost:9999/mcp', {
-        headers: { authorization: `Bearer ${issued.token}` },
-      }),
-      ctx
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.phase).toBe(3);
-    expect(body.scope).toBe('gchat:default');
-    expect(body.clientId).toBe('cli_x');
-  });
-
-  test('POST /mcp also requires bearer (any method)', async () => {
+  test('POST /mcp without bearer → 401 (any method is gated)', async () => {
     const res = await dispatch(
       req('/mcp', { method: 'POST', body: '{}' })
     );
+    expect(res.status).toBe(401);
+  });
+
+  test('DELETE /mcp without bearer → 401', async () => {
+    const res = await dispatch(req('/mcp', { method: 'DELETE' }));
     expect(res.status).toBe(401);
   });
 });

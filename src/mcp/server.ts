@@ -67,7 +67,7 @@ import { registerSqlCommands } from '../commands/sql';
 import { registerTelegramCommands } from '../commands/telegram';
 import { registerWhatsAppCommands } from '../commands/whatsapp';
 
-const SERVICE_REGISTRATIONS: Record<string, (program: Command) => void> = {
+export const SERVICE_REGISTRATIONS: Record<string, (program: Command) => void> = {
   discourse: registerDiscourseCommands,
   gcal: registerGCalCommands,
   gchat: registerGChatCommands,

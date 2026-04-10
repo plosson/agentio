@@ -253,15 +253,17 @@ describe('end-to-end OAuth flow', () => {
     expect(tokenBody.token_type).toBe('Bearer');
     expect(tokenBody.expires_in).toBe(30 * 24 * 60 * 60);
 
-    // 5. Use the bearer on /mcp (Phase 3 stub body).
+    // 5. Use the bearer on /mcp. In Phase 4 this hits the real MCP
+    //    Streamable HTTP transport — a plain GET without the MCP Accept
+    //    headers is rejected by the transport (406), but the important
+    //    thing for THIS test is that the bearer check passed: we did NOT
+    //    get a 401 with WWW-Authenticate. The full MCP protocol flow is
+    //    exercised in mcp-e2e.test.ts.
     const mcpRes = await fetch(`${server.baseUrl}/mcp`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    expect(mcpRes.status).toBe(200);
-    const mcpBody = (await mcpRes.json()) as Record<string, unknown>;
-    expect(mcpBody.phase).toBe(3);
-    expect(mcpBody.clientId).toBe(clientId);
-    expect(mcpBody.scope).toBe('mcp');
+    expect(mcpRes.status).not.toBe(401);
+    expect(mcpRes.headers.get('www-authenticate')).toBeNull();
   });
 
   test('/mcp without bearer returns 401 + WWW-Authenticate (the trigger)', async () => {
@@ -477,13 +479,13 @@ describe('end-to-end OAuth flow', () => {
     const server2 = await startServer();
     expect(server2.apiKey).toBe(server1.apiKey); // also persisted
 
-    // The bearer issued under server1 should still work on server2.
+    // The bearer issued under server1 should still work on server2 —
+    // i.e. the bearer check passes and we don't get a 401.
     const mcpRes = await fetch(`${server2.baseUrl}/mcp`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    expect(mcpRes.status).toBe(200);
-    const body = (await mcpRes.json()) as Record<string, unknown>;
-    expect(body.clientId).toBe(clientId);
+    expect(mcpRes.status).not.toBe(401);
+    expect(mcpRes.headers.get('www-authenticate')).toBeNull();
   });
 
   test('XSS attempt in client_name does not execute when /authorize renders', async () => {

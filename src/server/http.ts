@@ -1,3 +1,4 @@
+import { handleMcpRequest } from './mcp-http';
 import type { OAuthStore } from './oauth-store';
 import { requireBearer, routeOAuth } from './oauth';
 
@@ -38,18 +39,15 @@ export async function handleRequest(
   const oauthResponse = await routeOAuth(req, ctx);
   if (oauthResponse) return oauthResponse;
 
-  // /mcp — bearer-protected. Phase 3 only ships a stub body; Phase 4 will
-  // replace this with the Streamable HTTP MCP transport.
+  // /mcp — bearer-protected Streamable HTTP MCP transport.
+  // Bearer auth runs first so unauthorized requests get a clean 401 with
+  // WWW-Authenticate (triggering the client's OAuth flow) rather than an
+  // opaque MCP error. After auth, the request is forwarded to the
+  // per-session transport managed in mcp-http.ts.
   if (url.pathname === '/mcp') {
     const auth = requireBearer(req, ctx);
     if (!auth.ok) return auth.response;
-    return jsonResponse({
-      phase: 3,
-      message:
-        'MCP transport not yet implemented; bearer auth verified successfully.',
-      scope: auth.token!.scope,
-      clientId: auth.token!.clientId,
-    });
+    return handleMcpRequest(req);
   }
 
   return jsonResponse({ error: 'not found' }, 404);
