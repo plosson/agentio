@@ -26,6 +26,7 @@ import { registerMcpCommands } from './commands/mcp';
 import { registerDocsCommand } from './commands/docs';
 import { registerGatewayCommands } from './commands/gateway';
 import { registerReauthCommand } from './commands/reauth';
+import { registerServerCommands } from './commands/server';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 
@@ -70,6 +71,7 @@ registerMcpCommands(program);
 registerDocsCommand(program);
 registerGatewayCommands(program);
 registerReauthCommand(program);
+registerServerCommands(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 

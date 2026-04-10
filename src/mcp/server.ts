@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -6,6 +7,48 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { Command } from 'commander';
 import { collectMcpTools, type McpToolDefinition } from './tools.js';
+
+/**
+ * Per-invocation stdout capture, propagated through `await` via
+ * AsyncLocalStorage. The `console.log` and `process.stdout.write` globals are
+ * patched **once** at module init (see below) and route into whatever
+ * `chunks` array the current async context provides — or fall through to the
+ * real stdout when no context is active.
+ *
+ * Why this matters: the previous implementation swapped the globals per call
+ * and restored them in a `finally`. Under two concurrent `executeCommand`
+ * calls (as will happen under the HTTP MCP server), the second call's swap
+ * would overwrite the first call's capture closure, and the first call's
+ * `finally` would restore the second's capture — cross-contaminating output
+ * between in-flight requests. AsyncLocalStorage solves this because each
+ * `captureContext.run()` creates its own store that automatically follows
+ * the async chain, with no shared mutable globals between concurrent calls.
+ */
+const captureContext = new AsyncLocalStorage<string[]>();
+
+const originalConsoleLog = console.log;
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+
+console.log = (...args: unknown[]): void => {
+  const chunks = captureContext.getStore();
+  if (chunks) {
+    chunks.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+    return;
+  }
+  originalConsoleLog(...args);
+};
+
+process.stdout.write = ((
+  chunk: string | Uint8Array,
+  ...rest: unknown[]
+): boolean => {
+  const chunks = captureContext.getStore();
+  if (chunks) {
+    chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+    return true;
+  }
+  return originalStdoutWrite(chunk, ...(rest as [])) as boolean;
+}) as typeof process.stdout.write;
 
 // Import all service registrations
 import { registerDiscourseCommands } from '../commands/discourse';
@@ -66,7 +109,7 @@ export function parseServiceProfiles(args: string[]): ServiceProfilePair[] {
 /**
  * Build a commander program with only the requested services registered.
  */
-function buildProgram(services: string[]): Command {
+export function buildProgram(services: string[]): Command {
   const program = new Command();
   program.name('agentio').exitOverride();
 
@@ -83,8 +126,12 @@ function buildProgram(services: string[]): Command {
 /**
  * Execute a command by capturing stdout output.
  * Builds argv from the tool definition + input arguments, injects --profile.
+ *
+ * Concurrency-safe: output capture runs inside an AsyncLocalStorage context
+ * (see `captureContext` at the top of this file), so concurrent calls each
+ * get their own `chunks` array. The globals are not touched here.
  */
-async function executeCommand(
+export async function executeCommand(
   program: Command,
   tool: McpToolDefinition,
   input: Record<string, unknown>,
@@ -132,34 +179,8 @@ async function executeCommand(
     argv.push('--profile', profile);
   }
 
-  // Capture stdout
   const chunks: string[] = [];
-  const originalLog = console.log;
-  const originalWrite = process.stdout.write;
-
-  console.log = (...args: unknown[]) => {
-    chunks.push(args.map(String).join(' '));
-  };
-
-  process.stdout.write = ((
-    chunk: string | Uint8Array,
-    ...rest: unknown[]
-  ): boolean => {
-    if (typeof chunk === 'string') {
-      chunks.push(chunk);
-    } else {
-      chunks.push(Buffer.from(chunk).toString());
-    }
-    return true;
-  }) as typeof process.stdout.write;
-
-  try {
-    await program.parseAsync(argv);
-  } finally {
-    console.log = originalLog;
-    process.stdout.write = originalWrite;
-  }
-
+  await captureContext.run(chunks, () => program.parseAsync(argv));
   return chunks.join('\n');
 }
 
