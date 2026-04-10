@@ -5,6 +5,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
 
+import { findFreePort, startServerSubprocess } from './test-helpers';
+
 /**
  * Adversarial HTTP-level tests for /mcp. These bypass the SDK client and
  * hit the endpoint directly with malformed / hostile / edge-case inputs
@@ -67,59 +69,9 @@ afterEach(async () => {
   }
 });
 
-async function findFreePort(): Promise<number> {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  if (typeof port !== 'number') throw new Error('no port');
-  return port;
-}
-
 async function startAndAuth(): Promise<RunningServer> {
-  const port = await findFreePort();
-  const proc = Bun.spawn(
-    [
-      'bun',
-      'run',
-      'src/index.ts',
-      'server',
-      'start',
-      '--foreground',
-      '--port',
-      String(port),
-    ],
-    {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, HOME: tempHome },
-    }
-  );
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const reader = proc.stdout.getReader();
-  const deadline = Date.now() + 10_000;
-  try {
-    while (!buffer.includes('Server ready')) {
-      if (Date.now() > deadline) {
-        proc.kill('SIGKILL');
-        throw new Error('startup timeout');
-      }
-      const { done, value } = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            Math.max(100, deadline - Date.now())
-          )
-        ),
-      ]);
-      if (done) throw new Error(`exited early:\n${buffer}`);
-      buffer += decoder.decode(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const apiKey = buffer.match(/API Key: (\S+)/)?.[1] ?? '';
+  const started = await startServerSubprocess({ home: tempHome });
+  const { proc, port, apiKey } = started;
   const baseUrl = `http://127.0.0.1:${port}`;
 
   // Run the OAuth flow inline (the oauth-e2e tests validate the shape).

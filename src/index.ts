@@ -28,6 +28,7 @@ import { registerGatewayCommands } from './commands/gateway';
 import { registerReauthCommand } from './commands/reauth';
 import { registerServerCommands } from './commands/server';
 import { registerStatusCommand } from './commands/status';
+import { registerTeleportCommand } from './commands/teleport';
 import { registerUpdateCommand } from './commands/update';
 
 declare const BUILD_VERSION: string | undefined;
@@ -73,6 +74,7 @@ registerGatewayCommands(program);
 registerReauthCommand(program);
 registerServerCommands(program);
 registerStatusCommand(program);
+registerTeleportCommand(program);
 registerUpdateCommand(program);
 
 // Show help (exit 0) when no command is provided

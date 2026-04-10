@@ -5,6 +5,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
 
+import { startServerSubprocess } from './test-helpers';
+
 /**
  * End-to-end test for the full MCP OAuth flow against a real `agentio
  * server` subprocess. This is the closest we get to "what Claude Code
@@ -58,76 +60,13 @@ afterEach(async () => {
   }
 });
 
-async function findFreePort(): Promise<number> {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  if (typeof port !== 'number') throw new Error('no port');
-  return port;
-}
-
 async function startServer(): Promise<RunningServer> {
-  const port = await findFreePort();
-  const proc = Bun.spawn(
-    [
-      'bun',
-      'run',
-      'src/index.ts',
-      'server',
-      'start',
-      '--foreground',
-      '--port',
-      String(port),
-    ],
-    {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, HOME: tempHome },
-    }
-  );
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const reader = proc.stdout.getReader();
-  const deadline = Date.now() + 10_000;
-  try {
-    while (!buffer.includes('Server ready')) {
-      if (Date.now() > deadline) {
-        proc.kill('SIGKILL');
-        throw new Error(`startup timeout. stdout:\n${buffer}`);
-      }
-      const { done, value } = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            Math.max(100, deadline - Date.now())
-          )
-        ),
-      ]);
-      if (done) {
-        const stderr = await new Response(proc.stderr).text();
-        throw new Error(
-          `child exited or timed out. stdout:\n${buffer}\nstderr:\n${stderr}`
-        );
-      }
-      buffer += decoder.decode(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const apiKey = buffer.match(/API Key: (\S+)/)?.[1] ?? '';
-  if (!apiKey) {
-    proc.kill('SIGKILL');
-    throw new Error(`could not parse API key from stdout:\n${buffer}`);
-  }
-
+  const started = await startServerSubprocess({ home: tempHome });
   const running: RunningServer = {
-    proc: proc as Subprocess<'ignore', 'pipe', 'pipe'>,
-    apiKey,
-    port,
-    baseUrl: `http://127.0.0.1:${port}`,
+    proc: started.proc,
+    apiKey: started.apiKey,
+    port: started.port,
+    baseUrl: `http://127.0.0.1:${started.port}`,
   };
   active = running;
   return running;

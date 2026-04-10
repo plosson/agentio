@@ -8,6 +8,8 @@ import type { Subprocess } from 'bun';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+import { findFreePort, startServerSubprocess } from './test-helpers';
+
 /**
  * End-to-end MCP protocol test.
  *
@@ -75,73 +77,13 @@ afterEach(async () => {
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-async function findFreePort(): Promise<number> {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response('') });
-  const port = probe.port;
-  probe.stop(true);
-  if (typeof port !== 'number') throw new Error('no port');
-  return port;
-}
-
 async function startAgentioServer(): Promise<RunningServer> {
-  const port = await findFreePort();
-  const proc = Bun.spawn(
-    [
-      'bun',
-      'run',
-      'src/index.ts',
-      'server',
-      'start',
-      '--foreground',
-      '--port',
-      String(port),
-    ],
-    {
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, HOME: tempHome },
-    }
-  );
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  const reader = proc.stdout.getReader();
-  const deadline = Date.now() + 10_000;
-  try {
-    while (!buffer.includes('Server ready')) {
-      if (Date.now() > deadline) {
-        proc.kill('SIGKILL');
-        throw new Error(`startup timeout:\n${buffer}`);
-      }
-      const { done, value } = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(
-            () => resolve({ done: true, value: undefined }),
-            Math.max(100, deadline - Date.now())
-          )
-        ),
-      ]);
-      if (done) {
-        const err = await new Response(proc.stderr).text();
-        throw new Error(
-          `child exited before ready:\n${buffer}\nstderr:\n${err}`
-        );
-      }
-      buffer += decoder.decode(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const apiKey = buffer.match(/API Key: (\S+)/)?.[1] ?? '';
-  if (!apiKey) throw new Error(`cannot parse API key:\n${buffer}`);
-
+  const started = await startServerSubprocess({ home: tempHome });
   const running: RunningServer = {
-    proc: proc as Subprocess<'ignore', 'pipe', 'pipe'>,
-    apiKey,
-    port,
-    baseUrl: `http://127.0.0.1:${port}`,
+    proc: started.proc,
+    apiKey: started.apiKey,
+    port: started.port,
+    baseUrl: `http://127.0.0.1:${started.port}`,
   };
   active = running;
   return running;
