@@ -23,6 +23,7 @@ interface ResolvedUser {
 export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
   private userCache = new Map<string, ResolvedUser>();
+  private spaceIdCache = new Map<string, string>();
 
   constructor(credentials: GChatCredentials) {
     this.credentials = credentials;
@@ -52,9 +53,11 @@ export class GChatClient implements ServiceClient {
   async send(options: GChatSendOptions & { spaceId?: string }): Promise<GChatSendResult> {
     if (this.credentials.type === 'webhook') {
       return this.sendViaWebhook(options);
-    } else {
-      return this.sendViaOAuth(options);
     }
+    if (options.spaceId) {
+      options.spaceId = await this.resolveSpaceId(options.spaceId);
+    }
+    return this.sendViaOAuth(options);
   }
 
   async list(options: GChatListOptions): Promise<GChatMessage[]> {
@@ -72,6 +75,7 @@ export class GChatClient implements ServiceClient {
         'Use an OAuth profile to read messages'
       );
     }
+    options.spaceId = await this.resolveSpaceId(options.spaceId);
     return this.listViaOAuth(options);
   }
 
@@ -90,6 +94,7 @@ export class GChatClient implements ServiceClient {
         'Use an OAuth profile to read messages'
       );
     }
+    options.spaceId = await this.resolveSpaceId(options.spaceId);
     return this.getViaOAuth(options);
   }
 
@@ -345,6 +350,49 @@ export class GChatClient implements ServiceClient {
         'Check that OAuth token is valid and has Chat scope'
       );
     }
+  }
+
+  /**
+   * Resolve a space identifier that may be an ID or a display name.
+   * Tries as ID first (no API call), falls back to name resolution via listSpaces.
+   * Results are cached for the lifetime of this client instance.
+   */
+  private async resolveSpaceId(spaceIdOrName: string): Promise<string> {
+    // Check cache first
+    const cached = this.spaceIdCache.get(spaceIdOrName);
+    if (cached) return cached;
+
+    const oauthCreds = this.credentials as GChatOAuthCredentials;
+    const auth = this.createOAuthClient(oauthCreds);
+    const chat = gchat({ version: 'v1', auth: auth as any });
+
+    // Try as ID first
+    try {
+      const resp = await chat.spaces.get({ name: `spaces/${spaceIdOrName}` });
+      if (resp.data.name) {
+        this.spaceIdCache.set(spaceIdOrName, spaceIdOrName);
+        return spaceIdOrName;
+      }
+    } catch {
+      // Not a valid ID, try as display name
+    }
+
+    // Resolve by display name
+    const spaces = await this.listSpacesViaOAuth();
+    const nameLower = spaceIdOrName.toLowerCase();
+    const match = spaces.find(s => s.displayName.toLowerCase() === nameLower);
+
+    if (!match) {
+      throw new CliError(
+        'NOT_FOUND',
+        `Space not found: "${spaceIdOrName}"`,
+        'Use "agentio gchat spaces" to list available spaces'
+      );
+    }
+
+    const id = match.name.replace('spaces/', '');
+    this.spaceIdCache.set(spaceIdOrName, id);
+    return id;
   }
 
   private async resolveUsers(userIds: string[], auth: OAuth2Client): Promise<void> {

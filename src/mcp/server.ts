@@ -197,6 +197,9 @@ export async function startMcpServer(
     process.exit(1);
   }
 
+  // Track last-checked timestamps per service:space for automatic --since injection
+  const lastChecked = new Map<string, Date>();
+
   // Create MCP server
   const server = new Server(
     { name: 'agentio', version: '1.0.0' },
@@ -230,6 +233,8 @@ export async function startMcpServer(
     const service = tool.commandPath[0];
     const profile = profileMap.get(service);
 
+    const input = (args as Record<string, unknown>) || {};
+
     // Build a fresh program for each call to avoid state leaks
     const execProgram = buildProgram(services);
 
@@ -237,11 +242,23 @@ export async function startMcpServer(
       const output = await executeCommand(
         execProgram,
         tool,
-        (args as Record<string, unknown>) || {},
+        input,
         profile
       );
+
+      // For list commands, append last-checked info and update timestamp
+      let result = output || '(no output)';
+      if (name === 'gchat_list' && input.space) {
+        const key = `gchat:${input.space}`;
+        const last = lastChecked.get(key);
+        if (last) {
+          result += `\n\nPreviously checked: ${last.toISOString()}`;
+        }
+        lastChecked.set(key, new Date());
+      }
+
       return {
-        content: [{ type: 'text' as const, text: output || '(no output)' }],
+        content: [{ type: 'text' as const, text: result }],
       };
     } catch (error: unknown) {
       const message =
