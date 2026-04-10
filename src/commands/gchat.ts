@@ -11,7 +11,7 @@ import { GChatClient } from '../services/gchat/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
-import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList } from '../utils/output';
+import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from '../utils/output';
 import { enforceWriteAccess } from '../utils/read-only';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
@@ -176,6 +176,36 @@ export function registerGChatCommands(program: Command): void {
         }
 
         printGChatSpaceList(spaces);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gchat
+    .command('members')
+    .description('List members of a Google Chat space (OAuth profiles only)')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .requiredOption('--space <id-or-name>', 'Space ID or display name')
+    .action(async (options) => {
+      try {
+        const { client } = await getGChatClient(options.profile);
+        const members = await client.listMembers(options.space);
+        printGChatMemberList(members);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gchat
+    .command('user')
+    .argument('<user-id>', 'User ID (e.g. "123456789" or "users/123456789")')
+    .description('Get full user info from the People API (OAuth profiles only)')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (userId: string, options) => {
+      try {
+        const { client } = await getGChatClient(options.profile);
+        const user = await client.getUser(userId);
+        printGChatUser(user);
       } catch (error) {
         handleError(error);
       }

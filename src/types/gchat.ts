@@ -31,6 +31,24 @@ export interface GChatSpace {
   displaySettings?: GChatDisplaySettings;
 }
 
+export interface GChatUser {
+  name: string; // 'users/USER_ID'
+  displayName?: string;
+  email?: string;
+  phoneNumbers?: string[];
+  organizations?: Array<{ name?: string; title?: string; department?: string }>;
+  photoUrl?: string;
+  locations?: string[];
+}
+
+export interface GChatMember {
+  name: string; // 'spaces/SPACE_ID/members/MEMBER_ID'
+  role: 'ROLE_MEMBER' | 'ROLE_MANAGER' | 'ROLE_UNSPECIFIED';
+  state: 'JOINED' | 'INVITED' | 'NOT_A_MEMBER' | 'MEMBERSHIP_STATE_UNSPECIFIED';
+  memberType: 'HUMAN' | 'BOT';
+  user?: GChatUser;
+}
+
 export interface GChatWebhookCredentials {
   type: 'webhook';
   webhookUrl: string;

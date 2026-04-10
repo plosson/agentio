@@ -13,6 +13,8 @@ import type {
   GChatOAuthCredentials,
   GChatMessage,
   GChatSpace,
+  GChatUser,
+  GChatMember,
 } from '../../types/gchat';
 
 interface ResolvedUser {
@@ -23,10 +25,28 @@ interface ResolvedUser {
 export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
   private userCache = new Map<string, ResolvedUser>();
+  private fullUserCache = new Map<string, GChatUser>();
   private spaceIdCache = new Map<string, string>();
 
   constructor(credentials: GChatCredentials) {
     this.credentials = credentials;
+  }
+
+  private ensureOAuth(operation: string): void {
+    if (this.credentials.type === 'webhook') {
+      throw new CliError(
+        'PERMISSION_DENIED',
+        `${operation} is not supported for webhook profiles`,
+        'Use an OAuth profile'
+      );
+    }
+  }
+
+  private getOAuthChatApi(): { auth: OAuth2Client; chat: ReturnType<typeof gchat> } {
+    const oauthCreds = this.credentials as GChatOAuthCredentials;
+    const auth = this.createOAuthClient(oauthCreds);
+    const chat = gchat({ version: 'v1', auth: auth as any });
+    return { auth, chat };
   }
 
   async validate(): Promise<ValidationResult> {
@@ -36,10 +56,9 @@ export class GChatClient implements ServiceClient {
     }
 
     try {
-      const oauthCreds = this.credentials as GChatOAuthCredentials;
-      const auth = this.createOAuthClient(oauthCreds);
-      const chat = gchat({ version: 'v1', auth: auth as any });
+      const { chat } = this.getOAuthChatApi();
       await chat.spaces.list({ pageSize: 1 });
+      const oauthCreds = this.credentials as GChatOAuthCredentials;
       return { valid: true, info: oauthCreds.email || 'oauth' };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -68,13 +87,7 @@ export class GChatClient implements ServiceClient {
         'Specify with --space or configure default in profile'
       );
     }
-    if (this.credentials.type === 'webhook') {
-      throw new CliError(
-        'PERMISSION_DENIED',
-        'List is not supported for webhook profiles',
-        'Use an OAuth profile to read messages'
-      );
-    }
+    this.ensureOAuth('Listing messages');
     options.spaceId = await this.resolveSpaceId(options.spaceId);
     return this.listViaOAuth(options);
   }
@@ -87,26 +100,37 @@ export class GChatClient implements ServiceClient {
         'Specify with --space and message ID'
       );
     }
-    if (this.credentials.type === 'webhook') {
-      throw new CliError(
-        'PERMISSION_DENIED',
-        'Get is not supported for webhook profiles',
-        'Use an OAuth profile to read messages'
-      );
-    }
+    this.ensureOAuth('Getting messages');
     options.spaceId = await this.resolveSpaceId(options.spaceId);
     return this.getViaOAuth(options);
   }
 
   async listSpaces(): Promise<GChatSpace[]> {
-    if (this.credentials.type === 'webhook') {
+    this.ensureOAuth('Listing spaces');
+    return this.listSpacesViaOAuth();
+  }
+
+  async listMembers(spaceIdOrName: string): Promise<GChatMember[]> {
+    this.ensureOAuth('Listing members');
+    const spaceId = await this.resolveSpaceId(spaceIdOrName);
+    return this.listMembersViaOAuth(spaceId);
+  }
+
+  async getUser(userIdOrResourceName: string): Promise<GChatUser> {
+    this.ensureOAuth('Getting user info');
+    const { auth } = this.getOAuthChatApi();
+    const resourceName = userIdOrResourceName.startsWith('users/')
+      ? userIdOrResourceName
+      : `users/${userIdOrResourceName}`;
+    const user = await this.fetchPerson(resourceName, auth);
+    if (!user) {
       throw new CliError(
-        'PERMISSION_DENIED',
-        'Listing spaces is not supported for webhook profiles',
-        'Use an OAuth profile to list spaces'
+        'NOT_FOUND',
+        `User not found: "${userIdOrResourceName}"`,
+        'Check the user ID is valid'
       );
     }
-    return this.listSpacesViaOAuth();
+    return user;
   }
 
   private async sendViaWebhook(options: GChatSendOptions): Promise<GChatSendResult> {
@@ -170,9 +194,7 @@ export class GChatClient implements ServiceClient {
   }
 
   private async sendViaOAuth(options: GChatSendOptions & { spaceId?: string }): Promise<GChatSendResult> {
-    const oauthCreds = this.credentials as GChatOAuthCredentials;
-    const auth = this.createOAuthClient(oauthCreds);
-    const chat = gchat({ version: 'v1', auth: auth as any });
+    const { chat } = this.getOAuthChatApi();
 
     if (!options.spaceId) {
       throw new CliError(
@@ -211,9 +233,7 @@ export class GChatClient implements ServiceClient {
   }
 
   private async listViaOAuth(options: GChatListOptions): Promise<GChatMessage[]> {
-    const oauthCreds = this.credentials as GChatOAuthCredentials;
-    const auth = this.createOAuthClient(oauthCreds);
-    const chat = gchat({ version: 'v1', auth: auth as any });
+    const { auth, chat } = this.getOAuthChatApi();
 
     try {
       // Build filter from options
@@ -267,9 +287,7 @@ export class GChatClient implements ServiceClient {
   }
 
   private async getViaOAuth(options: GChatGetOptions): Promise<GChatMessage> {
-    const oauthCreds = this.credentials as GChatOAuthCredentials;
-    const auth = this.createOAuthClient(oauthCreds);
-    const chat = gchat({ version: 'v1', auth: auth as any });
+    const { auth, chat } = this.getOAuthChatApi();
 
     try {
       const response = await chat.spaces.messages.get({
@@ -313,9 +331,7 @@ export class GChatClient implements ServiceClient {
   }
 
   private async listSpacesViaOAuth(): Promise<GChatSpace[]> {
-    const oauthCreds = this.credentials as GChatOAuthCredentials;
-    const auth = this.createOAuthClient(oauthCreds);
-    const chat = gchat({ version: 'v1', auth: auth as any });
+    const { chat } = this.getOAuthChatApi();
 
     try {
       const allSpaces: GChatSpace[] = [];
@@ -352,19 +368,124 @@ export class GChatClient implements ServiceClient {
     }
   }
 
+  private async listMembersViaOAuth(spaceId: string): Promise<GChatMember[]> {
+    const { auth, chat } = this.getOAuthChatApi();
+
+    try {
+      const allMembers: chat_v1.Schema$Membership[] = [];
+      let pageToken: string | undefined;
+
+      do {
+        const response = await chat.spaces.members.list({
+          parent: `spaces/${spaceId}`,
+          pageSize: 100,
+          pageToken,
+        });
+        const members = response.data.memberships || [];
+        allMembers.push(...members);
+        pageToken = response.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      const userResourceNames = allMembers
+        .map(m => m.member?.name)
+        .filter((n): n is string => !!n && n.startsWith('users/'));
+      const users = await Promise.all(
+        userResourceNames.map(name => this.fetchPerson(name, auth))
+      );
+      const userByName = new Map<string, GChatUser>();
+      for (const u of users) {
+        if (u) userByName.set(u.name, u);
+      }
+
+      return allMembers.map((m): GChatMember => {
+        const memberName = m.name || '';
+        const userName = m.member?.name;
+        const user = userName ? userByName.get(userName) : undefined;
+        return {
+          name: memberName,
+          role: (m.role as GChatMember['role']) || 'ROLE_UNSPECIFIED',
+          state: (m.state as GChatMember['state']) || 'MEMBERSHIP_STATE_UNSPECIFIED',
+          memberType: (m.member?.type as GChatMember['memberType']) || 'HUMAN',
+          user: user || (userName ? {
+            name: userName,
+            displayName: m.member?.displayName || undefined,
+          } : undefined),
+        };
+      });
+    } catch (err) {
+      const code = this.getErrorCode(err);
+      const message = this.getErrorMessage(err);
+      throw new CliError(
+        code,
+        `Failed to list members: ${message}`,
+        'Check that the space ID is valid and OAuth token is not expired'
+      );
+    }
+  }
+
+  /**
+   * Fetch a single person from the People API with rich field set.
+   * Returns undefined if the person cannot be fetched.
+   */
+  private async fetchPerson(userResourceName: string, auth: OAuth2Client): Promise<GChatUser | undefined> {
+    const cached = this.fullUserCache.get(userResourceName);
+    if (cached) return cached;
+
+    const token = await auth.getAccessToken();
+    if (!token.token) return undefined;
+
+    const personId = userResourceName.replace('users/', '');
+    const personFields = 'names,emailAddresses,phoneNumbers,organizations,photos,locations';
+    try {
+      const res = await fetch(
+        `https://people.googleapis.com/v1/people/${personId}?personFields=${personFields}`,
+        { headers: { Authorization: `Bearer ${token.token}` } }
+      );
+      if (!res.ok) return undefined;
+      const data = await res.json() as Record<string, any>;
+
+      const displayName = data.names?.[0]?.displayName;
+      const email = data.emailAddresses?.[0]?.value;
+      const phoneNumbers = (data.phoneNumbers as Array<{ value?: string }> | undefined)
+        ?.map(p => p.value).filter((v): v is string => !!v);
+      const organizations = (data.organizations as Array<{ name?: string; title?: string; department?: string }> | undefined)
+        ?.map(o => ({ name: o.name, title: o.title, department: o.department }));
+      const photoUrl = (data.photos as Array<{ url?: string }> | undefined)?.[0]?.url;
+      const locations = (data.locations as Array<{ value?: string }> | undefined)
+        ?.map(l => l.value).filter((v): v is string => !!v);
+
+      const user: GChatUser = {
+        name: userResourceName,
+        displayName,
+        email,
+        phoneNumbers: phoneNumbers?.length ? phoneNumbers : undefined,
+        organizations: organizations?.length ? organizations : undefined,
+        photoUrl,
+        locations: locations?.length ? locations : undefined,
+      };
+
+      this.fullUserCache.set(userResourceName, user);
+      // Warm the lightweight userCache so enrichSender benefits on future message lists
+      if (displayName) {
+        this.userCache.set(userResourceName, { displayName, email });
+      }
+
+      return user;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * Resolve a space identifier that may be an ID or a display name.
    * Tries as ID first (no API call), falls back to name resolution via listSpaces.
    * Results are cached for the lifetime of this client instance.
    */
   private async resolveSpaceId(spaceIdOrName: string): Promise<string> {
-    // Check cache first
     const cached = this.spaceIdCache.get(spaceIdOrName);
     if (cached) return cached;
 
-    const oauthCreds = this.credentials as GChatOAuthCredentials;
-    const auth = this.createOAuthClient(oauthCreds);
-    const chat = gchat({ version: 'v1', auth: auth as any });
+    const { chat } = this.getOAuthChatApi();
 
     // Try as ID first
     try {
