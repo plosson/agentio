@@ -152,6 +152,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<void> 
     runningServer = Bun.serve({
       port,
       hostname: host,
+      // MCP's Streamable HTTP transport keeps GET /mcp SSE streams open
+      // for server-initiated messages (notifications, progress updates),
+      // and some tool calls legitimately take more than the default 10s
+      // (Gmail search, large RSS feeds, JIRA JQL queries). Set the idle
+      // timeout to Bun's maximum so the transport can hold connections
+      // as long as it needs. 255 is Bun's hard cap — passing higher
+      // values throws.
+      idleTimeout: 255,
       fetch: (req) => handleRequest(req, ctx),
     });
 
