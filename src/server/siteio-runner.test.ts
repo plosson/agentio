@@ -170,6 +170,58 @@ describe('findApp', () => {
     expect(app!.name).toBe('mcp');
   });
 
+  test('accepts {success, data: [...]} wrapper shape (real siteio CLI)', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            success: true,
+            data: [{ name: 'mcp', url: 'https://mcp.x.siteio.me' }],
+          }),
+          stderr: '',
+        },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    const app = await runner.findApp('mcp');
+    expect(app).not.toBeNull();
+    expect(app!.name).toBe('mcp');
+    expect(app!.url).toBe('https://mcp.x.siteio.me');
+  });
+
+  test('{success, data: []} empty list returns null', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({ success: true, data: [] }),
+          stderr: '',
+        },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    expect(await runner.findApp('mcp')).toBeNull();
+  });
+
+  test('strips progress-line prefix before JSON (real siteio CLI quirk)', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [
+        {
+          exitCode: 0,
+          stdout:
+            '- Fetching apps\n' +
+            JSON.stringify({ success: true, data: [{ name: 'mcp' }] }),
+          stderr: '',
+        },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    const app = await runner.findApp('mcp');
+    expect(app).not.toBeNull();
+    expect(app!.name).toBe('mcp');
+  });
+
   test('throws when siteio exits non-zero', async () => {
     const { spawn } = makeMockSpawn({
       responses: [FAIL_1('api error')],
@@ -201,7 +253,7 @@ describe('findApp', () => {
 /* createApp                                                           */
 /* ------------------------------------------------------------------ */
 
-describe('createApp', () => {
+describe('createApp — inline mode', () => {
   test('emits exact argv: siteio apps create <name> -f <path> -p <port>', async () => {
     const { spawn, calls } = makeMockSpawn({ responses: [OK] });
     const runner = createSiteioRunner(spawn);
@@ -234,6 +286,98 @@ describe('createApp', () => {
         port: 9999,
       })
     ).rejects.toThrow(/create mcp/);
+  });
+});
+
+describe('createApp — git mode', () => {
+  test('emits: siteio apps create <name> -g <url> --branch <b> --dockerfile <path> -p <port>', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.createApp({
+      name: 'mcp',
+      port: 9999,
+      git: {
+        repoUrl: 'https://github.com/plosson/agentio.git',
+        branch: 'http-mcp-server-phase-1',
+        dockerfilePath: 'docker/Dockerfile.teleport',
+      },
+    });
+    expect(calls[0].cmd).toEqual([
+      'siteio',
+      'apps',
+      'create',
+      'mcp',
+      '-g',
+      'https://github.com/plosson/agentio.git',
+      '--branch',
+      'http-mcp-server-phase-1',
+      '--dockerfile',
+      'docker/Dockerfile.teleport',
+      '-p',
+      '9999',
+    ]);
+  });
+
+  test('passes port at the END so siteio parses flags in a stable order', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.createApp({
+      name: 'x',
+      port: 1234,
+      git: {
+        repoUrl: 'https://git.example.com/r.git',
+        branch: 'main',
+        dockerfilePath: 'D',
+      },
+    });
+    expect(calls[0].cmd.slice(-2)).toEqual(['-p', '1234']);
+  });
+
+  test('throws on non-zero exit', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [FAIL_1('clone failed: not found')],
+    });
+    const runner = createSiteioRunner(spawn);
+    await expect(
+      runner.createApp({
+        name: 'mcp',
+        port: 9999,
+        git: {
+          repoUrl: 'https://example.com/missing.git',
+          branch: 'main',
+          dockerfilePath: 'D',
+        },
+      })
+    ).rejects.toThrow(/create mcp/);
+  });
+});
+
+describe('createApp — mode exclusivity', () => {
+  test('neither dockerfilePath nor git → throws', async () => {
+    const { spawn } = makeMockSpawn({ responses: [] });
+    const runner = createSiteioRunner(spawn);
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      runner.createApp({ name: 'mcp', port: 9999 } as any)
+    ).rejects.toThrow(/exactly one of/);
+  });
+
+  test('both dockerfilePath AND git → throws', async () => {
+    const { spawn } = makeMockSpawn({ responses: [] });
+    const runner = createSiteioRunner(spawn);
+    await expect(
+      runner.createApp({
+        name: 'mcp',
+        port: 9999,
+        dockerfilePath: '/tmp/D',
+        git: {
+          repoUrl: 'https://x/r.git',
+          branch: 'main',
+          dockerfilePath: 'D',
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+    ).rejects.toThrow(/exactly one of/);
   });
 });
 
@@ -415,5 +559,46 @@ describe('appInfo', () => {
     });
     const runner = createSiteioRunner(spawn);
     expect(await runner.appInfo('mcp')).toBeNull();
+  });
+
+  test('unwraps {success, data: {...}} shape (real siteio CLI)', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            success: true,
+            data: { name: 'mcp', url: 'https://mcp.x.siteio.me' },
+          }),
+          stderr: '',
+        },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    const info = await runner.appInfo('mcp');
+    expect(info).not.toBeNull();
+    expect(info!.name).toBe('mcp');
+    expect(info!.url).toBe('https://mcp.x.siteio.me');
+  });
+
+  test('strips progress-line prefix from appInfo JSON', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [
+        {
+          exitCode: 0,
+          stdout:
+            '- Fetching app info\n' +
+            JSON.stringify({
+              success: true,
+              data: { name: 'mcp', url: 'https://mcp.x.siteio.me' },
+            }),
+          stderr: '',
+        },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    const info = await runner.appInfo('mcp');
+    expect(info).not.toBeNull();
+    expect(info!.url).toBe('https://mcp.x.siteio.me');
   });
 });

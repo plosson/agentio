@@ -1,0 +1,76 @@
+# Dockerfile used by `agentio teleport <name> --git-branch <branch>`.
+#
+# Siteio's git-mode clones the full agentio repo on the agent host and
+# builds against this Dockerfile with the repo as the build context. That
+# means, unlike docker/Dockerfile (the binary-fetch image used by the
+# gateway) and unlike the inline Dockerfile emitted by the teleport
+# command for release-binary deploys, THIS file can `COPY` from the
+# repository freely.
+#
+# Two stages:
+#   1. builder : `oven/bun` image, installs deps, compiles the single-file
+#                native binary via `bun build --compile`.
+#   2. runtime : ubuntu:24.04 with only the bits the binary needs at
+#                runtime (ca-certificates, curl for healthcheck, tini for
+#                signal handling). Non-root `agentio` user; HOME=/data so
+#                config.json + tokens.enc land in a siteio-managed path.
+#
+# The container's CMD imports the encrypted config from
+# AGENTIO_KEY + AGENTIO_CONFIG (populated by siteio's `apps set -e …`)
+# and then `exec`s the HTTP server so tini sees it directly.
+
+# ---------- stage 1: build the native binary ---------------------------
+
+FROM oven/bun:1.3 AS builder
+
+WORKDIR /build
+
+# Install only what `bun install` needs first, for layer caching.
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile
+
+# Now bring in the rest of the repo and compile.
+COPY . .
+
+# `bun build --compile` embeds the runtime and produces a standalone
+# binary at /build/dist/agentio.
+RUN bun run build:native
+
+# ---------- stage 2: runtime image -------------------------------------
+
+FROM ubuntu:24.04
+
+# Runtime dependencies:
+#   ca-certificates : HTTPS calls from the container to upstream services
+#   curl            : healthcheck probe
+#   tini            : proper PID 1 / signal handling
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user. HOME=/data so that ~/.config/agentio lives in a path
+# siteio can mount as a persistent volume if needed.
+RUN groupadd -g 1001 agentio \
+    && useradd -u 1001 -g agentio -d /home/agentio -m agentio \
+    && mkdir -p /data /home/agentio/bin \
+    && chown -R agentio:agentio /data /home/agentio/bin
+
+# Copy the built binary from the builder stage. Own it as `agentio` so
+# we can drop privileges below.
+COPY --from=builder --chown=agentio:agentio /build/dist/agentio /home/agentio/bin/agentio
+
+USER agentio
+ENV HOME=/data
+ENV XDG_CONFIG_HOME=/data
+ENV PATH="/home/agentio/bin:${PATH}"
+
+EXPOSE 9999
+
+# The healthcheck start-period is generous (30s) because on the very
+# first boot the container has to decrypt the AGENTIO_CONFIG blob and
+# import credentials before /health becomes responsive.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -sf http://localhost:9999/health || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sh", "-c", "agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999"]

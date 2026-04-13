@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   generateServerApiKey,
+  normalizeGitUrl,
   runTeleport,
+  TELEPORT_DOCKERFILE_PATH,
   validateAppName,
   type TeleportDeps,
 } from './teleport';
@@ -104,6 +106,8 @@ interface FakeDepsOptions extends FakeRunnerOptions {
   exportConfig?: string;
   fixedServerApiKey?: string;
   dockerfile?: string;
+  /** Value returned by detectGitOriginUrl. Default: null. */
+  gitOriginUrl?: string | null;
 }
 
 interface FakeDeps extends TeleportDeps {
@@ -153,6 +157,8 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     removeTempFile: async (path) => {
       tempFileDeletes.push(path);
     },
+    detectGitOriginUrl: async () =>
+      'gitOriginUrl' in opts ? (opts.gitOriginUrl ?? null) : null,
     log: (msg) => logLines.push(msg),
     warn: (msg) => warnLines.push(msg),
   };
@@ -517,5 +523,236 @@ describe('runTeleport — name validation', () => {
       runTeleport({ name: 'MCP_INVALID' }, deps)
     ).rejects.toThrow(/Invalid app name/);
     expect(deps.calls).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* normalizeGitUrl                                                     */
+/* ------------------------------------------------------------------ */
+
+describe('normalizeGitUrl', () => {
+  test('SSH → HTTPS (github)', () => {
+    expect(normalizeGitUrl('git@github.com:plosson/agentio.git')).toBe(
+      'https://github.com/plosson/agentio.git'
+    );
+  });
+
+  test('SSH without .git suffix still emits .git', () => {
+    expect(normalizeGitUrl('git@github.com:plosson/agentio')).toBe(
+      'https://github.com/plosson/agentio.git'
+    );
+  });
+
+  test('SSH with multi-level path (gitlab-style)', () => {
+    expect(
+      normalizeGitUrl('git@gitlab.example.com:group/sub/repo.git')
+    ).toBe('https://gitlab.example.com/group/sub/repo.git');
+  });
+
+  test('HTTPS URL passes through unchanged', () => {
+    expect(
+      normalizeGitUrl('https://github.com/plosson/agentio.git')
+    ).toBe('https://github.com/plosson/agentio.git');
+  });
+
+  test('HTTP URL passes through unchanged', () => {
+    expect(normalizeGitUrl('http://gitea.local/x/y.git')).toBe(
+      'http://gitea.local/x/y.git'
+    );
+  });
+
+  test('trims surrounding whitespace', () => {
+    expect(
+      normalizeGitUrl('  git@github.com:plosson/agentio.git\n')
+    ).toBe('https://github.com/plosson/agentio.git');
+  });
+
+  test('unknown shape passes through unchanged (siteio will error)', () => {
+    expect(normalizeGitUrl('not-a-url')).toBe('not-a-url');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — git mode                                              */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — git mode', () => {
+  test('happy path: calls createApp with git args, never writes a temp file', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/plosson/agentio.git',
+    });
+    const result = await runTeleport(
+      {
+        name: 'mcp',
+        gitBranch: 'http-mcp-server-phase-1',
+      },
+      deps
+    );
+
+    expect(result.url).toBe('https://mcp.siteio.example.com');
+    expect(result.serverApiKey).toMatch(/^srv_/);
+
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    expect(createCall).toBeDefined();
+    const args = createCall!.args as {
+      name: string;
+      port: number;
+      dockerfilePath?: string;
+      git?: { repoUrl: string; branch: string; dockerfilePath: string };
+    };
+    expect(args.name).toBe('mcp');
+    expect(args.port).toBe(9999);
+    expect(args.dockerfilePath).toBeUndefined();
+    expect(args.git).toBeDefined();
+    expect(args.git!.repoUrl).toBe(
+      'https://github.com/plosson/agentio.git'
+    );
+    expect(args.git!.branch).toBe('http-mcp-server-phase-1');
+    expect(args.git!.dockerfilePath).toBe(TELEPORT_DOCKERFILE_PATH);
+
+    // No temp file written OR deleted.
+    expect(deps.tempFileWrites).toHaveLength(0);
+    expect(deps.tempFileDeletes).toHaveLength(0);
+  });
+
+  test('SSH origin URL is auto-normalized to HTTPS', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'git@github.com:plosson/agentio.git',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'main' },
+      deps
+    );
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    const args = createCall!.args as {
+      git?: { repoUrl: string };
+    };
+    expect(args.git!.repoUrl).toBe(
+      'https://github.com/plosson/agentio.git'
+    );
+  });
+
+  test('--git-url overrides detection', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/plosson/agentio.git',
+    });
+    await runTeleport(
+      {
+        name: 'mcp',
+        gitBranch: 'main',
+        gitUrl: 'https://gitea.example.com/owner/fork.git',
+      },
+      deps
+    );
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    const args = createCall!.args as { git?: { repoUrl: string } };
+    expect(args.git!.repoUrl).toBe(
+      'https://gitea.example.com/owner/fork.git'
+    );
+  });
+
+  test('--git-url SSH value is normalized to HTTPS', async () => {
+    const deps = makeDeps();
+    await runTeleport(
+      {
+        name: 'mcp',
+        gitBranch: 'main',
+        gitUrl: 'git@gitea.example.com:owner/fork.git',
+      },
+      deps
+    );
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    const args = createCall!.args as { git?: { repoUrl: string } };
+    expect(args.git!.repoUrl).toBe(
+      'https://gitea.example.com/owner/fork.git'
+    );
+  });
+
+  test('no detectable origin and no --git-url → CliError, zero siteio calls past preflight', async () => {
+    const deps = makeDeps({ gitOriginUrl: null });
+    await expect(
+      runTeleport({ name: 'mcp', gitBranch: 'main' }, deps)
+    ).rejects.toThrow(/Could not detect git origin URL/);
+    // Preflight ran (isInstalled/isLoggedIn/findApp) but create should
+    // NOT have been attempted.
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('createApp');
+  });
+
+  test('deploy is called WITHOUT dockerfilePath in git mode', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/x/y.git',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'main' },
+      deps
+    );
+    const deployCall = deps.calls.find((c) => c.method === 'deploy');
+    const args = deployCall!.args as {
+      name: string;
+      dockerfilePath?: string;
+    };
+    expect(args.name).toBe('mcp');
+    expect(args.dockerfilePath).toBeUndefined();
+  });
+
+  test('--no-cache still propagates in git mode', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/x/y.git',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'main', noCache: true },
+      deps
+    );
+    const deployCall = deps.calls.find((c) => c.method === 'deploy');
+    const args = deployCall!.args as { noCache?: boolean };
+    expect(args.noCache).toBe(true);
+  });
+
+  test('startup log announces git mode with resolved URL + branch', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'git@github.com:plosson/agentio.git',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'feat-x' },
+      deps
+    );
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('Git mode');
+    expect(joined).toContain('https://github.com/plosson/agentio.git');
+    expect(joined).toContain('feat-x');
+  });
+
+  test('dry-run in git mode shows siteio create -g command, no Dockerfile body', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/plosson/agentio.git',
+      dockerfile: '# should not appear in git-mode dry-run\n',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'main', dryRun: true },
+      deps
+    );
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('siteio apps create mcp -g');
+    expect(joined).toContain('--branch main');
+    expect(joined).toContain(`--dockerfile ${TELEPORT_DOCKERFILE_PATH}`);
+    // Must NOT dump the inline Dockerfile body — it's not relevant.
+    expect(joined).not.toContain('should not appear in git-mode dry-run');
+    // Must not hit siteio for real.
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('createApp');
+    expect(methods).not.toContain('deploy');
+  });
+
+  test('failed createApp in git mode: no temp file cleanup needed', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/x/y.git',
+      failOn: 'createApp',
+    });
+    await expect(
+      runTeleport({ name: 'mcp', gitBranch: 'main' }, deps)
+    ).rejects.toThrow();
+    expect(deps.tempFileWrites).toHaveLength(0);
+    expect(deps.tempFileDeletes).toHaveLength(0);
   });
 });

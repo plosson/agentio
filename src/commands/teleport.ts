@@ -40,8 +40,34 @@ import type { Config } from '../types/config';
  * inspection + offline development.
  */
 
+/** Path inside the repo to the teleport Dockerfile (relative to repo root). */
+export const TELEPORT_DOCKERFILE_PATH = 'docker/Dockerfile.teleport';
+
 /** Siteio app names must match this pattern. Mirrors Docker image name rules. */
 const VALID_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+
+/**
+ * Normalize common git URL shapes to an HTTPS URL that siteio's agent
+ * can clone without credentials. SSH URLs (`git@github.com:owner/repo.git`)
+ * are converted; HTTPS URLs pass through unchanged.
+ */
+export function normalizeGitUrl(url: string): string {
+  const trimmed = url.trim();
+  // git@github.com:owner/repo.git  →  https://github.com/owner/repo.git
+  // git@gitlab.example.com:group/sub/repo.git  →  https://gitlab.example.com/group/sub/repo.git
+  const sshMatch = trimmed.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const path = sshMatch[2];
+    return `https://${host}/${path}.git`;
+  }
+  // Already HTTPS / HTTP — leave alone.
+  if (/^https?:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+  // Unknown shape — return as-is and let siteio report the error.
+  return trimmed;
+}
 
 export function validateAppName(name: string): void {
   if (!VALID_NAME.test(name)) {
@@ -69,6 +95,12 @@ export interface TeleportDeps {
   generateDockerfile: () => string;
   writeTempFile: (content: string) => Promise<string>;
   removeTempFile: (path: string) => Promise<void>;
+  /**
+   * Return the git origin URL of the current project, or null if the
+   * cwd isn't a git repo / has no origin remote. Used to compute the
+   * siteio `--git` argument in git-mode.
+   */
+  detectGitOriginUrl: () => Promise<string | null>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
 }
@@ -79,6 +111,20 @@ export interface TeleportOptions {
   output?: string;
   dryRun?: boolean;
   noCache?: boolean;
+  /**
+   * When set, switches to git-mode: siteio clones the repo on the agent
+   * and builds docker/Dockerfile.teleport with the repo as the build
+   * context. Required to deploy unreleased code — the default inline
+   * mode fetches the latest GitHub release binary, which won't contain
+   * commits that haven't shipped yet.
+   */
+  gitBranch?: string;
+  /**
+   * Override the git URL siteio clones from. Default: detected via
+   * `git remote get-url origin` in the current working directory,
+   * normalized from SSH (`git@github.com:owner/repo.git`) to HTTPS.
+   */
+  gitUrl?: string;
 }
 
 export interface TeleportResult {
@@ -173,21 +219,58 @@ export async function runTeleport(
   deps.log('Exporting local configuration…');
   const exported = await deps.generateExportData();
 
+  // Resolve git mode settings up front so dry-run can show the same
+  // command shape the real run would use.
+  const isGitMode = Boolean(opts.gitBranch);
+  let gitSettings: { repoUrl: string; branch: string } | null = null;
+  if (isGitMode) {
+    let repoUrl = opts.gitUrl;
+    if (!repoUrl) {
+      const detected = await deps.detectGitOriginUrl();
+      if (!detected) {
+        throw new CliError(
+          'CONFIG_ERROR',
+          'Could not detect git origin URL for --git-branch mode',
+          'Run from inside a git repo with an "origin" remote, or pass --git-url <url> explicitly.'
+        );
+      }
+      repoUrl = normalizeGitUrl(detected);
+    } else {
+      repoUrl = normalizeGitUrl(repoUrl);
+    }
+    gitSettings = { repoUrl, branch: opts.gitBranch! };
+    deps.log(
+      `Git mode: will clone ${gitSettings.repoUrl} @ ${gitSettings.branch}`
+    );
+  }
+
   // Dry-run: report what would happen and exit.
   if (opts.dryRun) {
-    const dockerfile = deps.generateDockerfile();
     deps.log('--- Dry run: the following commands would be executed ---');
-    deps.log(
-      `siteio apps create ${opts.name} -f <tempfile> -p 9999`
-    );
+    if (gitSettings) {
+      deps.log(
+        `siteio apps create ${opts.name} -g ${gitSettings.repoUrl} --branch ${gitSettings.branch} --dockerfile ${TELEPORT_DOCKERFILE_PATH} -p 9999`
+      );
+    } else {
+      deps.log(
+        `siteio apps create ${opts.name} -f <tempfile> -p 9999`
+      );
+    }
     deps.log(
       `siteio apps set ${opts.name} -e AGENTIO_KEY=<redacted> -e AGENTIO_CONFIG=<${exported.config.length} chars> -e AGENTIO_SERVER_API_KEY=${serverApiKey}`
     );
     deps.log(
       `siteio apps deploy ${opts.name}${opts.noCache ? ' --no-cache' : ''}`
     );
-    deps.log('--- Dockerfile that would be uploaded ---');
-    deps.log(dockerfile);
+    if (!gitSettings) {
+      const dockerfile = deps.generateDockerfile();
+      deps.log('--- Dockerfile that would be uploaded ---');
+      deps.log(dockerfile);
+    } else {
+      deps.log(
+        `--- siteio will build ${TELEPORT_DOCKERFILE_PATH} from the cloned repo (no inline Dockerfile) ---`
+      );
+    }
     return {
       name: opts.name,
       serverApiKey,
@@ -195,17 +278,32 @@ export async function runTeleport(
     };
   }
 
-  // Write the Dockerfile to a temp file and drive the siteio flow.
-  const dockerfile = deps.generateDockerfile();
-  const tempPath = await deps.writeTempFile(dockerfile);
+  // In inline mode, write the generated Dockerfile to a temp file so
+  // siteio can read it with -f. In git mode, no temp file is needed —
+  // the Dockerfile already lives in the repo siteio is cloning.
+  const tempPath = gitSettings
+    ? null
+    : await deps.writeTempFile(deps.generateDockerfile());
 
   try {
     deps.log(`Creating siteio app "${opts.name}"…`);
-    await deps.runner.createApp({
-      name: opts.name,
-      dockerfilePath: tempPath,
-      port: 9999,
-    });
+    if (gitSettings) {
+      await deps.runner.createApp({
+        name: opts.name,
+        port: 9999,
+        git: {
+          repoUrl: gitSettings.repoUrl,
+          branch: gitSettings.branch,
+          dockerfilePath: TELEPORT_DOCKERFILE_PATH,
+        },
+      });
+    } else {
+      await deps.runner.createApp({
+        name: opts.name,
+        dockerfilePath: tempPath!,
+        port: 9999,
+      });
+    }
 
     deps.log('Setting environment variables…');
     await deps.runner.setEnv({
@@ -220,7 +318,9 @@ export async function runTeleport(
     deps.log('Deploying (this may take a minute — Docker is building your image)…');
     await deps.runner.deploy({
       name: opts.name,
-      dockerfilePath: tempPath,
+      // In git mode, there's no -f to re-pass on deploy — siteio uses
+      // the stored git settings from create.
+      ...(tempPath ? { dockerfilePath: tempPath } : {}),
       noCache: opts.noCache,
     });
 
@@ -261,10 +361,13 @@ export async function runTeleport(
       claudeMcpAddCommand: claudeCmd,
     };
   } finally {
-    // Always remove the temp Dockerfile, on both success and failure.
-    await deps.removeTempFile(tempPath).catch(() => {
-      /* ignore — not worth throwing over */
-    });
+    // In inline mode, always remove the temp Dockerfile on both success
+    // and failure. In git mode there is nothing to clean up.
+    if (tempPath) {
+      await deps.removeTempFile(tempPath).catch(() => {
+        /* ignore — not worth throwing over */
+      });
+    }
   }
 }
 
@@ -283,6 +386,29 @@ async function defaultRemoveTempFile(path: string): Promise<void> {
   await unlink(path).catch(() => {});
   // The mkdtemp dir is left behind intentionally — it's in /tmp and
   // only contains the one empty file, so the OS will reap it.
+}
+
+/**
+ * Default git-origin-URL detector: shell out to `git remote get-url origin`.
+ * Returns null if the cwd isn't a git repo, has no origin remote, or if
+ * the git binary isn't on PATH.
+ */
+async function defaultDetectGitOriginUrl(): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(['git', 'remote', 'get-url', 'origin'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) return null;
+    const url = stdout.trim();
+    return url.length > 0 ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 export function registerTeleportCommand(program: Command): void {
@@ -311,6 +437,14 @@ export function registerTeleportCommand(program: Command): void {
       '--no-cache',
       'Pass --no-cache to `siteio apps deploy` to force a fresh Docker build'
     )
+    .option(
+      '--git-branch <branch>',
+      'Deploy unreleased code by telling siteio to clone this repo and build docker/Dockerfile.teleport from the given branch (instead of fetching the latest release binary)'
+    )
+    .option(
+      '--git-url <url>',
+      'Override the git URL siteio clones from. Default: detected via `git remote get-url origin`, normalized to HTTPS'
+    )
     .action(async (name: string, options) => {
       try {
         const runner = createSiteioRunner();
@@ -325,6 +459,8 @@ export function registerTeleportCommand(program: Command): void {
             // directly, so it comes through as options.noCache=true.
             // Handle both just in case.
             noCache: Boolean(options.noCache ?? options.cache === false),
+            gitBranch: options.gitBranch,
+            gitUrl: options.gitUrl,
           },
           {
             runner,
@@ -334,6 +470,7 @@ export function registerTeleportCommand(program: Command): void {
             generateDockerfile: () => generateTeleportDockerfile(),
             writeTempFile: defaultWriteTempFile,
             removeTempFile: defaultRemoveTempFile,
+            detectGitOriginUrl: defaultDetectGitOriginUrl,
             log: (msg) => console.log(msg),
             warn: (msg) => console.error(msg),
           }

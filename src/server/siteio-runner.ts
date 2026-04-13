@@ -65,12 +65,13 @@ export interface SiteioRunner {
   isLoggedIn(): Promise<boolean>;
   /** `siteio apps list --json`, filtered to the named app. */
   findApp(name: string): Promise<SiteioApp | null>;
-  /** `siteio apps create <name> -f <dockerfile> -p <port>`. */
-  createApp(args: {
-    name: string;
-    dockerfilePath: string;
-    port: number;
-  }): Promise<void>;
+  /**
+   * `siteio apps create <name>` with either:
+   *   - inline-Dockerfile mode (`-f <path>`), or
+   *   - git mode (`-g <url> --branch <branch> --dockerfile <path>`).
+   * Exactly one of the two must be provided.
+   */
+  createApp(args: CreateAppArgs): Promise<void>;
   /** `siteio apps set <name> -e KEY=value -e KEY2=value2 ...`. */
   setEnv(args: { name: string; envVars: Record<string, string> }): Promise<void>;
   /** `siteio apps deploy <name> [-f <path>] [--no-cache]`. */
@@ -82,6 +83,29 @@ export interface SiteioRunner {
   /** `siteio apps info <name> --json` — used to surface the deployed URL. */
   appInfo(name: string): Promise<SiteioApp | null>;
 }
+
+/**
+ * Arguments for `siteio apps create`. Must be either inline-Dockerfile
+ * mode OR git mode; passing both (or neither) is rejected at runtime.
+ */
+export type CreateAppArgs =
+  | {
+      name: string;
+      port: number;
+      dockerfilePath: string;
+      git?: undefined;
+    }
+  | {
+      name: string;
+      port: number;
+      dockerfilePath?: undefined;
+      git: {
+        repoUrl: string;
+        branch: string;
+        /** Path to the Dockerfile inside the repo, e.g. "docker/Dockerfile.teleport". */
+        dockerfilePath: string;
+      };
+    };
 
 export interface SiteioRunnerError extends Error {
   command: string[];
@@ -131,45 +155,80 @@ export function createSiteioRunner(
       if (r.exitCode !== 0) {
         throw makeError(cmd, r, 'list apps');
       }
+      // siteio's CLI mixes progress output on stdout before the JSON
+      // payload (e.g. "- Fetching apps\n{...}"). Find the JSON body by
+      // looking for the first `{` or `[` that starts a line.
+      const jsonStart = r.stdout.search(/^[\[{]/m);
+      const jsonText =
+        jsonStart >= 0 ? r.stdout.slice(jsonStart) : r.stdout;
+
       let parsed: unknown;
       try {
-        parsed = JSON.parse(r.stdout);
+        parsed = JSON.parse(jsonText);
       } catch {
         throw new Error(
           `siteio apps list --json returned unparseable output:\n${r.stdout}`
         );
       }
-      if (!Array.isArray(parsed)) {
-        // Some versions of siteio may wrap the list in { apps: [...] }.
-        // Be permissive and try both shapes.
-        if (
-          parsed &&
-          typeof parsed === 'object' &&
-          Array.isArray((parsed as { apps?: unknown }).apps)
-        ) {
-          parsed = (parsed as { apps: unknown[] }).apps;
-        } else {
-          throw new Error(
-            `siteio apps list --json: expected an array, got:\n${r.stdout}`
-          );
-        }
+
+      // Normalize the shape: siteio ships {success, data: [...]} in
+      // recent versions, older versions may return {apps: [...]} or a
+      // bare [...]. Accept all three.
+      let apps: SiteioApp[];
+      if (Array.isArray(parsed)) {
+        apps = parsed as SiteioApp[];
+      } else if (
+        parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray((parsed as { data?: unknown }).data)
+      ) {
+        apps = (parsed as { data: SiteioApp[] }).data;
+      } else if (
+        parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray((parsed as { apps?: unknown }).apps)
+      ) {
+        apps = (parsed as { apps: SiteioApp[] }).apps;
+      } else {
+        throw new Error(
+          `siteio apps list --json: expected an array (or {data:[...]} / {apps:[...]}), got:\n${r.stdout}`
+        );
       }
-      const apps = parsed as SiteioApp[];
-      const match = apps.find((a) => a && typeof a === 'object' && a.name === name);
+
+      const match = apps.find(
+        (a) => a && typeof a === 'object' && a.name === name
+      );
       return match ?? null;
     },
 
     async createApp(args) {
-      const cmd = [
-        'siteio',
-        'apps',
-        'create',
-        args.name,
-        '-f',
-        args.dockerfilePath,
-        '-p',
-        String(args.port),
-      ];
+      // Enforce exactly-one-of semantics at runtime too (the type system
+      // enforces this at the call site, but a caller coming from JS or
+      // forcing a cast could still break the contract).
+      const hasInline = typeof args.dockerfilePath === 'string';
+      const hasGit = args.git != null;
+      if (hasInline === hasGit) {
+        throw new Error(
+          `createApp: exactly one of dockerfilePath or git must be provided (got inline=${hasInline}, git=${hasGit})`
+        );
+      }
+
+      const cmd = ['siteio', 'apps', 'create', args.name];
+      if (hasInline) {
+        cmd.push('-f', args.dockerfilePath as string);
+      } else {
+        const g = args.git!;
+        cmd.push(
+          '-g',
+          g.repoUrl,
+          '--branch',
+          g.branch,
+          '--dockerfile',
+          g.dockerfilePath
+        );
+      }
+      cmd.push('-p', String(args.port));
+
       const r = await spawn({ cmd });
       if (r.exitCode !== 0) {
         throw makeError(cmd, r, `create ${args.name}`);
@@ -210,12 +269,23 @@ export function createSiteioRunner(
         // teleport just because we couldn't get a URL to print.
         return null;
       }
+      // Strip any progress-line prefix before the JSON body (siteio's
+      // CLI prints status lines on stdout before the --json payload).
+      const jsonStart = r.stdout.search(/^[\[{]/m);
+      const jsonText =
+        jsonStart >= 0 ? r.stdout.slice(jsonStart) : r.stdout;
       try {
-        const parsed = JSON.parse(r.stdout);
-        if (parsed && typeof parsed === 'object') {
-          return parsed as SiteioApp;
+        const parsed = JSON.parse(jsonText);
+        if (!parsed || typeof parsed !== 'object') return null;
+        // Unwrap {success, data: {...}} shape if present.
+        if (
+          'data' in parsed &&
+          parsed.data &&
+          typeof parsed.data === 'object'
+        ) {
+          return parsed.data as SiteioApp;
         }
-        return null;
+        return parsed as SiteioApp;
       } catch {
         return null;
       }
