@@ -1,5 +1,5 @@
 /**
- * Thin wrapper around the `siteio` CLI for `agentio teleport`. Every
+ * Thin wrapper around the `siteio` CLI for `agentio mcp teleport`. Every
  * siteio command we need to invoke goes through this module, which
  * delegates to an injected `spawn` function. Tests inject a mock; the
  * production wiring injects a tiny adapter over `Bun.spawn`.

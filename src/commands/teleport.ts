@@ -15,7 +15,7 @@ import { handleError, CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 
 /**
- * `agentio teleport <name>` — one-command deploy of the local agentio
+ * `agentio mcp teleport <name>` — one-command deploy of the local agentio
  * HTTP MCP server to a siteio-managed remote.
  *
  * Flow:
@@ -193,7 +193,7 @@ async function runSync(
     throw new CliError(
       'NOT_FOUND',
       `No siteio app named "${opts.name}" to sync to`,
-      `Run \`agentio teleport ${opts.name}\` (without --sync) first to create it.`
+      `Run \`agentio mcp teleport ${opts.name}\` (without --sync) first to create it.`
     );
   }
 
@@ -580,8 +580,13 @@ async function defaultDetectGitOriginUrl(): Promise<string | null> {
   }
 }
 
-export function registerTeleportCommand(program: Command): void {
-  program
+/**
+ * Register the `teleport` subcommand under a parent Commander command
+ * (typically `mcp`). Invoked from `registerMcpCommands` so the user
+ * types `agentio mcp teleport <name>` rather than `agentio teleport`.
+ */
+export function registerTeleportCommand(parent: Command): void {
+  parent
     .command('teleport')
     .description(
       'Deploy the agentio HTTP MCP server to a siteio-managed remote in one command'

@@ -19,7 +19,7 @@ describe('generateTeleportDockerfile — structural invariants', () => {
 
   test('starts with a comment declaring it auto-generated', () => {
     const df = generateTeleportDockerfile();
-    expect(df.split('\n')[0]).toMatch(/^#.*auto-generated.*agentio teleport/i);
+    expect(df.split('\n')[0]).toMatch(/^#.*auto-generated.*agentio mcp teleport/i);
   });
 
   test('uses ubuntu:24.04 as the base image', () => {

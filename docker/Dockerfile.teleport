@@ -1,4 +1,4 @@
-# Dockerfile used by `agentio teleport <name> --git-branch <branch>`.
+# Dockerfile used by `agentio mcp teleport <name> --git-branch <branch>`.
 #
 # Siteio's git-mode clones the full agentio repo on the agent host and
 # builds against this Dockerfile with the repo as the build context. That
