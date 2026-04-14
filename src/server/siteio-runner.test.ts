@@ -514,6 +514,27 @@ describe('deploy', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* restartApp                                                          */
+/* ------------------------------------------------------------------ */
+
+describe('restartApp', () => {
+  test('emits exact argv: siteio apps restart <name>', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.restartApp('mcp');
+    expect(calls[0].cmd).toEqual(['siteio', 'apps', 'restart', 'mcp']);
+  });
+
+  test('throws on non-zero exit with descriptive error', async () => {
+    const { spawn } = makeMockSpawn({
+      responses: [FAIL_1('container failed to restart')],
+    });
+    const runner = createSiteioRunner(spawn);
+    await expect(runner.restartApp('mcp')).rejects.toThrow(/restart mcp/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* appInfo                                                             */
 /* ------------------------------------------------------------------ */
 

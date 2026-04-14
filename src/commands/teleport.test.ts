@@ -43,6 +43,7 @@ interface FakeRunnerOptions {
     | 'createApp'
     | 'setEnv'
     | 'deploy'
+    | 'restartApp'
     | 'appInfo';
 }
 
@@ -82,6 +83,10 @@ function makeFakeRunner(opts: FakeRunnerOptions = {}): {
     async deploy(args) {
       calls.push({ method: 'deploy', args });
       if (shouldFail('deploy')) throw new Error('deploy failed');
+    },
+    async restartApp(name) {
+      calls.push({ method: 'restartApp', args: { name } });
+      if (shouldFail('restartApp')) throw new Error('restart failed');
     },
     async appInfo(name) {
       calls.push({ method: 'appInfo', args: { name } });
@@ -754,5 +759,232 @@ describe('runTeleport — git mode', () => {
     ).rejects.toThrow();
     expect(deps.tempFileWrites).toHaveLength(0);
     expect(deps.tempFileDeletes).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — sync mode                                             */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — sync mode (--sync)', () => {
+  test('happy path: preflight → findApp → setEnv → restartApp → appInfo', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: { name: 'mcp', url: 'https://mcp.x.com' },
+    });
+    const result = await runTeleport(
+      { name: 'mcp', sync: true },
+      deps
+    );
+
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).toEqual([
+      'isInstalled',
+      'isLoggedIn',
+      'findApp',
+      'setEnv',
+      'restartApp',
+      'appInfo',
+    ]);
+    expect(result.url).toBe('https://mcp.x.com');
+  });
+
+  test('refuses to sync against a non-existent app', async () => {
+    const deps = makeDeps({ existingApp: null });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true }, deps)
+    ).rejects.toThrow(/No siteio app named "mcp" to sync to/);
+    // Did not attempt to set env or restart.
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('setEnv');
+    expect(methods).not.toContain('restartApp');
+  });
+
+  test('setEnv passes ONLY AGENTIO_KEY + AGENTIO_CONFIG (NOT AGENTIO_SERVER_API_KEY)', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      exportKey: 'rotated_key',
+      exportConfig: 'rotated_config==',
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setEnv');
+    const args = setCall!.args as {
+      name: string;
+      envVars: Record<string, string>;
+    };
+    expect(Object.keys(args.envVars).sort()).toEqual([
+      'AGENTIO_CONFIG',
+      'AGENTIO_KEY',
+    ]);
+    expect(args.envVars.AGENTIO_KEY).toBe('rotated_key');
+    expect(args.envVars.AGENTIO_CONFIG).toBe('rotated_config==');
+    expect(args.envVars.AGENTIO_SERVER_API_KEY).toBeUndefined();
+  });
+
+  test('restartApp is called with the app name', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const restartCall = deps.calls.find((c) => c.method === 'restartApp');
+    expect(restartCall).toBeDefined();
+    expect(restartCall!.args).toEqual({ name: 'mcp' });
+  });
+
+  test('does NOT generate a Dockerfile or write a temp file', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    expect(deps.tempFileWrites).toHaveLength(0);
+    expect(deps.tempFileDeletes).toHaveLength(0);
+  });
+
+  test('does NOT call createApp or deploy', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('createApp');
+    expect(methods).not.toContain('deploy');
+  });
+
+  test('output mentions client re-auth caveat', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('Sync complete');
+    expect(joined.toLowerCase()).toContain('re-run');
+    expect(joined).toContain('OAuth');
+    expect(joined).toContain('operator API key has NOT changed');
+  });
+
+  test('preserves the same operator API key (no fresh generation in sync)', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      fixedServerApiKey: 'srv_should_not_appear',
+    });
+    const result = await runTeleport(
+      { name: 'mcp', sync: true },
+      deps
+    );
+    // Sync result has no serverApiKey since we didn't generate one.
+    expect(result.serverApiKey).toBe('');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — sync mode dry-run                                     */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — sync dry-run', () => {
+  test('shows the apps set + apps restart commands without executing', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      exportConfig: 'X'.repeat(1000),
+    });
+    await runTeleport(
+      { name: 'mcp', sync: true, dryRun: true },
+      deps
+    );
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('siteio apps set mcp');
+    expect(joined).toContain('siteio apps restart mcp');
+    expect(joined).toContain('AGENTIO_KEY=<redacted>');
+    expect(joined).toContain('AGENTIO_CONFIG=<1000 chars>');
+    // Did NOT actually call setEnv / restartApp.
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('setEnv');
+    expect(methods).not.toContain('restartApp');
+  });
+
+  test('preflight + findApp still run in dry-run', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport(
+      { name: 'mcp', sync: true, dryRun: true },
+      deps
+    );
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).toContain('isInstalled');
+    expect(methods).toContain('isLoggedIn');
+    expect(methods).toContain('findApp');
+  });
+
+  test('dry-run still bails if app does not exist', async () => {
+    const deps = makeDeps({ existingApp: null });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true, dryRun: true }, deps)
+    ).rejects.toThrow(/No siteio app named/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — sync mutual exclusion                                 */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — --sync mutual exclusion', () => {
+  test('--sync + --dockerfile-only → CliError', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await expect(
+      runTeleport(
+        { name: 'mcp', sync: true, dockerfileOnly: true },
+        deps
+      )
+    ).rejects.toThrow(/--sync cannot be combined with --dockerfile-only/);
+    // Did not even hit preflight.
+    expect(deps.calls).toHaveLength(0);
+  });
+
+  test('--sync + --git-branch → CliError', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await expect(
+      runTeleport(
+        { name: 'mcp', sync: true, gitBranch: 'main' },
+        deps
+      )
+    ).rejects.toThrow(/--sync cannot be combined with --git-branch/);
+  });
+
+  test('--sync + --no-cache → CliError', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true, noCache: true }, deps)
+    ).rejects.toThrow(/--sync cannot be combined with --no-cache/);
+  });
+
+  test('--sync + --output → CliError', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await expect(
+      runTeleport(
+        { name: 'mcp', sync: true, output: '/tmp/x' },
+        deps
+      )
+    ).rejects.toThrow(/--sync cannot be combined with --output/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — sync failure cleanup                                  */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — sync failure paths', () => {
+  test('setEnv fails → restartApp NOT called', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      failOn: 'setEnv',
+    });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true }, deps)
+    ).rejects.toThrow();
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).not.toContain('restartApp');
+  });
+
+  test('restartApp fails → error propagates', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      failOn: 'restartApp',
+    });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true }, deps)
+    ).rejects.toThrow(/restart failed/);
+    // setEnv ran (we got past it before restartApp blew up).
+    const methods = deps.calls.map((c) => c.method);
+    expect(methods).toContain('setEnv');
   });
 });

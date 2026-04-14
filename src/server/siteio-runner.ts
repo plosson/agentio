@@ -80,6 +80,8 @@ export interface SiteioRunner {
     dockerfilePath?: string;
     noCache?: boolean;
   }): Promise<void>;
+  /** `siteio apps restart <name>`. Required after `apps set -e` to pick up new env vars. */
+  restartApp(name: string): Promise<void>;
   /** `siteio apps info <name> --json` — used to surface the deployed URL. */
   appInfo(name: string): Promise<SiteioApp | null>;
 }
@@ -257,6 +259,14 @@ export function createSiteioRunner(
       const r = await spawn({ cmd });
       if (r.exitCode !== 0) {
         throw makeError(cmd, r, `deploy ${args.name}`);
+      }
+    },
+
+    async restartApp(name) {
+      const cmd = ['siteio', 'apps', 'restart', name];
+      const r = await spawn({ cmd });
+      if (r.exitCode !== 0) {
+        throw makeError(cmd, r, `restart ${name}`);
       }
     },
 

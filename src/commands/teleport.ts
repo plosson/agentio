@@ -125,6 +125,16 @@ export interface TeleportOptions {
    * normalized from SSH (`git@github.com:owner/repo.git`) to HTTPS.
    */
   gitUrl?: string;
+  /**
+   * Sync mode: re-export the local config + push it to an EXISTING
+   * siteio app via `apps set -e AGENTIO_KEY=… -e AGENTIO_CONFIG=…`,
+   * then `apps restart`. Does NOT touch AGENTIO_SERVER_API_KEY (so
+   * the operator key on the remote stays the same and Claude clients
+   * keep using the same /authorize PIN). Does NOT rebuild the Docker
+   * image. Use this when you've added or changed profiles locally and
+   * want the remote to pick them up.
+   */
+  sync?: boolean;
 }
 
 export interface TeleportResult {
@@ -137,6 +147,130 @@ export interface TeleportResult {
 }
 
 /**
+ * Sync mode: re-export local config and push it to an existing siteio
+ * app, then restart. Same dependency-injection model as runTeleport
+ * for testability.
+ */
+async function runSync(
+  opts: TeleportOptions,
+  deps: TeleportDeps
+): Promise<TeleportResult> {
+  // Preflight: same as full teleport.
+  deps.log('Checking siteio…');
+  if (!(await deps.runner.isInstalled())) {
+    throw new CliError(
+      'CONFIG_ERROR',
+      'siteio is not installed or not on PATH',
+      'Install siteio first: https://github.com/plosson/siteio'
+    );
+  }
+  if (!(await deps.runner.isLoggedIn())) {
+    throw new CliError(
+      'AUTH_FAILED',
+      'Not logged into siteio',
+      'Run: siteio login --api-url <url> --api-key <key>'
+    );
+  }
+  const config = await deps.loadConfig();
+  const profileCount = Object.values(config.profiles ?? {}).reduce(
+    (acc, list) => acc + (list?.length ?? 0),
+    0
+  );
+  if (profileCount === 0) {
+    throw new CliError(
+      'NOT_FOUND',
+      'No agentio profiles configured locally',
+      'Add at least one profile first with `agentio <service> profile add`.'
+    );
+  }
+  deps.log(`Found ${profileCount} local profile(s).`);
+
+  // Sync requires the app to ALREADY EXIST. This is the inverse of the
+  // normal teleport check.
+  deps.log(`Checking that siteio app "${opts.name}" exists…`);
+  const existing = await deps.runner.findApp(opts.name);
+  if (!existing) {
+    throw new CliError(
+      'NOT_FOUND',
+      `No siteio app named "${opts.name}" to sync to`,
+      `Run \`agentio teleport ${opts.name}\` (without --sync) first to create it.`
+    );
+  }
+
+  // Re-export local config — generates a fresh AGENTIO_KEY each call.
+  deps.log('Re-exporting local configuration…');
+  const exported = await deps.generateExportData();
+
+  // Dry-run: report what would happen and exit.
+  if (opts.dryRun) {
+    deps.log('--- Dry run: the following commands would be executed ---');
+    deps.log(
+      `siteio apps set ${opts.name} -e AGENTIO_KEY=<redacted> -e AGENTIO_CONFIG=<${exported.config.length} chars>`
+    );
+    deps.log(`siteio apps restart ${opts.name}`);
+    deps.log(
+      '(AGENTIO_SERVER_API_KEY is intentionally NOT touched — operator key on the remote stays the same.)'
+    );
+    return {
+      name: opts.name,
+      serverApiKey: '',
+      claudeMcpAddCommand: null,
+    };
+  }
+
+  deps.log('Updating environment variables on siteio…');
+  // Critical: only AGENTIO_KEY + AGENTIO_CONFIG. Do NOT pass
+  // AGENTIO_SERVER_API_KEY — siteio's `apps set -e` only updates the
+  // vars you name, leaving others intact, which is exactly what we
+  // want: the operator key stays the same so Claude /authorize keeps
+  // accepting the existing PIN.
+  await deps.runner.setEnv({
+    name: opts.name,
+    envVars: {
+      AGENTIO_KEY: exported.key,
+      AGENTIO_CONFIG: exported.config,
+    },
+  });
+
+  deps.log('Restarting container so the new env vars take effect…');
+  await deps.runner.restartApp(opts.name);
+
+  // Try to surface the URL again so the user has it handy.
+  const info = await deps.runner.appInfo(opts.name);
+  const url = typeof info?.url === 'string' ? info.url : undefined;
+
+  deps.log('');
+  deps.log('Sync complete!');
+  if (url) {
+    deps.log(`  URL:    ${url}`);
+    deps.log(`  Health: ${url}/health`);
+  }
+  deps.log(
+    '  Note: container restarted. Without a persistent volume mount on /data,'
+  );
+  deps.log(
+    '        any in-memory MCP session state was reset. Connected clients (Claude'
+  );
+  deps.log(
+    '        Desktop / Code) will get a 401 on their next call and re-run the'
+  );
+  deps.log(
+    '        OAuth flow once — the operator API key has NOT changed, so just'
+  );
+  deps.log(
+    '        re-paste the same one when prompted.'
+  );
+
+  return {
+    name: opts.name,
+    url,
+    // We did not generate a new server key in sync mode.
+    serverApiKey: '',
+    claudeMcpAddCommand: null,
+  };
+}
+
+/**
  * Core orchestration. Pure function of its dependencies — used by both
  * the real command and the unit tests.
  */
@@ -145,6 +279,41 @@ export async function runTeleport(
   deps: TeleportDeps
 ): Promise<TeleportResult> {
   validateAppName(opts.name);
+
+  // Sync mode short-circuits — different command shape, different
+  // preflight (app must EXIST, not absent), no Dockerfile work, no
+  // create. Mutual exclusion with the "create new app" flags.
+  if (opts.sync) {
+    if (opts.dockerfileOnly) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--sync cannot be combined with --dockerfile-only',
+        '--dockerfile-only emits a Dockerfile for a fresh deploy; --sync just pushes new env to an existing app.'
+      );
+    }
+    if (opts.gitBranch) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--sync cannot be combined with --git-branch',
+        '--git-branch triggers a fresh build; --sync only pushes config. Use one or the other.'
+      );
+    }
+    if (opts.noCache) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--sync cannot be combined with --no-cache',
+        '--no-cache is a build flag; --sync does not rebuild.'
+      );
+    }
+    if (opts.output) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--sync cannot be combined with --output',
+        '--output is for --dockerfile-only.'
+      );
+    }
+    return runSync(opts, deps);
+  }
 
   // dockerfile-only: skip every siteio interaction, just emit the
   // Dockerfile to stdout or a file and return.
@@ -445,6 +614,10 @@ export function registerTeleportCommand(program: Command): void {
       '--git-url <url>',
       'Override the git URL siteio clones from. Default: detected via `git remote get-url origin`, normalized to HTTPS'
     )
+    .option(
+      '--sync',
+      'Push the latest local config (profiles + credentials) to an EXISTING siteio app and restart it. Use after adding/changing a profile. Does not rebuild the image; does not change the operator API key.'
+    )
     .action(async (name: string, options) => {
       try {
         const runner = createSiteioRunner();
@@ -461,6 +634,7 @@ export function registerTeleportCommand(program: Command): void {
             noCache: Boolean(options.noCache ?? options.cache === false),
             gitBranch: options.gitBranch,
             gitUrl: options.gitUrl,
+            sync: Boolean(options.sync),
           },
           {
             runner,
