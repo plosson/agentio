@@ -342,8 +342,27 @@ export function registerConfigCommands(program: Command): void {
           await setAllCredentials(currentCredentials);
           console.log('Configuration merged successfully');
         } else {
-          // Replace existing config
-          await saveConfig(exportData.config);
+          // Replace profiles + env from the export, but PRESERVE any
+          // other top-level fields (config.server, config.gateway, …).
+          // The export blob only contains `{profiles, env}` by
+          // construction; everything else in the existing config is
+          // per-machine state (server.apiKey, server.tokens,
+          // gateway.apiKey, …) that the import has no business
+          // destroying.
+          //
+          // This matters in particular for the teleport flow: a remote
+          // container's `agentio config import` on restart would
+          // otherwise wipe `config.server.tokens`, invalidating any
+          // bearer Claude Desktop / Claude Code had been using.
+          const currentConfig = await loadConfig();
+          const newConfig: Config = {
+            ...currentConfig,
+            profiles: exportData.config.profiles,
+            ...(exportData.config.env !== undefined
+              ? { env: exportData.config.env }
+              : {}),
+          };
+          await saveConfig(newConfig);
           await setAllCredentials(exportData.credentials);
           console.log('Configuration imported successfully');
         }

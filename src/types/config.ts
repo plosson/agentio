@@ -1,3 +1,5 @@
+import type { ServerConfig } from './server';
+
 export interface GatewayServerConfig {
   // Server binding (for running a gateway daemon)
   port?: number;          // Port to bind (default: 7890)
@@ -57,6 +59,7 @@ export interface Config {
   };
   env?: Record<string, string>;
   gateway?: GatewayConfig;
+  server?: ServerConfig;
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'github' | 'jira' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';

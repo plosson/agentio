@@ -41,3 +41,7 @@ TODO.md
 
 # claude
 .claudiu
+.mcp.json
+
+# siteio (local project-level deploy state — similar shape to .git)
+.siteio
