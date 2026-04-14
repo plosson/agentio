@@ -349,8 +349,14 @@ async function runSync(
   await deps.runner.restartApp(opts.name);
 
   // We already fetched appInfo earlier for volume detection; reuse
-  // its URL field rather than calling again.
-  const url = typeof detail?.url === 'string' ? detail.url : undefined;
+  // its URL field rather than calling again. Same fallback as the
+  // full-teleport path: siteio's `apps info --json` omits the
+  // generated subdomain URL, so fall back to findApp if it's missing.
+  let url = typeof detail?.url === 'string' ? detail.url : undefined;
+  if (!url) {
+    const listed = await deps.runner.findApp(opts.name);
+    if (typeof listed?.url === 'string') url = listed.url;
+  }
 
   // Same health-check / log-surface pattern as the full teleport path.
   // A sync that breaks the container (bad env, corrupted config blob,
@@ -641,7 +647,16 @@ export async function runTeleport(
     // Try to surface the deployed URL. Non-fatal if siteio doesn't
     // give us one back.
     const info = await deps.runner.appInfo(opts.name);
-    const url = typeof info?.url === 'string' ? info.url : undefined;
+    let url = typeof info?.url === 'string' ? info.url : undefined;
+    // siteio's `apps info --json` output omits the generated subdomain
+    // URL (domains: [] in the payload) even though the app is reachable
+    // at it. `apps list --json` DOES include the url field at the top
+    // level. Fall back to findApp so the post-deploy health check can
+    // still run even when siteio doesn't surface url in info.
+    if (!url) {
+      const listed = await deps.runner.findApp(opts.name);
+      if (typeof listed?.url === 'string') url = listed.url;
+    }
 
     // Poll /health to CONFIRM the container actually came up. siteio's
     // deploy returns success as soon as Docker starts the container, so

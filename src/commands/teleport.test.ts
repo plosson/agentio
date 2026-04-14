@@ -1390,6 +1390,40 @@ describe('runTeleport — health check on deploy', () => {
     expect(deps.healthProbeUrls).toEqual([]);
     expect(deps.warnLines.join('\n')).toContain('Skipping health check');
   });
+
+  test('appInfo lacks url but findApp has it → falls back, still runs health check', async () => {
+    // Mirrors real siteio behavior: `apps info --json` omits the
+    // generated subdomain URL even though `apps list --json` surfaces
+    // it. We fall back to findApp (which wraps `apps list`) so the
+    // health check can still run.
+    const deps = makeDeps({
+      deployedApp: { name: 'mcp' }, // info: no url
+      // existingApp is read by findApp on re-call — setting it supplies
+      // the fallback URL.
+      existingApp: { name: 'mcp', url: 'https://mcp.siteio.example.com' },
+    });
+    // But runTeleport's "create" path REFUSES if existingApp is found,
+    // so we need to bypass that. Trick: set existingApp to null at call
+    // time; we can't really do that here without extending the fixture.
+    // Instead, emulate via a custom runner.
+    let findAppCalls = 0;
+    const deployInfo: SiteioApp = { name: 'mcp' }; // info returns no url
+    const fallbackInfo: SiteioApp = {
+      name: 'mcp',
+      url: 'https://mcp.siteio.example.com',
+    };
+    deps.runner.findApp = async () => {
+      findAppCalls++;
+      // First call (preflight — "does app already exist?") must return null
+      // so runTeleport proceeds with create. Second call (post-deploy URL
+      // fallback) returns the populated URL.
+      return findAppCalls === 1 ? null : fallbackInfo;
+    };
+    deps.runner.appInfo = async () => deployInfo;
+    await runTeleport({ name: 'mcp' }, deps);
+    expect(findAppCalls).toBe(2);
+    expect(deps.healthProbeUrls[0]).toBe('https://mcp.siteio.example.com/health');
+  });
 });
 
 describe('runTeleport — health check on --sync', () => {
