@@ -385,11 +385,11 @@ describe('createApp — mode exclusivity', () => {
 /* setEnv                                                              */
 /* ------------------------------------------------------------------ */
 
-describe('setEnv', () => {
+describe('setApp — env vars only', () => {
   test('emits one -e flag per env var in insertion order', async () => {
     const { spawn, calls } = makeMockSpawn({ responses: [OK] });
     const runner = createSiteioRunner(spawn);
-    await runner.setEnv({
+    await runner.setApp({
       name: 'mcp',
       envVars: {
         AGENTIO_KEY: 'abc123',
@@ -414,7 +414,7 @@ describe('setEnv', () => {
   test('passes values containing `=` verbatim (siteio splits on first `=`)', async () => {
     const { spawn, calls } = makeMockSpawn({ responses: [OK] });
     const runner = createSiteioRunner(spawn);
-    await runner.setEnv({
+    await runner.setApp({
       name: 'mcp',
       envVars: {
         AGENTIO_CONFIG: 'base64==padding==values',
@@ -426,7 +426,7 @@ describe('setEnv', () => {
   test('passes values containing newlines verbatim', async () => {
     const { spawn, calls } = makeMockSpawn({ responses: [OK] });
     const runner = createSiteioRunner(spawn);
-    await runner.setEnv({
+    await runner.setApp({
       name: 'mcp',
       envVars: { X: 'line1\nline2' },
     });
@@ -439,8 +439,103 @@ describe('setEnv', () => {
     });
     const runner = createSiteioRunner(spawn);
     await expect(
-      runner.setEnv({ name: 'mcp', envVars: { FOO: 'bar' } })
-    ).rejects.toThrow(/set env on mcp/);
+      runner.setApp({ name: 'mcp', envVars: { FOO: 'bar' } })
+    ).rejects.toThrow(/set on mcp/);
+  });
+});
+
+describe('setApp — volumes only', () => {
+  test('emits one -v flag per volume mount', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.setApp({
+      name: 'mcp',
+      volumes: { 'agentio-data-mcp': '/data' },
+    });
+    expect(calls[0].cmd).toEqual([
+      'siteio',
+      'apps',
+      'set',
+      'mcp',
+      '-v',
+      'agentio-data-mcp:/data',
+    ]);
+  });
+
+  test('multiple volumes pass through in insertion order', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.setApp({
+      name: 'mcp',
+      volumes: {
+        'agentio-data-mcp': '/data',
+        'agentio-cache-mcp': '/cache',
+      },
+    });
+    expect(calls[0].cmd).toEqual([
+      'siteio',
+      'apps',
+      'set',
+      'mcp',
+      '-v',
+      'agentio-data-mcp:/data',
+      '-v',
+      'agentio-cache-mcp:/cache',
+    ]);
+  });
+});
+
+describe('setApp — env + volumes combined', () => {
+  test('env flags come before volume flags in argv', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.setApp({
+      name: 'mcp',
+      envVars: { AGENTIO_KEY: 'k', AGENTIO_CONFIG: 'c' },
+      volumes: { 'agentio-data-mcp': '/data' },
+    });
+    expect(calls[0].cmd).toEqual([
+      'siteio',
+      'apps',
+      'set',
+      'mcp',
+      '-e',
+      'AGENTIO_KEY=k',
+      '-e',
+      'AGENTIO_CONFIG=c',
+      '-v',
+      'agentio-data-mcp:/data',
+    ]);
+  });
+});
+
+describe('setApp — input validation', () => {
+  test('neither envVars nor volumes provided → throws', async () => {
+    const { spawn } = makeMockSpawn({ responses: [] });
+    const runner = createSiteioRunner(spawn);
+    await expect(runner.setApp({ name: 'mcp' })).rejects.toThrow(
+      /no envVars or volumes/
+    );
+  });
+
+  test('empty objects (no entries) → throws', async () => {
+    const { spawn } = makeMockSpawn({ responses: [] });
+    const runner = createSiteioRunner(spawn);
+    await expect(
+      runner.setApp({ name: 'mcp', envVars: {}, volumes: {} })
+    ).rejects.toThrow(/no envVars or volumes/);
+  });
+
+  test('envVars: {} but volumes: {x:y} → ok', async () => {
+    const { spawn, calls } = makeMockSpawn({ responses: [OK] });
+    const runner = createSiteioRunner(spawn);
+    await runner.setApp({
+      name: 'mcp',
+      envVars: {},
+      volumes: { 'agentio-data-mcp': '/data' },
+    });
+    expect(calls[0].cmd).toContain('-v');
+    expect(calls[0].cmd).not.toContain('-e');
   });
 });
 

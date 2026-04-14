@@ -43,6 +43,38 @@ import type { Config } from '../types/config';
 /** Path inside the repo to the teleport Dockerfile (relative to repo root). */
 export const TELEPORT_DOCKERFILE_PATH = 'docker/Dockerfile.teleport';
 
+/** Container path where agentio writes config + tokens.enc. */
+export const DATA_VOLUME_PATH = '/data';
+
+/**
+ * Compute the named-volume identifier for an app. Per-app suffix avoids
+ * collisions when a user deploys multiple agentio instances on the same
+ * siteio agent (e.g. mcp-prod + mcp-staging).
+ */
+export function volumeNameFor(appName: string): string {
+  return `agentio-data-${appName}`;
+}
+
+/**
+ * Inspect an app's `volumes` field (as returned by `siteio apps info`)
+ * and decide whether `/data` is already mounted. Tolerates the various
+ * shapes siteio might return (array of strings, array of objects with
+ * `path` or `mountPath`, or absent).
+ */
+export function hasDataVolumeMount(appInfo: unknown): boolean {
+  if (!appInfo || typeof appInfo !== 'object') return false;
+  const vols = (appInfo as { volumes?: unknown }).volumes;
+  if (!Array.isArray(vols)) return false;
+  return vols.some((v) => {
+    if (typeof v === 'string') return v.endsWith(`:${DATA_VOLUME_PATH}`);
+    if (v && typeof v === 'object') {
+      const obj = v as Record<string, unknown>;
+      return obj.path === DATA_VOLUME_PATH || obj.mountPath === DATA_VOLUME_PATH;
+    }
+    return false;
+  });
+}
+
 /** Siteio app names must match this pattern. Mirrors Docker image name rules. */
 const VALID_NAME = /^[a-z][a-z0-9-]{0,62}$/;
 
@@ -201,12 +233,31 @@ async function runSync(
   deps.log('Re-exporting local configuration…');
   const exported = await deps.generateExportData();
 
+  // Detect whether /data is already mounted as a persistent volume.
+  // If not, attach it as part of this sync (one-time backfill for apps
+  // teleported before the volume was a default).
+  const detail = await deps.runner.appInfo(opts.name);
+  const needsVolumeBackfill = !hasDataVolumeMount(detail);
+  if (needsVolumeBackfill) {
+    deps.log(
+      `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH} as part of this sync.`
+    );
+  }
+
   // Dry-run: report what would happen and exit.
   if (opts.dryRun) {
     deps.log('--- Dry run: the following commands would be executed ---');
-    deps.log(
-      `siteio apps set ${opts.name} -e AGENTIO_KEY=<redacted> -e AGENTIO_CONFIG=<${exported.config.length} chars>`
-    );
+    const dryParts = [
+      `siteio apps set ${opts.name}`,
+      '-e AGENTIO_KEY=<redacted>',
+      `-e AGENTIO_CONFIG=<${exported.config.length} chars>`,
+    ];
+    if (needsVolumeBackfill) {
+      dryParts.push(
+        `-v ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH}`
+      );
+    }
+    deps.log(dryParts.join(' '));
     deps.log(`siteio apps restart ${opts.name}`);
     deps.log(
       '(AGENTIO_SERVER_API_KEY is intentionally NOT touched — operator key on the remote stays the same.)'
@@ -218,26 +269,39 @@ async function runSync(
     };
   }
 
-  deps.log('Updating environment variables on siteio…');
-  // Critical: only AGENTIO_KEY + AGENTIO_CONFIG. Do NOT pass
+  deps.log(
+    needsVolumeBackfill
+      ? 'Updating env vars + attaching persistent volume on siteio…'
+      : 'Updating environment variables on siteio…'
+  );
+  // Critical: only AGENTIO_KEY + AGENTIO_CONFIG in env. Do NOT pass
   // AGENTIO_SERVER_API_KEY — siteio's `apps set -e` only updates the
   // vars you name, leaving others intact, which is exactly what we
   // want: the operator key stays the same so Claude /authorize keeps
   // accepting the existing PIN.
-  await deps.runner.setEnv({
+  //
+  // For volumes: only attach /data if it isn't already mounted. Siteio
+  // REPLACES the volumes list on update (env merges; volumes don't),
+  // so attaching when something else is mounted would clobber it.
+  await deps.runner.setApp({
     name: opts.name,
     envVars: {
       AGENTIO_KEY: exported.key,
       AGENTIO_CONFIG: exported.config,
     },
+    ...(needsVolumeBackfill
+      ? {
+          volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH },
+        }
+      : {}),
   });
 
   deps.log('Restarting container so the new env vars take effect…');
   await deps.runner.restartApp(opts.name);
 
-  // Try to surface the URL again so the user has it handy.
-  const info = await deps.runner.appInfo(opts.name);
-  const url = typeof info?.url === 'string' ? info.url : undefined;
+  // We already fetched appInfo earlier for volume detection; reuse
+  // its URL field rather than calling again.
+  const url = typeof detail?.url === 'string' ? detail.url : undefined;
 
   deps.log('');
   deps.log('Sync complete!');
@@ -245,21 +309,24 @@ async function runSync(
     deps.log(`  URL:    ${url}`);
     deps.log(`  Health: ${url}/health`);
   }
-  deps.log(
-    '  Note: container restarted. Without a persistent volume mount on /data,'
-  );
-  deps.log(
-    '        any in-memory MCP session state was reset. Connected clients (Claude'
-  );
-  deps.log(
-    '        Desktop / Code) will get a 401 on their next call and re-run the'
-  );
-  deps.log(
-    '        OAuth flow once — the operator API key has NOT changed, so just'
-  );
-  deps.log(
-    '        re-paste the same one when prompted.'
-  );
+  if (needsVolumeBackfill) {
+    deps.log(
+      '  First sync after volume backfill: previous /data state is gone, so'
+    );
+    deps.log(
+      '        any bearer Claude had cached is now invalid. Re-paste the'
+    );
+    deps.log(
+      '        operator API key when prompted. From here on, bearers persist.'
+    );
+  } else {
+    deps.log(
+      '  Note: container restarted. With the persistent volume on /data,'
+    );
+    deps.log(
+      '        connected clients should keep their existing bearer.'
+    );
+  }
 
   return {
     name: opts.name,
@@ -474,14 +541,19 @@ export async function runTeleport(
       });
     }
 
-    deps.log('Setting environment variables…');
-    await deps.runner.setEnv({
+    deps.log('Setting environment variables and persistent volume…');
+    await deps.runner.setApp({
       name: opts.name,
       envVars: {
         AGENTIO_KEY: exported.key,
         AGENTIO_CONFIG: exported.config,
         AGENTIO_SERVER_API_KEY: serverApiKey,
       },
+      // Persistent named volume mounted at /data so config.server.tokens
+      // (issued OAuth bearers) survive container restarts. Without this
+      // mount, every restart wipes the bearer and connected clients
+      // would re-run the OAuth flow.
+      volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH },
     });
 
     deps.log('Deploying (this may take a minute — Docker is building your image)…');

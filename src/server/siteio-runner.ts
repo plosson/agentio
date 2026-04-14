@@ -72,8 +72,23 @@ export interface SiteioRunner {
    * Exactly one of the two must be provided.
    */
   createApp(args: CreateAppArgs): Promise<void>;
-  /** `siteio apps set <name> -e KEY=value -e KEY2=value2 ...`. */
-  setEnv(args: { name: string; envVars: Record<string, string> }): Promise<void>;
+  /**
+   * `siteio apps set <name> [-e KEY=value]... [-v vol:path]...`.
+   *
+   * Per siteio's update semantics (see app-storage.ts:62-91 in the
+   * siteio repo): env vars MERGE additively (existing keys preserved
+   * unless overridden), but volumes REPLACE the entire mount list.
+   * Callers that want to preserve other volumes should read appInfo
+   * first and union the entries.
+   *
+   * At least one of envVars/volumes must be provided.
+   */
+  setApp(args: {
+    name: string;
+    envVars?: Record<string, string>;
+    /** Map of `volumeName` → `mountPath`, e.g. `{ 'agentio-data-mcp': '/data' }`. */
+    volumes?: Record<string, string>;
+  }): Promise<void>;
   /** `siteio apps deploy <name> [-f <path>] [--no-cache]`. */
   deploy(args: {
     name: string;
@@ -237,14 +252,24 @@ export function createSiteioRunner(
       }
     },
 
-    async setEnv(args) {
+    async setApp(args) {
+      const envEntries = Object.entries(args.envVars ?? {});
+      const volEntries = Object.entries(args.volumes ?? {});
+      if (envEntries.length === 0 && volEntries.length === 0) {
+        throw new Error(
+          `setApp(${args.name}): no envVars or volumes provided — siteio would reject the call`
+        );
+      }
       const cmd = ['siteio', 'apps', 'set', args.name];
-      for (const [key, value] of Object.entries(args.envVars)) {
+      for (const [key, value] of envEntries) {
         cmd.push('-e', `${key}=${value}`);
+      }
+      for (const [name, path] of volEntries) {
+        cmd.push('-v', `${name}:${path}`);
       }
       const r = await spawn({ cmd });
       if (r.exitCode !== 0) {
-        throw makeError(cmd, r, `set env on ${args.name}`);
+        throw makeError(cmd, r, `set on ${args.name}`);
       }
     },
 

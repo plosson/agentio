@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
+  DATA_VOLUME_PATH,
   generateServerApiKey,
+  hasDataVolumeMount,
   normalizeGitUrl,
   runTeleport,
   TELEPORT_DOCKERFILE_PATH,
   validateAppName,
+  volumeNameFor,
   type TeleportDeps,
 } from './teleport';
 import type { SiteioRunner, SiteioApp } from '../server/siteio-runner';
@@ -41,7 +44,7 @@ interface FakeRunnerOptions {
     | 'isLoggedIn'
     | 'findApp'
     | 'createApp'
-    | 'setEnv'
+    | 'setApp'
     | 'deploy'
     | 'restartApp'
     | 'appInfo';
@@ -76,9 +79,9 @@ function makeFakeRunner(opts: FakeRunnerOptions = {}): {
       calls.push({ method: 'createApp', args });
       if (shouldFail('createApp')) throw new Error('create failed');
     },
-    async setEnv(args) {
-      calls.push({ method: 'setEnv', args });
-      if (shouldFail('setEnv')) throw new Error('set failed');
+    async setApp(args) {
+      calls.push({ method: 'setApp', args });
+      if (shouldFail('setApp')) throw new Error('set failed');
     },
     async deploy(args) {
       calls.push({ method: 'deploy', args });
@@ -238,7 +241,7 @@ describe('runTeleport — happy path', () => {
       'isLoggedIn',
       'findApp',
       'createApp',
-      'setEnv',
+      'setApp',
       'deploy',
       'appInfo',
     ]);
@@ -265,14 +268,14 @@ describe('runTeleport — happy path', () => {
     expect(args.port).toBe(9999);
   });
 
-  test('setEnv is called with AGENTIO_KEY + AGENTIO_CONFIG + AGENTIO_SERVER_API_KEY', async () => {
+  test('setApp is called with AGENTIO_KEY + AGENTIO_CONFIG + AGENTIO_SERVER_API_KEY', async () => {
     const deps = makeDeps({
       exportKey: 'key_value_from_export',
       exportConfig: 'config_blob_from_export==',
       fixedServerApiKey: 'srv_fixed_test_key',
     });
     await runTeleport({ name: 'mcp' }, deps);
-    const setCall = deps.calls.find((c) => c.method === 'setEnv');
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
     const args = setCall!.args as {
       name: string;
       envVars: Record<string, string>;
@@ -382,8 +385,8 @@ describe('runTeleport — temp file lifecycle', () => {
     expect(deps.tempFileDeletes).toHaveLength(1);
   });
 
-  test('deletes the temp file even when setEnv fails', async () => {
-    const deps = makeDeps({ failOn: 'setEnv' });
+  test('deletes the temp file even when setApp fails', async () => {
+    const deps = makeDeps({ failOn: 'setApp' });
     await expect(runTeleport({ name: 'mcp' }, deps)).rejects.toThrow();
     expect(deps.tempFileDeletes).toHaveLength(1);
   });
@@ -475,7 +478,7 @@ describe('runTeleport — dry-run', () => {
     expect(methods).toContain('isLoggedIn');
     expect(methods).toContain('findApp');
     expect(methods).not.toContain('createApp');
-    expect(methods).not.toContain('setEnv');
+    expect(methods).not.toContain('setApp');
     expect(methods).not.toContain('deploy');
   });
 
@@ -767,10 +770,15 @@ describe('runTeleport — git mode', () => {
 /* ------------------------------------------------------------------ */
 
 describe('runTeleport — sync mode (--sync)', () => {
-  test('happy path: preflight → findApp → setEnv → restartApp → appInfo', async () => {
+  test('happy path: preflight → findApp → appInfo → setApp → restartApp', async () => {
     const deps = makeDeps({
       existingApp: { name: 'mcp' },
-      deployedApp: { name: 'mcp', url: 'https://mcp.x.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        // Existing /data volume — no backfill needed.
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
     });
     const result = await runTeleport(
       { name: 'mcp', sync: true },
@@ -782,9 +790,9 @@ describe('runTeleport — sync mode (--sync)', () => {
       'isInstalled',
       'isLoggedIn',
       'findApp',
-      'setEnv',
-      'restartApp',
       'appInfo',
+      'setApp',
+      'restartApp',
     ]);
     expect(result.url).toBe('https://mcp.x.com');
   });
@@ -796,18 +804,18 @@ describe('runTeleport — sync mode (--sync)', () => {
     ).rejects.toThrow(/No siteio app named "mcp" to sync to/);
     // Did not attempt to set env or restart.
     const methods = deps.calls.map((c) => c.method);
-    expect(methods).not.toContain('setEnv');
+    expect(methods).not.toContain('setApp');
     expect(methods).not.toContain('restartApp');
   });
 
-  test('setEnv passes ONLY AGENTIO_KEY + AGENTIO_CONFIG (NOT AGENTIO_SERVER_API_KEY)', async () => {
+  test('setApp passes ONLY AGENTIO_KEY + AGENTIO_CONFIG (NOT AGENTIO_SERVER_API_KEY)', async () => {
     const deps = makeDeps({
       existingApp: { name: 'mcp' },
       exportKey: 'rotated_key',
       exportConfig: 'rotated_config==',
     });
     await runTeleport({ name: 'mcp', sync: true }, deps);
-    const setCall = deps.calls.find((c) => c.method === 'setEnv');
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
     const args = setCall!.args as {
       name: string;
       envVars: Record<string, string>;
@@ -844,14 +852,34 @@ describe('runTeleport — sync mode (--sync)', () => {
     expect(methods).not.toContain('deploy');
   });
 
-  test('output mentions client re-auth caveat', async () => {
-    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+  test('output for backfill case mentions one-time bearer invalidation', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      // No volumes on the deployedApp → backfill triggers.
+      deployedApp: { name: 'mcp', url: 'https://mcp.x.com', volumes: [] },
+    });
     await runTeleport({ name: 'mcp', sync: true }, deps);
     const joined = deps.logLines.join('\n');
     expect(joined).toContain('Sync complete');
-    expect(joined.toLowerCase()).toContain('re-run');
-    expect(joined).toContain('OAuth');
-    expect(joined).toContain('operator API key has NOT changed');
+    expect(joined).toContain('volume backfill');
+    expect(joined.toLowerCase()).toContain('re-paste');
+    expect(joined).toContain('persist');
+  });
+
+  test('output for already-mounted case promises bearer survival', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('Sync complete');
+    expect(joined).toContain('persistent volume');
+    expect(joined).toContain('keep their existing bearer');
   });
 
   test('preserves the same operator API key (no fresh generation in sync)', async () => {
@@ -887,9 +915,9 @@ describe('runTeleport — sync dry-run', () => {
     expect(joined).toContain('siteio apps restart mcp');
     expect(joined).toContain('AGENTIO_KEY=<redacted>');
     expect(joined).toContain('AGENTIO_CONFIG=<1000 chars>');
-    // Did NOT actually call setEnv / restartApp.
+    // Did NOT actually call setApp / restartApp.
     const methods = deps.calls.map((c) => c.method);
-    expect(methods).not.toContain('setEnv');
+    expect(methods).not.toContain('setApp');
     expect(methods).not.toContain('restartApp');
   });
 
@@ -959,14 +987,212 @@ describe('runTeleport — --sync mutual exclusion', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* volume helpers                                                     */
+/* ------------------------------------------------------------------ */
+
+describe('volumeNameFor', () => {
+  test('namespaces by app name', () => {
+    expect(volumeNameFor('mcp')).toBe('agentio-data-mcp');
+    expect(volumeNameFor('mcp-prod')).toBe('agentio-data-mcp-prod');
+  });
+});
+
+describe('hasDataVolumeMount', () => {
+  test('null / non-object → false', () => {
+    expect(hasDataVolumeMount(null)).toBe(false);
+    expect(hasDataVolumeMount(undefined)).toBe(false);
+    expect(hasDataVolumeMount('string')).toBe(false);
+  });
+
+  test('no volumes field → false', () => {
+    expect(hasDataVolumeMount({ name: 'x' })).toBe(false);
+  });
+
+  test('empty volumes array → false', () => {
+    expect(hasDataVolumeMount({ volumes: [] })).toBe(false);
+  });
+
+  test('object form with mountPath /data → true', () => {
+    expect(
+      hasDataVolumeMount({
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      })
+    ).toBe(true);
+  });
+
+  test('object form with path /data → true (alternate field name)', () => {
+    expect(
+      hasDataVolumeMount({
+        volumes: [{ name: 'agentio-data-mcp', path: '/data' }],
+      })
+    ).toBe(true);
+  });
+
+  test('object form with /other mount → false', () => {
+    expect(
+      hasDataVolumeMount({
+        volumes: [{ name: 'cache', mountPath: '/cache' }],
+      })
+    ).toBe(false);
+  });
+
+  test('string form name:/data → true', () => {
+    expect(
+      hasDataVolumeMount({ volumes: ['agentio-data-mcp:/data'] })
+    ).toBe(true);
+  });
+
+  test('mixed array with at least one /data → true', () => {
+    expect(
+      hasDataVolumeMount({
+        volumes: [
+          { name: 'cache', mountPath: '/cache' },
+          { name: 'data', mountPath: '/data' },
+        ],
+      })
+    ).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* persistent volume on initial teleport (inline + git mode)           */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — initial deploy attaches persistent volume', () => {
+  test('inline mode: setApp call includes volume agentio-data-<name>:/data', async () => {
+    const deps = makeDeps();
+    await runTeleport({ name: 'mcp' }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as {
+      envVars?: Record<string, string>;
+      volumes?: Record<string, string>;
+    };
+    expect(args.volumes).toBeDefined();
+    expect(args.volumes!['agentio-data-mcp']).toBe(DATA_VOLUME_PATH);
+  });
+
+  test('git mode: setApp call includes the volume too', async () => {
+    const deps = makeDeps({
+      gitOriginUrl: 'https://github.com/x/y.git',
+    });
+    await runTeleport(
+      { name: 'mcp', gitBranch: 'main' },
+      deps
+    );
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as { volumes?: Record<string, string> };
+    expect(args.volumes!['agentio-data-mcp']).toBe(DATA_VOLUME_PATH);
+  });
+
+  test('volume name follows the per-app convention', async () => {
+    const deps = makeDeps();
+    await runTeleport({ name: 'my-prod-deploy' }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as { volumes?: Record<string, string> };
+    expect(Object.keys(args.volumes!)).toEqual(['agentio-data-my-prod-deploy']);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* sync backfills the volume only when missing                         */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — sync volume backfill', () => {
+  test('app already has /data mount → setApp omits volumes', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as {
+      envVars?: Record<string, string>;
+      volumes?: Record<string, string>;
+    };
+    expect(args.volumes).toBeUndefined();
+    expect(args.envVars).toBeDefined();
+  });
+
+  test('app has NO /data mount → setApp includes volumes (backfill)', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: { name: 'mcp', url: 'https://mcp.x.com', volumes: [] },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as { volumes?: Record<string, string> };
+    expect(args.volumes!['agentio-data-mcp']).toBe(DATA_VOLUME_PATH);
+  });
+
+  test('app has /other mount but no /data → setApp includes /data volume', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'something-else', mountPath: '/cache' }],
+      },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as { volumes?: Record<string, string> };
+    expect(args.volumes!['agentio-data-mcp']).toBe(DATA_VOLUME_PATH);
+  });
+
+  test('appInfo returns null → treated as needs-backfill (defensive)', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: null,
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    const args = setCall!.args as { volumes?: Record<string, string> };
+    expect(args.volumes!['agentio-data-mcp']).toBe(DATA_VOLUME_PATH);
+  });
+
+  test('dry-run shows the -v flag when backfill is needed', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: { name: 'mcp', volumes: [] },
+    });
+    await runTeleport(
+      { name: 'mcp', sync: true, dryRun: true },
+      deps
+    );
+    const joined = deps.logLines.join('\n');
+    expect(joined).toContain('-v agentio-data-mcp:/data');
+  });
+
+  test('dry-run does NOT show -v when volume already present', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp' },
+      deployedApp: {
+        name: 'mcp',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+    });
+    await runTeleport(
+      { name: 'mcp', sync: true, dryRun: true },
+      deps
+    );
+    const joined = deps.logLines.join('\n');
+    expect(joined).not.toContain('-v agentio-data-mcp');
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* runTeleport — sync failure cleanup                                  */
 /* ------------------------------------------------------------------ */
 
 describe('runTeleport — sync failure paths', () => {
-  test('setEnv fails → restartApp NOT called', async () => {
+  test('setApp fails → restartApp NOT called', async () => {
     const deps = makeDeps({
       existingApp: { name: 'mcp' },
-      failOn: 'setEnv',
+      failOn: 'setApp',
     });
     await expect(
       runTeleport({ name: 'mcp', sync: true }, deps)
@@ -983,8 +1209,8 @@ describe('runTeleport — sync failure paths', () => {
     await expect(
       runTeleport({ name: 'mcp', sync: true }, deps)
     ).rejects.toThrow(/restart failed/);
-    // setEnv ran (we got past it before restartApp blew up).
+    // setApp ran (we got past it before restartApp blew up).
     const methods = deps.calls.map((c) => c.method);
-    expect(methods).toContain('setEnv');
+    expect(methods).toContain('setApp');
   });
 });
