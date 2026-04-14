@@ -52,16 +52,21 @@ FROM ubuntu:24.04
 #   ca-certificates : HTTPS calls from the container
 #   curl            : release binary download + healthcheck
 #   tini            : proper PID 1 / signal handling
+#   gosu            : drop privileges from root to the agentio user at
+#                     container START (AFTER we've chowned the persistent
+#                     /data volume, which Docker mounts as root-owned)
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-    ca-certificates curl tini \\
+    ca-certificates curl tini gosu \\
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user, home at /data so config.json + tokens.enc live in
-# a siteio-managed persistent volume path.
+# Non-root user. /data will be a siteio-managed persistent volume mount,
+# so its build-time ownership is meaningless — the volume masks whatever
+# we chown here at image-build time. We fix ownership at container-START
+# via the entrypoint script below (requires root, hence no USER directive).
 RUN groupadd -g 1001 agentio \\
     && useradd -u 1001 -g agentio -d /home/agentio -m agentio \\
     && mkdir -p /data /home/agentio/bin \\
-    && chown -R agentio:agentio /data /home/agentio/bin
+    && chown -R agentio:agentio /home/agentio/bin
 
 # Fetch the agentio linux binary at BUILD time (not boot) so siteio
 # caches the layer and subsequent deploys reuse it unless --no-cache
@@ -80,7 +85,6 @@ RUN set -eux; \\
     chmod +x /home/agentio/bin/agentio; \\
     chown agentio:agentio /home/agentio/bin/agentio
 
-USER agentio
 ENV HOME=/data
 ENV XDG_CONFIG_HOME=/data
 ENV PATH="/home/agentio/bin:\${PATH}"
@@ -93,9 +97,12 @@ EXPOSE ${port}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \\
     CMD curl -sf http://localhost:${port}/health || exit 1
 
-# tini becomes PID 1 for signal handling. sh -c runs the import-then-
-# server pipeline so SIGTERM propagates correctly to the running server.
+# tini becomes PID 1 for signal handling. The sh -c script runs as ROOT
+# so it can chown the freshly-mounted /data volume (Docker mounts named
+# volumes with root:root ownership on first boot, overriding any
+# build-time chown), then drops to the agentio user via gosu and exec's
+# the config-import + server pipeline so SIGTERM propagates correctly.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port ${port}"]
+CMD ["sh", "-c", "chown -R agentio:agentio /data && exec gosu agentio sh -c 'agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port ${port}'"]
 `;
 }

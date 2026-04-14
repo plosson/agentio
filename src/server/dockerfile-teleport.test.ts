@@ -76,11 +76,12 @@ describe('docker/Dockerfile.teleport — structural invariants', () => {
     expect(df).toMatch(/FROM\s+ubuntu:24\.04\s*(?:\n|$)/);
   });
 
-  test('stage 2 installs ca-certificates, curl, tini', () => {
+  test('stage 2 installs ca-certificates, curl, tini, gosu', () => {
     const df = loadDockerfile();
     expect(df).toContain('ca-certificates');
     expect(df).toContain('curl');
     expect(df).toContain('tini');
+    expect(df).toContain('gosu');
   });
 
   test('stage 2 cleans up apt lists', () => {
@@ -92,7 +93,15 @@ describe('docker/Dockerfile.teleport — structural invariants', () => {
     const df = loadDockerfile();
     expect(df).toContain('groupadd -g 1001 agentio');
     expect(df).toContain('useradd -u 1001 -g agentio');
-    expect(df).toContain('USER agentio');
+  });
+
+  test('stage 2 does NOT set USER agentio (container runs as root until entrypoint drops privileges via gosu)', () => {
+    // Container boots as root so the CMD can chown /data (Docker mounts
+    // named volumes with root:root ownership on first boot, overriding
+    // any build-time chown). gosu drops privileges before any user-input
+    // code runs.
+    const df = loadDockerfile();
+    expect(df).not.toMatch(/^USER\s+agentio/m);
   });
 
   test('copies binary from stage 1 with --chown=agentio:agentio', () => {
@@ -133,10 +142,10 @@ describe('docker/Dockerfile.teleport — structural invariants', () => {
     expect(df).toContain('ENTRYPOINT ["/usr/bin/tini", "--"]');
   });
 
-  test('CMD runs config import THEN the server, via sh -c with exec', () => {
+  test('CMD chowns /data, drops privileges via gosu, imports config, execs server', () => {
     const df = loadDockerfile();
     expect(df).toContain(
-      'CMD ["sh", "-c", "agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999"]'
+      'CMD ["sh", "-c", "chown -R agentio:agentio /data && exec gosu agentio sh -c \'agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999\'"]'
     );
   });
 
@@ -148,14 +157,19 @@ describe('docker/Dockerfile.teleport — structural invariants', () => {
 });
 
 describe('docker/Dockerfile.teleport — security posture', () => {
-  test('runtime stage switches to USER agentio before the CMD runs', () => {
+  test('drops to non-root BEFORE any user-input code runs (config import, server)', () => {
+    // The boot sequence in CMD is: root runs chown /data, then `exec gosu
+    // agentio` hands control to the agentio user. Only AFTER that does
+    // `agentio config import` (which decrypts AGENTIO_CONFIG) and the
+    // server ever run. Confirm the ordering inside the CMD string itself.
     const df = loadDockerfile();
-    // Find the position of USER agentio and the FINAL CMD/ENTRYPOINT.
-    const userIdx = df.lastIndexOf('USER agentio');
-    const cmdIdx = df.search(/^CMD /m);
-    expect(userIdx).toBeGreaterThan(-1);
-    expect(cmdIdx).toBeGreaterThan(-1);
-    expect(userIdx).toBeLessThan(cmdIdx);
+    const cmdLine = df.match(/CMD \[.*\]/m)?.[0] ?? '';
+    const gosuIdx = cmdLine.indexOf('gosu agentio');
+    const importIdx = cmdLine.indexOf('agentio config import');
+    const serverIdx = cmdLine.indexOf('agentio server start');
+    expect(gosuIdx).toBeGreaterThan(-1);
+    expect(importIdx).toBeGreaterThan(gosuIdx);
+    expect(serverIdx).toBeGreaterThan(gosuIdx);
   });
 
   test('does not install sudo', () => {
@@ -166,15 +180,5 @@ describe('docker/Dockerfile.teleport — security posture', () => {
   test('does not EXPOSE SSH', () => {
     const df = loadDockerfile();
     expect(df).not.toContain('EXPOSE 22');
-  });
-
-  test('HEALTHCHECK runs under the agentio user (no root escalation)', () => {
-    // Since USER agentio is set before HEALTHCHECK and CMD, they both
-    // run as agentio. Verify by ordering: USER must come before the
-    // HEALTHCHECK directive.
-    const df = loadDockerfile();
-    const userIdx = df.lastIndexOf('USER agentio');
-    const hcIdx = df.indexOf('HEALTHCHECK');
-    expect(userIdx).toBeLessThan(hcIdx);
   });
 });

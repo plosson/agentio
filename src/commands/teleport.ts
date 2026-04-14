@@ -133,8 +133,57 @@ export interface TeleportDeps {
    * siteio `--git` argument in git-mode.
    */
   detectGitOriginUrl: () => Promise<string | null>;
+  /**
+   * HTTP probe used by `waitForHealth`. Returns the status code (200 on
+   * a healthy server). Network errors are surfaced as `null` so the
+   * poller can treat them the same as a not-yet-ready container.
+   */
+  probeHealth: (url: string) => Promise<number | null>;
+  /** Resolved after `ms` milliseconds. Injected for testability. */
+  sleep: (ms: number) => Promise<void>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
+}
+
+/* ------------------------------------------------------------------ */
+/* health polling                                                     */
+/* ------------------------------------------------------------------ */
+
+/** How long to wait for /health to return 200 before giving up. */
+export const HEALTH_TIMEOUT_MS = 90_000;
+/** Spacing between consecutive /health probes. */
+export const HEALTH_INTERVAL_MS = 2_000;
+/** Number of log lines to surface when the health check times out. */
+export const HEALTH_FAILURE_LOG_TAIL = 50;
+
+/**
+ * Poll `${url}/health` until it returns 200 or we exhaust the attempt
+ * budget (ceil(timeoutMs / intervalMs)). Returns true on success; false
+ * otherwise. Uses an attempt-count loop (not wall clock) so tests that
+ * stub `deps.sleep` to a no-op can exercise the timeout path without
+ * actually waiting 90 real seconds.
+ */
+export async function waitForHealth(
+  url: string,
+  deps: Pick<TeleportDeps, 'probeHealth' | 'sleep' | 'log'>,
+  opts: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? HEALTH_TIMEOUT_MS;
+  const intervalMs = opts.intervalMs ?? HEALTH_INTERVAL_MS;
+  const maxAttempts = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+  const healthUrl = `${url.replace(/\/+$/, '')}/health`;
+  deps.log(`Waiting for ${healthUrl} (up to ${Math.round(timeoutMs / 1000)}s)…`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const status = await deps.probeHealth(healthUrl);
+    if (status === 200) {
+      deps.log(`  /health responded 200 after ${attempt} attempt(s).`);
+      return true;
+    }
+    if (attempt < maxAttempts) {
+      await deps.sleep(intervalMs);
+    }
+  }
+  return false;
 }
 
 export interface TeleportOptions {
@@ -300,8 +349,38 @@ async function runSync(
   await deps.runner.restartApp(opts.name);
 
   // We already fetched appInfo earlier for volume detection; reuse
-  // its URL field rather than calling again.
-  const url = typeof detail?.url === 'string' ? detail.url : undefined;
+  // its URL field rather than calling again. Same fallback as the
+  // full-teleport path: siteio's `apps info --json` omits the
+  // generated subdomain URL, so fall back to findApp if it's missing.
+  let url = typeof detail?.url === 'string' ? detail.url : undefined;
+  if (!url) {
+    const listed = await deps.runner.findApp(opts.name);
+    if (typeof listed?.url === 'string') url = listed.url;
+  }
+
+  // Same health-check / log-surface pattern as the full teleport path.
+  // A sync that breaks the container (bad env, corrupted config blob,
+  // volume backfill surprise) should fail loudly instead of silently
+  // leaving a crash-looping remote.
+  if (url) {
+    const healthy = await waitForHealth(url, deps);
+    if (!healthy) {
+      deps.warn(
+        `Container failed to report healthy after ${Math.round(HEALTH_TIMEOUT_MS / 1000)}s. Fetching logs…`
+      );
+      const logs = await deps.runner.logsApp(opts.name, {
+        tail: HEALTH_FAILURE_LOG_TAIL,
+      });
+      deps.warn('--- container logs (tail) ---');
+      deps.warn(logs.trim() || '(no logs returned by siteio)');
+      deps.warn('--- end logs ---');
+      throw new CliError(
+        'API_ERROR',
+        `Sync to "${opts.name}" restarted the container but /health never returned 200`,
+        'Inspect the logs above. The previous config is gone — the next sync (or a manual `siteio apps restart`) will still see the broken state until you fix the root cause.'
+      );
+    }
+  }
 
   deps.log('');
   deps.log('Sync complete!');
@@ -568,7 +647,47 @@ export async function runTeleport(
     // Try to surface the deployed URL. Non-fatal if siteio doesn't
     // give us one back.
     const info = await deps.runner.appInfo(opts.name);
-    const url = typeof info?.url === 'string' ? info.url : undefined;
+    let url = typeof info?.url === 'string' ? info.url : undefined;
+    // siteio's `apps info --json` output omits the generated subdomain
+    // URL (domains: [] in the payload) even though the app is reachable
+    // at it. `apps list --json` DOES include the url field at the top
+    // level. Fall back to findApp so the post-deploy health check can
+    // still run even when siteio doesn't surface url in info.
+    if (!url) {
+      const listed = await deps.runner.findApp(opts.name);
+      if (typeof listed?.url === 'string') url = listed.url;
+    }
+
+    // Poll /health to CONFIRM the container actually came up. siteio's
+    // deploy returns success as soon as Docker starts the container, so
+    // a crash-loop (bad volume permissions, bad config, missing binary,
+    // etc.) looks like a successful deploy until the user probes it
+    // themselves. Surfacing logs on timeout is the fix.
+    if (url) {
+      const healthy = await waitForHealth(url, deps);
+      if (!healthy) {
+        deps.warn(
+          `Container failed to report healthy after ${Math.round(HEALTH_TIMEOUT_MS / 1000)}s. Fetching logs…`
+        );
+        const logs = await deps.runner.logsApp(opts.name, {
+          tail: HEALTH_FAILURE_LOG_TAIL,
+        });
+        deps.warn('--- container logs (tail) ---');
+        deps.warn(logs.trim() || '(no logs returned by siteio)');
+        deps.warn('--- end logs ---');
+        throw new CliError(
+          'API_ERROR',
+          `Deploy "${opts.name}" started but /health never returned 200`,
+          'Inspect the logs above. Common causes: permission errors on mounted volumes, missing env vars, binary not found for the container arch.'
+        );
+      }
+    } else {
+      deps.warn(
+        'Skipping health check: siteio did not return a URL for this app. ' +
+          `Run \`siteio apps info ${opts.name}\` and curl <url>/health manually to verify.`
+      );
+    }
+
     const claudeCmd = url
       ? `claude mcp add --scope local --transport http agentio "${url}/mcp?services=rss"`
       : null;
@@ -634,6 +753,34 @@ async function defaultRemoveTempFile(path: string): Promise<void> {
  * Returns null if the cwd isn't a git repo, has no origin remote, or if
  * the git binary isn't on PATH.
  */
+/**
+ * Default health probe: HEAD-equivalent GET on the given URL. Returns
+ * the HTTP status code, or null if the request couldn't be made (DNS,
+ * connection refused, TLS error, etc). We treat connection errors the
+ * same as "not ready yet" so the poller keeps retrying.
+ */
+async function defaultProbeHealth(url: string): Promise<number | null> {
+  try {
+    // Short timeout per attempt so a hung connection can't eat the
+    // whole polling budget. AbortSignal.timeout is natively supported
+    // by Bun's fetch.
+    const res = await fetch(url, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5_000),
+    });
+    // Drain the body so the socket is released promptly; we only care
+    // about the status code here.
+    await res.text().catch(() => {});
+    return res.status;
+  } catch {
+    return null;
+  }
+}
+
+async function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function defaultDetectGitOriginUrl(): Promise<string | null> {
   try {
     const proc = Bun.spawn(['git', 'remote', 'get-url', 'origin'], {
@@ -722,6 +869,8 @@ export function registerTeleportCommand(parent: Command): void {
             writeTempFile: defaultWriteTempFile,
             removeTempFile: defaultRemoveTempFile,
             detectGitOriginUrl: defaultDetectGitOriginUrl,
+            probeHealth: defaultProbeHealth,
+            sleep: defaultSleep,
             log: (msg) => console.log(msg),
             warn: (msg) => console.error(msg),
           }

@@ -44,22 +44,26 @@ FROM ubuntu:24.04
 #   ca-certificates : HTTPS calls from the container to upstream services
 #   curl            : healthcheck probe
 #   tini            : proper PID 1 / signal handling
+#   gosu            : drop privileges to the agentio user at container
+#                     START (after we've chowned the persistent /data
+#                     volume, which Docker mounts as root-owned)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl tini \
+    ca-certificates curl tini gosu \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user. HOME=/data so that ~/.config/agentio lives in a path
-# siteio can mount as a persistent volume if needed.
+# Non-root user. /data will be a siteio-managed persistent volume mount,
+# so its build-time ownership is meaningless — the volume masks whatever
+# we chown here at image-build time. We fix ownership at container-START
+# via the entrypoint script below (requires root, hence no USER directive).
 RUN groupadd -g 1001 agentio \
     && useradd -u 1001 -g agentio -d /home/agentio -m agentio \
     && mkdir -p /data /home/agentio/bin \
-    && chown -R agentio:agentio /data /home/agentio/bin
+    && chown -R agentio:agentio /home/agentio/bin
 
 # Copy the built binary from the builder stage. Own it as `agentio` so
-# we can drop privileges below.
+# the dropped-privilege process below can execute it.
 COPY --from=builder --chown=agentio:agentio /build/dist/agentio /home/agentio/bin/agentio
 
-USER agentio
 ENV HOME=/data
 ENV XDG_CONFIG_HOME=/data
 ENV PATH="/home/agentio/bin:${PATH}"
@@ -72,5 +76,10 @@ EXPOSE 9999
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -sf http://localhost:9999/health || exit 1
 
+# tini becomes PID 1 for signal handling. The sh -c script runs as ROOT
+# so it can chown the freshly-mounted /data volume (Docker mounts named
+# volumes with root:root ownership on first boot, overriding any
+# build-time chown), then drops to the agentio user via gosu and exec's
+# the config-import + server pipeline so SIGTERM propagates correctly.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999"]
+CMD ["sh", "-c", "chown -R agentio:agentio /data && exec gosu agentio sh -c 'agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999'"]

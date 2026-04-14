@@ -39,6 +39,8 @@ interface FakeRunnerOptions {
   loggedIn?: boolean;
   existingApp?: SiteioApp | null;
   deployedApp?: SiteioApp | null;
+  /** Stdout returned by logsApp. Default: empty string. */
+  logsStdout?: string;
   failOn?:
     | 'isInstalled'
     | 'isLoggedIn'
@@ -99,6 +101,10 @@ function makeFakeRunner(opts: FakeRunnerOptions = {}): {
       if ('deployedApp' in opts) return opts.deployedApp ?? null;
       return { name, url: `https://${name}.siteio.example.com` };
     },
+    async logsApp(name, logOpts) {
+      calls.push({ method: 'logsApp', args: { name, opts: logOpts ?? null } });
+      return opts.logsStdout ?? '';
+    },
   };
 
   return { runner, calls };
@@ -116,6 +122,12 @@ interface FakeDepsOptions extends FakeRunnerOptions {
   dockerfile?: string;
   /** Value returned by detectGitOriginUrl. Default: null. */
   gitOriginUrl?: string | null;
+  /**
+   * Sequence of HTTP status codes (or nulls) `probeHealth` should return
+   * across successive polls. When exhausted, falls back to the default
+   * (a healthy 200). Pass [] to simulate an unreachable container.
+   */
+  healthProbeResponses?: Array<number | null>;
 }
 
 interface FakeDeps extends TeleportDeps {
@@ -126,6 +138,8 @@ interface FakeDeps extends TeleportDeps {
   warnLines: string[];
   tempFileWrites: { path: string; content: string }[];
   tempFileDeletes: string[];
+  healthProbeUrls: string[];
+  sleepCalls: number[];
 }
 
 function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
@@ -134,8 +148,11 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
   const warnLines: string[] = [];
   const tempFileWrites: { path: string; content: string }[] = [];
   const tempFileDeletes: string[] = [];
+  const healthProbeUrls: string[] = [];
+  const sleepCalls: number[] = [];
 
   let tempCounter = 0;
+  let healthProbeIdx = 0;
 
   const deps: FakeDeps = {
     calls,
@@ -143,6 +160,8 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     warnLines,
     tempFileWrites,
     tempFileDeletes,
+    healthProbeUrls,
+    sleepCalls,
     runner,
     loadConfig: async () =>
       ({
@@ -167,6 +186,25 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     },
     detectGitOriginUrl: async () =>
       'gitOriginUrl' in opts ? (opts.gitOriginUrl ?? null) : null,
+    probeHealth: async (url) => {
+      healthProbeUrls.push(url);
+      // Default behavior: 200 on the first probe so happy-path tests
+      // don't have to configure anything. Callers exercising timeouts
+      // pass `healthProbeResponses: []` or an explicit list.
+      if (opts.healthProbeResponses == null) return 200;
+      const list = opts.healthProbeResponses;
+      if (healthProbeIdx < list.length) {
+        return list[healthProbeIdx++] ?? null;
+      }
+      return null;
+    },
+    // Sleep is a no-op in tests — we don't want real time to pass.
+    // The loop inside waitForHealth is bounded by Date.now() ≥ deadline,
+    // so we also need the deadline to be reachable; see the test that
+    // exercises a timeout, which shrinks the timeoutMs explicitly.
+    sleep: async (ms) => {
+      sleepCalls.push(ms);
+    },
     log: (msg) => logLines.push(msg),
     warn: (msg) => warnLines.push(msg),
   };
@@ -1212,5 +1250,213 @@ describe('runTeleport — sync failure paths', () => {
     // setApp ran (we got past it before restartApp blew up).
     const methods = deps.calls.map((c) => c.method);
     expect(methods).toContain('setApp');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* waitForHealth (direct)                                             */
+/* ------------------------------------------------------------------ */
+
+describe('waitForHealth', () => {
+  test('returns true on first 200 without sleeping', async () => {
+    const { waitForHealth } = await import('./teleport');
+    const probed: string[] = [];
+    const sleeps: number[] = [];
+    const logs: string[] = [];
+    const ok = await waitForHealth(
+      'https://mcp.example.com',
+      {
+        probeHealth: async (u) => {
+          probed.push(u);
+          return 200;
+        },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        log: (m) => logs.push(m),
+      },
+      { timeoutMs: 1000, intervalMs: 100 }
+    );
+    expect(ok).toBe(true);
+    expect(probed).toEqual(['https://mcp.example.com/health']);
+    expect(sleeps).toEqual([]); // no sleep after a first-attempt success
+    expect(logs.join('\n')).toMatch(/responded 200 after 1 attempt/);
+  });
+
+  test('returns true when 200 arrives after a few not-ready probes', async () => {
+    const { waitForHealth } = await import('./teleport');
+    const sequence: Array<number | null> = [null, 503, null, 200];
+    let idx = 0;
+    const sleeps: number[] = [];
+    const ok = await waitForHealth(
+      'https://mcp.example.com/',
+      {
+        probeHealth: async () => sequence[idx++] ?? null,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        log: () => {},
+      },
+      { timeoutMs: 10_000, intervalMs: 100 }
+    );
+    expect(ok).toBe(true);
+    expect(sleeps).toEqual([100, 100, 100]); // 3 sleeps before the 4th probe hit 200
+  });
+
+  test('returns false when probe never hits 200 within the budget', async () => {
+    const { waitForHealth } = await import('./teleport');
+    let probeCount = 0;
+    const sleeps: number[] = [];
+    const ok = await waitForHealth(
+      'https://mcp.example.com',
+      {
+        probeHealth: async () => {
+          probeCount++;
+          return null;
+        },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        log: () => {},
+      },
+      { timeoutMs: 500, intervalMs: 100 }
+    );
+    expect(ok).toBe(false);
+    // timeout/interval = 5 attempts, 4 sleeps between them.
+    expect(probeCount).toBe(5);
+    expect(sleeps.length).toBe(4);
+  });
+
+  test('strips trailing slash(es) from url before appending /health', async () => {
+    const { waitForHealth } = await import('./teleport');
+    const probed: string[] = [];
+    await waitForHealth(
+      'https://mcp.example.com///',
+      {
+        probeHealth: async (u) => {
+          probed.push(u);
+          return 200;
+        },
+        sleep: async () => {},
+        log: () => {},
+      },
+      { timeoutMs: 1000, intervalMs: 100 }
+    );
+    expect(probed[0]).toBe('https://mcp.example.com/health');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — health-check surfacing                               */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — health check on deploy', () => {
+  test('happy path probes /health at the deployed URL and does not fetch logs', async () => {
+    const deps = makeDeps();
+    await runTeleport({ name: 'mcp' }, deps);
+    expect(deps.healthProbeUrls[0]).toBe('https://mcp.siteio.example.com/health');
+    expect(deps.calls.map((c) => c.method)).not.toContain('logsApp');
+  });
+
+  test('health never returns 200 → fetches logs, surfaces them via warn, throws CliError', async () => {
+    const deps = makeDeps({
+      healthProbeResponses: [], // always null → timeout path
+      logsStdout: 'Error: EACCES: permission denied, mkdir /data/.config\n',
+    });
+    await expect(runTeleport({ name: 'mcp' }, deps)).rejects.toThrow(
+      /\/health never returned 200/
+    );
+    // logs were fetched with the expected tail size
+    const logsCall = deps.calls.find((c) => c.method === 'logsApp');
+    expect(logsCall).toBeDefined();
+    expect((logsCall!.args as { opts: { tail: number } }).opts.tail).toBeGreaterThan(0);
+    // The log tail was surfaced to the user on stderr (deps.warn)
+    expect(deps.warnLines.join('\n')).toContain('EACCES: permission denied');
+  });
+
+  test('empty log stdout still produces a clear warning (no "undefined" output)', async () => {
+    const deps = makeDeps({
+      healthProbeResponses: [],
+      logsStdout: '',
+    });
+    await expect(runTeleport({ name: 'mcp' }, deps)).rejects.toThrow();
+    expect(deps.warnLines.join('\n')).toContain('(no logs returned by siteio)');
+  });
+
+  test('siteio did not return a URL → health check is skipped with a warning, no throw', async () => {
+    const deps = makeDeps({ deployedApp: { name: 'mcp' } }); // no url field
+    const result = await runTeleport({ name: 'mcp' }, deps);
+    expect(result.url).toBeUndefined();
+    expect(deps.healthProbeUrls).toEqual([]);
+    expect(deps.warnLines.join('\n')).toContain('Skipping health check');
+  });
+
+  test('appInfo lacks url but findApp has it → falls back, still runs health check', async () => {
+    // Mirrors real siteio behavior: `apps info --json` omits the
+    // generated subdomain URL even though `apps list --json` surfaces
+    // it. We fall back to findApp (which wraps `apps list`) so the
+    // health check can still run.
+    const deps = makeDeps({
+      deployedApp: { name: 'mcp' }, // info: no url
+      // existingApp is read by findApp on re-call — setting it supplies
+      // the fallback URL.
+      existingApp: { name: 'mcp', url: 'https://mcp.siteio.example.com' },
+    });
+    // But runTeleport's "create" path REFUSES if existingApp is found,
+    // so we need to bypass that. Trick: set existingApp to null at call
+    // time; we can't really do that here without extending the fixture.
+    // Instead, emulate via a custom runner.
+    let findAppCalls = 0;
+    const deployInfo: SiteioApp = { name: 'mcp' }; // info returns no url
+    const fallbackInfo: SiteioApp = {
+      name: 'mcp',
+      url: 'https://mcp.siteio.example.com',
+    };
+    deps.runner.findApp = async () => {
+      findAppCalls++;
+      // First call (preflight — "does app already exist?") must return null
+      // so runTeleport proceeds with create. Second call (post-deploy URL
+      // fallback) returns the populated URL.
+      return findAppCalls === 1 ? null : fallbackInfo;
+    };
+    deps.runner.appInfo = async () => deployInfo;
+    await runTeleport({ name: 'mcp' }, deps);
+    expect(findAppCalls).toBe(2);
+    expect(deps.healthProbeUrls[0]).toBe('https://mcp.siteio.example.com/health');
+  });
+});
+
+describe('runTeleport — health check on --sync', () => {
+  test('sync happy path probes /health after restart', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.siteio.example.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.siteio.example.com',
+        volumes: [`agentio-data-mcp:${DATA_VOLUME_PATH}`],
+      },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+    expect(deps.healthProbeUrls[0]).toBe('https://mcp.siteio.example.com/health');
+    // No log fetch on a happy sync.
+    expect(deps.calls.map((c) => c.method)).not.toContain('logsApp');
+  });
+
+  test('sync health times out → logs fetched + thrown', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.siteio.example.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.siteio.example.com',
+        volumes: [`agentio-data-mcp:${DATA_VOLUME_PATH}`],
+      },
+      healthProbeResponses: [],
+      logsStdout: 'boom\n',
+    });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true }, deps)
+    ).rejects.toThrow(/\/health never returned 200/);
+    expect(deps.calls.map((c) => c.method)).toContain('logsApp');
+    expect(deps.warnLines.join('\n')).toContain('boom');
   });
 });
