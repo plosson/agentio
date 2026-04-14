@@ -99,6 +99,16 @@ export interface SiteioRunner {
   restartApp(name: string): Promise<void>;
   /** `siteio apps info <name> --json` — used to surface the deployed URL. */
   appInfo(name: string): Promise<SiteioApp | null>;
+  /**
+   * `siteio apps logs <name> [--tail N]` — tail of the container's
+   * stdout/stderr. Used by teleport to surface crash-loop output when
+   * /health never becomes responsive after a deploy.
+   *
+   * Returns the captured stdout. Callers that want stderr too should
+   * treat this as best-effort (siteio's own progress lines sometimes
+   * leak onto stderr, which we don't try to merge).
+   */
+  logsApp(name: string, opts?: { tail?: number }): Promise<string>;
 }
 
 /**
@@ -293,6 +303,19 @@ export function createSiteioRunner(
       if (r.exitCode !== 0) {
         throw makeError(cmd, r, `restart ${name}`);
       }
+    },
+
+    async logsApp(name, opts) {
+      const cmd = ['siteio', 'apps', 'logs', name];
+      if (opts?.tail != null) {
+        cmd.push('--tail', String(opts.tail));
+      }
+      const r = await spawn({ cmd });
+      // Logs are best-effort: if siteio errors (app doesn't exist yet,
+      // agent offline, etc), return whatever we got instead of throwing,
+      // so the caller — typically in an already-failing teleport path —
+      // can still surface something useful to the user.
+      return r.stdout;
     },
 
     async appInfo(name) {

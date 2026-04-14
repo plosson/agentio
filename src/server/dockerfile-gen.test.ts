@@ -27,11 +27,12 @@ describe('generateTeleportDockerfile — structural invariants', () => {
     expect(df).toContain('FROM ubuntu:24.04');
   });
 
-  test('installs ca-certificates, curl, tini', () => {
+  test('installs ca-certificates, curl, tini, gosu', () => {
     const df = generateTeleportDockerfile();
     expect(df).toContain('ca-certificates');
     expect(df).toContain('curl');
     expect(df).toContain('tini');
+    expect(df).toContain('gosu');
   });
 
   test('cleans up apt lists (image size hygiene)', () => {
@@ -43,7 +44,14 @@ describe('generateTeleportDockerfile — structural invariants', () => {
     const df = generateTeleportDockerfile();
     expect(df).toContain('groupadd -g 1001 agentio');
     expect(df).toContain('useradd -u 1001 -g agentio');
-    expect(df).toContain('USER agentio');
+  });
+
+  test('does NOT set USER agentio (container runs as root until entrypoint drops privileges via gosu)', () => {
+    // The container boots as root so the CMD can chown /data (the
+    // persistent volume mounts as root:root on first boot). gosu then
+    // drops privileges before any user-input-processing code runs.
+    const df = generateTeleportDockerfile();
+    expect(df).not.toMatch(/^USER\s+agentio/m);
   });
 
   test('sets HOME, XDG_CONFIG_HOME, PATH for the non-root user', () => {
@@ -53,9 +61,15 @@ describe('generateTeleportDockerfile — structural invariants', () => {
     expect(df).toContain('ENV PATH="/home/agentio/bin:${PATH}"');
   });
 
-  test('ensures /data and /home/agentio/bin are owned by agentio', () => {
+  test('ensures /home/agentio/bin is owned by agentio at build time', () => {
     const df = generateTeleportDockerfile();
-    expect(df).toContain('chown -R agentio:agentio /data /home/agentio/bin');
+    expect(df).toContain('chown -R agentio:agentio /home/agentio/bin');
+  });
+
+  test('chowns /data at container START (in CMD) — volume mount masks any build-time ownership', () => {
+    const df = generateTeleportDockerfile();
+    const cmdLine = df.match(/CMD \[.*\]/)?.[0] ?? '';
+    expect(cmdLine).toContain('chown -R agentio:agentio /data');
   });
 
   test('never uses COPY or ADD (siteio inline Dockerfile constraint)', () => {
@@ -151,10 +165,10 @@ describe('generateTeleportDockerfile — port + healthcheck + entrypoint', () =>
     expect(df).toContain('ENTRYPOINT ["/usr/bin/tini", "--"]');
   });
 
-  test('CMD runs config import THEN the server, via sh -c', () => {
+  test('CMD chowns /data, drops privileges via gosu, imports config, execs server', () => {
     const df = generateTeleportDockerfile();
     expect(df).toContain(
-      'CMD ["sh", "-c", "agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999"]'
+      'CMD ["sh", "-c", "chown -R agentio:agentio /data && exec gosu agentio sh -c \'agentio config import && exec agentio server start --foreground --host 0.0.0.0 --port 9999\'"]'
     );
   });
 
@@ -164,6 +178,12 @@ describe('generateTeleportDockerfile — port + healthcheck + entrypoint', () =>
     expect(cmdLine).toContain('exec agentio server start');
   });
 
+  test('CMD uses `exec gosu agentio` so the server is NOT a child of the root shell (so tini sees the right PID)', () => {
+    const df = generateTeleportDockerfile();
+    const cmdLine = df.match(/CMD \[.*\]/)?.[0] ?? '';
+    expect(cmdLine).toContain('exec gosu agentio');
+  });
+
   test('CMD binds to 0.0.0.0 (required for Docker networking)', () => {
     const df = generateTeleportDockerfile();
     expect(df).toContain('--host 0.0.0.0');
@@ -171,13 +191,19 @@ describe('generateTeleportDockerfile — port + healthcheck + entrypoint', () =>
 });
 
 describe('generateTeleportDockerfile — security posture', () => {
-  test('switches to non-root user BEFORE the CMD runs', () => {
+  test('drops to non-root BEFORE any user-input code runs (config import, server)', () => {
+    // The boot sequence in CMD is: root runs chown /data, then `exec gosu
+    // agentio` hands control to the agentio user. Only AFTER that does
+    // `agentio config import` (which decrypts AGENTIO_CONFIG) and the
+    // server ever run. Confirm the ordering inside the CMD string itself.
     const df = generateTeleportDockerfile();
-    const userIdx = df.indexOf('USER agentio');
-    const cmdIdx = df.search(/^CMD /m);
-    expect(userIdx).toBeGreaterThan(-1);
-    expect(cmdIdx).toBeGreaterThan(-1);
-    expect(userIdx).toBeLessThan(cmdIdx);
+    const cmdLine = df.match(/CMD \[.*\]/)?.[0] ?? '';
+    const gosuIdx = cmdLine.indexOf('gosu agentio');
+    const importIdx = cmdLine.indexOf('agentio config import');
+    const serverIdx = cmdLine.indexOf('agentio server start');
+    expect(gosuIdx).toBeGreaterThan(-1);
+    expect(importIdx).toBeGreaterThan(gosuIdx);
+    expect(serverIdx).toBeGreaterThan(gosuIdx);
   });
 
   test('does not install sudo', () => {

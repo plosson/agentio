@@ -718,3 +718,49 @@ describe('appInfo', () => {
     expect(info!.url).toBe('https://mcp.x.siteio.me');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* logsApp                                                             */
+/* ------------------------------------------------------------------ */
+
+describe('logsApp', () => {
+  test('emits exact argv without --tail when tail is omitted', async () => {
+    const { spawn, calls } = makeMockSpawn({
+      responses: [{ exitCode: 0, stdout: 'log line 1\nlog line 2\n', stderr: '' }],
+    });
+    const runner = createSiteioRunner(spawn);
+    const out = await runner.logsApp('mcp');
+    expect(out).toBe('log line 1\nlog line 2\n');
+    expect(calls[0].cmd).toEqual(['siteio', 'apps', 'logs', 'mcp']);
+  });
+
+  test('passes --tail N when provided', async () => {
+    const { spawn, calls } = makeMockSpawn({
+      responses: [{ exitCode: 0, stdout: 'tail output\n', stderr: '' }],
+    });
+    const runner = createSiteioRunner(spawn);
+    await runner.logsApp('mcp', { tail: 40 });
+    expect(calls[0].cmd).toEqual([
+      'siteio',
+      'apps',
+      'logs',
+      'mcp',
+      '--tail',
+      '40',
+    ]);
+  });
+
+  test('returns partial stdout without throwing even on non-zero exit (best-effort)', async () => {
+    // Logs are consumed inside an already-failing path (crash-loop
+    // surfacing) so we don't want them to raise and mask the original
+    // error. Verify graceful return.
+    const { spawn } = makeMockSpawn({
+      responses: [
+        { exitCode: 1, stdout: 'some partial output\n', stderr: 'agent offline' },
+      ],
+    });
+    const runner = createSiteioRunner(spawn);
+    const out = await runner.logsApp('mcp', { tail: 10 });
+    expect(out).toBe('some partial output\n');
+  });
+});
