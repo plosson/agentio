@@ -394,21 +394,44 @@ describe('runTeleport — preflight failures', () => {
     );
   });
 
-  test('app already exists → CliError + warning', async () => {
+  test('app already exists → rebuild in place (no create, key preserved)', async () => {
     const deps = makeDeps({
       existingApp: { name: 'mcp', url: 'https://mcp.existing.com' },
     });
-    await expect(runTeleport({ name: 'mcp' }, deps)).rejects.toThrow(
-      /already exists/
-    );
-    // A warning was emitted before the throw so the user has context.
-    expect(deps.warnLines.some((l) => l.includes('siteio apps rm'))).toBe(
-      true
-    );
-    // Must not have attempted to create/set/deploy.
+    const result = await runTeleport({ name: 'mcp' }, deps);
+
     const methods = deps.calls.map((c) => c.method);
+    // Rebuild MUST NOT create the app — it already exists.
     expect(methods).not.toContain('createApp');
-    expect(methods).not.toContain('deploy');
+    // But it MUST push env + redeploy so the image is rebuilt.
+    expect(methods).toContain('setApp');
+    expect(methods).toContain('deploy');
+
+    // setApp on rebuild preserves AGENTIO_SERVER_API_KEY by omitting it
+    // from the env map (siteio merges env vars).
+    const setCall = deps.calls.find((c) => c.method === 'setApp');
+    expect(setCall).toBeDefined();
+    const envVars = (setCall!.args as { envVars?: Record<string, string> })
+      .envVars;
+    expect(envVars).toBeDefined();
+    expect(Object.keys(envVars!).sort()).toEqual([
+      'AGENTIO_CONFIG',
+      'AGENTIO_KEY',
+    ]);
+    expect(envVars!.AGENTIO_SERVER_API_KEY).toBeUndefined();
+
+    // Result signals a rebuild: no new server API key emitted.
+    expect(result.serverApiKey).toBe('');
+
+    // Log messages surface the rebuild intent, and the success banner
+    // is distinct from a fresh deploy.
+    const logs = deps.logLines.join('\n');
+    expect(logs).toMatch(/rebuild/i);
+    expect(logs).toContain('Rebuild complete!');
+    expect(logs).not.toContain('Teleport complete!');
+    // We do NOT print the onboarding snippet on rebuild — clients
+    // already have their bearer.
+    expect(logs).not.toContain('To add to Claude Code:');
   });
 });
 

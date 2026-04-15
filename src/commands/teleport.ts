@@ -513,26 +513,51 @@ export async function runTeleport(
   }
   deps.log(`Found ${profileCount} local profile(s).`);
 
-  // App must not already exist.
+  // Check whether the app already exists on siteio. If it does, we
+  // REBUILD in place: skip createApp, preserve the existing
+  // AGENTIO_SERVER_API_KEY (so Claude clients keep their /authorize PIN
+  // and their issued bearers), backfill /data if needed, and redeploy
+  // the freshly generated image. If it doesn't exist, fall through to
+  // the fresh-deploy path.
   deps.log(`Checking if siteio app "${opts.name}" already exists…`);
   const existing = await deps.runner.findApp(opts.name);
-  if (existing) {
-    deps.warn(
-      `A siteio app named "${opts.name}" already exists. ` +
-        `Run \`siteio apps rm ${opts.name}\` if you want to redeploy from scratch.`
+  const isRebuild = Boolean(existing);
+  if (isRebuild) {
+    deps.log(
+      `Found existing siteio app "${opts.name}" — will rebuild image in place (API key and clients preserved).`
     );
-    throw new CliError(
-      'INVALID_PARAMS',
-      `App "${opts.name}" already exists on siteio`
+  } else {
+    deps.log(
+      `No existing siteio app "${opts.name}" — will create a fresh one.`
     );
   }
 
-  // Generate a fresh server API key for the remote.
-  const serverApiKey = deps.generateServerApiKey();
+  // Only generate a new operator API key on fresh deploys. On rebuild
+  // the remote's AGENTIO_SERVER_API_KEY is left untouched (siteio's
+  // `apps set -e` merges env vars, so omitting a key preserves it).
+  const serverApiKey = isRebuild ? '' : deps.generateServerApiKey();
 
-  // Export the local config.
-  deps.log('Exporting local configuration…');
+  // Export the local config (always — we want rebuild to also pick up
+  // any profile additions since the last deploy).
+  deps.log(
+    isRebuild
+      ? 'Re-exporting local configuration…'
+      : 'Exporting local configuration…'
+  );
   const exported = await deps.generateExportData();
+
+  // On rebuild, detect whether /data is already mounted so we backfill
+  // the persistent volume if it's missing (same logic as --sync).
+  let needsVolumeBackfill = false;
+  if (isRebuild) {
+    const detail = await deps.runner.appInfo(opts.name);
+    needsVolumeBackfill = !hasDataVolumeMount(detail);
+    if (needsVolumeBackfill) {
+      deps.log(
+        `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH} as part of this rebuild.`
+      );
+    }
+  }
 
   // Resolve git mode settings up front so dry-run can show the same
   // command shape the real run would use.
@@ -562,21 +587,37 @@ export async function runTeleport(
   // Dry-run: report what would happen and exit.
   if (opts.dryRun) {
     deps.log('--- Dry run: the following commands would be executed ---');
-    if (gitSettings) {
-      deps.log(
-        `siteio apps create ${opts.name} -g ${gitSettings.repoUrl} --branch ${gitSettings.branch} --dockerfile ${TELEPORT_DOCKERFILE_PATH} -p 9999`
-      );
-    } else {
-      deps.log(
-        `siteio apps create ${opts.name} -f <tempfile> -p 9999`
-      );
+    if (!isRebuild) {
+      if (gitSettings) {
+        deps.log(
+          `siteio apps create ${opts.name} -g ${gitSettings.repoUrl} --branch ${gitSettings.branch} --dockerfile ${TELEPORT_DOCKERFILE_PATH} -p 9999`
+        );
+      } else {
+        deps.log(
+          `siteio apps create ${opts.name} -f <tempfile> -p 9999`
+        );
+      }
     }
-    deps.log(
-      `siteio apps set ${opts.name} -e AGENTIO_KEY=<redacted> -e AGENTIO_CONFIG=<${exported.config.length} chars> -e AGENTIO_SERVER_API_KEY=${serverApiKey}`
-    );
+    const setParts = [
+      `siteio apps set ${opts.name}`,
+      '-e AGENTIO_KEY=<redacted>',
+      `-e AGENTIO_CONFIG=<${exported.config.length} chars>`,
+    ];
+    if (!isRebuild) {
+      setParts.push(`-e AGENTIO_SERVER_API_KEY=${serverApiKey}`);
+    }
+    if (!isRebuild || needsVolumeBackfill) {
+      setParts.push(`-v ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH}`);
+    }
+    deps.log(setParts.join(' '));
     deps.log(
       `siteio apps deploy ${opts.name}${opts.noCache ? ' --no-cache' : ''}`
     );
+    if (isRebuild) {
+      deps.log(
+        '(AGENTIO_SERVER_API_KEY is intentionally NOT touched — operator key on the remote stays the same.)'
+      );
+    }
     if (!gitSettings) {
       const dockerfile = deps.generateDockerfile();
       deps.log('--- Dockerfile that would be uploaded ---');
@@ -601,41 +642,62 @@ export async function runTeleport(
     : await deps.writeTempFile(deps.generateDockerfile());
 
   try {
-    deps.log(`Creating siteio app "${opts.name}"…`);
-    if (gitSettings) {
-      await deps.runner.createApp({
-        name: opts.name,
-        port: 9999,
-        git: {
-          repoUrl: gitSettings.repoUrl,
-          branch: gitSettings.branch,
-          dockerfilePath: TELEPORT_DOCKERFILE_PATH,
-        },
-      });
-    } else {
-      await deps.runner.createApp({
-        name: opts.name,
-        dockerfilePath: tempPath!,
-        port: 9999,
-      });
+    if (!isRebuild) {
+      deps.log(`Creating siteio app "${opts.name}"…`);
+      if (gitSettings) {
+        await deps.runner.createApp({
+          name: opts.name,
+          port: 9999,
+          git: {
+            repoUrl: gitSettings.repoUrl,
+            branch: gitSettings.branch,
+            dockerfilePath: TELEPORT_DOCKERFILE_PATH,
+          },
+        });
+      } else {
+        await deps.runner.createApp({
+          name: opts.name,
+          dockerfilePath: tempPath!,
+          port: 9999,
+        });
+      }
     }
 
-    deps.log('Setting environment variables and persistent volume…');
+    // On rebuild, omit AGENTIO_SERVER_API_KEY so siteio's env-merge
+    // preserves the existing value (clients keep their bearer). Only
+    // attach /data when not already mounted — siteio REPLACES the
+    // volumes list on update, so blindly passing it would clobber
+    // other mounts the operator added.
+    const envVars: Record<string, string> = {
+      AGENTIO_KEY: exported.key,
+      AGENTIO_CONFIG: exported.config,
+      ...(isRebuild ? {} : { AGENTIO_SERVER_API_KEY: serverApiKey }),
+    };
+    const attachVolume = !isRebuild || needsVolumeBackfill;
+
+    if (isRebuild) {
+      deps.log(
+        attachVolume
+          ? 'Updating env vars + attaching persistent volume on siteio…'
+          : 'Updating environment variables on siteio…'
+      );
+    } else {
+      deps.log('Setting environment variables and persistent volume…');
+    }
+
     await deps.runner.setApp({
       name: opts.name,
-      envVars: {
-        AGENTIO_KEY: exported.key,
-        AGENTIO_CONFIG: exported.config,
-        AGENTIO_SERVER_API_KEY: serverApiKey,
-      },
-      // Persistent named volume mounted at /data so config.server.tokens
-      // (issued OAuth bearers) survive container restarts. Without this
-      // mount, every restart wipes the bearer and connected clients
-      // would re-run the OAuth flow.
-      volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH },
+      envVars,
+      ...(attachVolume
+        ? { volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH } }
+        : {}),
     });
 
-    deps.log('Deploying (this may take a minute — Docker is building your image)…');
+    deps.log(
+      isRebuild
+        ? 'Rebuilding (this may take a minute — Docker is rebuilding your image)…'
+        : 'Deploying (this may take a minute — Docker is building your image)…'
+    );
     await deps.runner.deploy({
       name: opts.name,
       // In git mode, there's no -f to re-pass on deploy — siteio uses
@@ -693,7 +755,7 @@ export async function runTeleport(
       : null;
 
     deps.log('');
-    deps.log('Teleport complete!');
+    deps.log(isRebuild ? 'Rebuild complete!' : 'Teleport complete!');
     if (url) {
       deps.log(`  URL:       ${url}`);
       deps.log(`  Health:    ${url}/health`);
@@ -703,10 +765,14 @@ export async function runTeleport(
         `  URL:       (siteio did not return a URL — run \`siteio apps info ${opts.name}\` to look it up)`
       );
     }
-    deps.log(`  API key:   ${serverApiKey}`);
-    deps.log('             (you will type this into the Authorize page when Claude Code first connects)');
+    if (isRebuild) {
+      deps.log('  API key:   (unchanged — existing clients keep their bearer)');
+    } else {
+      deps.log(`  API key:   ${serverApiKey}`);
+      deps.log('             (you will type this into the Authorize page when Claude Code first connects)');
+    }
     deps.log('');
-    if (claudeCmd) {
+    if (claudeCmd && !isRebuild) {
       deps.log('To add to Claude Code:');
       deps.log(`  ${claudeCmd}`);
       deps.log(
