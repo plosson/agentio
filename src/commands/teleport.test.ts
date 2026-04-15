@@ -12,7 +12,7 @@ import {
   type TeleportDeps,
 } from './teleport';
 import type { SiteioRunner, SiteioApp } from '../server/siteio-runner';
-import type { Config } from '../types/config';
+import type { Config, TeleportAppRecord } from '../types/config';
 
 /**
  * Unit tests for `agentio teleport`. Every test injects a fake
@@ -128,6 +128,11 @@ interface FakeDepsOptions extends FakeRunnerOptions {
    * (a healthy 200). Pass [] to simulate an unreachable container.
    */
   healthProbeResponses?: Array<number | null>;
+  /**
+   * The record `getLastTeleportApp` should return. Default: null (no
+   * app remembered yet).
+   */
+  lastTeleportApp?: TeleportAppRecord | null;
 }
 
 interface FakeDeps extends TeleportDeps {
@@ -140,6 +145,8 @@ interface FakeDeps extends TeleportDeps {
   tempFileDeletes: string[];
   healthProbeUrls: string[];
   sleepCalls: number[];
+  /** Records every call to `saveLastTeleportApp`. */
+  savedTeleportApps: TeleportAppRecord[];
 }
 
 function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
@@ -150,6 +157,7 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
   const tempFileDeletes: string[] = [];
   const healthProbeUrls: string[] = [];
   const sleepCalls: number[] = [];
+  const savedTeleportApps: TeleportAppRecord[] = [];
 
   let tempCounter = 0;
   let healthProbeIdx = 0;
@@ -162,6 +170,7 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     tempFileDeletes,
     healthProbeUrls,
     sleepCalls,
+    savedTeleportApps,
     runner,
     loadConfig: async () =>
       ({
@@ -204,6 +213,11 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     // exercises a timeout, which shrinks the timeoutMs explicitly.
     sleep: async (ms) => {
       sleepCalls.push(ms);
+    },
+    getLastTeleportApp: async () =>
+      'lastTeleportApp' in opts ? (opts.lastTeleportApp ?? null) : null,
+    saveLastTeleportApp: async (record) => {
+      savedTeleportApps.push(record);
     },
     log: (msg) => logLines.push(msg),
     warn: (msg) => warnLines.push(msg),
@@ -1481,5 +1495,149 @@ describe('runTeleport — health check on --sync', () => {
     ).rejects.toThrow(/\/health never returned 200/);
     expect(deps.calls.map((c) => c.method)).toContain('logsApp');
     expect(deps.warnLines.join('\n')).toContain('boom');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* runTeleport — remembered app name                                   */
+/* ------------------------------------------------------------------ */
+
+describe('runTeleport — remembered app name', () => {
+  test('full teleport saves lastApp on success', async () => {
+    const deps = makeDeps();
+    const before = Date.now();
+    await runTeleport({ name: 'mcp' }, deps);
+    const after = Date.now();
+
+    expect(deps.savedTeleportApps).toHaveLength(1);
+    const saved = deps.savedTeleportApps[0]!;
+    expect(saved.name).toBe('mcp');
+    expect(saved.url).toBe('https://mcp.siteio.example.com');
+    expect(saved.deployedAt).toBeGreaterThanOrEqual(before);
+    expect(saved.deployedAt).toBeLessThanOrEqual(after);
+  });
+
+  test('sync saves lastApp on success', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.x.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+    });
+    await runTeleport({ name: 'mcp', sync: true }, deps);
+
+    expect(deps.savedTeleportApps).toHaveLength(1);
+    expect(deps.savedTeleportApps[0]!.name).toBe('mcp');
+    expect(deps.savedTeleportApps[0]!.url).toBe('https://mcp.x.com');
+  });
+
+  test('sync without name uses remembered app', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.x.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+      lastTeleportApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        deployedAt: 1_000_000,
+      },
+    });
+    const result = await runTeleport({ sync: true }, deps);
+    expect(result.name).toBe('mcp');
+    // Confirm it actually reached the siteio calls with the remembered name.
+    const findCall = deps.calls.find((c) => c.method === 'findApp');
+    expect(findCall!.args).toEqual({ name: 'mcp' });
+    // And announced the fallback to the user.
+    expect(deps.logLines.join('\n')).toContain(
+      'Using remembered teleport app "mcp"'
+    );
+  });
+
+  test('sync without name errors if nothing remembered', async () => {
+    const deps = makeDeps({ lastTeleportApp: null });
+    await expect(runTeleport({ sync: true }, deps)).rejects.toThrow(
+      /no remembered teleport app/i
+    );
+    // Did not reach siteio.
+    expect(deps.calls.map((c) => c.method)).not.toContain('findApp');
+  });
+
+  test('full teleport without name uses remembered app', async () => {
+    const deps = makeDeps({
+      lastTeleportApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        deployedAt: 1_000_000,
+      },
+    });
+    const result = await runTeleport({}, deps);
+    expect(result.name).toBe('mcp');
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    // First time on this fresh runner, no existing app — falls through
+    // to create. The create call must use the remembered name.
+    expect((createCall!.args as { name: string }).name).toBe('mcp');
+  });
+
+  test('explicit name overrides remembered app', async () => {
+    const deps = makeDeps({
+      lastTeleportApp: {
+        name: 'old-app',
+        url: 'https://old.x.com',
+        deployedAt: 1_000_000,
+      },
+    });
+    await runTeleport({ name: 'new-app' }, deps);
+    expect(deps.savedTeleportApps).toHaveLength(1);
+    expect(deps.savedTeleportApps[0]!.name).toBe('new-app');
+    const createCall = deps.calls.find((c) => c.method === 'createApp');
+    expect((createCall!.args as { name: string }).name).toBe('new-app');
+  });
+
+  test('dry-run does NOT save lastApp', async () => {
+    const deps = makeDeps();
+    await runTeleport({ name: 'mcp', dryRun: true }, deps);
+    expect(deps.savedTeleportApps).toHaveLength(0);
+  });
+
+  test('sync dry-run does NOT save lastApp', async () => {
+    const deps = makeDeps({ existingApp: { name: 'mcp' } });
+    await runTeleport(
+      { name: 'mcp', sync: true, dryRun: true },
+      deps
+    );
+    expect(deps.savedTeleportApps).toHaveLength(0);
+  });
+
+  test('failed full teleport (bad health) does NOT save lastApp', async () => {
+    const deps = makeDeps({
+      healthProbeResponses: [],
+      logsStdout: 'crash\n',
+    });
+    await expect(runTeleport({ name: 'mcp' }, deps)).rejects.toThrow(
+      /\/health never returned 200/
+    );
+    expect(deps.savedTeleportApps).toHaveLength(0);
+  });
+
+  test('failed sync (bad health) does NOT save lastApp', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.x.com' },
+      deployedApp: {
+        name: 'mcp',
+        url: 'https://mcp.x.com',
+        volumes: [{ name: 'agentio-data-mcp', mountPath: '/data' }],
+      },
+      healthProbeResponses: [],
+      logsStdout: 'crash\n',
+    });
+    await expect(
+      runTeleport({ name: 'mcp', sync: true }, deps)
+    ).rejects.toThrow(/\/health never returned 200/);
+    expect(deps.savedTeleportApps).toHaveLength(0);
   });
 });

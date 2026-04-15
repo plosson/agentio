@@ -5,14 +5,14 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 import { generateExportData } from './config';
-import { loadConfig } from '../config/config-manager';
+import { loadConfig, saveConfig } from '../config/config-manager';
 import { generateTeleportDockerfile } from '../server/dockerfile-gen';
 import {
   createSiteioRunner,
   type SiteioRunner,
 } from '../server/siteio-runner';
 import { handleError, CliError } from '../utils/errors';
-import type { Config } from '../types/config';
+import type { Config, TeleportAppRecord } from '../types/config';
 
 /**
  * `agentio mcp teleport <name>` — one-command deploy of the local agentio
@@ -141,6 +141,17 @@ export interface TeleportDeps {
   probeHealth: (url: string) => Promise<number | null>;
   /** Resolved after `ms` milliseconds. Injected for testability. */
   sleep: (ms: number) => Promise<void>;
+  /**
+   * Load the most recently teleported app. Used to resolve an
+   * omitted `<name>` argument (e.g. `agentio mcp teleport --sync`).
+   * Returns null if nothing has been remembered yet.
+   */
+  getLastTeleportApp: () => Promise<TeleportAppRecord | null>;
+  /**
+   * Persist the most recently teleported app so future invocations
+   * without a `<name>` can default to it.
+   */
+  saveLastTeleportApp: (record: TeleportAppRecord) => Promise<void>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
 }
@@ -187,7 +198,12 @@ export async function waitForHealth(
 }
 
 export interface TeleportOptions {
-  name: string;
+  /**
+   * Siteio app name. Optional: if omitted, `runTeleport` will fall
+   * back to the most recently teleported app recorded in config
+   * (`config.teleport.lastApp`). Required for the very first deploy.
+   */
+  name?: string;
   dockerfileOnly?: boolean;
   output?: string;
   dryRun?: boolean;
@@ -228,6 +244,32 @@ export interface TeleportResult {
 }
 
 /**
+ * Resolve the siteio app name, falling back to the remembered one if
+ * the caller omitted `<name>`. Validates the resulting name. Throws a
+ * user-facing CliError if nothing is provided and nothing is remembered.
+ */
+async function resolveAppName(
+  requested: string | undefined,
+  deps: TeleportDeps
+): Promise<string> {
+  if (requested) {
+    validateAppName(requested);
+    return requested;
+  }
+  const last = await deps.getLastTeleportApp();
+  if (!last) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      'No app name provided and no remembered teleport app',
+      'Pass <name> explicitly the first time, e.g. `agentio mcp teleport mcp`. The name is remembered after the first successful deploy.'
+    );
+  }
+  validateAppName(last.name);
+  deps.log(`Using remembered teleport app "${last.name}".`);
+  return last.name;
+}
+
+/**
  * Sync mode: re-export local config and push it to an existing siteio
  * app, then restart. Same dependency-injection model as runTeleport
  * for testability.
@@ -236,6 +278,7 @@ async function runSync(
   opts: TeleportOptions,
   deps: TeleportDeps
 ): Promise<TeleportResult> {
+  const name = await resolveAppName(opts.name, deps);
   // Preflight: same as full teleport.
   deps.log('Checking siteio…');
   if (!(await deps.runner.isInstalled())) {
@@ -268,13 +311,13 @@ async function runSync(
 
   // Sync requires the app to ALREADY EXIST. This is the inverse of the
   // normal teleport check.
-  deps.log(`Checking that siteio app "${opts.name}" exists…`);
-  const existing = await deps.runner.findApp(opts.name);
+  deps.log(`Checking that siteio app "${name}" exists…`);
+  const existing = await deps.runner.findApp(name);
   if (!existing) {
     throw new CliError(
       'NOT_FOUND',
-      `No siteio app named "${opts.name}" to sync to`,
-      `Run \`agentio mcp teleport ${opts.name}\` (without --sync) first to create it.`
+      `No siteio app named "${name}" to sync to`,
+      `Run \`agentio mcp teleport ${name}\` (without --sync) first to create it.`
     );
   }
 
@@ -285,11 +328,11 @@ async function runSync(
   // Detect whether /data is already mounted as a persistent volume.
   // If not, attach it as part of this sync (one-time backfill for apps
   // teleported before the volume was a default).
-  const detail = await deps.runner.appInfo(opts.name);
+  const detail = await deps.runner.appInfo(name);
   const needsVolumeBackfill = !hasDataVolumeMount(detail);
   if (needsVolumeBackfill) {
     deps.log(
-      `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH} as part of this sync.`
+      `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(name)}:${DATA_VOLUME_PATH} as part of this sync.`
     );
   }
 
@@ -297,22 +340,22 @@ async function runSync(
   if (opts.dryRun) {
     deps.log('--- Dry run: the following commands would be executed ---');
     const dryParts = [
-      `siteio apps set ${opts.name}`,
+      `siteio apps set ${name}`,
       '-e AGENTIO_KEY=<redacted>',
       `-e AGENTIO_CONFIG=<${exported.config.length} chars>`,
     ];
     if (needsVolumeBackfill) {
       dryParts.push(
-        `-v ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH}`
+        `-v ${volumeNameFor(name)}:${DATA_VOLUME_PATH}`
       );
     }
     deps.log(dryParts.join(' '));
-    deps.log(`siteio apps restart ${opts.name}`);
+    deps.log(`siteio apps restart ${name}`);
     deps.log(
       '(AGENTIO_SERVER_API_KEY is intentionally NOT touched — operator key on the remote stays the same.)'
     );
     return {
-      name: opts.name,
+      name: name,
       serverApiKey: '',
       claudeMcpAddCommand: null,
     };
@@ -333,20 +376,20 @@ async function runSync(
   // REPLACES the volumes list on update (env merges; volumes don't),
   // so attaching when something else is mounted would clobber it.
   await deps.runner.setApp({
-    name: opts.name,
+    name: name,
     envVars: {
       AGENTIO_KEY: exported.key,
       AGENTIO_CONFIG: exported.config,
     },
     ...(needsVolumeBackfill
       ? {
-          volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH },
+          volumes: { [volumeNameFor(name)]: DATA_VOLUME_PATH },
         }
       : {}),
   });
 
   deps.log('Restarting container so the new env vars take effect…');
-  await deps.runner.restartApp(opts.name);
+  await deps.runner.restartApp(name);
 
   // We already fetched appInfo earlier for volume detection; reuse
   // its URL field rather than calling again. Same fallback as the
@@ -354,7 +397,7 @@ async function runSync(
   // generated subdomain URL, so fall back to findApp if it's missing.
   let url = typeof detail?.url === 'string' ? detail.url : undefined;
   if (!url) {
-    const listed = await deps.runner.findApp(opts.name);
+    const listed = await deps.runner.findApp(name);
     if (typeof listed?.url === 'string') url = listed.url;
   }
 
@@ -368,7 +411,7 @@ async function runSync(
       deps.warn(
         `Container failed to report healthy after ${Math.round(HEALTH_TIMEOUT_MS / 1000)}s. Fetching logs…`
       );
-      const logs = await deps.runner.logsApp(opts.name, {
+      const logs = await deps.runner.logsApp(name, {
         tail: HEALTH_FAILURE_LOG_TAIL,
       });
       deps.warn('--- container logs (tail) ---');
@@ -376,11 +419,20 @@ async function runSync(
       deps.warn('--- end logs ---');
       throw new CliError(
         'API_ERROR',
-        `Sync to "${opts.name}" restarted the container but /health never returned 200`,
+        `Sync to "${name}" restarted the container but /health never returned 200`,
         'Inspect the logs above. The previous config is gone — the next sync (or a manual `siteio apps restart`) will still see the broken state until you fix the root cause.'
       );
     }
   }
+
+  // Remember the app so a future bare `--sync` (or any name-less
+  // teleport invocation) can default to it. Only reached once the
+  // restart + health check have both succeeded.
+  await deps.saveLastTeleportApp({
+    name,
+    url,
+    deployedAt: Date.now(),
+  });
 
   deps.log('');
   deps.log('Sync complete!');
@@ -408,7 +460,7 @@ async function runSync(
   }
 
   return {
-    name: opts.name,
+    name: name,
     url,
     // We did not generate a new server key in sync mode.
     serverApiKey: '',
@@ -424,8 +476,6 @@ export async function runTeleport(
   opts: TeleportOptions,
   deps: TeleportDeps
 ): Promise<TeleportResult> {
-  validateAppName(opts.name);
-
   // Sync mode short-circuits — different command shape, different
   // preflight (app must EXIST, not absent), no Dockerfile work, no
   // create. Mutual exclusion with the "create new app" flags.
@@ -461,6 +511,11 @@ export async function runTeleport(
     return runSync(opts, deps);
   }
 
+  // Resolve the app name up front so every downstream path (including
+  // dockerfile-only and dry-run) uses a single consistent value, and
+  // so an omitted name cleanly falls back to the remembered app.
+  const name = await resolveAppName(opts.name, deps);
+
   // dockerfile-only: skip every siteio interaction, just emit the
   // Dockerfile to stdout or a file and return.
   if (opts.dockerfileOnly) {
@@ -476,7 +531,7 @@ export async function runTeleport(
       process.stdout.write(content);
     }
     return {
-      name: opts.name,
+      name: name,
       serverApiKey: '',
       claudeMcpAddCommand: null,
     };
@@ -519,16 +574,16 @@ export async function runTeleport(
   // and their issued bearers), backfill /data if needed, and redeploy
   // the freshly generated image. If it doesn't exist, fall through to
   // the fresh-deploy path.
-  deps.log(`Checking if siteio app "${opts.name}" already exists…`);
-  const existing = await deps.runner.findApp(opts.name);
+  deps.log(`Checking if siteio app "${name}" already exists…`);
+  const existing = await deps.runner.findApp(name);
   const isRebuild = Boolean(existing);
   if (isRebuild) {
     deps.log(
-      `Found existing siteio app "${opts.name}" — will rebuild image in place (API key and clients preserved).`
+      `Found existing siteio app "${name}" — will rebuild image in place (API key and clients preserved).`
     );
   } else {
     deps.log(
-      `No existing siteio app "${opts.name}" — will create a fresh one.`
+      `No existing siteio app "${name}" — will create a fresh one.`
     );
   }
 
@@ -550,11 +605,11 @@ export async function runTeleport(
   // the persistent volume if it's missing (same logic as --sync).
   let needsVolumeBackfill = false;
   if (isRebuild) {
-    const detail = await deps.runner.appInfo(opts.name);
+    const detail = await deps.runner.appInfo(name);
     needsVolumeBackfill = !hasDataVolumeMount(detail);
     if (needsVolumeBackfill) {
       deps.log(
-        `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH} as part of this rebuild.`
+        `No persistent volume mounted at ${DATA_VOLUME_PATH} — will attach ${volumeNameFor(name)}:${DATA_VOLUME_PATH} as part of this rebuild.`
       );
     }
   }
@@ -590,16 +645,16 @@ export async function runTeleport(
     if (!isRebuild) {
       if (gitSettings) {
         deps.log(
-          `siteio apps create ${opts.name} -g ${gitSettings.repoUrl} --branch ${gitSettings.branch} --dockerfile ${TELEPORT_DOCKERFILE_PATH} -p 9999`
+          `siteio apps create ${name} -g ${gitSettings.repoUrl} --branch ${gitSettings.branch} --dockerfile ${TELEPORT_DOCKERFILE_PATH} -p 9999`
         );
       } else {
         deps.log(
-          `siteio apps create ${opts.name} -f <tempfile> -p 9999`
+          `siteio apps create ${name} -f <tempfile> -p 9999`
         );
       }
     }
     const setParts = [
-      `siteio apps set ${opts.name}`,
+      `siteio apps set ${name}`,
       '-e AGENTIO_KEY=<redacted>',
       `-e AGENTIO_CONFIG=<${exported.config.length} chars>`,
     ];
@@ -607,11 +662,11 @@ export async function runTeleport(
       setParts.push(`-e AGENTIO_SERVER_API_KEY=${serverApiKey}`);
     }
     if (!isRebuild || needsVolumeBackfill) {
-      setParts.push(`-v ${volumeNameFor(opts.name)}:${DATA_VOLUME_PATH}`);
+      setParts.push(`-v ${volumeNameFor(name)}:${DATA_VOLUME_PATH}`);
     }
     deps.log(setParts.join(' '));
     deps.log(
-      `siteio apps deploy ${opts.name}${opts.noCache ? ' --no-cache' : ''}`
+      `siteio apps deploy ${name}${opts.noCache ? ' --no-cache' : ''}`
     );
     if (isRebuild) {
       deps.log(
@@ -628,7 +683,7 @@ export async function runTeleport(
       );
     }
     return {
-      name: opts.name,
+      name: name,
       serverApiKey,
       claudeMcpAddCommand: null,
     };
@@ -643,10 +698,10 @@ export async function runTeleport(
 
   try {
     if (!isRebuild) {
-      deps.log(`Creating siteio app "${opts.name}"…`);
+      deps.log(`Creating siteio app "${name}"…`);
       if (gitSettings) {
         await deps.runner.createApp({
-          name: opts.name,
+          name: name,
           port: 9999,
           git: {
             repoUrl: gitSettings.repoUrl,
@@ -656,7 +711,7 @@ export async function runTeleport(
         });
       } else {
         await deps.runner.createApp({
-          name: opts.name,
+          name: name,
           dockerfilePath: tempPath!,
           port: 9999,
         });
@@ -686,10 +741,10 @@ export async function runTeleport(
     }
 
     await deps.runner.setApp({
-      name: opts.name,
+      name: name,
       envVars,
       ...(attachVolume
-        ? { volumes: { [volumeNameFor(opts.name)]: DATA_VOLUME_PATH } }
+        ? { volumes: { [volumeNameFor(name)]: DATA_VOLUME_PATH } }
         : {}),
     });
 
@@ -699,7 +754,7 @@ export async function runTeleport(
         : 'Deploying (this may take a minute — Docker is building your image)…'
     );
     await deps.runner.deploy({
-      name: opts.name,
+      name: name,
       // In git mode, there's no -f to re-pass on deploy — siteio uses
       // the stored git settings from create.
       ...(tempPath ? { dockerfilePath: tempPath } : {}),
@@ -708,7 +763,7 @@ export async function runTeleport(
 
     // Try to surface the deployed URL. Non-fatal if siteio doesn't
     // give us one back.
-    const info = await deps.runner.appInfo(opts.name);
+    const info = await deps.runner.appInfo(name);
     let url = typeof info?.url === 'string' ? info.url : undefined;
     // siteio's `apps info --json` output omits the generated subdomain
     // URL (domains: [] in the payload) even though the app is reachable
@@ -716,7 +771,7 @@ export async function runTeleport(
     // level. Fall back to findApp so the post-deploy health check can
     // still run even when siteio doesn't surface url in info.
     if (!url) {
-      const listed = await deps.runner.findApp(opts.name);
+      const listed = await deps.runner.findApp(name);
       if (typeof listed?.url === 'string') url = listed.url;
     }
 
@@ -731,7 +786,7 @@ export async function runTeleport(
         deps.warn(
           `Container failed to report healthy after ${Math.round(HEALTH_TIMEOUT_MS / 1000)}s. Fetching logs…`
         );
-        const logs = await deps.runner.logsApp(opts.name, {
+        const logs = await deps.runner.logsApp(name, {
           tail: HEALTH_FAILURE_LOG_TAIL,
         });
         deps.warn('--- container logs (tail) ---');
@@ -739,20 +794,29 @@ export async function runTeleport(
         deps.warn('--- end logs ---');
         throw new CliError(
           'API_ERROR',
-          `Deploy "${opts.name}" started but /health never returned 200`,
+          `Deploy "${name}" started but /health never returned 200`,
           'Inspect the logs above. Common causes: permission errors on mounted volumes, missing env vars, binary not found for the container arch.'
         );
       }
     } else {
       deps.warn(
         'Skipping health check: siteio did not return a URL for this app. ' +
-          `Run \`siteio apps info ${opts.name}\` and curl <url>/health manually to verify.`
+          `Run \`siteio apps info ${name}\` and curl <url>/health manually to verify.`
       );
     }
 
     const claudeCmd = url
       ? `claude mcp add --scope local --transport http agentio "${url}/mcp?services=rss"`
       : null;
+
+    // Remember the app so a future bare `--sync` (or any name-less
+    // teleport invocation) can default to it. Only reached once the
+    // deploy + health check have both succeeded.
+    await deps.saveLastTeleportApp({
+      name,
+      url,
+      deployedAt: Date.now(),
+    });
 
     deps.log('');
     deps.log(isRebuild ? 'Rebuild complete!' : 'Teleport complete!');
@@ -762,7 +826,7 @@ export async function runTeleport(
       deps.log(`  MCP:       ${url}/mcp`);
     } else {
       deps.log(
-        `  URL:       (siteio did not return a URL — run \`siteio apps info ${opts.name}\` to look it up)`
+        `  URL:       (siteio did not return a URL — run \`siteio apps info ${name}\` to look it up)`
       );
     }
     if (isRebuild) {
@@ -781,7 +845,7 @@ export async function runTeleport(
     }
 
     return {
-      name: opts.name,
+      name: name,
       url,
       serverApiKey,
       claudeMcpAddCommand: claudeCmd,
@@ -847,6 +911,29 @@ async function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Default `getLastTeleportApp`: read `config.teleport.lastApp` from
+ * `~/.config/agentio/config.json`. Returns null if the config has no
+ * teleport memory yet.
+ */
+async function defaultGetLastTeleportApp(): Promise<TeleportAppRecord | null> {
+  const config = (await loadConfig()) as Config;
+  return config.teleport?.lastApp ?? null;
+}
+
+/**
+ * Default `saveLastTeleportApp`: merge into `config.teleport.lastApp`
+ * and persist. Single-slot — the most recent successful teleport
+ * overwrites whatever was there before.
+ */
+async function defaultSaveLastTeleportApp(
+  record: TeleportAppRecord
+): Promise<void> {
+  const config = (await loadConfig()) as Config;
+  config.teleport = { ...(config.teleport ?? {}), lastApp: record };
+  await saveConfig(config);
+}
+
 async function defaultDetectGitOriginUrl(): Promise<string | null> {
   try {
     const proc = Bun.spawn(['git', 'remote', 'get-url', 'origin'], {
@@ -877,8 +964,8 @@ export function registerTeleportCommand(parent: Command): void {
       'Deploy the agentio HTTP MCP server to a siteio-managed remote in one command'
     )
     .argument(
-      '<name>',
-      'Siteio app name (becomes the subdomain: e.g. "mcp" → mcp.<your-siteio-domain>)'
+      '[name]',
+      'Siteio app name (becomes the subdomain: e.g. "mcp" → mcp.<your-siteio-domain>). Optional on subsequent runs — defaults to the most recently deployed app.'
     )
     .option(
       '--dockerfile-only',
@@ -908,7 +995,7 @@ export function registerTeleportCommand(parent: Command): void {
       '--sync',
       'Push the latest local config (profiles + credentials) to an EXISTING siteio app and restart it. Use after adding/changing a profile. Does not rebuild the image; does not change the operator API key.'
     )
-    .action(async (name: string, options) => {
+    .action(async (name: string | undefined, options) => {
       try {
         const runner = createSiteioRunner();
         await runTeleport(
@@ -937,6 +1024,8 @@ export function registerTeleportCommand(parent: Command): void {
             detectGitOriginUrl: defaultDetectGitOriginUrl,
             probeHealth: defaultProbeHealth,
             sleep: defaultSleep,
+            getLastTeleportApp: defaultGetLastTeleportApp,
+            saveLastTeleportApp: defaultSaveLastTeleportApp,
             log: (msg) => console.log(msg),
             warn: (msg) => console.error(msg),
           }

@@ -40,6 +40,23 @@ export interface ProfileEntry {
 // Helper type for backward compatibility during migration
 export type ProfileValue = string | ProfileEntry;
 
+/**
+ * Record of a successfully teleported siteio app. Persisted so that
+ * `agentio mcp teleport --sync` (and other name-optional variants) can
+ * default to the most recently deployed app instead of forcing the
+ * user to re-type the name every time.
+ */
+export interface TeleportAppRecord {
+  name: string;
+  url?: string;
+  /** Unix epoch milliseconds of the last successful deploy or sync. */
+  deployedAt: number;
+}
+
+export interface TeleportConfig {
+  lastApp?: TeleportAppRecord;
+}
+
 export interface Config {
   profiles: {
     gdocs?: ProfileValue[];
@@ -60,6 +77,7 @@ export interface Config {
   env?: Record<string, string>;
   gateway?: GatewayConfig;
   server?: ServerConfig;
+  teleport?: TeleportConfig;
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'github' | 'jira' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';
