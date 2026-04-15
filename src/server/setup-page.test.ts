@@ -160,6 +160,23 @@ describe('POST / — login', () => {
     expect(res.headers.get('set-cookie')).toBeNull();
   });
 
+  test('correct api_key with trailing whitespace (newline/space) → 302', async () => {
+    // Regression: operators routinely paste the key with a trailing
+    // newline from terminals. Byte-for-byte compare would silently
+    // reject an otherwise-valid key; trim makes it forgiving.
+    for (const suffix of [' ', '\n', '\r\n', '  \t']) {
+      const res = await handleRequest(
+        req('POST', '/', {
+          contentType: FORM,
+          body: formBody({ api_key: API_KEY + suffix }),
+        }),
+        ctx
+      );
+      expect(res.status).toBe(302);
+      expect(res.headers.get('set-cookie')).toContain(expectedCookieValue(API_KEY));
+    }
+  });
+
   test('correct api_key → 302 to /, sets cookie with expected attributes', async () => {
     const res = await handleRequest(
       req('POST', '/', {

@@ -809,6 +809,29 @@ describe('handleAuthorizePost — happy path', () => {
     expect(url.searchParams.get('state')).toBe('STATE_XYZ');
   });
 
+  test('api_key with trailing whitespace still authorizes (trim)', async () => {
+    // Regression: operators often paste the key with a trailing newline
+    // from terminals. Byte-for-byte compare would silently reject.
+    const ctx = makeCtx();
+    const clientId = await registerTestClient(ctx);
+    for (const suffix of [' ', '\n', '\r\n', '  \t']) {
+      const res = await handleAuthorizePost(
+        authorizePost({
+          client_id: clientId,
+          redirect_uri: 'http://localhost:53682/callback',
+          response_type: 'code',
+          code_challenge: 'CHAL',
+          code_challenge_method: 'S256',
+          state: '',
+          scope: 'gchat:default',
+          api_key: TEST_API_KEY + suffix,
+        }),
+        ctx
+      );
+      expect(res.status).toBe(302);
+    }
+  });
+
   test('issued code is consumable from the store', async () => {
     const ctx = makeCtx();
     const clientId = await registerTestClient(ctx);

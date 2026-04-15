@@ -338,7 +338,11 @@ async function handleSetupPost(
     });
   }
 
-  const apiKey = form.get('api_key') ?? '';
+  // Trim: operators routinely paste the key with a trailing newline or
+  // space from terminals / password managers. constantTimeEquals is a
+  // byte-for-byte compare, so an extra whitespace character silently
+  // fails the login with a confusing "Invalid API key" error.
+  const apiKey = (form.get('api_key') ?? '').trim();
   if (!apiKey || !constantTimeEquals(apiKey, ctx.apiKey)) {
     return new Response(loginFormHtml('Invalid API key.'), {
       status: 401,

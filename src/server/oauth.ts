@@ -539,7 +539,10 @@ export async function handleAuthorizePost(
 
   const params = result.params;
   const client = ctx.oauthStore.findClient(params.clientId);
-  const apiKey = form.get('api_key') ?? '';
+  // Trim pasted whitespace — same UX issue as setup-page.ts: a stray
+  // newline or trailing space from copy-paste would otherwise fail the
+  // byte-for-byte compare with a confusing error.
+  const apiKey = (form.get('api_key') ?? '').trim();
 
   if (!apiKey || !constantTimeEquals(apiKey, ctx.apiKey)) {
     // Re-render the form with an error. We deliberately do NOT redirect
