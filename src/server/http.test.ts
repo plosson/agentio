@@ -173,9 +173,10 @@ describe('handleRequest — /health adversarial paths', () => {
     expect(res.status).toBe(404);
   });
 
-  test('GET / (root) → 404', async () => {
+  test('GET / (root) → 200 setup page (login form)', async () => {
     const res = await dispatch(req('/'));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
   });
 });
 

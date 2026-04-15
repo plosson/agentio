@@ -1,6 +1,7 @@
 import { handleMcpRequest } from './mcp-http';
 import type { OAuthStore } from './oauth-store';
 import { requireBearer, routeOAuth } from './oauth';
+import { routeSetup } from './setup-page';
 
 /**
  * Context passed to every fetch handler invocation. Built once at boot in
@@ -34,6 +35,11 @@ export async function handleRequest(
   if (url.pathname === '/health') {
     return jsonResponse({ ok: true });
   }
+
+  // Root setup page — operator-facing UI (API-key gated) for picking
+  // profiles and generating the MCP URL.
+  const setupResponse = await routeSetup(req, ctx);
+  if (setupResponse) return setupResponse;
 
   // OAuth metadata + endpoints (Phase 3c onward).
   const oauthResponse = await routeOAuth(req, ctx);
