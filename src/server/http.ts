@@ -2,6 +2,7 @@ import { handleMcpRequest } from './mcp-http';
 import type { OAuthStore } from './oauth-store';
 import { requireBearer, routeOAuth } from './oauth';
 import { routeSetup } from './setup-page';
+import { FAVICON_BYTES, FAVICON_CONTENT_TYPE } from './favicon';
 
 /**
  * Context passed to every fetch handler invocation. Built once at boot in
@@ -34,6 +35,16 @@ export async function handleRequest(
 
   if (url.pathname === '/health') {
     return jsonResponse({ ok: true });
+  }
+
+  if (url.pathname === '/favicon.ico' || url.pathname === '/favicon.png') {
+    return new Response(FAVICON_BYTES, {
+      status: 200,
+      headers: {
+        'content-type': FAVICON_CONTENT_TYPE,
+        'cache-control': 'public, max-age=86400',
+      },
+    });
   }
 
   // Root setup page — operator-facing UI (API-key gated) for picking

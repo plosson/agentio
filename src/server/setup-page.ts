@@ -188,6 +188,7 @@ function loginFormHtml(errorMessage?: string): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/png" href="/favicon.png">
 <title>agentio MCP setup</title>
 <style>${BASE_CSS}</style>
 </head>
@@ -307,6 +308,7 @@ ${sectionsHtml}
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/png" href="/favicon.png">
 <title>agentio MCP setup</title>
 <style>${BASE_CSS}${PROFILES_CSS}</style>
 </head>
