@@ -41,6 +41,12 @@ interface FakeRunnerOptions {
   deployedApp?: SiteioApp | null;
   /** Stdout returned by logsApp. Default: empty string. */
   logsStdout?: string;
+  /**
+   * If set, the first call to `deploy` throws an Error with this message;
+   * subsequent calls succeed. Used to simulate siteio rejecting `-f` on
+   * an app that was originally created with `-g` (git mode).
+   */
+  failDeployFirstWith?: string;
   failOn?:
     | 'isInstalled'
     | 'isLoggedIn'
@@ -88,6 +94,14 @@ function makeFakeRunner(opts: FakeRunnerOptions = {}): {
     async deploy(args) {
       calls.push({ method: 'deploy', args });
       if (shouldFail('deploy')) throw new Error('deploy failed');
+      if (opts.failDeployFirstWith != null) {
+        const deployCallCount = calls.filter(
+          (c) => c.method === 'deploy'
+        ).length;
+        if (deployCallCount === 1) {
+          throw new Error(opts.failDeployFirstWith);
+        }
+      }
     },
     async restartApp(name) {
       calls.push({ method: 'restartApp', args: { name } });
@@ -446,6 +460,29 @@ describe('runTeleport — preflight failures', () => {
     // We do NOT print the onboarding snippet on rebuild — clients
     // already have their bearer.
     expect(logs).not.toContain('To add to Claude Code:');
+  });
+
+  test('rebuild: deploy retries without -f if existing app was created in git mode', async () => {
+    const deps = makeDeps({
+      existingApp: { name: 'mcp', url: 'https://mcp.existing.com' },
+      failDeployFirstWith:
+        'siteio apps deploy mcp -f /tmp/Dockerfile failed (deploy mcp): exit 1\nx Cannot override Dockerfile: app was not created with -f',
+    });
+    const result = await runTeleport({ name: 'mcp' }, deps);
+
+    const deployCalls = deps.calls.filter((c) => c.method === 'deploy');
+    expect(deployCalls).toHaveLength(2);
+    // First attempt passed -f (inline Dockerfile)…
+    expect(
+      (deployCalls[0]!.args as { dockerfilePath?: string }).dockerfilePath
+    ).toMatch(/Dockerfile$/);
+    // …second attempt omits -f so siteio uses its stored git settings.
+    expect(
+      (deployCalls[1]!.args as { dockerfilePath?: string }).dockerfilePath
+    ).toBeUndefined();
+
+    expect(result.serverApiKey).toBe('');
+    expect(deps.logLines.join('\n')).toMatch(/not created with -f/i);
   });
 });
 

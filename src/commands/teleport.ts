@@ -753,13 +753,35 @@ export async function runTeleport(
         ? 'Rebuilding (this may take a minute — Docker is rebuilding your image)…'
         : 'Deploying (this may take a minute — Docker is building your image)…'
     );
-    await deps.runner.deploy({
-      name: name,
-      // In git mode, there's no -f to re-pass on deploy — siteio uses
-      // the stored git settings from create.
-      ...(tempPath ? { dockerfilePath: tempPath } : {}),
-      noCache: opts.noCache,
-    });
+    try {
+      await deps.runner.deploy({
+        name: name,
+        // In git mode, there's no -f to re-pass on deploy — siteio uses
+        // the stored git settings from create.
+        ...(tempPath ? { dockerfilePath: tempPath } : {}),
+        noCache: opts.noCache,
+      });
+    } catch (err) {
+      // The existing app may have been created in git mode (no -f). siteio
+      // refuses `deploy -f` in that case with a specific error — retry
+      // without -f so it falls back to the stored git settings.
+      if (
+        isRebuild &&
+        tempPath &&
+        err instanceof Error &&
+        /not created with -f/i.test(err.message)
+      ) {
+        deps.log(
+          'Existing app was not created with -f — retrying deploy without inline Dockerfile (siteio will rebuild from its stored git settings).'
+        );
+        await deps.runner.deploy({
+          name: name,
+          noCache: opts.noCache,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     // Try to surface the deployed URL. Non-fatal if siteio doesn't
     // give us one back.
