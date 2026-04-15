@@ -147,6 +147,24 @@ label.profile {
   cursor: pointer;
 }
 label.profile input { margin-right: 0.5rem; }
+.ro-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  vertical-align: 1px;
+}
+@media (prefers-color-scheme: dark) {
+  .ro-badge { color: #fde68a; background: #3f2e08; border-color: #5c4510; }
+}
 .output { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1.4rem; }
 .output label { font-weight: 600; font-size: 0.9rem; }
 .output .row { display: flex; gap: 0.5rem; }
@@ -186,9 +204,14 @@ ${errorBlock}
 </html>`;
 }
 
+interface ProfileView {
+  name: string;
+  readOnly: boolean;
+}
+
 interface ServiceProfileList {
   service: string;
-  profiles: string[];
+  profiles: ProfileView[];
 }
 
 function profilesPageHtml(origin: string, configured: ServiceProfileList[]): string {
@@ -198,10 +221,13 @@ function profilesPageHtml(origin: string, configured: ServiceProfileList[]): str
     .map((s) => {
       const items = s.profiles
         .map((p) => {
-          const value = `${s.service}:${p}`;
+          const value = `${s.service}:${p.name}`;
+          const badge = p.readOnly
+            ? ' <span class="ro-badge" title="read-only">RO</span>'
+            : '';
           return `    <label class="profile"><input type="checkbox" name="sp" value="${escapeHtml(
             value
-          )}"> ${escapeHtml(p)}</label>`;
+          )}"> ${escapeHtml(p.name)}${badge}</label>`;
         })
         .join('\n');
       return `  <section class="service">
@@ -314,7 +340,10 @@ async function handleSetupGet(
     .filter((s) => s.profiles.length > 0)
     .map((s) => ({
       service: s.service,
-      profiles: s.profiles.map((p) => p.name),
+      profiles: s.profiles.map((p) => ({
+        name: p.name,
+        readOnly: p.readOnly === true,
+      })),
     }));
 
   return new Response(profilesPageHtml(origin, configured), {

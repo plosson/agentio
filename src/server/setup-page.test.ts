@@ -32,10 +32,14 @@ interface FakeProfile {
 // Mutable container the mock consults on each call.
 let currentProfiles: FakeProfile[] = [];
 
-function setProfiles(fixture: Record<string, string[]>): void {
-  currentProfiles = Object.entries(fixture).map(([service, names]) => ({
+type ProfileFixture = string | { name: string; readOnly?: boolean };
+
+function setProfiles(fixture: Record<string, ProfileFixture[]>): void {
+  currentProfiles = Object.entries(fixture).map(([service, entries]) => ({
     service,
-    profiles: names.map((n) => ({ name: n })),
+    profiles: entries.map((e) =>
+      typeof e === 'string' ? { name: e } : { name: e.name, readOnly: e.readOnly }
+    ),
   }));
 }
 
@@ -261,6 +265,33 @@ describe('GET / — authenticated (valid cookie)', () => {
     expect(html).toContain('<h2>slack</h2>');
     expect(html).toContain('value="slack:team"');
     expect(html).not.toContain('<h2>jira</h2>');
+  });
+
+  test('read-only profiles render an RO badge; writable profiles do not', async () => {
+    setProfiles({
+      gmail: [
+        'work', // writable
+        { name: 'archive', readOnly: true },
+      ],
+    });
+    const res = await handleRequest(
+      req('GET', '/', { cookie: validCookie() }),
+      ctx
+    );
+    const html = await res.text();
+
+    // Find the two profile rows and check each one independently.
+    const workRow = html.match(
+      /<label class="profile">[^<]*<input[^>]*value="gmail:work"[^>]*>[^<]*(?:<span[^<]*<\/span>)?[^<]*<\/label>/
+    );
+    const archiveRow = html.match(
+      /<label class="profile">[^<]*<input[^>]*value="gmail:archive"[^>]*>[^<]*(?:<span[^<]*<\/span>)?[^<]*<\/label>/
+    );
+    expect(workRow).not.toBeNull();
+    expect(archiveRow).not.toBeNull();
+    expect(workRow![0]).not.toContain('ro-badge');
+    expect(archiveRow![0]).toContain('ro-badge');
+    expect(archiveRow![0]).toContain('>RO<');
   });
 
   test('no configured profiles → empty-state message, no checkboxes', async () => {
