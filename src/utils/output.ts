@@ -476,6 +476,7 @@ import type {
   GSheetsAppendResult,
   GSheetsClearResult,
   GSheetsCreateResult,
+  GSheetsFormatResult,
 } from '../types/gsheets';
 
 export function printGSheetsList(spreadsheets: GSheetsListItem[]): void {
@@ -546,6 +547,16 @@ export function printGSheetsCreated(result: GSheetsCreateResult): void {
   console.log(`ID: ${result.id}`);
   console.log(`Title: ${result.title}`);
   console.log(`URL: ${result.url}`);
+}
+
+export function printGSheetsFormatResult(result: GSheetsFormatResult): void {
+  console.log(`Formatted ${result.range}`);
+  console.log(`  Sheet: ${result.sheetTitle}`);
+  if (result.cleared) console.log('  Cleared existing formatting');
+  if (result.appliedFields.length > 0) {
+    console.log(`  Applied: ${result.appliedFields.join(', ')}`);
+  }
+  if (result.merged) console.log('  Merged: yes');
 }
 
 // Google Drive specific formatters

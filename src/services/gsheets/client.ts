@@ -18,7 +18,93 @@ import type {
   GSheetsCreateResult,
   GSheetsListOptions,
   GSheetsListItem,
+  GSheetsFormatOptions,
+  GSheetsFormatResult,
+  GSheetsBorderStyle,
 } from '../../types/gsheets';
+
+function parseHexColor(hex: string): { red: number; green: number; blue: number } {
+  const cleaned = hex.trim().replace(/^#/, '');
+  if (!/^[0-9a-f]{6}$/i.test(cleaned)) {
+    throw new CliError('INVALID_PARAMS', `Invalid hex color: ${hex}`, 'Use format #rrggbb (e.g., #ff0000)');
+  }
+  return {
+    red: parseInt(cleaned.slice(0, 2), 16) / 255,
+    green: parseInt(cleaned.slice(2, 4), 16) / 255,
+    blue: parseInt(cleaned.slice(4, 6), 16) / 255,
+  };
+}
+
+function colLettersToIndex(letters: string): number {
+  let index = 0;
+  for (const ch of letters.toUpperCase()) {
+    index = index * 26 + (ch.charCodeAt(0) - 64);
+  }
+  return index - 1;
+}
+
+function parseA1Range(range: string): { sheetTitle?: string; cells?: string } {
+  const bangIdx = range.indexOf('!');
+  if (bangIdx === -1) {
+    if (/^[A-Z]+\d*(:[A-Z]+\d*)?$/i.test(range) || /^\d+:\d+$/.test(range)) {
+      return { cells: range };
+    }
+    return { sheetTitle: range };
+  }
+  let sheetTitle = range.slice(0, bangIdx);
+  if (sheetTitle.startsWith("'") && sheetTitle.endsWith("'")) {
+    sheetTitle = sheetTitle.slice(1, -1).replace(/''/g, "'");
+  }
+  const cells = range.slice(bangIdx + 1);
+  return { sheetTitle, cells: cells || undefined };
+}
+
+function parseCellRange(cells?: string): {
+  startRow?: number;
+  endRow?: number;
+  startCol?: number;
+  endCol?: number;
+} {
+  if (!cells) return {};
+  const [startRef, endRef] = cells.split(':');
+  const parseRef = (ref: string): { col?: number; row?: number } => {
+    const m = ref.match(/^([A-Z]+)?(\d+)?$/i);
+    if (!m || (!m[1] && !m[2])) {
+      throw new CliError('INVALID_PARAMS', `Invalid cell reference: ${ref}`, 'Use A1 notation like A1, B2, or A:B');
+    }
+    return {
+      col: m[1] ? colLettersToIndex(m[1]) : undefined,
+      row: m[2] ? parseInt(m[2], 10) - 1 : undefined,
+    };
+  };
+  const s = parseRef(startRef);
+  const e = endRef ? parseRef(endRef) : s;
+  return {
+    startCol: s.col,
+    endCol: e.col !== undefined ? e.col + 1 : undefined,
+    startRow: s.row,
+    endRow: e.row !== undefined ? e.row + 1 : undefined,
+  };
+}
+
+function buildBorderRequest(
+  range: sheets_v4.Schema$GridRange,
+  style: GSheetsBorderStyle
+): sheets_v4.Schema$Request {
+  const border: sheets_v4.Schema$Border = { style: style === 'none' ? 'NONE' : 'SOLID' };
+  const req: sheets_v4.Schema$UpdateBordersRequest = {
+    range,
+    top: border,
+    bottom: border,
+    left: border,
+    right: border,
+  };
+  if (style === 'all') {
+    req.innerHorizontal = border;
+    req.innerVertical = border;
+  }
+  return { updateBorders: req };
+}
 
 export class GSheetsClient implements ServiceClient {
   private credentials: GSheetsCredentials;
@@ -298,6 +384,163 @@ export class GSheetsClient implements ServiceClient {
     } catch (err) {
       this.throwApiError(err, 'export spreadsheet');
     }
+  }
+
+  async format(
+    spreadsheetIdOrUrl: string,
+    range: string,
+    options: GSheetsFormatOptions
+  ): Promise<GSheetsFormatResult> {
+    const spreadsheetId = this.extractSpreadsheetId(spreadsheetIdOrUrl);
+    const cleanedRange = this.cleanRange(range);
+
+    try {
+      const { gridRange, sheetTitle } = await this.resolveGridRange(spreadsheetId, cleanedRange);
+      const requests: sheets_v4.Schema$Request[] = [];
+      const appliedFields: string[] = [];
+
+      if (options.clearFormat) {
+        requests.push({
+          repeatCell: {
+            range: gridRange,
+            cell: {},
+            fields: 'userEnteredFormat',
+          },
+        });
+      }
+
+      const cellFormat: sheets_v4.Schema$CellFormat = {};
+      const maskParts: string[] = [];
+
+      if (options.backgroundColor !== undefined) {
+        cellFormat.backgroundColor = parseHexColor(options.backgroundColor);
+        maskParts.push('backgroundColor');
+      }
+      if (options.horizontalAlignment !== undefined) {
+        cellFormat.horizontalAlignment = options.horizontalAlignment;
+        maskParts.push('horizontalAlignment');
+      }
+      if (options.verticalAlignment !== undefined) {
+        cellFormat.verticalAlignment = options.verticalAlignment;
+        maskParts.push('verticalAlignment');
+      }
+      if (options.wrapStrategy !== undefined) {
+        cellFormat.wrapStrategy = options.wrapStrategy;
+        maskParts.push('wrapStrategy');
+      }
+      if (options.numberFormat !== undefined) {
+        cellFormat.numberFormat = { type: 'NUMBER', pattern: options.numberFormat };
+        maskParts.push('numberFormat');
+      }
+
+      const textFormat: sheets_v4.Schema$TextFormat = {};
+      const textMask: string[] = [];
+      if (options.bold !== undefined) {
+        textFormat.bold = options.bold;
+        textMask.push('bold');
+      }
+      if (options.italic !== undefined) {
+        textFormat.italic = options.italic;
+        textMask.push('italic');
+      }
+      if (options.underline !== undefined) {
+        textFormat.underline = options.underline;
+        textMask.push('underline');
+      }
+      if (options.fontSize !== undefined) {
+        textFormat.fontSize = options.fontSize;
+        textMask.push('fontSize');
+      }
+      if (options.fontFamily !== undefined) {
+        textFormat.fontFamily = options.fontFamily;
+        textMask.push('fontFamily');
+      }
+      if (options.textColor !== undefined) {
+        textFormat.foregroundColor = parseHexColor(options.textColor);
+        textMask.push('foregroundColor');
+      }
+
+      if (textMask.length > 0) {
+        cellFormat.textFormat = textFormat;
+        for (const part of textMask) {
+          maskParts.push(`textFormat.${part}`);
+        }
+      }
+
+      if (options.raw) {
+        Object.assign(cellFormat, options.raw);
+        for (const key of Object.keys(options.raw)) {
+          if (!maskParts.some((p) => p === key || p.startsWith(`${key}.`))) {
+            maskParts.push(key);
+          }
+        }
+      }
+
+      if (maskParts.length > 0) {
+        requests.push({
+          repeatCell: {
+            range: gridRange,
+            cell: { userEnteredFormat: cellFormat },
+            fields: maskParts.map((p) => `userEnteredFormat.${p}`).join(','),
+          },
+        });
+        appliedFields.push(...maskParts);
+      }
+
+      if (options.border !== undefined) {
+        requests.push(buildBorderRequest(gridRange, options.border));
+        appliedFields.push(`border:${options.border}`);
+      }
+
+      if (options.merge) {
+        requests.push({
+          mergeCells: { range: gridRange, mergeType: 'MERGE_ALL' },
+        });
+      }
+
+      if (requests.length === 0) {
+        throw new CliError('INVALID_PARAMS', 'No formatting options specified', 'Pass at least one format flag or --clear-format');
+      }
+
+      await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests },
+      });
+
+      return {
+        range: cleanedRange,
+        sheetTitle,
+        appliedFields,
+        merged: !!options.merge,
+        cleared: !!options.clearFormat,
+      };
+    } catch (err) {
+      if (err instanceof CliError) throw err;
+      this.throwApiError(err, 'format range');
+    }
+  }
+
+  private async resolveGridRange(
+    spreadsheetId: string,
+    a1range: string
+  ): Promise<{ gridRange: sheets_v4.Schema$GridRange; sheetTitle: string }> {
+    const { sheetTitle: requestedTitle, cells } = parseA1Range(a1range);
+    const response = await this.sheets.spreadsheets.get({ spreadsheetId });
+    const sheets = response.data.sheets || [];
+    const targetSheet = requestedTitle
+      ? sheets.find((s) => s.properties?.title === requestedTitle)
+      : sheets[0];
+    if (!targetSheet?.properties) {
+      throw new CliError('NOT_FOUND', `Sheet not found: ${requestedTitle || '(first sheet)'}`);
+    }
+    const sheetId = targetSheet.properties.sheetId ?? 0;
+    const { startRow, endRow, startCol, endCol } = parseCellRange(cells);
+    const gridRange: sheets_v4.Schema$GridRange = { sheetId };
+    if (startRow !== undefined) gridRange.startRowIndex = startRow;
+    if (endRow !== undefined) gridRange.endRowIndex = endRow;
+    if (startCol !== undefined) gridRange.startColumnIndex = startCol;
+    if (endCol !== undefined) gridRange.endColumnIndex = endCol;
+    return { gridRange, sheetTitle: targetSheet.properties.title || '' };
   }
 
   private extractSpreadsheetId(idOrUrl: string): string {

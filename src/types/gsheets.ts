@@ -79,3 +79,34 @@ export interface GSheetsListItem {
   modifiedTime?: string;
   webViewLink: string;
 }
+
+export type GSheetsHorizontalAlignment = 'LEFT' | 'CENTER' | 'RIGHT';
+export type GSheetsVerticalAlignment = 'TOP' | 'MIDDLE' | 'BOTTOM';
+export type GSheetsWrapStrategy = 'OVERFLOW_CELL' | 'CLIP' | 'WRAP';
+export type GSheetsBorderStyle = 'all' | 'outer' | 'none';
+
+export interface GSheetsFormatOptions {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  fontSize?: number;
+  fontFamily?: string;
+  textColor?: string;
+  backgroundColor?: string;
+  horizontalAlignment?: GSheetsHorizontalAlignment;
+  verticalAlignment?: GSheetsVerticalAlignment;
+  wrapStrategy?: GSheetsWrapStrategy;
+  numberFormat?: string;
+  border?: GSheetsBorderStyle;
+  merge?: boolean;
+  clearFormat?: boolean;
+  raw?: Record<string, unknown>;
+}
+
+export interface GSheetsFormatResult {
+  range: string;
+  sheetTitle: string;
+  appliedFields: string[];
+  merged: boolean;
+  cleared: boolean;
+}

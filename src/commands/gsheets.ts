@@ -15,10 +15,18 @@ import {
   printGSheetsAppendResult,
   printGSheetsClearResult,
   printGSheetsCreated,
+  printGSheetsFormatResult,
 } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
-import type { GSheetsCredentials } from '../types/gsheets';
+import type {
+  GSheetsCredentials,
+  GSheetsFormatOptions,
+  GSheetsHorizontalAlignment,
+  GSheetsVerticalAlignment,
+  GSheetsWrapStrategy,
+  GSheetsBorderStyle,
+} from '../types/gsheets';
 
 const getGSheetsClient = createClientGetter<GSheetsCredentials, GSheetsClient>({
   service: 'gsheets',
@@ -55,6 +63,54 @@ function parseValues(valueArgs: string[], valuesJson?: string): unknown[][] {
     const cells = row.trim().split('|');
     return cells.map((cell) => cell.trim());
   });
+}
+
+function parseAlign(value?: string): GSheetsHorizontalAlignment | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase();
+  if (v === 'left') return 'LEFT';
+  if (v === 'center' || v === 'centre') return 'CENTER';
+  if (v === 'right') return 'RIGHT';
+  throw new CliError('INVALID_PARAMS', `Invalid --align value: ${value}`, 'Use left, center, or right');
+}
+
+function parseValign(value?: string): GSheetsVerticalAlignment | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase();
+  if (v === 'top') return 'TOP';
+  if (v === 'middle' || v === 'center') return 'MIDDLE';
+  if (v === 'bottom') return 'BOTTOM';
+  throw new CliError('INVALID_PARAMS', `Invalid --valign value: ${value}`, 'Use top, middle, or bottom');
+}
+
+function parseWrap(value?: string): GSheetsWrapStrategy | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase();
+  if (v === 'overflow') return 'OVERFLOW_CELL';
+  if (v === 'clip') return 'CLIP';
+  if (v === 'wrap') return 'WRAP';
+  throw new CliError('INVALID_PARAMS', `Invalid --wrap value: ${value}`, 'Use overflow, clip, or wrap');
+}
+
+function parseBorder(value?: string): GSheetsBorderStyle | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase();
+  if (v === 'all' || v === 'outer' || v === 'none') return v;
+  throw new CliError('INVALID_PARAMS', `Invalid --border value: ${value}`, 'Use all, outer, or none');
+}
+
+function parseRawFormat(json?: string): Record<string, unknown> | undefined {
+  if (!json) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    throw new CliError('INVALID_PARAMS', `Invalid --raw JSON: ${err instanceof Error ? err.message : err}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new CliError('INVALID_PARAMS', '--raw must be a JSON object (CellFormat)');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function registerGSheetsCommands(program: Command): void {
@@ -217,6 +273,77 @@ Insert Options:
         await enforceWriteAccess('gsheets', profile, 'clear values');
         const result = await client.clear(spreadsheetId, range);
         printGSheetsClearResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gsheets
+    .command('format')
+    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+    .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
+    .description('Apply cell formatting (colors, text style, alignment, borders, merge)')
+    .option('--profile <name>', 'Profile name')
+    .option('--bold', 'Make text bold')
+    .option('--italic', 'Make text italic')
+    .option('--underline', 'Underline text')
+    .option('--font-size <n>', 'Font size in points', (v) => parseInt(v, 10))
+    .option('--font-family <name>', 'Font family name (e.g., "Arial")')
+    .option('--text-color <hex>', 'Text color as #rrggbb')
+    .option('--background <hex>', 'Background color as #rrggbb')
+    .option('--align <pos>', 'Horizontal alignment: left, center, right')
+    .option('--valign <pos>', 'Vertical alignment: top, middle, bottom')
+    .option('--wrap <strategy>', 'Text wrap: overflow, clip, wrap')
+    .option('--number-format <pattern>', 'Number format pattern (e.g., "$#,##0.00", "0.00%")')
+    .option('--border <style>', 'Borders: all, outer, none')
+    .option('--merge', 'Merge the range into a single cell')
+    .option('--clear-format', 'Clear existing formatting on the range first')
+    .option('--raw <json>', 'Raw CellFormat JSON merged into the request')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Bold header row with colored background
+  agentio gsheets format <id> Sheet1!A1:D1 --bold --background "#4285f4" --text-color "#ffffff"
+
+  # Currency column
+  agentio gsheets format <id> Sheet1!C2:C100 --number-format "$#,##0.00"
+
+  # Outer border around a table
+  agentio gsheets format <id> Sheet1!A1:D10 --border outer
+
+  # Reset formatting on a range
+  agentio gsheets format <id> Sheet1!A1:Z1000 --clear-format
+
+  # Merge title cells
+  agentio gsheets format <id> Sheet1!A1:D1 --merge --align center --bold
+`
+    )
+    .action(async (spreadsheetId: string, range: string, options) => {
+      try {
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'format range');
+
+        const formatOptions: GSheetsFormatOptions = {
+          bold: options.bold,
+          italic: options.italic,
+          underline: options.underline,
+          fontSize: options.fontSize,
+          fontFamily: options.fontFamily,
+          textColor: options.textColor,
+          backgroundColor: options.background,
+          horizontalAlignment: parseAlign(options.align),
+          verticalAlignment: parseValign(options.valign),
+          wrapStrategy: parseWrap(options.wrap),
+          numberFormat: options.numberFormat,
+          border: parseBorder(options.border),
+          merge: options.merge,
+          clearFormat: options.clearFormat,
+          raw: parseRawFormat(options.raw),
+        };
+
+        const result = await client.format(spreadsheetId, range, formatOptions);
+        printGSheetsFormatResult(result);
       } catch (error) {
         handleError(error);
       }
