@@ -477,6 +477,8 @@ import type {
   GSheetsClearResult,
   GSheetsCreateResult,
   GSheetsFormatResult,
+  GSheetsResizeResult,
+  GSheetsBatchResult,
 } from '../types/gsheets';
 
 export function printGSheetsList(spreadsheets: GSheetsListItem[]): void {
@@ -557,6 +559,19 @@ export function printGSheetsFormatResult(result: GSheetsFormatResult): void {
     console.log(`  Applied: ${result.appliedFields.join(', ')}`);
   }
   if (result.merged) console.log('  Merged: yes');
+}
+
+export function printGSheetsResizeResult(result: GSheetsResizeResult): void {
+  const unit = result.dimension === 'COLUMNS' ? 'column(s)' : 'row(s)';
+  const how = result.auto ? 'auto-fit' : `${result.pixelSize}px`;
+  console.log(`Resized ${result.count} ${unit} in ${result.range}`);
+  console.log(`  Sheet: ${result.sheetTitle}`);
+  console.log(`  Size: ${how}`);
+}
+
+export function printGSheetsBatchResult(result: GSheetsBatchResult): void {
+  console.log(`Batch update applied to ${result.spreadsheetId}`);
+  console.log(`  Replies: ${result.replies}`);
 }
 
 // Google Drive specific formatters

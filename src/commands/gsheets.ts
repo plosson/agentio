@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { writeFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile, getProfile } from '../config/config-manager';
@@ -16,6 +16,8 @@ import {
   printGSheetsClearResult,
   printGSheetsCreated,
   printGSheetsFormatResult,
+  printGSheetsResizeResult,
+  printGSheetsBatchResult,
 } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -344,6 +346,98 @@ Examples:
 
         const result = await client.format(spreadsheetId, range, formatOptions);
         printGSheetsFormatResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gsheets
+    .command('resize')
+    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+    .argument('<range>', 'Columns (Sheet1!A:C) or rows (Sheet1!1:10)')
+    .description('Resize columns or rows (explicit pixel size or auto-fit)')
+    .option('--profile <name>', 'Profile name')
+    .option('--size <pixels>', 'Pixel size', (v) => parseInt(v, 10))
+    .option('--auto', 'Auto-fit to content')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Set columns A-C to 200px wide
+  agentio gsheets resize <id> Sheet1!A:C --size 200
+
+  # Auto-fit the first row to content
+  agentio gsheets resize <id> Sheet1!1:1 --auto
+
+  # Resize a single column
+  agentio gsheets resize <id> Sheet1!B --size 150
+
+Notes:
+  - Range must be columns-only (A:C) or rows-only (1:10), not both.
+  - --size and --auto are mutually exclusive.
+`
+    )
+    .action(async (spreadsheetId: string, range: string, options) => {
+      try {
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'resize range');
+        const result = await client.resize(spreadsheetId, range, {
+          pixelSize: options.size,
+          auto: options.auto,
+        });
+        printGSheetsResizeResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gsheets
+    .command('batch')
+    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+    .description('Execute raw spreadsheets.batchUpdate requests (escape hatch)')
+    .option('--profile <name>', 'Profile name')
+    .option('--requests-json <json>', 'Inline JSON array of batchUpdate requests')
+    .option('--file <path>', 'Path to a JSON file containing the requests array')
+    .addHelpText(
+      'after',
+      `
+Accepts an array of Google Sheets batchUpdate Request objects. Reference:
+  https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request
+
+Examples:
+  # Freeze the first row
+  agentio gsheets batch <id> --requests-json '[
+    {"updateSheetProperties":{"properties":{"sheetId":0,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}
+  ]'
+
+  # From a file
+  agentio gsheets batch <id> --file ./requests.json
+`
+    )
+    .action(async (spreadsheetId: string, options) => {
+      try {
+        if (!options.requestsJson && !options.file) {
+          throw new CliError('INVALID_PARAMS', 'Provide --requests-json or --file');
+        }
+        if (options.requestsJson && options.file) {
+          throw new CliError('INVALID_PARAMS', '--requests-json and --file are mutually exclusive');
+        }
+
+        const source = options.requestsJson ?? (await readFile(options.file, 'utf8'));
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(source);
+        } catch (err) {
+          throw new CliError('INVALID_PARAMS', `Invalid JSON: ${err instanceof Error ? err.message : err}`);
+        }
+        if (!Array.isArray(parsed)) {
+          throw new CliError('INVALID_PARAMS', 'Input must be a JSON array of Request objects');
+        }
+
+        const { client, profile } = await getGSheetsClient(options.profile);
+        await enforceWriteAccess('gsheets', profile, 'execute batch update');
+        const result = await client.batch(spreadsheetId, parsed as Parameters<typeof client.batch>[1]);
+        printGSheetsBatchResult(result);
       } catch (error) {
         handleError(error);
       }

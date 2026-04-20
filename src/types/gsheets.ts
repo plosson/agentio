@@ -110,3 +110,24 @@ export interface GSheetsFormatResult {
   merged: boolean;
   cleared: boolean;
 }
+
+export type GSheetsResizeDimension = 'ROWS' | 'COLUMNS';
+
+export interface GSheetsResizeOptions {
+  pixelSize?: number;
+  auto?: boolean;
+}
+
+export interface GSheetsResizeResult {
+  range: string;
+  sheetTitle: string;
+  dimension: GSheetsResizeDimension;
+  count: number;
+  pixelSize?: number;
+  auto: boolean;
+}
+
+export interface GSheetsBatchResult {
+  replies: number;
+  spreadsheetId: string;
+}

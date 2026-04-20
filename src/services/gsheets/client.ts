@@ -21,6 +21,10 @@ import type {
   GSheetsFormatOptions,
   GSheetsFormatResult,
   GSheetsBorderStyle,
+  GSheetsResizeOptions,
+  GSheetsResizeResult,
+  GSheetsResizeDimension,
+  GSheetsBatchResult,
 } from '../../types/gsheets';
 
 function parseHexColor(hex: string): { red: number; green: number; blue: number } {
@@ -518,6 +522,125 @@ export class GSheetsClient implements ServiceClient {
       if (err instanceof CliError) throw err;
       this.throwApiError(err, 'format range');
     }
+  }
+
+  async resize(
+    spreadsheetIdOrUrl: string,
+    range: string,
+    options: GSheetsResizeOptions
+  ): Promise<GSheetsResizeResult> {
+    const spreadsheetId = this.extractSpreadsheetId(spreadsheetIdOrUrl);
+    const cleanedRange = this.cleanRange(range);
+
+    if (!options.auto && options.pixelSize === undefined) {
+      throw new CliError('INVALID_PARAMS', 'Specify --size <pixels> or --auto');
+    }
+    if (options.auto && options.pixelSize !== undefined) {
+      throw new CliError('INVALID_PARAMS', '--size and --auto are mutually exclusive');
+    }
+
+    try {
+      const { dimensionRange, sheetTitle, dimension } = await this.resolveDimensionRange(
+        spreadsheetId,
+        cleanedRange
+      );
+
+      const request: sheets_v4.Schema$Request = options.auto
+        ? { autoResizeDimensions: { dimensions: dimensionRange } }
+        : {
+            updateDimensionProperties: {
+              range: dimensionRange,
+              properties: { pixelSize: options.pixelSize },
+              fields: 'pixelSize',
+            },
+          };
+
+      await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: [request] },
+      });
+
+      const count = (dimensionRange.endIndex ?? 0) - (dimensionRange.startIndex ?? 0);
+      return {
+        range: cleanedRange,
+        sheetTitle,
+        dimension,
+        count,
+        pixelSize: options.pixelSize,
+        auto: !!options.auto,
+      };
+    } catch (err) {
+      if (err instanceof CliError) throw err;
+      this.throwApiError(err, 'resize dimension');
+    }
+  }
+
+  async batch(spreadsheetIdOrUrl: string, requests: sheets_v4.Schema$Request[]): Promise<GSheetsBatchResult> {
+    const spreadsheetId = this.extractSpreadsheetId(spreadsheetIdOrUrl);
+
+    if (!Array.isArray(requests) || requests.length === 0) {
+      throw new CliError('INVALID_PARAMS', 'requests must be a non-empty array');
+    }
+
+    try {
+      const response = await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests },
+      });
+
+      return {
+        replies: response.data.replies?.length ?? 0,
+        spreadsheetId,
+      };
+    } catch (err) {
+      this.throwApiError(err, 'execute batch update');
+    }
+  }
+
+  private async resolveDimensionRange(
+    spreadsheetId: string,
+    a1range: string
+  ): Promise<{
+    dimensionRange: sheets_v4.Schema$DimensionRange;
+    sheetTitle: string;
+    dimension: GSheetsResizeDimension;
+  }> {
+    const { sheetTitle: requestedTitle, cells } = parseA1Range(a1range);
+    if (!cells) {
+      throw new CliError('INVALID_PARAMS', `Resize range must reference columns or rows (e.g. Sheet1!A:C or Sheet1!1:10)`);
+    }
+    const response = await this.sheets.spreadsheets.get({ spreadsheetId });
+    const sheets = response.data.sheets || [];
+    const targetSheet = requestedTitle
+      ? sheets.find((s) => s.properties?.title === requestedTitle)
+      : sheets[0];
+    if (!targetSheet?.properties) {
+      throw new CliError('NOT_FOUND', `Sheet not found: ${requestedTitle || '(first sheet)'}`);
+    }
+    const sheetId = targetSheet.properties.sheetId ?? 0;
+    const { startRow, endRow, startCol, endCol } = parseCellRange(cells);
+
+    const hasCols = startCol !== undefined;
+    const hasRows = startRow !== undefined;
+    if (hasCols && hasRows) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Resize range must be columns-only (A:C) or rows-only (1:10), got ${cells}`
+      );
+    }
+    if (!hasCols && !hasRows) {
+      throw new CliError('INVALID_PARAMS', `Could not parse resize range: ${cells}`);
+    }
+
+    const dimensionRange: sheets_v4.Schema$DimensionRange = hasCols
+      ? { sheetId, dimension: 'COLUMNS', startIndex: startCol, endIndex: endCol }
+      : { sheetId, dimension: 'ROWS', startIndex: startRow, endIndex: endRow };
+
+    return {
+      dimensionRange,
+      sheetTitle: targetSheet.properties.title || '',
+      dimension: hasCols ? 'COLUMNS' : 'ROWS',
+    };
   }
 
   private async resolveGridRange(
