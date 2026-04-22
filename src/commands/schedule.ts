@@ -14,6 +14,7 @@ import { parseDuration } from '../services/schedule/duration';
 import { parseWeekdays, weekdayNames } from '../services/schedule/weekdays';
 import { installPlist, enumerateInstalledSchedules, uninstallPlist } from '../services/schedule/launchd';
 import { walkRunFiles } from '../services/schedule/walker';
+import { runSchedule } from '../services/schedule/runner';
 import { folderHash } from '../services/schedule/folder-hash';
 import { buildPlistDict } from '../services/schedule/plist-builder';
 import { nextRuns } from '../services/schedule/schedule-calculator';
@@ -459,7 +460,28 @@ export function registerScheduleCommands(program: Command): void {
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
     .option('--from-launchd', 'Internal: flag set by launchd-triggered invocations')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (id: string, opts: { folder?: string; fromLaunchd?: boolean }) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        if (matches.length !== 1) {
+          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`,
+            'Run `agentio schedule list` to see available ids');
+        }
+        const raw = await readFile(matches[0].path, 'utf-8');
+        const parsed = parseFrontmatter(raw);
+        const cfg = mergeConfig({}, parsed.config);
+        const { exitCode, logPath } = await runSchedule({
+          folder, id, promptBody: parsed.body, config: cfg,
+        });
+        if (!opts.fromLaunchd) {
+          console.log(`Run complete. Log: ${logPath}`);
+        }
+        process.exit(exitCode);
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('show').description('Show a schedule and next run times')
     .argument('<id>', 'Schedule id')
