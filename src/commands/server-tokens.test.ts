@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'fs/promises';
+import { mkdtemp, rm, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { seedVault } from '../vault/test-helpers';
+import { loadVault, clearVaultCache } from '../vault/vault';
 
 /**
  * Subprocess tests for `agentio server tokens list|revoke|clear`. They
- * seed config.json directly with a known set of tokens so we can avoid
+ * seed the vault directly with a known set of tokens so we can avoid
  * spinning up a real OAuth flow per test.
  */
 
 let tempHome = '';
+let keychainFile = '';
+const TEST_PASSPHRASE = 'test-pw-12345';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-tokens-test-'));
+  keychainFile = join(tempHome, 'keychain.json');
   await mkdir(join(tempHome, '.config', 'agentio'), {
     recursive: true,
     mode: 0o700,
@@ -20,6 +25,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  delete process.env.AGENTIO_PASSPHRASE;
+  delete process.env.AGENTIO_KEYCHAIN;
+  clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
     tempHome = '';
@@ -35,27 +43,36 @@ interface Token {
 }
 
 async function seedTokens(tokens: Token[]): Promise<void> {
-  const cfg = {
-    profiles: {},
-    server: {
-      apiKey: 'srv_test_key_for_seeded_tests',
-      tokens,
-    },
-  };
-  await writeFile(
-    join(tempHome, '.config', 'agentio', 'config.json'),
-    JSON.stringify(cfg, null, 2),
-    { mode: 0o600 }
-  );
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  await seedVault({
+    config: {
+      profiles: {},
+      server: {
+        apiKey: 'srv_test_key_for_seeded_tests',
+        tokens,
+      },
+    } as any,
+    passphrase: TEST_PASSPHRASE,
+  });
 }
 
 async function readTokensFromConfig(): Promise<Token[]> {
-  const raw = await readFile(
-    join(tempHome, '.config', 'agentio', 'config.json'),
-    'utf8'
-  );
-  const cfg = JSON.parse(raw);
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  const vault = await loadVault();
+  const cfg = vault.config as unknown as { server?: { tokens?: Token[] } };
   return cfg.server?.tokens ?? [];
+}
+
+async function readConfig(): Promise<Record<string, unknown>> {
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  const vault = await loadVault();
+  return vault.config as unknown as Record<string, unknown>;
 }
 
 async function runCli(
@@ -64,7 +81,12 @@ async function runCli(
   const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, HOME: tempHome },
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AGENTIO_PASSPHRASE: TEST_PASSPHRASE,
+      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+    },
   });
   const exitCode = await proc.exited;
   const stdout = await new Response(proc.stdout).text();
@@ -217,12 +239,9 @@ describe('agentio server tokens revoke', () => {
   test('preserves apiKey and other server fields when revoking', async () => {
     await seedTokens(makeSampleTokens());
     await runCli(['server', 'tokens', 'revoke', 'aaaaaaaaaaaa']);
-    const raw = await readFile(
-      join(tempHome, '.config', 'agentio', 'config.json'),
-      'utf8'
-    );
-    const cfg = JSON.parse(raw);
-    expect(cfg.server.apiKey).toBe('srv_test_key_for_seeded_tests');
+    const cfg = await readConfig();
+    const server = cfg.server as Record<string, unknown>;
+    expect(server.apiKey).toBe('srv_test_key_for_seeded_tests');
   });
 });
 
@@ -258,12 +277,9 @@ describe('agentio server tokens clear', () => {
   test('clear preserves apiKey and other server fields', async () => {
     await seedTokens(makeSampleTokens());
     await runCli(['server', 'tokens', 'clear']);
-    const raw = await readFile(
-      join(tempHome, '.config', 'agentio', 'config.json'),
-      'utf8'
-    );
-    const cfg = JSON.parse(raw);
-    expect(cfg.server.apiKey).toBe('srv_test_key_for_seeded_tests');
-    expect(cfg.server.tokens).toEqual([]);
+    const cfg = await readConfig();
+    const server = cfg.server as Record<string, unknown>;
+    expect(server.apiKey).toBe('srv_test_key_for_seeded_tests');
+    expect(server.tokens).toEqual([]);
   });
 });

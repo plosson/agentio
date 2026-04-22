@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { seedVault } from '../vault/test-helpers';
+import { loadVault, clearVaultCache } from '../vault/vault';
 
 /**
  * Subprocess tests for `agentio config import` — specifically the fix
@@ -9,15 +11,18 @@ import { tmpdir } from 'os';
  * doesn't contain (server, gateway).
  *
  * Why subprocess: config import touches the real config-manager and
- * credential store (file-backed, tied to homedir() at module load).
- * Each test runs in an isolated `mkdtemp` HOME so the tests never
- * touch the developer's real ~/.config/agentio.
+ * credential store (vault-backed). Each test runs in an isolated
+ * `mkdtemp` HOME + seeded vault so the tests never touch the
+ * developer's real ~/.config/agentio.
  */
 
 let tempHome = '';
+let keychainFile = '';
+const TEST_PASSPHRASE = 'test-pw-12345';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-config-import-test-'));
+  keychainFile = join(tempHome, 'keychain.json');
   await mkdir(join(tempHome, '.config', 'agentio'), {
     recursive: true,
     mode: 0o700,
@@ -25,6 +30,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  delete process.env.AGENTIO_PASSPHRASE;
+  delete process.env.AGENTIO_KEYCHAIN;
+  clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
     tempHome = '';
@@ -32,19 +40,21 @@ afterEach(async () => {
 });
 
 async function writeConfig(content: unknown): Promise<void> {
-  await writeFile(
-    join(tempHome, '.config', 'agentio', 'config.json'),
-    JSON.stringify(content, null, 2),
-    { mode: 0o600 }
-  );
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  await seedVault({
+    config: content as any,
+    passphrase: TEST_PASSPHRASE,
+  });
 }
 
 async function readConfig(): Promise<Record<string, unknown>> {
-  const raw = await readFile(
-    join(tempHome, '.config', 'agentio', 'config.json'),
-    'utf8'
-  );
-  return JSON.parse(raw);
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  const v = await loadVault();
+  return v.config as unknown as Record<string, unknown>;
 }
 
 /**
@@ -70,7 +80,13 @@ async function runCli(
   const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, HOME: tempHome, ...extraEnv },
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AGENTIO_PASSPHRASE: TEST_PASSPHRASE,
+      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+      ...extraEnv,
+    },
   });
   const exitCode = await proc.exited;
   const stdout = await new Response(proc.stdout).text();

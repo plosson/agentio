@@ -1,11 +1,12 @@
 import { homedir } from 'os';
 import { join } from 'path';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { loadVault, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
-const CONFIG_DIR = join(homedir(), '.config', 'agentio');
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const CONFIG_DIR = join(process.env.HOME || homedir(), '.config', 'agentio');
+const CONFIG_FILE = join(CONFIG_DIR, 'config.json'); // kept for backward-compat imports elsewhere
 
 const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql'];
 
@@ -23,10 +24,6 @@ function getProfileName(entry: ProfileValue): string {
   return typeof entry === 'string' ? entry : entry.name;
 }
 
-const DEFAULT_CONFIG: Config = {
-  profiles: {},
-};
-
 export async function ensureConfigDir(): Promise<void> {
   if (!existsSync(CONFIG_DIR)) {
     await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
@@ -34,31 +31,17 @@ export async function ensureConfigDir(): Promise<void> {
 }
 
 export async function loadConfig(): Promise<Config> {
-  await ensureConfigDir();
-
-  if (!existsSync(CONFIG_FILE)) {
-    await saveConfig(DEFAULT_CONFIG);
-    return DEFAULT_CONFIG;
-  }
-
-  try {
-    const content = await readFile(CONFIG_FILE, 'utf-8');
-    return JSON.parse(content) as Config;
-  } catch {
-    // Config file corrupted, back it up and return default
-    const backupPath = `${CONFIG_FILE}.backup`;
-    const content = await readFile(CONFIG_FILE, 'utf-8').catch(() => '');
-    if (content) {
-      await writeFile(backupPath, content).catch(() => {});
-    }
-    await saveConfig(DEFAULT_CONFIG);
-    return DEFAULT_CONFIG;
-  }
+  const vault = await loadVault();
+  return vault.config;
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  await ensureConfigDir();
-  await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  const vault = await loadVault();
+  await saveVault({
+    version: CURRENT_VAULT_VERSION,
+    config,
+    credentials: vault.credentials,
+  });
 }
 
 export async function getProfile(

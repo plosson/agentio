@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'crypto';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
 
 import { startServerSubprocess } from './test-helpers';
+import { seedVault } from '../vault/test-helpers';
+import { clearVaultCache } from '../vault/vault';
+
+const TEST_PASSPHRASE = 'test-pw-12345';
 
 /**
  * End-to-end test for the full MCP OAuth flow against a real `agentio
@@ -30,10 +34,23 @@ interface RunningServer {
 }
 
 let tempHome = '';
+let keychainFile = '';
 let active: RunningServer | null = null;
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-server-e2e-'));
+  keychainFile = join(tempHome, 'keychain.json');
+  await mkdir(join(tempHome, '.config', 'agentio'), {
+    recursive: true,
+    mode: 0o700,
+  });
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  await seedVault({
+    config: { profiles: {} },
+    passphrase: TEST_PASSPHRASE,
+  });
 });
 
 afterEach(async () => {
@@ -54,6 +71,9 @@ afterEach(async () => {
     }
     active = null;
   }
+  delete process.env.AGENTIO_PASSPHRASE;
+  delete process.env.AGENTIO_KEYCHAIN;
+  clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
     tempHome = '';
@@ -61,7 +81,11 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<RunningServer> {
-  const started = await startServerSubprocess({ home: tempHome });
+  const started = await startServerSubprocess({
+    home: tempHome,
+    passphrase: TEST_PASSPHRASE,
+    keychainFile,
+  });
   const running: RunningServer = {
     proc: started.proc,
     apiKey: started.apiKey,

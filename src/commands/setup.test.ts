@@ -130,6 +130,19 @@ describe('agentio setup — migration path', () => {
     expect(existsSync(legacyConfigPath)).toBe(false);
     expect(existsSync(legacyConfigPath + '.bak')).toBe(true);
     expect(existsSync(legacyTokensPath + '.bak')).toBe(true);
+
+    // Now that config-manager reads from the vault, verify `agentio status`
+    // with the migration passphrase returns exit 0 and includes the
+    // imported gmail:work profile.
+    const statusRes = await runCli(['status', '--no-test', '--json'], {
+      env: { AGENTIO_PASSPHRASE: 'migration-pw-123' },
+    });
+    expect(statusRes.exitCode).toBe(0);
+    const parsed = JSON.parse(statusRes.stdout);
+    const gmail = parsed.gmail ?? parsed.profiles?.gmail;
+    // Accept any shape that includes the 'work' profile name.
+    const serialized = JSON.stringify(gmail ?? parsed);
+    expect(serialized).toContain('work');
   });
 
   test('migration with undecryptable tokens.enc still imports config', async () => {
@@ -256,10 +269,18 @@ describe('agentio setup — existing vault menu', () => {
     const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
     expect(kc.vault).toBe('new-pw-67890');
 
-    // Note: the original plan includes additional assertions that run `agentio status`
-    // to verify the old passphrase no longer decrypts and the new one does. These are
-    // deferred to Task 12 (after the facade cutover) because `status` currently reads
-    // plaintext config.json and ignores the vault.
+    // Now that config-manager reads from the vault, verify that running
+    // `agentio status` with the OLD passphrase fails (AUTH_FAILED) and
+    // with the NEW passphrase succeeds.
+    const resOld = await runCli(['status', '--no-test', '--json'], {
+      env: { AGENTIO_PASSPHRASE: 'old-pw-12345' },
+    });
+    expect(resOld.exitCode).not.toBe(0);
+
+    const resNew = await runCli(['status', '--no-test', '--json'], {
+      env: { AGENTIO_PASSPHRASE: 'new-pw-67890' },
+    });
+    expect(resNew.exitCode).toBe(0);
   });
 
   test('move vault copies file to new location and updates pointer', async () => {
