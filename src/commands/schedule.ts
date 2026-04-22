@@ -376,6 +376,25 @@ export function abbrHome(path: string, home: string = homedir()): string {
   return path;
 }
 
+/** Print a summary of a saved schedule's frontmatter and whether it will run here. */
+function printSaveResult(filePath: string, config: FrontmatterConfig): void {
+  console.log(`Saved ${abbrHome(filePath)}:`);
+  console.log(`  schedule:       ${describeSchedule(config.schedule)}`);
+  console.log(`  model:          ${config.model}`);
+  console.log(`  permissionMode: ${config.permissionMode}`);
+  console.log(`  sessionMode:    ${config.sessionMode}`);
+  console.log(`  enabled:        ${config.enabled ? 'yes' : 'no'}`);
+  if (config.command) console.log(`  command:        ${config.command}`);
+  if (config.host) console.log(`  host:           ${config.host}`);
+  const currentHost = getCurrentHost();
+  if (hostMatches(config)) {
+    console.log(`Will run on: this host (${currentHost})`);
+  } else {
+    console.log(`Will run on: ${config.host} (this host is "${currentHost}" — not scheduled here)`);
+    console.log(`Run \`agentio schedule sync\` on ${config.host} to install.`);
+  }
+}
+
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
@@ -440,13 +459,12 @@ export function registerScheduleCommands(program: Command): void {
         const id = file.split('/').pop()!.slice(0, -'.run.md'.length);
         if (hostMatches(finalConfig)) {
           installPlist(folder, id, finalConfig);
-          console.log(`Installed schedule "${id}" in ${folder}`);
         } else {
           // Schedule pinned to another host — make sure a stale plist from a
           // prior host match isn't left behind, then skip install.
           uninstallPlist(folder, id);
-          console.log(`Wrote "${id}" (pinned to host "${finalConfig.host}"; current host is "${getCurrentHost()}"; plist not installed)`);
         }
+        printSaveResult(filePath, finalConfig);
       } catch (e) {
         handleError(e);
       }
@@ -516,11 +534,10 @@ export function registerScheduleCommands(program: Command): void {
 
         if (hostMatches(finalConfig)) {
           installPlist(folder, id, finalConfig);
-          console.log(`Updated schedule "${id}" in ${folder}`);
         } else {
           uninstallPlist(folder, id);
-          console.log(`Wrote "${id}" (pinned to host "${finalConfig.host}"; current host is "${getCurrentHost()}"; plist not installed)`);
         }
+        printSaveResult(filePath, finalConfig);
       } catch (e) {
         handleError(e);
       }
