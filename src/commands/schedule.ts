@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
@@ -11,11 +11,12 @@ import {
   serializeFrontmatter,
 } from '../services/schedule/frontmatter';
 import { parseDuration } from '../services/schedule/duration';
-import { parseWeekdays } from '../services/schedule/weekdays';
+import { parseWeekdays, weekdayNames } from '../services/schedule/weekdays';
 import { installPlist, enumerateInstalledSchedules, uninstallPlist } from '../services/schedule/launchd';
 import { walkRunFiles } from '../services/schedule/walker';
 import { folderHash } from '../services/schedule/folder-hash';
 import { buildPlistDict } from '../services/schedule/plist-builder';
+import { nextRuns } from '../services/schedule/schedule-calculator';
 import type {
   FrontmatterConfig,
   Model,
@@ -200,6 +201,28 @@ async function promptMissing(
   return out;
 }
 
+export function describeSchedule(s: Schedule): string {
+  switch (s.type) {
+    case 'manual': return 'Manual';
+    case 'daily':
+      return `Daily at ${fmtHM(s.hour, s.minute)}`;
+    case 'weekly':
+      return `Weekly ${weekdayNames(s.weekdays ?? [])} at ${fmtHM(s.hour, s.minute)}`;
+    case 'monthly':
+      return `Monthly on day ${s.day} at ${fmtHM(s.hour, s.minute)}`;
+    case 'interval': {
+      const m = s.intervalMinutes ?? 0;
+      if (m < 60) return `Every ${m}m`;
+      if (m % 60 === 0) return `Every ${m / 60}h`;
+      return `Every ${Math.floor(m / 60)}h${m % 60}m`;
+    }
+  }
+}
+
+function fmtHM(h?: number, m?: number): string {
+  return `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`;
+}
+
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
@@ -271,7 +294,43 @@ export function registerScheduleCommands(program: Command): void {
 
   schedule.command('list').description('List installed schedules')
     .option('--folder <path>', 'Filter to one folder')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (opts: { folder?: string }) => {
+      try {
+        const filterFolder = opts.folder ? resolve(opts.folder) : undefined;
+        const installed = enumerateInstalledSchedules();
+        const rows = installed
+          .filter((p) => !filterFolder || p.folder === filterFolder)
+          .map((p) => {
+            const glob = walkRunFiles(p.folder).find((f) => f.id === p.id);
+            if (!glob) {
+              return {
+                folder: p.folder, id: p.id, schedule: '[broken: .run.md missing]',
+                model: '-', next: '-', enabled: '-',
+              };
+            }
+            try {
+              const raw = readFileSync(glob.path, 'utf-8');
+              const parsed = parseFrontmatter(raw);
+              const cfg = mergeConfig({}, parsed.config);
+              const next = nextRuns(cfg.schedule, 1)[0];
+              return {
+                folder: p.folder, id: p.id, schedule: describeSchedule(cfg.schedule),
+                model: cfg.command ? `cmd: ${cfg.command}` : cfg.model,
+                next: next ? next.toISOString() : '-',
+                enabled: cfg.enabled ? 'yes' : 'no',
+              };
+            } catch {
+              return { folder: p.folder, id: p.id, schedule: '[parse error]', model: '-', next: '-', enabled: '-' };
+            }
+          });
+        if (rows.length === 0) { console.log('No schedules installed.'); return; }
+        for (const r of rows) {
+          console.log(`${r.folder}  ${r.id}  ${r.schedule}  (${r.model})  next: ${r.next}  enabled: ${r.enabled}`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('sync').description('Reconcile launchd plists with *.run.md files')
     .option('--folder <path>', 'Folder to sync (default: CWD)')
