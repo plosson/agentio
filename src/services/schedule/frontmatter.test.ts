@@ -67,6 +67,10 @@ describe('mergeConfig', () => {
     expect(merged.sessionMode).toBe('new');
     expect(merged.enabled).toBe(true);
   });
+
+  test('throws when schedule missing on both base and override', () => {
+    expect(() => mergeConfig({}, {})).toThrow(/schedule is required/);
+  });
 });
 
 describe('serializeFrontmatter', () => {
