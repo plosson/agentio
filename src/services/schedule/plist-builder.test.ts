@@ -59,7 +59,7 @@ describe('buildPlistDict', () => {
     const dict = buildPlistDict(folder, id, baseConfig({ schedule: { type: 'manual' } }));
     expect(dict.ProgramArguments).toEqual([
       '/bin/zsh', '-lic',
-      'agentio schedule run test --folder /Users/foo/proj --from-launchd',
+      'agentio schedule run test --folder /Users/foo/proj -q',
     ]);
   });
 

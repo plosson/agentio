@@ -16,11 +16,16 @@ export interface RunScheduleOpts {
   id: string;
   promptBody: string;
   config: FrontmatterConfig;
+  /** When false, tee child stdout/stderr to process.stdout/stderr. Defaults to true. */
+  quiet?: boolean;
   /** injected for tests; defaults to child_process.spawn */
   spawner?: Spawner;
   /** injected for tests; defaults to locateClaude() */
   claudePath?: string | null;
   now?: () => Date;
+  /** injected for tests; defaults to process.stdout/process.stderr */
+  stdout?: { write: (chunk: string | Buffer) => boolean };
+  stderr?: { write: (chunk: string | Buffer) => boolean };
 }
 
 export interface RunResult {
@@ -57,7 +62,12 @@ export async function runSchedule(opts: RunScheduleOpts): Promise<RunResult> {
     args = buildClaudeArgs(opts.config, opts.promptBody);
   }
 
-  await appendFile(logPath, `[${now.toISOString()}] spawn: ${cmd} ${args.map(a => JSON.stringify(a)).join(' ')}\n`);
+  const spawnLine = `[${now.toISOString()}] spawn: ${cmd} ${args.map(a => JSON.stringify(a)).join(' ')}\n`;
+  await appendFile(logPath, spawnLine);
+  const stdout = opts.stdout ?? process.stdout;
+  const stderr = opts.stderr ?? process.stderr;
+  const tee = opts.quiet === false;
+  if (tee) stderr.write(spawnLine);
 
   const child = spawner(cmd, args, { cwd: opts.folder, env });
   const startedAt = now;
@@ -66,6 +76,7 @@ export async function runSchedule(opts: RunScheduleOpts): Promise<RunResult> {
   const pending: Promise<void>[] = [];
 
   child.stdout?.on('data', (chunk: Buffer) => {
+    if (tee) stdout.write(chunk);
     const p = (async () => {
       const text = chunk.toString('utf-8');
       await appendFile(logPath, text);
@@ -88,6 +99,7 @@ export async function runSchedule(opts: RunScheduleOpts): Promise<RunResult> {
   });
 
   child.stderr?.on('data', (chunk: Buffer) => {
+    if (tee) stderr.write(chunk);
     pending.push(appendFile(logPath, chunk.toString('utf-8')));
   });
 

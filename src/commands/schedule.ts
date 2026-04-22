@@ -754,8 +754,8 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('run').description('Run a schedule immediately')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
-    .option('--from-launchd', 'Internal: flag set by launchd-triggered invocations')
-    .action(async (id: string, opts: { folder?: string; fromLaunchd?: boolean }) => {
+    .option('-q, --quiet', 'Suppress streaming child output to stdout/stderr (used by launchd)')
+    .action(async (id: string, opts: { folder?: string; quiet?: boolean }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
         const matches = walkRunFiles(folder).filter((f) => f.id === id);
@@ -767,9 +767,9 @@ export function registerScheduleCommands(program: Command): void {
         const parsed = parseFrontmatter(raw);
         const cfg = mergeConfig({}, parsed.config);
         const { exitCode, logPath } = await runSchedule({
-          folder, id, promptBody: parsed.body, config: cfg,
+          folder, id, promptBody: parsed.body, config: cfg, quiet: opts.quiet ?? false,
         });
-        if (!opts.fromLaunchd) {
+        if (!opts.quiet) {
           console.log(`Run complete. Log: ${logPath}`);
         }
         process.exit(exitCode);

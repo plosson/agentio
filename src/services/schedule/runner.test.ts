@@ -12,11 +12,16 @@ class FakeChild extends EventEmitter {
   kill(): void {}
 }
 
-function makeSpawner(lines: string[], exitCode: number): { spawner: Spawner; child: FakeChild } {
+function makeSpawner(
+  lines: string[],
+  exitCode: number,
+  stderrLines: string[] = []
+): { spawner: Spawner; child: FakeChild } {
   const child = new FakeChild();
   const spawner: Spawner = () => {
     setImmediate(() => {
       for (const l of lines) child.stdout.emit('data', Buffer.from(l + '\n'));
+      for (const l of stderrLines) child.stderr.emit('data', Buffer.from(l + '\n'));
       child.emit('close', exitCode);
     });
     return child as unknown as ReturnType<Spawner>;
@@ -75,5 +80,36 @@ describe('runSchedule', () => {
     const runsDir = join(folder, '.agentio', 'runs', 'test');
     expect(existsSync(runsDir)).toBe(true);
     expect(readdirSync(runsDir).length).toBeGreaterThan(0);
+  });
+
+  test('quiet=false tees stdout/stderr to provided sinks', async () => {
+    const { spawner } = makeSpawner(['hello'], 0, ['boom']);
+    const out: string[] = [];
+    const err: string[] = [];
+    const sinkOut = { write: (c: string | Buffer) => { out.push(c.toString()); return true; } };
+    const sinkErr = { write: (c: string | Buffer) => { err.push(c.toString()); return true; } };
+    await runSchedule({
+      folder, id: 'test', promptBody: 'hi', config, spawner,
+      claudePath: '/fake/claude', now: () => new Date('2026-04-22T10:00:00Z'),
+      quiet: false, stdout: sinkOut, stderr: sinkErr,
+    });
+    expect(out.join('')).toContain('hello');
+    expect(err.join('')).toContain('boom');
+    expect(err.join('')).toContain('spawn:');
+  });
+
+  test('quiet=true (default) does not write to provided sinks', async () => {
+    const { spawner } = makeSpawner(['hello'], 0, ['boom']);
+    const out: string[] = [];
+    const err: string[] = [];
+    const sinkOut = { write: (c: string | Buffer) => { out.push(c.toString()); return true; } };
+    const sinkErr = { write: (c: string | Buffer) => { err.push(c.toString()); return true; } };
+    await runSchedule({
+      folder, id: 'test', promptBody: 'hi', config, spawner,
+      claudePath: '/fake/claude', now: () => new Date('2026-04-22T10:00:00Z'),
+      stdout: sinkOut, stderr: sinkErr,
+    });
+    expect(out).toEqual([]);
+    expect(err).toEqual([]);
   });
 });

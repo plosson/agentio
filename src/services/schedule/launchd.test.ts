@@ -25,7 +25,7 @@ describe('enumerateInstalledSchedules', () => {
       Label: 'me.agentio.schedule.abc-mytask',
       ProgramArguments: [
         '/bin/zsh', '-lic',
-        'agentio schedule run mytask --folder /Users/x/proj --from-launchd',
+        'agentio schedule run mytask --folder /Users/x/proj -q',
       ],
     });
     const result = enumerateInstalledSchedules(dir);

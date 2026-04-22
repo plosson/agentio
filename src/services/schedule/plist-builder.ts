@@ -34,7 +34,7 @@ export function buildPlistDict(
     ProgramArguments: [
       '/bin/zsh',
       '-lic',
-      `agentio schedule run ${id} --folder ${folder} --from-launchd`,
+      `agentio schedule run ${id} --folder ${folder} -q`,
     ],
     RunAtLoad: false,
     StandardOutPath: join(logBase, 'launchd.log'),

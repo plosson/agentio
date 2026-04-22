@@ -18,7 +18,7 @@ export interface InstalledSchedule {
 function parseProgramArgs(args: string[]): { id: string; folder: string } | null {
   if (args.length !== 3) return null;
   const cmd = args[2];
-  const match = cmd.match(/^agentio schedule run (\S+) --folder (.+) --from-launchd$/);
+  const match = cmd.match(/^agentio schedule run (\S+) --folder (.+) -q$/);
   if (!match) return null;
   return { id: match[1], folder: match[2] };
 }
