@@ -1,5 +1,7 @@
 import { chat as gchat, type chat_v1 } from '@googleapis/chat';
 import { OAuth2Client } from 'google-auth-library';
+import { readFile } from 'fs/promises';
+import { basename, extname } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
@@ -21,6 +23,28 @@ interface ResolvedUser {
   displayName: string;
   email?: string;
 }
+
+const ATTACHMENT_EXT_TO_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.zip': 'application/zip',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
 
 export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
@@ -71,6 +95,13 @@ export class GChatClient implements ServiceClient {
 
   async send(options: GChatSendOptions & { spaceId?: string }): Promise<GChatSendResult> {
     if (this.credentials.type === 'webhook') {
+      if (options.attachments?.length) {
+        throw new CliError(
+          'PERMISSION_DENIED',
+          'File attachments are not supported for webhook profiles',
+          'Use an OAuth profile to send attachments'
+        );
+      }
       return this.sendViaWebhook(options);
     }
     if (options.spaceId) {
@@ -204,8 +235,20 @@ export class GChatClient implements ServiceClient {
       );
     }
 
+    // Upload file attachments first (in parallel) to obtain attachmentDataRefs
+    const attachmentRefs = options.attachments?.length
+      ? await Promise.all(options.attachments.map(p => this.uploadAttachment(options.spaceId!, p, chat)))
+      : [];
+
     // Use raw payload if provided, otherwise construct simple text message
-    const requestBody = options.payload ?? { text: options.text };
+    const requestBody: Record<string, unknown> = options.payload
+      ? { ...options.payload }
+      : { text: options.text };
+
+    if (attachmentRefs.length) {
+      const existing = Array.isArray(requestBody.attachment) ? requestBody.attachment as unknown[] : [];
+      requestBody.attachment = [...existing, ...attachmentRefs.map(ref => ({ attachmentDataRef: ref }))];
+    }
 
     try {
       const response = await chat.spaces.messages.create({
@@ -228,6 +271,54 @@ export class GChatClient implements ServiceClient {
         code,
         `Failed to send message: ${message}`,
         'Check that the space ID is valid and OAuth token is not expired'
+      );
+    }
+  }
+
+  private async uploadAttachment(
+    spaceId: string,
+    filePath: string,
+    chat: ReturnType<typeof gchat>
+  ): Promise<chat_v1.Schema$AttachmentDataRef> {
+    let content: Buffer;
+    try {
+      content = await readFile(filePath);
+    } catch (err) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Failed to read attachment: ${filePath}`,
+        'Check that the file exists and is readable'
+      );
+    }
+
+    const filename = basename(filePath);
+    const ext = extname(filePath).toLowerCase();
+    const mimeType = ATTACHMENT_EXT_TO_MIME[ext] || 'application/octet-stream';
+
+    try {
+      const response = await chat.media.upload({
+        parent: `spaces/${spaceId}`,
+        requestBody: { filename },
+        media: { mimeType, body: content },
+      });
+
+      const ref = response.data.attachmentDataRef;
+      if (!ref) {
+        throw new CliError(
+          'API_ERROR',
+          `Upload of "${filename}" returned no attachmentDataRef`,
+          'Retry, or check that the file size is under the Chat API limit (200MB)'
+        );
+      }
+      return ref;
+    } catch (err) {
+      if (err instanceof CliError) throw err;
+      const code = this.getErrorCode(err);
+      const message = this.getErrorMessage(err);
+      throw new CliError(
+        code,
+        `Failed to upload attachment "${filename}": ${message}`,
+        'Check that the space ID is valid, OAuth scope includes chat.messages.create, and the file is under 200MB'
       );
     }
   }

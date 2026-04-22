@@ -32,6 +32,7 @@ export function registerGChatCommands(program: Command): void {
     .option('--space <id>', 'Space ID (required for OAuth profiles)')
     .option('--thread <id>', 'Thread ID (optional)')
     .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
+    .option('--attachment <path>', 'File to attach (repeatable, OAuth profiles only)', (val: string, acc: string[]) => [...acc, val], [] as string[])
     .argument('[message]', 'Message text (or pipe via stdin)')
     .action(async (message: string | undefined, options) => {
       try {
@@ -91,8 +92,9 @@ export function registerGChatCommands(program: Command): void {
             text = await readStdin() || undefined;
           }
 
-          if (!text) {
-            throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          const hasAttachments = (options.attachment as string[] | undefined)?.length;
+          if (!text && !hasAttachments) {
+            throw new CliError('INVALID_PARAMS', 'Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.');
           }
         }
 
@@ -103,11 +105,16 @@ export function registerGChatCommands(program: Command): void {
 
         const { client, profile } = await getGChatClient(options.profile);
         await enforceWriteAccess('gchat', profile, 'send message');
+        const attachments = (options.attachment as string[] | undefined)?.length
+          ? (options.attachment as string[])
+          : undefined;
+
         const result = await client.send({
           text,
           payload,
           threadId: options.thread,
           spaceId: options.space,
+          attachments,
         });
 
         printGChatSendResult(result);

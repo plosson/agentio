@@ -70,6 +70,7 @@ export interface GChatSendOptions {
   threadId?: string;
   text?: string;
   payload?: Record<string, unknown>; // Raw JSON payload for rich messages (cardsV2, etc.)
+  attachments?: string[]; // Local file paths to upload and attach (OAuth only)
 }
 
 export interface GChatListOptions {
