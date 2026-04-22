@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, readFile, mkdir, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { encryptVault } from '../vault/crypto';
 
 let tempHome = '';
 let keychainFile = '';
@@ -178,5 +179,118 @@ describe('agentio setup — migration path', () => {
     // Legacy file untouched (not renamed) when user declines migration
     expect(existsSync(legacyConfigPath)).toBe(true);
     expect(existsSync(legacyConfigPath + '.bak')).toBe(false);
+  });
+});
+
+describe('agentio setup — adopt existing vault', () => {
+  test('prompts for passphrase of an existing vault file and writes pointer + keychain', async () => {
+    const vaultPath = join(tempHome, 'dropbox', 'myvault.enc');
+    await mkdir(dirname(vaultPath), { recursive: true });
+    const payload = JSON.stringify({
+      version: 1,
+      config: { profiles: { gmail: [{ name: 'imported' }] } },
+      credentials: {},
+    });
+    await writeFile(vaultPath, encryptVault(payload, 'adopt-pw-12345'));
+
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_ADOPT: '1',
+        AGENTIO_SETUP_VAULT_PATH: vaultPath,
+        AGENTIO_SETUP_PASSPHRASE: 'adopt-pw-12345',
+      },
+    });
+    expect(res.exitCode).toBe(0);
+
+    const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
+    expect(kc.vault).toBe('adopt-pw-12345');
+    const pointer = (await readFile(join(tempHome, '.config', 'agentio', 'vault.path'), 'utf-8')).trim();
+    expect(pointer).toBe(vaultPath);
+  });
+
+  test('rejects wrong passphrase when adopting', async () => {
+    const vaultPath = join(tempHome, 'myvault.enc');
+    await writeFile(
+      vaultPath,
+      encryptVault(JSON.stringify({ version: 1, config: { profiles: {} }, credentials: {} }), 'right-pw')
+    );
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_ADOPT: '1',
+        AGENTIO_SETUP_VAULT_PATH: vaultPath,
+        AGENTIO_SETUP_PASSPHRASE: 'wrong-pw',
+      },
+    });
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stderr.toLowerCase()).toContain('passphrase');
+  });
+});
+
+async function preSetupVault(passphrase: string): Promise<string> {
+  const vaultPath = join(tempHome, '.config', 'agentio', 'vault.enc');
+  await runCli(['setup'], {
+    env: {
+      AGENTIO_SETUP_NONINTERACTIVE: '1',
+      AGENTIO_SETUP_VAULT_PATH: vaultPath,
+      AGENTIO_SETUP_PASSPHRASE: passphrase,
+    },
+  });
+  return vaultPath;
+}
+
+describe('agentio setup — existing vault menu', () => {
+  test('change passphrase re-encrypts vault and updates keychain', async () => {
+    await preSetupVault('old-pw-12345');
+
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_MENU: 'change-passphrase',
+        AGENTIO_SETUP_PASSPHRASE: 'new-pw-67890',
+      },
+    });
+    expect(res.exitCode).toBe(0);
+
+    const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
+    expect(kc.vault).toBe('new-pw-67890');
+
+    // Note: the original plan includes additional assertions that run `agentio status`
+    // to verify the old passphrase no longer decrypts and the new one does. These are
+    // deferred to Task 12 (after the facade cutover) because `status` currently reads
+    // plaintext config.json and ignores the vault.
+  });
+
+  test('move vault copies file to new location and updates pointer', async () => {
+    const originalPath = await preSetupVault('pw-12345');
+    const newPath = join(tempHome, 'relocated.enc');
+
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_MENU: 'move-vault',
+        AGENTIO_SETUP_VAULT_PATH: newPath,
+      },
+    });
+    expect(res.exitCode).toBe(0);
+    expect(existsSync(newPath)).toBe(true);
+    expect(existsSync(originalPath)).toBe(false);
+    const pointer = (await readFile(join(tempHome, '.config', 'agentio', 'vault.path'), 'utf-8')).trim();
+    expect(pointer).toBe(newPath);
+  });
+});
+
+describe('agentio setup --reset', () => {
+  test('wipes vault, pointer, and keychain entry', async () => {
+    const vaultPath = await preSetupVault('pw-12345');
+
+    const res = await runCli(['setup', '--reset', '--force']);
+    expect(res.exitCode).toBe(0);
+    expect(existsSync(vaultPath)).toBe(false);
+    expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
+    const kcRaw = existsSync(keychainFile) ? await readFile(keychainFile, 'utf-8') : '{}';
+    const kc = JSON.parse(kcRaw || '{}');
+    expect(kc.vault).toBeUndefined();
   });
 });
