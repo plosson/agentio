@@ -147,7 +147,7 @@ export function configFromFlags(flags: AddFlags): Partial<FrontmatterConfig> {
     throw new CliError(
       'INVALID_PARAMS',
       '--enable and --disabled cannot be used together',
-      'Pass only one'
+      'Use --enable to re-enable, or --disabled to disable — not both'
     );
   }
   if (flags.disabled) partial.enabled = false;
