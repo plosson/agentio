@@ -12,7 +12,10 @@ import {
 } from '../services/schedule/frontmatter';
 import { parseDuration } from '../services/schedule/duration';
 import { parseWeekdays } from '../services/schedule/weekdays';
-import { installPlist } from '../services/schedule/launchd';
+import { installPlist, enumerateInstalledSchedules, uninstallPlist } from '../services/schedule/launchd';
+import { walkRunFiles } from '../services/schedule/walker';
+import { folderHash } from '../services/schedule/folder-hash';
+import { buildPlistDict } from '../services/schedule/plist-builder';
 import type {
   FrontmatterConfig,
   Model,
@@ -273,7 +276,99 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('sync').description('Reconcile launchd plists with *.run.md files')
     .option('--folder <path>', 'Folder to sync (default: CWD)')
     .option('-y, --yes', 'Non-interactive')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (opts: { folder?: string; yes?: boolean }) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+
+        // 1. Walk for *.run.md files
+        const files = walkRunFiles(folder);
+
+        // 2. Collision check
+        const byId = new Map<string, string[]>();
+        for (const f of files) {
+          const arr = byId.get(f.id) ?? [];
+          arr.push(f.path);
+          byId.set(f.id, arr);
+        }
+        const collisions = [...byId.entries()].filter(([, v]) => v.length > 1);
+        if (collisions.length > 0) {
+          const lines = collisions.map(([id, paths]) => `  "${id}":\n    ${paths.join('\n    ')}`);
+          throw new CliError('INVALID_PARAMS',
+            `Multiple .run.md files share the same id:\n${lines.join('\n')}`,
+            'Rename one of the files');
+        }
+
+        // 3. Ensure .agentio/.gitignore exists (first-time scaffolding)
+        if (files.length > 0) {
+          const giPath = resolve(folder, '.agentio', '.gitignore');
+          await mkdir(dirname(giPath), { recursive: true });
+          if (!existsSync(giPath)) {
+            await writeFile(giPath, 'runs/\nstate.json\n');
+          }
+        }
+
+        // 4. Build desired configs, prompting for incomplete files
+        const desired = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
+        for (const f of files) {
+          const raw = await readFile(f.path, 'utf-8');
+          const parsed = parseFrontmatter(raw);
+          let config = parsed.config as Partial<FrontmatterConfig>;
+          const missing = missingScheduleFields(config.schedule);
+          if (missing.length > 0) {
+            if (opts.yes || !isInteractive()) {
+              throw new CliError('INVALID_PARAMS',
+                `${f.path} is missing required fields: ${missing.join(', ')}`,
+                'Fill in the frontmatter or run sync interactively');
+            }
+            console.log(`Filling in missing frontmatter for ${f.path}:`);
+            config = await promptMissing(config, missing);
+            const finalConfig = mergeConfig({}, config);
+            await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
+            desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
+          } else {
+            desired.set(f.id, { config: mergeConfig({}, config), body: parsed.body, filePath: f.path });
+          }
+        }
+
+        // 5. Diff against installed plists
+        const installed = enumerateInstalledSchedules();
+        const targetHash = folderHash(folder);
+        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`com.agentio.schedule.${targetHash}-`));
+
+        const installedIds = new Set(installedForFolder.map((p) => p.id));
+        const desiredIds = new Set(desired.keys());
+
+        // 5a. Orphans: installed but no file -> uninstall
+        for (const p of installedForFolder) {
+          if (!desiredIds.has(p.id)) {
+            uninstallPlist(folder, p.id);
+            console.log(`Removed orphan plist: ${p.id}`);
+          }
+        }
+
+        // 5b. New or changed: install/update
+        for (const [id, { config }] of desired) {
+          const dict = buildPlistDict(folder, id, config);
+          let needsInstall = !installedIds.has(id);
+          if (!needsInstall) {
+            const existing = installedForFolder.find((p) => p.id === id)!;
+            try {
+              const raw = await readFile(existing.plistPath, 'utf-8');
+              const parsedDict = (await import('plist')).default.parse(raw) as Record<string, unknown>;
+              if (JSON.stringify(parsedDict) !== JSON.stringify(dict)) needsInstall = true;
+            } catch { needsInstall = true; }
+          }
+          if (needsInstall) {
+            installPlist(folder, id, config);
+            console.log(`Installed/updated: ${id}`);
+          }
+        }
+
+        console.log(`Sync complete: ${desired.size} schedules.`);
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('remove').description('Delete a schedule and uninstall its plist')
     .argument('<id>', 'Schedule id')
