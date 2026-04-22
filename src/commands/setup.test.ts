@@ -315,3 +315,90 @@ describe('agentio setup --reset', () => {
     expect(kc.vault).toBeUndefined();
   });
 });
+
+describe('agentio setup — directory path normalization', () => {
+  test('first-time setup appends default filename when path is an existing directory', async () => {
+    const dir = join(tempHome, 'my-vault-dir');
+    await mkdir(dir, { recursive: true });
+
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_VAULT_PATH: dir,
+        AGENTIO_SETUP_PASSPHRASE: 'test-pw-12345',
+      },
+    });
+    expect(res.exitCode).toBe(0);
+    const expected = join(dir, 'agentio.vault');
+    expect(existsSync(expected)).toBe(true);
+    const pointer = (await readFile(join(tempHome, '.config', 'agentio', 'vault.path'), 'utf-8')).trim();
+    expect(pointer).toBe(expected);
+    expect(res.stdout).toContain('Path is a directory');
+  });
+
+  test('trailing slash is treated as a directory intent', async () => {
+    const dir = join(tempHome, 'new-dir') + '/';
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_VAULT_PATH: dir,
+        AGENTIO_SETUP_PASSPHRASE: 'test-pw-12345',
+      },
+    });
+    expect(res.exitCode).toBe(0);
+    const expected = join(tempHome, 'new-dir', 'agentio.vault');
+    expect(existsSync(expected)).toBe(true);
+  });
+});
+
+describe('agentio setup — migration rollback on failure', () => {
+  test('legacy files and keychain are untouched if vault write fails', async () => {
+    const cfgDir = join(tempHome, '.config', 'agentio');
+    const legacyConfigPath = join(cfgDir, 'config.json');
+    const legacyTokensPath = join(cfgDir, 'tokens.enc');
+    await writeFile(legacyConfigPath, JSON.stringify({ profiles: { gmail: [{ name: 'work' }] } }), { mode: 0o600 });
+    // tokens.enc with a garbage body — still counts as "hasTokens" for detectLegacy
+    await writeFile(legacyTokensPath, '{}', { mode: 0o600 });
+
+    // Point the vault at an unwritable path: a file path whose parent is itself a FILE,
+    // so mkdir can't create the parent and writeFile will fail. We use /dev/null as the parent.
+    const unwritableVault = '/dev/null/vault.enc';
+
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_VAULT_PATH: unwritableVault,
+        AGENTIO_SETUP_PASSPHRASE: 'migration-pw-123',
+        AGENTIO_SETUP_MIGRATE: 'yes',
+      },
+    });
+    expect(res.exitCode).not.toBe(0);
+
+    // Legacy files must still be at their original names (not .bak)
+    expect(existsSync(legacyConfigPath)).toBe(true);
+    expect(existsSync(legacyConfigPath + '.bak')).toBe(false);
+    expect(existsSync(legacyTokensPath)).toBe(true);
+    expect(existsSync(legacyTokensPath + '.bak')).toBe(false);
+
+    // Pointer must be cleaned up so the next setup run starts fresh
+    expect(existsSync(join(cfgDir, 'vault.path'))).toBe(false);
+
+    // Keychain must not have been written (setPassphrase runs after saveVault)
+    const kcRaw = existsSync(keychainFile) ? await readFile(keychainFile, 'utf-8') : '{}';
+    const kc = JSON.parse(kcRaw || '{}');
+    expect(kc.vault).toBeUndefined();
+  });
+
+  test('first-time setup also cleans up pointer on vault write failure', async () => {
+    const unwritableVault = '/dev/null/vault.enc';
+    const res = await runCli(['setup'], {
+      env: {
+        AGENTIO_SETUP_NONINTERACTIVE: '1',
+        AGENTIO_SETUP_VAULT_PATH: unwritableVault,
+        AGENTIO_SETUP_PASSPHRASE: 'test-pw-12345',
+      },
+    });
+    expect(res.exitCode).not.toBe(0);
+    expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
+  });
+});

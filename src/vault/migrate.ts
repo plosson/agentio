@@ -54,7 +54,12 @@ export interface MigrateResult {
   tokensRecovered: boolean;
 }
 
-export async function migrateLegacy(): Promise<MigrateResult> {
+/**
+ * Read legacy config + tokens without side effects. Safe to call multiple
+ * times. Call archiveLegacy() after the new vault has been successfully
+ * written to preserve the originals as .bak files.
+ */
+export async function readLegacy(): Promise<MigrateResult> {
   const { configPath, tokensPath } = legacyPaths();
 
   if (!existsSync(configPath)) {
@@ -88,11 +93,23 @@ export async function migrateLegacy(): Promise<MigrateResult> {
     }
   }
 
-  // Rename legacy files to .bak (do not delete).
-  await rename(configPath, configPath + '.bak');
+  return { config, credentials, tokensRecovered };
+}
+
+/** Rename legacy files to .bak. Call only after the new vault is safely written. */
+export async function archiveLegacy(): Promise<void> {
+  const { configPath, tokensPath } = legacyPaths();
+  if (existsSync(configPath)) {
+    await rename(configPath, configPath + '.bak');
+  }
   if (existsSync(tokensPath)) {
     await rename(tokensPath, tokensPath + '.bak');
   }
+}
 
-  return { config, credentials, tokensRecovered };
+/** Back-compat wrapper: read then archive in one step. */
+export async function migrateLegacy(): Promise<MigrateResult> {
+  const result = await readLegacy();
+  await archiveLegacy();
+  return result;
 }

@@ -1,11 +1,11 @@
 import { Command } from 'commander';
 import { mkdir, copyFile, unlink, readFile as fsReadFile } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, isAbsolute, join } from 'path';
 import { password, input, confirm, select } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
-import { writePointer, readPointer } from '../vault/pointer';
+import { writePointer, readPointer, deletePointer } from '../vault/pointer';
 import {
   vaultExists,
   loadVault,
@@ -15,7 +15,9 @@ import {
 } from '../vault/vault';
 import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
-import { detectLegacy, migrateLegacy, legacyPaths } from '../vault/migrate';
+import { detectLegacy, readLegacy, archiveLegacy, legacyPaths } from '../vault/migrate';
+
+const DEFAULT_VAULT_FILENAME = 'agentio.vault';
 
 const MIN_PASSPHRASE_LEN = 8;
 
@@ -32,20 +34,50 @@ function readNonInteractiveInputs(): NonInteractiveInputs | null {
   };
 }
 
-function validateInputs(v: NonInteractiveInputs): void {
-  if (!isAbsolute(v.vaultPath)) {
+function validateVaultPath(path: string): void {
+  if (!isAbsolute(path)) {
     throw new CliError(
       'INVALID_PARAMS',
       'Vault path must be absolute',
       'Use a path like /Users/you/agentio.vault'
     );
   }
-  if (v.passphrase.length < MIN_PASSPHRASE_LEN) {
+}
+
+function validatePassphrase(passphrase: string): void {
+  if (passphrase.length < MIN_PASSPHRASE_LEN) {
     throw new CliError(
       'INVALID_PARAMS',
       `passphrase must be at least ${MIN_PASSPHRASE_LEN} characters`
     );
   }
+}
+
+function validateInputs(v: NonInteractiveInputs): void {
+  validateVaultPath(v.vaultPath);
+  validatePassphrase(v.passphrase);
+}
+
+/**
+ * If the user passes a directory (or a path ending in /), append the default
+ * filename so the vault lands inside that directory instead of trying to
+ * rename over it.
+ */
+function normalizeVaultPath(path: string): string {
+  const trailingSlash = path.endsWith('/');
+  let resolved = trailingSlash ? path.slice(0, -1) : path;
+  if (existsSync(resolved)) {
+    try {
+      if (statSync(resolved).isDirectory()) {
+        return join(resolved, DEFAULT_VAULT_FILENAME);
+      }
+    } catch {
+      // stat failed — fall through, let downstream I/O surface the error
+    }
+  } else if (trailingSlash) {
+    return join(resolved, DEFAULT_VAULT_FILENAME);
+  }
+  return resolved;
 }
 
 async function promptFirstTime(): Promise<NonInteractiveInputs> {
@@ -74,20 +106,30 @@ async function promptFirstTime(): Promise<NonInteractiveInputs> {
 
 async function doFirstTimeSetup(inputs: NonInteractiveInputs): Promise<void> {
   validateInputs(inputs);
+  const vaultPath = normalizeVaultPath(inputs.vaultPath);
+  if (vaultPath !== inputs.vaultPath) {
+    console.log(`Path is a directory; using ${vaultPath}`);
+  }
 
-  const dir = dirname(inputs.vaultPath);
+  const dir = dirname(vaultPath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true, mode: 0o700 });
   }
 
-  await writePointer(inputs.vaultPath);
+  await writePointer(vaultPath);
   process.env.AGENTIO_PASSPHRASE = inputs.passphrase;
 
-  await saveVault({
-    version: CURRENT_VAULT_VERSION,
-    config: { profiles: {} },
-    credentials: {},
-  });
+  try {
+    await saveVault({
+      version: CURRENT_VAULT_VERSION,
+      config: { profiles: {} },
+      credentials: {},
+    });
+  } catch (err) {
+    // Roll back the pointer so the next setup run starts clean.
+    await deletePointer().catch(() => {});
+    throw err;
+  }
 
   try {
     await setPassphrase(inputs.passphrase);
@@ -98,26 +140,43 @@ async function doFirstTimeSetup(inputs: NonInteractiveInputs): Promise<void> {
     console.error('Set AGENTIO_PASSPHRASE in your environment for future commands.');
   }
 
-  console.log(`Vault created at ${inputs.vaultPath}`);
+  console.log(`Vault created at ${vaultPath}`);
 }
 
 async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
   validateInputs(inputs);
-  const dir = dirname(inputs.vaultPath);
+  const vaultPath = normalizeVaultPath(inputs.vaultPath);
+  if (vaultPath !== inputs.vaultPath) {
+    console.log(`Path is a directory; using ${vaultPath}`);
+  }
+
+  const dir = dirname(vaultPath);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true, mode: 0o700 });
   }
 
-  const result = await migrateLegacy();
+  // Read legacy files but DO NOT rename them yet — we only archive after the
+  // new vault is safely on disk, so a failure here leaves the originals intact.
+  const result = await readLegacy();
 
-  await writePointer(inputs.vaultPath);
+  await writePointer(vaultPath);
   process.env.AGENTIO_PASSPHRASE = inputs.passphrase;
 
-  await saveVault({
-    version: CURRENT_VAULT_VERSION,
-    config: result.config,
-    credentials: result.credentials,
-  });
+  try {
+    await saveVault({
+      version: CURRENT_VAULT_VERSION,
+      config: result.config,
+      credentials: result.credentials,
+    });
+  } catch (err) {
+    // Roll back pointer. Legacy files were never touched, so setup can be
+    // re-run (and detection will still find them).
+    await deletePointer().catch(() => {});
+    throw err;
+  }
+
+  // Vault is safely written — now archive the legacy files.
+  await archiveLegacy();
 
   try {
     await setPassphrase(inputs.passphrase);
@@ -127,7 +186,7 @@ async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
   }
 
   const { configPath, tokensPath } = legacyPaths();
-  console.log(`Vault created at ${inputs.vaultPath}`);
+  console.log(`Vault created at ${vaultPath}`);
   console.log(`Legacy files preserved at ${configPath}.bak${existsSync(tokensPath + '.bak') ? ` and ${tokensPath}.bak` : ''}`);
   console.log('Delete them once you have confirmed the vault works.');
   if (!result.tokensRecovered) {
@@ -136,27 +195,26 @@ async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
 }
 
 async function doAdoptExisting(inputs: NonInteractiveInputs): Promise<void> {
-  if (!isAbsolute(inputs.vaultPath)) {
-    throw new CliError('INVALID_PARAMS', 'Vault path must be absolute');
-  }
-  if (!existsSync(inputs.vaultPath)) {
-    throw new CliError('NOT_FOUND', `No vault file at ${inputs.vaultPath}`);
+  validateVaultPath(inputs.vaultPath);
+  const vaultPath = normalizeVaultPath(inputs.vaultPath);
+  if (!existsSync(vaultPath)) {
+    throw new CliError('NOT_FOUND', `No vault file at ${vaultPath}`);
   }
 
-  const encoded = await fsReadFile(inputs.vaultPath, 'utf-8');
+  const encoded = await fsReadFile(vaultPath, 'utf-8');
   try {
     decryptVault(encoded.trim(), inputs.passphrase);
   } catch {
     throw new CliError('AUTH_FAILED', 'Wrong passphrase for the vault file');
   }
 
-  await writePointer(inputs.vaultPath);
+  await writePointer(vaultPath);
   try {
     await setPassphrase(inputs.passphrase);
   } catch (err) {
     console.error(`Warning: could not store passphrase in OS keychain: ${(err as Error).message}`);
   }
-  console.log(`Adopted vault at ${inputs.vaultPath}`);
+  console.log(`Adopted vault at ${vaultPath}`);
 }
 
 async function doChangePassphrase(newPassphrase: string): Promise<void> {
@@ -178,35 +236,34 @@ async function doChangePassphrase(newPassphrase: string): Promise<void> {
 }
 
 async function doMoveVault(newPath: string): Promise<void> {
-  if (!isAbsolute(newPath)) {
-    throw new CliError('INVALID_PARAMS', 'New path must be absolute');
-  }
+  validateVaultPath(newPath);
+  const resolved = normalizeVaultPath(newPath);
   const current = await readPointer();
   if (!current) throw new CliError('VAULT_NOT_CONFIGURED', 'No vault to move');
-  if (newPath === current) {
+  if (resolved === current) {
     console.log('Vault is already at that path');
     return;
   }
 
-  const dir = dirname(newPath);
+  const dir = dirname(resolved);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true, mode: 0o700 });
   }
 
   // Copy → repoint → verify → on failure, roll back pointer and delete new file.
-  await copyFile(current, newPath);
+  await copyFile(current, resolved);
   const oldPointer = current;
-  await writePointer(newPath);
+  await writePointer(resolved);
   try {
     await loadVault();
   } catch (err) {
     await writePointer(oldPointer);
-    if (existsSync(newPath)) await unlink(newPath).catch(() => {});
+    if (existsSync(resolved)) await unlink(resolved).catch(() => {});
     throw err;
   }
 
   if (existsSync(oldPointer)) await unlink(oldPointer).catch(() => {});
-  console.log(`Vault moved to ${newPath}`);
+  console.log(`Vault moved to ${resolved}`);
 }
 
 async function doReset(force: boolean): Promise<void> {
