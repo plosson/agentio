@@ -67,10 +67,6 @@ export type ConfigField =
   | 'host'
   | 'enabled';
 
-export const SCHEDULE_FIELDS: readonly ConfigField[] = [
-  'schedule', 'weekdays', 'day', 'hour', 'minute', 'intervalMinutes',
-];
-
 export const ALL_EDITABLE_FIELDS: readonly ConfigField[] = [
   'schedule', 'weekdays', 'day', 'hour', 'minute', 'intervalMinutes',
   'model', 'permissionMode', 'sessionMode', 'command', 'host', 'enabled',
@@ -215,20 +211,20 @@ export function configFromFlags(flags: AddFlags): Partial<FrontmatterConfig> {
 }
 
 /** Required fields of a schedule by type. */
-function missingScheduleFields(s: Schedule | undefined): string[] {
+function missingScheduleFields(s: Schedule | undefined): ConfigField[] {
   if (!s) return ['schedule'];
   switch (s.type) {
     case 'manual': return [];
     case 'daily':
       return (s.hour === undefined || s.minute === undefined) ? ['hour', 'minute'] : [];
     case 'weekly': {
-      const missing: string[] = [];
+      const missing: ConfigField[] = [];
       if (!s.weekdays || s.weekdays.length === 0) missing.push('weekdays');
       if (s.hour === undefined || s.minute === undefined) missing.push('hour', 'minute');
       return missing;
     }
     case 'monthly': {
-      const missing: string[] = [];
+      const missing: ConfigField[] = [];
       if (s.day === undefined) missing.push('day');
       if (s.hour === undefined || s.minute === undefined) missing.push('hour', 'minute');
       return missing;
@@ -262,7 +258,7 @@ async function promptConfig(
   const needsInterval = s.type === 'interval';
 
   if (needsWeekdays && fieldSet.has('weekdays')) {
-    const current = s.weekdays ? s.weekdays.map(String).join(',') : '';
+    const current = s.weekdays ? formatWeekdaysShort(s.weekdays) : '';
     const raw = await input({ message: 'Weekdays (e.g. mon,wed,fri):', default: current });
     s.weekdays = parseWeekdays(raw);
   }
@@ -367,6 +363,11 @@ function fmtHM(h?: number, m?: number): string {
   return `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`;
 }
 
+const WEEKDAY_SHORT = ['', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+function formatWeekdaysShort(nums: number[]): string {
+  return nums.map((n) => WEEKDAY_SHORT[n] ?? String(n)).join(',');
+}
+
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
@@ -420,7 +421,7 @@ export function registerScheduleCommands(program: Command): void {
               `Missing required fields: ${missing.join(', ')}`,
               'Provide via flags or run interactively (no -y)');
           }
-          merged = await promptConfig(merged, missing as ConfigField[]);
+          merged = await promptConfig(merged, missing);
         }
 
         const finalConfig: FrontmatterConfig = mergeConfig({}, merged);
@@ -531,7 +532,7 @@ export function registerScheduleCommands(program: Command): void {
                 'Fill in the frontmatter or run sync interactively');
             }
             console.log(`Filling in missing frontmatter for ${f.path}:`);
-            config = await promptConfig(config, missing as ConfigField[]);
+            config = await promptConfig(config, missing);
             const finalConfig = mergeConfig({}, config);
             await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
             desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
