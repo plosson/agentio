@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { existsSync, readFileSync } from 'fs';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
@@ -432,7 +432,27 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('remove').description('Delete a schedule and uninstall its plist')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (id: string, opts: { folder?: string }) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        if (matches.length === 0) {
+          // still attempt plist uninstall in case the file was already removed
+          uninstallPlist(folder, id);
+          throw new CliError('NOT_FOUND', `No .run.md file found for id "${id}" under ${folder}`,
+            'Check the id (ls **/*.run.md) or run schedule list');
+        }
+        if (matches.length > 1) {
+          throw new CliError('INVALID_PARAMS',
+            `Multiple files match id "${id}": ${matches.map((m) => m.path).join(', ')}`);
+        }
+        await unlink(matches[0].path);
+        uninstallPlist(folder, id);
+        console.log(`Removed schedule "${id}" (deleted ${matches[0].path}, uninstalled plist)`);
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('run').description('Run a schedule immediately')
     .argument('<id>', 'Schedule id')
