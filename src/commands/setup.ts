@@ -3,11 +3,12 @@ import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, isAbsolute, join } from 'path';
-import { password, input } from '@inquirer/prompts';
+import { password, input, confirm } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { writePointer } from '../vault/pointer';
 import { saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import { setPassphrase } from '../vault/passphrase';
+import { detectLegacy, migrateLegacy } from '../vault/migrate';
 
 const MIN_PASSPHRASE_LEN = 8;
 
@@ -93,13 +94,63 @@ async function doFirstTimeSetup(inputs: NonInteractiveInputs): Promise<void> {
   console.log(`Vault created at ${inputs.vaultPath}`);
 }
 
+async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
+  validateInputs(inputs);
+  const dir = dirname(inputs.vaultPath);
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+  }
+
+  const result = await migrateLegacy();
+
+  await writePointer(inputs.vaultPath);
+  process.env.AGENTIO_PASSPHRASE = inputs.passphrase;
+
+  await saveVault({
+    version: CURRENT_VAULT_VERSION,
+    config: result.config,
+    credentials: result.credentials,
+  });
+
+  try {
+    await setPassphrase(inputs.passphrase);
+  } catch (err) {
+    console.error(`Warning: could not store passphrase in OS keychain: ${(err as Error).message}`);
+    console.error('Set AGENTIO_PASSPHRASE in your environment for future commands.');
+  }
+
+  console.log(`Vault created at ${inputs.vaultPath}`);
+  if (!result.tokensRecovered) {
+    console.error('Warning: legacy credentials could not be recovered. Re-authenticate each service.');
+  }
+}
+
 export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
     .description('Initialize or manage the agentio vault')
     .action(async () => {
       try {
+        const legacy = await detectLegacy();
         const nonInteractive = readNonInteractiveInputs();
+
+        if (legacy.hasConfig) {
+          let migrate: boolean;
+          if (nonInteractive) {
+            migrate = process.env.AGENTIO_SETUP_MIGRATE === 'yes';
+          } else {
+            migrate = await confirm({
+              message: 'Found legacy config. Import into new vault?',
+              default: true,
+            });
+          }
+          if (migrate) {
+            const inputs = nonInteractive ?? (await promptFirstTime());
+            await doMigrationSetup(inputs);
+            return;
+          }
+        }
+
         const inputs = nonInteractive ?? (await promptFirstTime());
         await doFirstTimeSetup(inputs);
       } catch (error) {
