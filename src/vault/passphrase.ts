@@ -11,6 +11,11 @@ let provider: KeychainProvider | null = null;
 let cached: string | null = null;
 
 function keytarProvider(): KeychainProvider {
+  const test = process.env.AGENTIO_KEYCHAIN;
+  if (test && test.startsWith('memory:')) {
+    const path = test.slice('memory:'.length);
+    return memoryFileKeychain(path);
+  }
   // Lazy require so tests using an injected provider don't need keytar loadable.
   const keytar = require('keytar');
   return {
@@ -23,6 +28,36 @@ function keytarProvider(): KeychainProvider {
     },
     async delete(account: string) {
       await keytar.deletePassword(SERVICE, account);
+    },
+  };
+}
+
+function memoryFileKeychain(path: string): KeychainProvider {
+  const fs = require('fs');
+  function read(): Record<string, string> {
+    if (!fs.existsSync(path)) return {};
+    try {
+      return JSON.parse(fs.readFileSync(path, 'utf-8'));
+    } catch {
+      return {};
+    }
+  }
+  function write(data: Record<string, string>) {
+    fs.writeFileSync(path, JSON.stringify(data), { mode: 0o600 });
+  }
+  return {
+    async get(account: string) {
+      return read()[account] ?? null;
+    },
+    async set(account: string, value: string) {
+      const d = read();
+      d[account] = value;
+      write(d);
+    },
+    async delete(account: string) {
+      const d = read();
+      delete d[account];
+      write(d);
     },
   };
 }

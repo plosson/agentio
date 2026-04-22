@@ -28,6 +28,7 @@ import { registerGatewayCommands } from './commands/gateway';
 import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
 import { registerServerCommands } from './commands/server';
+import { registerSetupCommand } from './commands/setup';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 
@@ -74,6 +75,7 @@ registerGatewayCommands(program);
 registerReauthCommand(program);
 registerScheduleCommands(program);
 registerServerCommands(program);
+registerSetupCommand(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 
