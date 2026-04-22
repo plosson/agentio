@@ -19,6 +19,7 @@ import { folderHash } from '../services/schedule/folder-hash';
 import { buildPlistDict } from '../services/schedule/plist-builder';
 import { nextRuns } from '../services/schedule/schedule-calculator';
 import { listRuns } from '../services/schedule/runs';
+import { getCurrentHost, hostMatches } from '../services/schedule/host';
 import type {
   FrontmatterConfig,
   Model,
@@ -41,6 +42,7 @@ export interface AddFlags {
   permissionMode?: string;
   sessionMode?: string;
   command?: string;
+  host?: string;
   disabled?: boolean;
   yes?: boolean;
 }
@@ -139,6 +141,7 @@ export function configFromFlags(flags: AddFlags): Partial<FrontmatterConfig> {
     partial.sessionMode = flags.sessionMode as SessionMode;
   }
   if (flags.command) partial.command = flags.command;
+  if (flags.host) partial.host = flags.host;
   if (flags.disabled) partial.enabled = false;
   return partial;
 }
@@ -244,6 +247,7 @@ export function registerScheduleCommands(program: Command): void {
     .option('--permission-mode <m>', 'default | bypass | plan | accept-edits')
     .option('--session-mode <m>', 'new | resume | fork')
     .option('--command <cmd>', 'Command override (ignores model/permissionMode/sessionMode)')
+    .option('--host <name>', 'Pin schedule to a specific hostname; skipped on other machines')
     .option('--disabled', 'Create with enabled: false')
     .option('-y, --yes', 'Non-interactive; error if required flags missing')
     .action(async (file: string, opts: AddFlags) => {
@@ -286,9 +290,15 @@ export function registerScheduleCommands(program: Command): void {
         await writeFile(filePath, serializeFrontmatter(finalConfig, existingBody));
 
         const id = file.split('/').pop()!.slice(0, -'.run.md'.length);
-        installPlist(folder, id, finalConfig);
-
-        console.log(`Installed schedule "${id}" in ${folder}`);
+        if (hostMatches(finalConfig)) {
+          installPlist(folder, id, finalConfig);
+          console.log(`Installed schedule "${id}" in ${folder}`);
+        } else {
+          // Schedule pinned to another host — make sure a stale plist from a
+          // prior host match isn't left behind, then skip install.
+          uninstallPlist(folder, id);
+          console.log(`Wrote "${id}" (pinned to host "${finalConfig.host}"; current host is "${getCurrentHost()}"; plist not installed)`);
+        }
       } catch (e) {
         handleError(e);
       }
@@ -397,18 +407,35 @@ export function registerScheduleCommands(program: Command): void {
         const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`me.agentio.schedule.${targetHash}-`));
 
         const installedIds = new Set(installedForFolder.map((p) => p.id));
-        const desiredIds = new Set(desired.keys());
+        const currentHost = getCurrentHost();
 
-        // 5a. Orphans: installed but no file -> uninstall
+        // Partition desired into those for this host vs. pinned elsewhere.
+        const desiredForThisHost = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
+        const desiredForOtherHost = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
+        for (const [id, entry] of desired) {
+          if (hostMatches(entry.config, currentHost)) desiredForThisHost.set(id, entry);
+          else desiredForOtherHost.set(id, entry);
+        }
+
+        // 5a. Orphans: installed plist with no matching .run.md file -> uninstall
+        const allDesiredIds = new Set(desired.keys());
         for (const p of installedForFolder) {
-          if (!desiredIds.has(p.id)) {
+          if (!allDesiredIds.has(p.id)) {
             uninstallPlist(folder, p.id);
             console.log(`Removed orphan plist: ${p.id}`);
           }
         }
 
-        // 5b. New or changed: install/update
-        for (const [id, { config }] of desired) {
+        // 5b. Host-pinned-elsewhere but currently installed -> uninstall
+        for (const [id, { config }] of desiredForOtherHost) {
+          if (installedIds.has(id)) {
+            uninstallPlist(folder, id);
+            console.log(`Uninstalled "${id}" (pinned to host "${config.host}", this host is "${currentHost}")`);
+          }
+        }
+
+        // 5c. New or changed for this host: install/update
+        for (const [id, { config }] of desiredForThisHost) {
           const dict = buildPlistDict(folder, id, config);
           let needsInstall = !installedIds.has(id);
           if (!needsInstall) {
@@ -425,7 +452,9 @@ export function registerScheduleCommands(program: Command): void {
           }
         }
 
-        console.log(`Sync complete: ${desired.size} schedules.`);
+        const skipped = desiredForOtherHost.size;
+        const skipNote = skipped > 0 ? ` (${skipped} pinned to other hosts)` : '';
+        console.log(`Sync complete: ${desiredForThisHost.size} on this host${skipNote}.`);
       } catch (e) {
         handleError(e);
       }
@@ -504,6 +533,10 @@ export function registerScheduleCommands(program: Command): void {
         console.log(`sessionMode:   ${cfg.sessionMode}`);
         console.log(`enabled:       ${cfg.enabled}`);
         if (cfg.command) console.log(`command:       ${cfg.command}`);
+        if (cfg.host) {
+          const hostState = hostMatches(cfg) ? 'matches current host' : `pinned to "${cfg.host}"; current is "${getCurrentHost()}"`;
+          console.log(`host:          ${cfg.host} (${hostState})`);
+        }
         console.log('next 5 runs:');
         for (const d of nextRuns(cfg.schedule, 5)) {
           console.log(`  ${d.toISOString()}`);

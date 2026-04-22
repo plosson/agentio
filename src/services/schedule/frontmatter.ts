@@ -42,6 +42,11 @@ export function mergeConfig(
       : base.command !== undefined
       ? { command: base.command }
       : {}),
+    ...(override.host !== undefined
+      ? { host: override.host }
+      : base.host !== undefined
+      ? { host: base.host }
+      : {}),
   };
 }
 
@@ -56,6 +61,9 @@ export function serializeFrontmatter(config: FrontmatterConfig, body: string): s
   };
   if (config.command !== undefined) {
     data.command = config.command;
+  }
+  if (config.host !== undefined) {
+    data.host = config.host;
   }
   return matter.stringify(body, data);
 }

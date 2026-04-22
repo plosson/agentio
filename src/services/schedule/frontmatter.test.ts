@@ -100,4 +100,19 @@ describe('serializeFrontmatter', () => {
     const serialized = serializeFrontmatter(config, 'x');
     expect(serialized).not.toContain('command');
   });
+
+  test('round-trips host when set', () => {
+    const config: FrontmatterConfig = {
+      schedule: { type: 'manual' },
+      model: 'sonnet',
+      permissionMode: 'default',
+      sessionMode: 'new',
+      enabled: true,
+      host: 'mac-1',
+    };
+    const serialized = serializeFrontmatter(config, 'body');
+    expect(serialized).toContain('host: mac-1');
+    const reparsed = parseFrontmatter(serialized);
+    expect(reparsed.config.host).toBe('mac-1');
+  });
 });

@@ -54,6 +54,17 @@ agentio schedule sync
 
 Reconciles launchd state to match the committed files.
 
+## Pin a schedule to one machine
+
+When the folder syncs across multiple machines (e.g. Dropbox, iCloud, git), use `host` to run a schedule on only one of them:
+
+```bash
+agentio schedule add prompts/backup.run.md \
+  --schedule daily --at 02:00 --host mac-work -y
+```
+
+On machines where `hostname` doesn't match `mac-work`, `schedule sync` skips the install (and uninstalls it if previously installed). `agentio schedule run <id>` still works anywhere — `host` only gates automatic scheduling.
+
 ## File format
 
 ```markdown
@@ -66,6 +77,7 @@ model: sonnet
 permissionMode: bypassPermissions
 sessionMode: new
 enabled: true
+# host: mac-work   # optional; only install on machines with this hostname
 ---
 
 Your prompt text here. Everything below the `---` is sent to claude as-is.

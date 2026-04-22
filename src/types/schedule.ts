@@ -20,6 +20,7 @@ export interface FrontmatterConfig {
   sessionMode: SessionMode;
   enabled: boolean;
   command?: string; // optional command override
+  host?: string; // when set, schedule only installs on machines whose hostname matches
 }
 
 export interface ScheduleState {
