@@ -140,7 +140,7 @@ export function applyScheduleType(current: Schedule, newType: ScheduleType): Sch
         type: 'weekly',
         ...(current.hour !== undefined ? { hour: current.hour } : {}),
         ...(current.minute !== undefined ? { minute: current.minute } : {}),
-        ...(current.weekdays ? { weekdays: current.weekdays } : {}),
+        ...(current.weekdays && current.weekdays.length > 0 ? { weekdays: current.weekdays } : {}),
       };
     case 'monthly':
       return {
