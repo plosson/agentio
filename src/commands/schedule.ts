@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { existsSync, readFileSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
+import { homedir } from 'os';
 import { dirname, isAbsolute, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
@@ -368,6 +369,13 @@ function formatWeekdaysShort(nums: number[]): string {
   return nums.map((n) => WEEKDAY_SHORT[n] ?? String(n)).join(',');
 }
 
+/** Replace $HOME prefix with `~` for display. */
+export function abbrHome(path: string, home: string = homedir()): string {
+  if (path === home) return '~';
+  if (path.startsWith(home + '/')) return '~' + path.slice(home.length);
+  return path;
+}
+
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
@@ -530,8 +538,8 @@ export function registerScheduleCommands(program: Command): void {
             const glob = walkRunFiles(p.folder).find((f) => f.id === p.id);
             if (!glob) {
               return {
-                folder: p.folder, id: p.id, schedule: '[broken: .run.md missing]',
-                model: '-', next: '-', enabled: '-',
+                id: p.id, folder: abbrHome(p.folder), enabled: '-',
+                schedule: '[broken: .run.md missing]', next: '-',
               };
             }
             try {
@@ -540,18 +548,29 @@ export function registerScheduleCommands(program: Command): void {
               const cfg = mergeConfig({}, parsed.config);
               const next = nextRuns(cfg.schedule, 1)[0];
               return {
-                folder: p.folder, id: p.id, schedule: describeSchedule(cfg.schedule),
-                model: cfg.command ? `cmd: ${cfg.command}` : cfg.model,
-                next: next ? next.toISOString() : '-',
+                id: p.id, folder: abbrHome(p.folder),
                 enabled: cfg.enabled ? 'yes' : 'no',
+                schedule: describeSchedule(cfg.schedule),
+                next: next ? next.toISOString() : '-',
               };
             } catch {
-              return { folder: p.folder, id: p.id, schedule: '[parse error]', model: '-', next: '-', enabled: '-' };
+              return {
+                id: p.id, folder: abbrHome(p.folder), enabled: '-',
+                schedule: '[parse error]', next: '-',
+              };
             }
           });
         if (rows.length === 0) { console.log('No schedules installed.'); return; }
+        const widths = {
+          id: Math.max('ID'.length, ...rows.map((r) => r.id.length)),
+          folder: Math.max('FOLDER'.length, ...rows.map((r) => r.folder.length)),
+          enabled: Math.max('ENABLED'.length, ...rows.map((r) => r.enabled.length)),
+          schedule: Math.max('SCHEDULE'.length, ...rows.map((r) => r.schedule.length)),
+        };
+        const header = `${'ID'.padEnd(widths.id)}  ${'FOLDER'.padEnd(widths.folder)}  ${'ENABLED'.padEnd(widths.enabled)}  ${'SCHEDULE'.padEnd(widths.schedule)}  NEXT`;
+        console.log(header);
         for (const r of rows) {
-          console.log(`${r.folder}  ${r.id}  ${r.schedule}  (${r.model})  next: ${r.next}  enabled: ${r.enabled}`);
+          console.log(`${r.id.padEnd(widths.id)}  ${r.folder.padEnd(widths.folder)}  ${r.enabled.padEnd(widths.enabled)}  ${r.schedule.padEnd(widths.schedule)}  ${r.next}`);
         }
       } catch (e) {
         handleError(e);
@@ -640,6 +659,19 @@ export function registerScheduleCommands(program: Command): void {
           }
         }
 
+        // 5a-bis. Global cleanup: any installed plist whose folder no longer
+        // exists on disk is unreachable — uninstall it. Runs on every sync so
+        // users don't need a separate prune command.
+        let stalePruned = 0;
+        for (const p of installed) {
+          if (p.folder === folder) continue; // already handled above
+          if (!existsSync(p.folder)) {
+            uninstallPlist(p.folder, p.id);
+            console.log(`Pruned stale plist: ${p.id} (folder ${p.folder} is gone)`);
+            stalePruned += 1;
+          }
+        }
+
         // 5b. Host-pinned-elsewhere but currently installed -> uninstall
         for (const [id, { config }] of desiredForOtherHost) {
           if (installedIds.has(id)) {
@@ -667,8 +699,11 @@ export function registerScheduleCommands(program: Command): void {
         }
 
         const skipped = desiredForOtherHost.size;
-        const skipNote = skipped > 0 ? ` (${skipped} pinned to other hosts)` : '';
-        console.log(`Sync complete: ${desiredForThisHost.size} on this host${skipNote}.`);
+        const notes = [];
+        if (skipped > 0) notes.push(`${skipped} pinned to other hosts`);
+        if (stalePruned > 0) notes.push(`${stalePruned} stale pruned`);
+        const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
+        console.log(`Sync complete: ${desiredForThisHost.size} on this host${suffix}.`);
       } catch (e) {
         handleError(e);
       }

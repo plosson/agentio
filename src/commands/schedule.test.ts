@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { configFromFlags, scheduleFromFlags, applyScheduleType } from './schedule';
+import { configFromFlags, scheduleFromFlags, applyScheduleType, abbrHome } from './schedule';
 import { CliError } from '../utils/errors';
 import type { Schedule } from '../types/schedule';
 
@@ -73,5 +73,20 @@ describe('applyScheduleType', () => {
   test('same type is a no-op', () => {
     const s: Schedule = { type: 'weekly', hour: 9, minute: 0, weekdays: [2] };
     expect(applyScheduleType(s, 'weekly')).toEqual(s);
+  });
+});
+
+describe('abbrHome', () => {
+  test('replaces $HOME prefix with ~', () => {
+    expect(abbrHome('/Users/alice/projects/x', '/Users/alice')).toBe('~/projects/x');
+  });
+  test('returns ~ when path equals home', () => {
+    expect(abbrHome('/Users/alice', '/Users/alice')).toBe('~');
+  });
+  test('leaves unrelated paths unchanged', () => {
+    expect(abbrHome('/tmp/foo', '/Users/alice')).toBe('/tmp/foo');
+  });
+  test('does not match a prefix that is not a path boundary', () => {
+    expect(abbrHome('/Users/alicia/x', '/Users/alice')).toBe('/Users/alicia/x');
   });
 });
