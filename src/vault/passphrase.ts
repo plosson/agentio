@@ -17,7 +17,20 @@ function keytarProvider(): KeychainProvider {
     return memoryFileKeychain(path);
   }
   // Lazy require so tests using an injected provider don't need keytar loadable.
-  const keytar = require('keytar');
+  // If keytar is unavailable (e.g., missing native binding in a compiled build),
+  // degrade to a no-op provider. Users must then set AGENTIO_PASSPHRASE.
+  let keytar: typeof import('keytar');
+  try {
+    keytar = require('keytar');
+  } catch {
+    return {
+      async get() { return null; },
+      async set() {
+        throw new Error('OS keychain is unavailable (keytar native binding missing). Use AGENTIO_PASSPHRASE.');
+      },
+      async delete() { /* no-op */ },
+    };
+  }
   return {
     async get(account: string) {
       const v = await keytar.getPassword(SERVICE, account);

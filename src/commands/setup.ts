@@ -15,7 +15,7 @@ import {
 } from '../vault/vault';
 import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
-import { detectLegacy, migrateLegacy } from '../vault/migrate';
+import { detectLegacy, migrateLegacy, legacyPaths } from '../vault/migrate';
 
 const MIN_PASSPHRASE_LEN = 8;
 
@@ -126,7 +126,10 @@ async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
     console.error('Set AGENTIO_PASSPHRASE in your environment for future commands.');
   }
 
+  const { configPath, tokensPath } = legacyPaths();
   console.log(`Vault created at ${inputs.vaultPath}`);
+  console.log(`Legacy files preserved at ${configPath}.bak${existsSync(tokensPath + '.bak') ? ` and ${tokensPath}.bak` : ''}`);
+  console.log('Delete them once you have confirmed the vault works.');
   if (!result.tokensRecovered) {
     console.error('Warning: legacy credentials could not be recovered. Re-authenticate each service.');
   }
