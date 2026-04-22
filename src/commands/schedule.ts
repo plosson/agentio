@@ -121,6 +121,42 @@ export function scheduleFromFlags(flags: AddFlags): Schedule | undefined {
   }
 }
 
+/**
+ * Rebuild a Schedule for a new type, carrying over fields that still apply
+ * and dropping irrelevant ones.
+ */
+export function applyScheduleType(current: Schedule, newType: ScheduleType): Schedule {
+  switch (newType) {
+    case 'manual':
+      return { type: 'manual' };
+    case 'daily':
+      return {
+        type: 'daily',
+        ...(current.hour !== undefined ? { hour: current.hour } : {}),
+        ...(current.minute !== undefined ? { minute: current.minute } : {}),
+      };
+    case 'weekly':
+      return {
+        type: 'weekly',
+        ...(current.hour !== undefined ? { hour: current.hour } : {}),
+        ...(current.minute !== undefined ? { minute: current.minute } : {}),
+        ...(current.weekdays ? { weekdays: current.weekdays } : {}),
+      };
+    case 'monthly':
+      return {
+        type: 'monthly',
+        ...(current.hour !== undefined ? { hour: current.hour } : {}),
+        ...(current.minute !== undefined ? { minute: current.minute } : {}),
+        ...(current.day !== undefined ? { day: current.day } : {}),
+      };
+    case 'interval':
+      return {
+        type: 'interval',
+        ...(current.intervalMinutes !== undefined ? { intervalMinutes: current.intervalMinutes } : {}),
+      };
+  }
+}
+
 /** Pure: partial FrontmatterConfig from CLI flags. */
 export function configFromFlags(flags: AddFlags): Partial<FrontmatterConfig> {
   const partial: Partial<FrontmatterConfig> = {};

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { configFromFlags, scheduleFromFlags } from './schedule';
+import { configFromFlags, scheduleFromFlags, applyScheduleType } from './schedule';
 import { CliError } from '../utils/errors';
+import type { Schedule } from '../types/schedule';
 
 describe('scheduleFromFlags', () => {
   test('daily with --at', () => {
@@ -41,5 +42,36 @@ describe('configFromFlags', () => {
   });
   test('--enable + --disabled together throws CliError', () => {
     expect(() => configFromFlags({ enable: true, disabled: true })).toThrow(CliError);
+  });
+});
+
+describe('applyScheduleType', () => {
+  test('weekly -> daily drops weekdays, keeps hour/minute', () => {
+    expect(applyScheduleType(
+      { type: 'weekly', hour: 9, minute: 0, weekdays: [1, 3, 5] },
+      'daily'
+    )).toEqual({ type: 'daily', hour: 9, minute: 0 });
+  });
+  test('daily -> interval drops hour/minute', () => {
+    expect(applyScheduleType(
+      { type: 'daily', hour: 9, minute: 0 },
+      'interval'
+    )).toEqual({ type: 'interval' });
+  });
+  test('daily -> monthly keeps hour/minute, no day', () => {
+    expect(applyScheduleType(
+      { type: 'daily', hour: 9, minute: 30 },
+      'monthly'
+    )).toEqual({ type: 'monthly', hour: 9, minute: 30 });
+  });
+  test('interval -> manual drops intervalMinutes', () => {
+    expect(applyScheduleType(
+      { type: 'interval', intervalMinutes: 30 },
+      'manual'
+    )).toEqual({ type: 'manual' });
+  });
+  test('same type is a no-op', () => {
+    const s: Schedule = { type: 'weekly', hour: 9, minute: 0, weekdays: [2] };
+    expect(applyScheduleType(s, 'weekly')).toEqual(s);
   });
 });
