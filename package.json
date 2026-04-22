@@ -60,6 +60,7 @@
     "commander": "^14.0.2",
     "google-auth-library": "^10.0.0",
     "gray-matter": "^4.0.3",
+    "keytar": "^7.9.0",
     "libsodium-wrappers": "^0.8.1",
     "long": "^5.3.2",
     "plist": "^3.1.0",
