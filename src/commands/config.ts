@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { randomBytes } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -8,6 +8,7 @@ import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
+import { encryptVault, decryptVault } from '../vault/crypto';
 import type { Config, ServiceName, ProfileValue } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
@@ -16,53 +17,14 @@ interface ProfileSelection {
   profile: string;
 }
 
-const ALGORITHM = 'aes-256-gcm';
-
 interface ExportedData {
   version: number;
   config: Config;
   credentials: StoredCredentials;
 }
 
-function deriveKeyFromPassword(password: string): Buffer {
-  return scryptSync(password, 'agentio-export-salt', 32);
-}
-
 function generateKey(): string {
   return randomBytes(32).toString('hex');
-}
-
-// Compact format: base64(iv + ciphertext + tag)
-function encrypt(data: string, key: Buffer): string {
-  const iv = randomBytes(16);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-
-  const ciphertext = Buffer.concat([
-    cipher.update(data, 'utf-8'),
-    cipher.final(),
-  ]);
-
-  const tag = cipher.getAuthTag();
-  const combined = Buffer.concat([iv, ciphertext, tag]);
-  return combined.toString('base64');
-}
-
-function decrypt(data: string, key: Buffer): string {
-  const combined = Buffer.from(data, 'base64');
-
-  const iv = combined.subarray(0, 16);
-  const tag = combined.subarray(combined.length - 16);
-  const ciphertext = combined.subarray(16, combined.length - 16);
-
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
-
-  const decrypted = Buffer.concat([
-    decipher.update(ciphertext),
-    decipher.final(),
-  ]);
-
-  return decrypted.toString('utf-8');
 }
 
 /**
@@ -81,8 +43,7 @@ export async function generateExportData(): Promise<{ key: string; config: strin
     credentials,
   };
 
-  const key = deriveKeyFromPassword(encryptionKey);
-  const encrypted = encrypt(JSON.stringify(exportData), key);
+  const encrypted = encryptVault(JSON.stringify(exportData), encryptionKey);
 
   return {
     key: encryptionKey,
@@ -205,8 +166,7 @@ export function registerConfigCommands(program: Command): void {
         };
 
         // Encrypt the data
-        const key = deriveKeyFromPassword(encryptionKey);
-        const encrypted = encrypt(JSON.stringify(exportData), key);
+        const encrypted = encryptVault(JSON.stringify(exportData), encryptionKey);
 
         const profileCount = selectedProfiles.length;
         const profileText = profileCount === 1 ? 'profile' : 'profiles';
@@ -279,10 +239,9 @@ export function registerConfigCommands(program: Command): void {
         }
 
         // Decrypt
-        const derivedKey = deriveKeyFromPassword(key);
         let exportData: ExportedData;
         try {
-          const decrypted = decrypt(encrypted.trim(), derivedKey);
+          const decrypted = decryptVault(encrypted.trim(), key);
           exportData = JSON.parse(decrypted);
         } catch {
           throw new CliError(

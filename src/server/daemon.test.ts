@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, rm, stat } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
+import { seedVault } from '../vault/test-helpers';
+import { loadVault, clearVaultCache } from '../vault/vault';
 
 /**
  * Integration tests for the agentio HTTP server daemon.
@@ -10,11 +12,13 @@ import type { Subprocess } from 'bun';
  * Each test:
  *   1. mkdtemps an isolated HOME so the spawned daemon never touches the
  *      developer's real ~/.config/agentio.
- *   2. Picks a free port from the OS via Bun.serve({port: 0}).
- *   3. Spawns `bun run src/index.ts server start --foreground` in a
- *      subprocess with that HOME, parses stdout for the API key + ready
- *      line, then exercises the daemon over a real socket.
- *   4. Sends SIGTERM in afterEach and removes the temp HOME.
+ *   2. Seeds an empty vault so gated commands pass the preAction check.
+ *   3. Picks a free port from the OS via Bun.serve({port: 0}).
+ *   4. Spawns `bun run src/index.ts server start --foreground` in a
+ *      subprocess with that HOME + vault env vars, parses stdout for the
+ *      API key + ready line, then exercises the daemon over a real
+ *      socket.
+ *   5. Sends SIGTERM in afterEach and removes the temp HOME.
  *
  * The goal is to nail down behavior I asserted but didn't actually
  * verify in Phase 2: the source-priority chain for port/host/api-key,
@@ -28,11 +32,26 @@ interface RunningServer {
   startupLog: string;
 }
 
+const TEST_PASSPHRASE = 'test-pw-12345';
+
 let tempHome = '';
+let keychainFile = '';
 let active: RunningServer | null = null;
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-server-test-'));
+  keychainFile = join(tempHome, 'keychain.json');
+  await mkdir(join(tempHome, '.config', 'agentio'), {
+    recursive: true,
+    mode: 0o700,
+  });
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  await seedVault({
+    config: { profiles: {} },
+    passphrase: TEST_PASSPHRASE,
+  });
 });
 
 afterEach(async () => {
@@ -49,6 +68,9 @@ afterEach(async () => {
     }
     active = null;
   }
+  delete process.env.AGENTIO_PASSPHRASE;
+  delete process.env.AGENTIO_KEYCHAIN;
+  clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
     tempHome = '';
@@ -78,19 +100,18 @@ interface StartOpts {
   home?: string;
 }
 
-async function startServer(opts: StartOpts = {}): Promise<RunningServer> {
-  const port = opts.port ?? (await findFreePort());
-  const home = opts.home ?? tempHome;
-
+function baseEnv(home: string, extraEnv?: Record<string, string>): Record<string, string> {
   // Strip variables from the parent env that would otherwise pollute the
   // child's behavior. We want a hermetic run.
   const env: Record<string, string> = {
     ...process.env,
     HOME: home,
+    AGENTIO_PASSPHRASE: TEST_PASSPHRASE,
+    AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
     AGENTIO_SERVER_PORT: '',
     AGENTIO_SERVER_HOST: '',
     AGENTIO_SERVER_API_KEY: '',
-    ...(opts.extraEnv ?? {}),
+    ...(extraEnv ?? {}),
   };
   // Bun's spawn treats empty-string env vars as set; delete the ones we
   // explicitly want unset (unless extraEnv re-set them).
@@ -99,8 +120,16 @@ async function startServer(opts: StartOpts = {}): Promise<RunningServer> {
     'AGENTIO_SERVER_HOST',
     'AGENTIO_SERVER_API_KEY',
   ]) {
-    if (!opts.extraEnv?.[k]) delete env[k];
+    if (!extraEnv?.[k]) delete env[k];
   }
+  return env;
+}
+
+async function startServer(opts: StartOpts = {}): Promise<RunningServer> {
+  const port = opts.port ?? (await findFreePort());
+  const home = opts.home ?? tempHome;
+
+  const env = baseEnv(home, opts.extraEnv);
 
   const proc = Bun.spawn(
     [
@@ -188,13 +217,27 @@ async function shutdown(
   return result.code;
 }
 
+/**
+ * Read the persisted server config from the vault. Uses in-process
+ * loadVault (requires HOME + AGENTIO_PASSPHRASE set by the test).
+ */
 async function readPersistedConfig(home: string): Promise<{
-  raw: string;
   parsed: { server?: { apiKey?: string; port?: number; host?: string } };
 }> {
-  const path = join(home, '.config', 'agentio', 'config.json');
-  const raw = await readFile(path, 'utf8');
-  return { raw, parsed: JSON.parse(raw) };
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  try {
+    const v = await loadVault();
+    return {
+      parsed: v.config as unknown as {
+        server?: { apiKey?: string; port?: number; host?: string };
+      },
+    };
+  } finally {
+    process.env.HOME = prevHome;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -213,21 +256,23 @@ describe('first run — API key generation + persistence', () => {
 
   test('persists the generated key to config.server.apiKey', async () => {
     const { apiKey } = await startServer();
+    // Shut down before reading (server has its own cached config).
+    await shutdown(active!.proc);
+    active = null;
     const { parsed } = await readPersistedConfig(tempHome);
     expect(parsed.server?.apiKey).toBe(apiKey);
   });
 
-  test('config file is created with mode 0600', async () => {
+  test('vault file is created with mode 0600', async () => {
     await startServer();
-    const path = join(tempHome, '.config', 'agentio', 'config.json');
+    // The vault file is what stores the config now.
+    const path = join(tempHome, '.config', 'agentio', 'vault.enc');
     const st = await stat(path);
-    // Mask out non-permission bits.
     const mode = st.mode & 0o777;
     expect(mode).toBe(0o600);
   });
 
-  test('config dir is auto-created when it did not exist', async () => {
-    // tempHome was just mkdtemped — it definitely has no .config/agentio yet.
+  test('config dir persists across vault init + server start', async () => {
     await startServer();
     const dirStat = await stat(join(tempHome, '.config', 'agentio'));
     expect(dirStat.isDirectory()).toBe(true);
@@ -257,39 +302,20 @@ describe('second run — persistence across restarts', () => {
     active = null;
 
     // Wipe just the apiKey field, keep the rest of the config.
-    const cfgPath = join(tempHome, '.config', 'agentio', 'config.json');
-    const raw = await readFile(cfgPath, 'utf8');
-    const cfg = JSON.parse(raw);
-    delete cfg.server.apiKey;
-    await writeFile(cfgPath, JSON.stringify(cfg, null, 2));
+    // Read via vault, mutate, re-seed.
+    process.env.HOME = tempHome;
+    process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+    clearVaultCache();
+    const v = await loadVault();
+    const cfg = v.config as any;
+    if (cfg.server) delete cfg.server.apiKey;
+    clearVaultCache();
+    await seedVault({ config: cfg, passphrase: TEST_PASSPHRASE });
 
     const second = await startServer();
     expect(second.apiKey).not.toBe(first.apiKey);
     expect(second.apiKey).toMatch(/^srv_/);
     expect(second.startupLog).toContain('Generated new API key');
-  });
-
-  test('corrupted config.json does not crash; daemon resets and generates new key', async () => {
-    // Pre-create a config dir with garbage.
-    await mkdir(join(tempHome, '.config', 'agentio'), {
-      recursive: true,
-      mode: 0o700,
-    });
-    await writeFile(
-      join(tempHome, '.config', 'agentio', 'config.json'),
-      '{ this is not valid json',
-      { mode: 0o600 }
-    );
-
-    const { apiKey, startupLog } = await startServer();
-    expect(apiKey).toMatch(/^srv_/);
-    expect(startupLog).toContain('Generated new API key');
-
-    // The corrupted file should have been backed up.
-    const backupStat = await stat(
-      join(tempHome, '.config', 'agentio', 'config.json.backup')
-    );
-    expect(backupStat.isFile()).toBe(true);
   });
 });
 
@@ -306,6 +332,8 @@ describe('source priority — CLI > env > config > default', () => {
       extraArgs: ['--api-key', 'srv_cli_override_value'],
     });
     expect(second.apiKey).toBe('srv_cli_override_value');
+    await shutdown(second.proc);
+    active = null;
 
     // The persisted key MUST not have been overwritten.
     const { parsed } = await readPersistedConfig(tempHome);
@@ -322,6 +350,8 @@ describe('source priority — CLI > env > config > default', () => {
       extraEnv: { AGENTIO_SERVER_API_KEY: 'srv_env_override_value' },
     });
     expect(second.apiKey).toBe('srv_env_override_value');
+    await shutdown(second.proc);
+    active = null;
 
     const { parsed } = await readPersistedConfig(tempHome);
     expect(parsed.server?.apiKey).toBe(stored);
@@ -508,7 +538,7 @@ describe('adversarial start conditions', () => {
         {
           stdout: 'pipe',
           stderr: 'pipe',
-          env: { ...process.env, HOME: tempHome },
+          env: baseEnv(tempHome),
         }
       );
 
@@ -546,7 +576,7 @@ describe('adversarial start conditions', () => {
       {
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, HOME: tempHome },
+        env: baseEnv(tempHome),
       }
     );
 
@@ -582,7 +612,7 @@ describe('adversarial start conditions', () => {
       {
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, HOME: tempHome },
+        env: baseEnv(tempHome),
       }
     );
 
@@ -616,7 +646,7 @@ describe('adversarial start conditions', () => {
       {
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, HOME: tempHome },
+        env: baseEnv(tempHome),
       }
     );
 

@@ -111,6 +111,20 @@ src/
 
 ## Commands Reference
 
+### Setup (vault)
+
+The agentio config + credentials are stored in a single encrypted **vault** file. First-time installs must run `agentio setup` before any other command.
+
+```bash
+agentio setup                  # First-time, migration, adopt existing, or manage vault
+agentio setup --reset --force  # Wipe vault, pointer, and keychain entry
+```
+
+- Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
+- Passphrase is stored in the OS keychain (macOS Keychain / libsecret / Windows Credential Manager). Commands read it silently.
+- For headless/CI use, set `AGENTIO_PASSPHRASE` env var to bypass the keychain.
+- Runtime files (`gateway.db`, `media/`, `gateway.log`) remain plaintext under `~/.config/agentio/`.
+
 ### Gmail
 
 ```bash

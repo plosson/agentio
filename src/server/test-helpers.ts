@@ -27,6 +27,17 @@ export interface StartSubprocessOptions {
   extraEnv?: Record<string, string>;
   /** Max retries on port allocation failure. Default 4. */
   maxRetries?: number;
+  /**
+   * Passphrase for the vault the subprocess will open. The caller is
+   * responsible for having already seeded a vault at `home` with this
+   * same passphrase (via seedVault).
+   */
+  passphrase?: string;
+  /**
+   * Path to a memory-keychain file to back `AGENTIO_KEYCHAIN=memory:<path>`.
+   * Must be writable. If provided, the subprocess receives this env var.
+   */
+  keychainFile?: string;
 }
 
 export interface StartedSubprocess {
@@ -61,6 +72,10 @@ export async function startServerSubprocess(
       AGENTIO_SERVER_PORT: '',
       AGENTIO_SERVER_HOST: '',
       AGENTIO_SERVER_API_KEY: '',
+      ...(opts.passphrase ? { AGENTIO_PASSPHRASE: opts.passphrase } : {}),
+      ...(opts.keychainFile
+        ? { AGENTIO_KEYCHAIN: `memory:${opts.keychainFile}` }
+        : {}),
       ...(opts.extraEnv ?? {}),
     };
     for (const k of [

@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'crypto';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
 
 import { findFreePort, startServerSubprocess } from './test-helpers';
+import { seedVault } from '../vault/test-helpers';
+import { clearVaultCache } from '../vault/vault';
+
+const TEST_PASSPHRASE = 'test-pw-12345';
 
 /**
  * Adversarial HTTP-level tests for /mcp. These bypass the SDK client and
@@ -39,10 +43,23 @@ interface RunningServer {
 }
 
 let tempHome = '';
+let keychainFile = '';
 let active: RunningServer | null = null;
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-mcp-adv-'));
+  keychainFile = join(tempHome, 'keychain.json');
+  await mkdir(join(tempHome, '.config', 'agentio'), {
+    recursive: true,
+    mode: 0o700,
+  });
+  process.env.HOME = tempHome;
+  process.env.AGENTIO_PASSPHRASE = TEST_PASSPHRASE;
+  clearVaultCache();
+  await seedVault({
+    config: { profiles: {} },
+    passphrase: TEST_PASSPHRASE,
+  });
 });
 
 afterEach(async () => {
@@ -63,6 +80,9 @@ afterEach(async () => {
     }
     active = null;
   }
+  delete process.env.AGENTIO_PASSPHRASE;
+  delete process.env.AGENTIO_KEYCHAIN;
+  clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
     tempHome = '';
@@ -70,7 +90,11 @@ afterEach(async () => {
 });
 
 async function startAndAuth(): Promise<RunningServer> {
-  const started = await startServerSubprocess({ home: tempHome });
+  const started = await startServerSubprocess({
+    home: tempHome,
+    passphrase: TEST_PASSPHRASE,
+    keychainFile,
+  });
   const { proc, port, apiKey } = started;
   const baseUrl = `http://127.0.0.1:${port}`;
 
