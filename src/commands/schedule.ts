@@ -53,6 +53,29 @@ const VALID_MODELS: Model[] = ['opus', 'sonnet', 'haiku'];
 const VALID_PERMISSION_MODES: PermissionMode[] = ['default', 'bypassPermissions', 'plan', 'acceptEdits'];
 const VALID_SESSION_MODES: SessionMode[] = ['new', 'resume', 'fork'];
 
+export type ConfigField =
+  | 'schedule'
+  | 'weekdays'
+  | 'day'
+  | 'hour'
+  | 'minute'
+  | 'intervalMinutes'
+  | 'model'
+  | 'permissionMode'
+  | 'sessionMode'
+  | 'command'
+  | 'host'
+  | 'enabled';
+
+export const SCHEDULE_FIELDS: readonly ConfigField[] = [
+  'schedule', 'weekdays', 'day', 'hour', 'minute', 'intervalMinutes',
+];
+
+export const ALL_EDITABLE_FIELDS: readonly ConfigField[] = [
+  'schedule', 'weekdays', 'day', 'hour', 'minute', 'intervalMinutes',
+  'model', 'permissionMode', 'sessionMode', 'command', 'host', 'enabled',
+];
+
 /** Map --permission-mode CLI flag ("bypass"/"accept-edits") to frontmatter values. */
 function mapPermissionMode(flag: string): PermissionMode {
   switch (flag) {
@@ -215,39 +238,110 @@ function missingScheduleFields(s: Schedule | undefined): string[] {
   }
 }
 
-async function promptMissing(
+async function promptConfig(
   partial: Partial<FrontmatterConfig>,
-  missing: string[]
+  fields: readonly ConfigField[]
 ): Promise<Partial<FrontmatterConfig>> {
+  const fieldSet = new Set(fields);
   const out: Partial<FrontmatterConfig> = { ...partial };
-  const s: Schedule = { ...(out.schedule ?? { type: 'manual' }) } as Schedule;
+  let s: Schedule = { ...(out.schedule ?? { type: 'manual' }) } as Schedule;
 
-  if (missing.includes('schedule')) {
-    s.type = await select({
+  if (fieldSet.has('schedule')) {
+    const newType = await select({
       message: 'Schedule type:',
       choices: VALID_SCHEDULE_TYPES.map((t) => ({ name: t, value: t })),
+      default: s.type,
     });
+    s = applyScheduleType(s, newType);
   }
-  if (missing.includes('weekdays')) {
-    const raw = await input({ message: 'Weekdays (e.g. mon,wed,fri):' });
+
+  // Schedule sub-fields are only prompted when relevant for the current type.
+  const needsHM = s.type === 'daily' || s.type === 'weekly' || s.type === 'monthly';
+  const needsWeekdays = s.type === 'weekly';
+  const needsDay = s.type === 'monthly';
+  const needsInterval = s.type === 'interval';
+
+  if (needsWeekdays && fieldSet.has('weekdays')) {
+    const current = s.weekdays ? s.weekdays.map(String).join(',') : '';
+    const raw = await input({ message: 'Weekdays (e.g. mon,wed,fri):', default: current });
     s.weekdays = parseWeekdays(raw);
   }
-  if (missing.includes('day')) {
-    const raw = await input({ message: 'Day of month (1-31):' });
+  if (needsDay && fieldSet.has('day')) {
+    const current = s.day !== undefined ? String(s.day) : '';
+    const raw = await input({ message: 'Day of month (1-31):', default: current });
     s.day = parseInt(raw, 10);
   }
-  if (missing.includes('hour') || missing.includes('minute')) {
-    const raw = await input({ message: 'Time of day (HH:MM):', default: '09:00' });
+  if (needsHM && (fieldSet.has('hour') || fieldSet.has('minute'))) {
+    const hDef = s.hour !== undefined ? String(s.hour).padStart(2, '0') : '09';
+    const mDef = s.minute !== undefined ? String(s.minute).padStart(2, '0') : '00';
+    const raw = await input({ message: 'Time of day (HH:MM):', default: `${hDef}:${mDef}` });
     const m = raw.match(/^(\d{1,2}):(\d{2})$/);
     if (!m) throw new CliError('INVALID_PARAMS', `Invalid time: "${raw}"`, 'Expected HH:MM');
     s.hour = parseInt(m[1], 10);
     s.minute = parseInt(m[2], 10);
   }
-  if (missing.includes('intervalMinutes')) {
-    const raw = await input({ message: 'Interval (e.g. 30m, 2h, 1h30m):' });
+  if (needsInterval && fieldSet.has('intervalMinutes')) {
+    const currentMinutes = s.intervalMinutes ?? 0;
+    const hh = Math.floor(currentMinutes / 60);
+    const mm = currentMinutes % 60;
+    const currentDur = hh > 0 && mm > 0 ? `${hh}h${mm}m` : hh > 0 ? `${hh}h` : `${mm}m`;
+    const raw = await input({
+      message: 'Interval (e.g. 30m, 2h, 1h30m):',
+      default: currentMinutes > 0 ? currentDur : '30m',
+    });
     s.intervalMinutes = parseDuration(raw);
   }
   out.schedule = s;
+
+  if (fieldSet.has('model')) {
+    out.model = await select({
+      message: 'Model:',
+      choices: VALID_MODELS.map((m) => ({ name: m, value: m })),
+      default: out.model ?? 'sonnet',
+    });
+  }
+  if (fieldSet.has('permissionMode')) {
+    out.permissionMode = await select({
+      message: 'Permission mode:',
+      choices: VALID_PERMISSION_MODES.map((m) => ({ name: m, value: m })),
+      default: out.permissionMode ?? 'bypassPermissions',
+    });
+  }
+  if (fieldSet.has('sessionMode')) {
+    out.sessionMode = await select({
+      message: 'Session mode:',
+      choices: VALID_SESSION_MODES.map((m) => ({ name: m, value: m })),
+      default: out.sessionMode ?? 'new',
+    });
+  }
+  if (fieldSet.has('command')) {
+    const raw = await input({
+      message: 'Command override (empty to clear):',
+      default: out.command ?? '',
+    });
+    if (raw.trim()) out.command = raw.trim();
+    else delete out.command;
+  }
+  if (fieldSet.has('host')) {
+    const raw = await input({
+      message: 'Pin to host (empty to clear):',
+      default: out.host ?? '',
+    });
+    if (raw.trim()) out.host = raw.trim();
+    else delete out.host;
+  }
+  if (fieldSet.has('enabled')) {
+    const enabled = await select({
+      message: 'Enabled?',
+      choices: [
+        { name: 'yes', value: true },
+        { name: 'no', value: false },
+      ],
+      default: out.enabled ?? true,
+    });
+    out.enabled = enabled;
+  }
+
   return out;
 }
 
@@ -326,7 +420,7 @@ export function registerScheduleCommands(program: Command): void {
               `Missing required fields: ${missing.join(', ')}`,
               'Provide via flags or run interactively (no -y)');
           }
-          merged = await promptMissing(merged, missing);
+          merged = await promptConfig(merged, missing as ConfigField[]);
         }
 
         const finalConfig: FrontmatterConfig = mergeConfig({}, merged);
@@ -437,7 +531,7 @@ export function registerScheduleCommands(program: Command): void {
                 'Fill in the frontmatter or run sync interactively');
             }
             console.log(`Filling in missing frontmatter for ${f.path}:`);
-            config = await promptMissing(config, missing);
+            config = await promptConfig(config, missing as ConfigField[]);
             const finalConfig = mergeConfig({}, config);
             await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
             desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
