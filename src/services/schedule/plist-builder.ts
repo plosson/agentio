@@ -2,7 +2,7 @@ import { join } from 'path';
 import { folderHash } from './folder-hash';
 import type { FrontmatterConfig } from '../../types/schedule';
 
-export const LABEL_PREFIX = 'com.agentio.schedule';
+export const LABEL_PREFIX = 'me.agentio.schedule';
 
 export function plistLabel(folder: string, id: string): string {
   return `${LABEL_PREFIX}.${folderHash(folder)}-${id}`;

@@ -27,8 +27,8 @@ Inspired by [claude-cron](https://github.com/plosson/claude-cron) (native macOS 
 - **`<folder>/<path>/<id>.run.md`** — the schedule definition. Anywhere in the folder subtree. User-owned, git-committable.
   - YAML frontmatter: schedule type, timing, model, permission mode, session mode, enabled flag, optional command override.
   - Body: the prompt text.
-- **`~/Library/LaunchAgents/com.agentio.schedule.<folder-hash>-<id>.plist`** — launchd job. Derived state.
-  - `Label`: `com.agentio.schedule.<folder-hash>-<id>`
+- **`~/Library/LaunchAgents/me.agentio.schedule.<folder-hash>-<id>.plist`** — launchd job. Derived state.
+  - `Label`: `me.agentio.schedule.<folder-hash>-<id>`
   - `ProgramArguments`: `["/bin/zsh", "-lic", "agentio schedule run <id> --folder <abs-folder> --from-launchd"]`
   - Trigger keys (`StartCalendarInterval` / `StartInterval`) generated from frontmatter.
   - Manual schedules still install a plist (as an index marker) with no trigger.
@@ -127,7 +127,7 @@ Reconciles launchd state with the `*.run.md` files in the folder.
 2. For each file:
    - Parse frontmatter. If missing or incomplete → prompt interactively (TTY, no `-y`) and write back. Non-interactive → error listing the incomplete files and skip.
    - Compute the desired plist dict.
-3. Enumerate existing agentio plists for this folder (Label prefix `com.agentio.schedule.<folder-hash>-`).
+3. Enumerate existing agentio plists for this folder (Label prefix `me.agentio.schedule.<folder-hash>-`).
 4. Diff:
    - **Files with no plist** → install.
    - **Plists with no file** → orphans → uninstall + delete plist.
@@ -138,7 +138,7 @@ Reconciles launchd state with the `*.run.md` files in the folder.
 
 ### `schedule list [--folder]`
 
-- Without `--folder`: enumerate all plists matching `com.agentio.schedule.*` across the machine; group by folder.
+- Without `--folder`: enumerate all plists matching `me.agentio.schedule.*` across the machine; group by folder.
 - With `--folder`: filter by folder hash.
 - For each plist, locate the `<id>.run.md` file (glob within folder); if missing, mark entry as `[broken]`.
 - Output columns: folder, id, schedule summary ("Daily at 21:00"), model, next run, enabled.

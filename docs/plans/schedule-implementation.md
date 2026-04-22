@@ -6,7 +6,7 @@
 
 **Architecture:**
 - Per-folder `.run.md` files under `<folder>/` contain frontmatter (schedule config) + prompt body.
-- `~/Library/LaunchAgents/com.agentio.schedule.<folder-hash>-<id>.plist` is generated from each `.run.md` file. `ProgramArguments` re-invokes `agentio schedule run <id> --folder <abs-folder> --from-launchd` under a login shell.
+- `~/Library/LaunchAgents/me.agentio.schedule.<folder-hash>-<id>.plist` is generated from each `.run.md` file. `ProgramArguments` re-invokes `agentio schedule run <id> --folder <abs-folder> --from-launchd` under a login shell.
 - Runtime state (sessionId, lastRunAt) lives in `<folder>/.agentio/state.json`. Per-run logs in `<folder>/.agentio/runs/<id>/<ISO>.log`.
 - Pure builders (plist dict, schedule calculator, parsers) are separated from impure wrappers (launchctl, file I/O, child-process spawn) so the builders can be unit-tested directly.
 
@@ -889,7 +889,7 @@ import { join } from 'path';
 import { folderHash } from './folder-hash';
 import type { FrontmatterConfig } from '../../types/schedule';
 
-export const LABEL_PREFIX = 'com.agentio.schedule';
+export const LABEL_PREFIX = 'me.agentio.schedule';
 
 export function plistLabel(folder: string, id: string): string {
   return `${LABEL_PREFIX}.${folderHash(folder)}-${id}`;
@@ -1012,8 +1012,8 @@ describe('enumerateInstalledSchedules', () => {
   });
 
   test('extracts id and folder from ProgramArguments', () => {
-    writePlist('com.agentio.schedule.abc-mytask', {
-      Label: 'com.agentio.schedule.abc-mytask',
+    writePlist('me.agentio.schedule.abc-mytask', {
+      Label: 'me.agentio.schedule.abc-mytask',
       ProgramArguments: [
         '/bin/zsh', '-lic',
         'agentio schedule run mytask --folder /Users/x/proj --from-launchd',
@@ -1022,15 +1022,15 @@ describe('enumerateInstalledSchedules', () => {
     const result = enumerateInstalledSchedules(dir);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
-      label: 'com.agentio.schedule.abc-mytask',
-      plistPath: join(dir, 'com.agentio.schedule.abc-mytask.plist'),
+      label: 'me.agentio.schedule.abc-mytask',
+      plistPath: join(dir, 'me.agentio.schedule.abc-mytask.plist'),
       id: 'mytask',
       folder: '/Users/x/proj',
     });
   });
 
   test('skips malformed agentio plists', () => {
-    writePlist('com.agentio.schedule.bad', { Label: 'com.agentio.schedule.bad', ProgramArguments: ['nope'] });
+    writePlist('me.agentio.schedule.bad', { Label: 'me.agentio.schedule.bad', ProgramArguments: ['nope'] });
     expect(enumerateInstalledSchedules(dir)).toEqual([]);
   });
 });
@@ -2220,7 +2220,7 @@ Then replace the `sync` stub with:
         // 5. Diff against installed plists
         const installed = enumerateInstalledSchedules();
         const targetHash = folderHash(folder);
-        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`com.agentio.schedule.${targetHash}-`));
+        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`me.agentio.schedule.${targetHash}-`));
 
         const installedIds = new Set(installedForFolder.map((p) => p.id));
         const desiredIds = new Set(desired.keys());
@@ -2615,8 +2615,8 @@ Verify:
 
 ```bash
 cat /tmp/agentio-schedule-smoke/prompts/hello.run.md
-ls ~/Library/LaunchAgents/com.agentio.schedule.*hello*
-launchctl list | grep com.agentio.schedule
+ls ~/Library/LaunchAgents/me.agentio.schedule.*hello*
+launchctl list | grep me.agentio.schedule
 ```
 
 All three should show the expected results.
@@ -2658,7 +2658,7 @@ Expected: one entry shown with `status=succeeded exit=0`.
 
 ```bash
 bun --cwd /Users/plosson/devel/projects/personal/agentio run dev schedule remove hello --folder /tmp/agentio-schedule-smoke
-ls ~/Library/LaunchAgents/com.agentio.schedule.*hello* 2>&1 | head -3
+ls ~/Library/LaunchAgents/me.agentio.schedule.*hello* 2>&1 | head -3
 ```
 
 Expected: plist is gone; `.run.md` file is deleted.

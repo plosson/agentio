@@ -21,8 +21,8 @@ describe('enumerateInstalledSchedules', () => {
   });
 
   test('extracts id and folder from ProgramArguments', () => {
-    writePlist('com.agentio.schedule.abc-mytask', {
-      Label: 'com.agentio.schedule.abc-mytask',
+    writePlist('me.agentio.schedule.abc-mytask', {
+      Label: 'me.agentio.schedule.abc-mytask',
       ProgramArguments: [
         '/bin/zsh', '-lic',
         'agentio schedule run mytask --folder /Users/x/proj --from-launchd',
@@ -31,15 +31,15 @@ describe('enumerateInstalledSchedules', () => {
     const result = enumerateInstalledSchedules(dir);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
-      label: 'com.agentio.schedule.abc-mytask',
-      plistPath: join(dir, 'com.agentio.schedule.abc-mytask.plist'),
+      label: 'me.agentio.schedule.abc-mytask',
+      plistPath: join(dir, 'me.agentio.schedule.abc-mytask.plist'),
       id: 'mytask',
       folder: '/Users/x/proj',
     });
   });
 
   test('skips malformed agentio plists', () => {
-    writePlist('com.agentio.schedule.bad', { Label: 'com.agentio.schedule.bad', ProgramArguments: ['nope'] });
+    writePlist('me.agentio.schedule.bad', { Label: 'me.agentio.schedule.bad', ProgramArguments: ['nope'] });
     expect(enumerateInstalledSchedules(dir)).toEqual([]);
   });
 });

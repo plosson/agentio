@@ -394,7 +394,7 @@ export function registerScheduleCommands(program: Command): void {
         // 5. Diff against installed plists
         const installed = enumerateInstalledSchedules();
         const targetHash = folderHash(folder);
-        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`com.agentio.schedule.${targetHash}-`));
+        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`me.agentio.schedule.${targetHash}-`));
 
         const installedIds = new Set(installedForFolder.map((p) => p.id));
         const desiredIds = new Set(desired.keys());

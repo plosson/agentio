@@ -19,7 +19,7 @@ function baseConfig(overrides: Partial<FrontmatterConfig>): FrontmatterConfig {
 describe('plistLabel', () => {
   test('uses folder hash + id', () => {
     const label = plistLabel(folder, id);
-    expect(label).toMatch(/^com\.agentio\.schedule\.[0-9a-f]+-test$/);
+    expect(label).toMatch(/^me\.agentio\.schedule\.[0-9a-f]+-test$/);
   });
 });
 
