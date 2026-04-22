@@ -17,6 +17,7 @@ import { walkRunFiles } from '../services/schedule/walker';
 import { folderHash } from '../services/schedule/folder-hash';
 import { buildPlistDict } from '../services/schedule/plist-builder';
 import { nextRuns } from '../services/schedule/schedule-calculator';
+import { listRuns } from '../services/schedule/runs';
 import type {
   FrontmatterConfig,
   Model,
@@ -493,5 +494,17 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('runs').description('List past runs for a schedule')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (id: string, opts: { folder?: string }) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const runs = listRuns(folder, id);
+        if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
+        for (const r of runs) {
+          const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
+          console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
 }
