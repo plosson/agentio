@@ -44,6 +44,7 @@ export interface AddFlags {
   command?: string;
   host?: string;
   disabled?: boolean;
+  enable?: boolean;
   yes?: boolean;
 }
 
@@ -142,7 +143,15 @@ export function configFromFlags(flags: AddFlags): Partial<FrontmatterConfig> {
   }
   if (flags.command) partial.command = flags.command;
   if (flags.host) partial.host = flags.host;
+  if (flags.disabled && flags.enable) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      '--enable and --disabled cannot be used together',
+      'Pass only one'
+    );
+  }
   if (flags.disabled) partial.enabled = false;
+  if (flags.enable) partial.enabled = true;
   return partial;
 }
 

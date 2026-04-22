@@ -36,4 +36,10 @@ describe('configFromFlags', () => {
   test('--host is passed through', () => {
     expect(configFromFlags({ host: 'mac-1' }).host).toBe('mac-1');
   });
+  test('--enable sets enabled: true', () => {
+    expect(configFromFlags({ enable: true }).enabled).toBe(true);
+  });
+  test('--enable + --disabled together throws CliError', () => {
+    expect(() => configFromFlags({ enable: true, disabled: true })).toThrow(CliError);
+  });
 });
