@@ -11,7 +11,7 @@ describe('enumerateInstalledSchedules', () => {
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
   function writePlist(label: string, dict: Record<string, unknown>): void {
-    writeFileSync(join(dir, `${label}.plist`), plist.build(dict));
+    writeFileSync(join(dir, `${label}.plist`), plist.build(dict as unknown as plist.PlistObject));
   }
 
   test('skips non-agentio plists', () => {
