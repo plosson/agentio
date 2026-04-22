@@ -444,6 +444,80 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
+  schedule.command('edit').description('Edit an existing schedule (walk-through editor)')
+    .argument('<id>', 'Schedule id')
+    .option('--folder <path>', 'Folder containing the file (default: CWD)')
+    .option('--schedule <type>', 'manual | daily | weekly | monthly | interval')
+    .option('--at <HH:MM>', 'Time of day shortcut for --hour/--minute')
+    .option('--hour <n>', 'Hour 0-23')
+    .option('--minute <n>', 'Minute 0-59')
+    .option('--weekdays <list>', 'Weekly: mon,wed,fri or 1,3,5')
+    .option('--day <n>', 'Monthly: day of month 1-31')
+    .option('--interval <dur>', 'Interval: 30m, 2h, 1h30m')
+    .option('--model <m>', 'opus | sonnet | haiku')
+    .option('--permission-mode <m>', 'default | bypass | plan | accept-edits')
+    .option('--session-mode <m>', 'new | resume | fork')
+    .option('--command <cmd>', 'Command override (ignores model/permissionMode/sessionMode)')
+    .option('--host <name>', 'Pin schedule to a specific hostname; skipped on other machines')
+    .option('--disabled', 'Set enabled: false')
+    .option('--enable', 'Set enabled: true')
+    .option('-y, --yes', 'Non-interactive; apply flags only, error if required fields missing')
+    .action(async (id: string, opts: AddFlags) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        if (matches.length === 0) {
+          throw new CliError('NOT_FOUND', `No .run.md file found for id "${id}" under ${folder}`,
+            'Check the id (agentio schedule list) or pass --folder');
+        }
+        if (matches.length > 1) {
+          throw new CliError('INVALID_PARAMS',
+            `Multiple files match id "${id}": ${matches.map((m) => m.path).join(', ')}`);
+        }
+        const filePath = matches[0].path;
+
+        const raw = await readFile(filePath, 'utf-8');
+        const parsed = parseFrontmatter(raw);
+        const existingConfig: Partial<FrontmatterConfig> = parsed.config;
+
+        const override = configFromFlags(opts);
+        let merged: Partial<FrontmatterConfig> = {
+          ...existingConfig,
+          ...override,
+          ...(override.schedule
+            ? { schedule: override.schedule }
+            : existingConfig.schedule
+            ? { schedule: existingConfig.schedule }
+            : {}),
+        };
+
+        if (opts.yes || !isInteractive()) {
+          const missing = missingScheduleFields(merged.schedule);
+          if (missing.length > 0) {
+            throw new CliError('INVALID_PARAMS',
+              `Missing required fields: ${missing.join(', ')}`,
+              'Provide via flags or run interactively (no -y)');
+          }
+        } else {
+          merged = await promptConfig(merged, ALL_EDITABLE_FIELDS);
+        }
+
+        const finalConfig: FrontmatterConfig = mergeConfig({}, merged);
+
+        await writeFile(filePath, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
+
+        if (hostMatches(finalConfig)) {
+          installPlist(folder, id, finalConfig);
+          console.log(`Updated schedule "${id}" in ${folder}`);
+        } else {
+          uninstallPlist(folder, id);
+          console.log(`Wrote "${id}" (pinned to host "${finalConfig.host}"; current host is "${getCurrentHost()}"; plist not installed)`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
   schedule.command('list').description('List installed schedules')
     .option('--folder <path>', 'Filter to one folder')
     .action(async (opts: { folder?: string }) => {
