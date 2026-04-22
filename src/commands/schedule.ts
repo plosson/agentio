@@ -463,7 +463,32 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('show').description('Show a schedule and next run times')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
-    .action(async () => { try { throw new Error('not implemented'); } catch (e) { handleError(e); } });
+    .action(async (id: string, opts: { folder?: string }) => {
+      try {
+        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        if (matches.length !== 1) {
+          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`);
+        }
+        const raw = await readFile(matches[0].path, 'utf-8');
+        const parsed = parseFrontmatter(raw);
+        const cfg = mergeConfig({}, parsed.config);
+        console.log(`id:            ${id}`);
+        console.log(`file:          ${matches[0].path}`);
+        console.log(`schedule:      ${describeSchedule(cfg.schedule)}`);
+        console.log(`model:         ${cfg.model}`);
+        console.log(`permissionMode:${cfg.permissionMode}`);
+        console.log(`sessionMode:   ${cfg.sessionMode}`);
+        console.log(`enabled:       ${cfg.enabled}`);
+        if (cfg.command) console.log(`command:       ${cfg.command}`);
+        console.log('next 5 runs:');
+        for (const d of nextRuns(cfg.schedule, 5)) {
+          console.log(`  ${d.toISOString()}`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('runs').description('List past runs for a schedule')
     .argument('<id>', 'Schedule id')
