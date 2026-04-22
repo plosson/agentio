@@ -8,7 +8,10 @@ export type ErrorCode =
   | 'PERMISSION_DENIED'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
-  | 'CONFIG_ERROR';
+  | 'CONFIG_ERROR'
+  | 'VAULT_NOT_CONFIGURED'
+  | 'VAULT_LOCKED'
+  | 'VAULT_CORRUPT';
 
 /**
  * Map HTTP status codes to standard error codes.
@@ -38,6 +41,9 @@ export function exitCodeForError(code: ErrorCode): number {
     case 'AUTH_FAILED':
     case 'TOKEN_EXPIRED':
     case 'PERMISSION_DENIED':
+    case 'VAULT_NOT_CONFIGURED':
+    case 'VAULT_LOCKED':
+    case 'VAULT_CORRUPT':
       return 2;
     case 'CONFIG_ERROR':
     case 'PROFILE_NOT_FOUND':
