@@ -11,8 +11,10 @@ import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/
 import { isInteractive } from '../utils/interactive';
 import type { Config } from '../types/config';
 
-const SERVICE_NAME = 'agentio-gateway';
+const SERVICE_NAME = 'agentio-daemon';
 const SERVICE_FILE = `/etc/systemd/system/${SERVICE_NAME}.service`;
+const LEGACY_SERVICE_NAME = 'agentio-gateway';
+const LEGACY_SERVICE_FILE = `/etc/systemd/system/${LEGACY_SERVICE_NAME}.service`;
 
 /**
  * Find the agentio binary path
@@ -38,10 +40,17 @@ function findBinaryPath(): string {
 }
 
 /**
- * Check if systemd service is installed
+ * Check if systemd service is installed (new or legacy unit)
  */
 function isServiceInstalled(): boolean {
-  return existsSync(SERVICE_FILE);
+  return existsSync(SERVICE_FILE) || existsSync(LEGACY_SERVICE_FILE);
+}
+
+/**
+ * Return the name of the currently active service unit
+ */
+function activeServiceName(): string {
+  return existsSync(SERVICE_FILE) ? SERVICE_NAME : LEGACY_SERVICE_NAME;
 }
 
 /**
@@ -75,12 +84,12 @@ function runCommand(cmd: string[], useSudo: boolean): { success: boolean; output
  */
 function generateServiceFile(binaryPath: string, configDir: string): string {
   return `[Unit]
-Description=agentio gateway - messaging bridge for WhatsApp and Telegram
+Description=agentio daemon - messaging connections and scheduler
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${binaryPath} gateway start --foreground
+ExecStart=${binaryPath} daemon start --foreground
 Restart=always
 RestartSec=5
 Environment=HOME=${process.env.HOME}
@@ -199,7 +208,7 @@ export function registerDaemonCommands(program: Command): void {
         } else if (isServiceInstalled()) {
           // Use systemctl
           const { isRoot } = checkRoot();
-          const result = runCommand(['systemctl', 'start', SERVICE_NAME], !isRoot);
+          const result = runCommand(['systemctl', 'start', activeServiceName()], !isRoot);
           if (!result.success) {
             throw new CliError('CONFIG_ERROR', `Failed to start: ${result.error}`);
           }
@@ -226,7 +235,7 @@ export function registerDaemonCommands(program: Command): void {
         }
 
         const { isRoot } = checkRoot();
-        const result = runCommand(['systemctl', 'stop', SERVICE_NAME], !isRoot);
+        const result = runCommand(['systemctl', 'stop', activeServiceName()], !isRoot);
         if (!result.success) {
           throw new CliError('CONFIG_ERROR', `Failed to stop: ${result.error}`);
         }
@@ -249,7 +258,7 @@ export function registerDaemonCommands(program: Command): void {
         }
 
         const { isRoot } = checkRoot();
-        const result = runCommand(['systemctl', 'restart', SERVICE_NAME], !isRoot);
+        const result = runCommand(['systemctl', 'restart', activeServiceName()], !isRoot);
         if (!result.success) {
           throw new CliError('CONFIG_ERROR', `Failed to restart: ${result.error}`);
         }
@@ -272,7 +281,7 @@ export function registerDaemonCommands(program: Command): void {
         }
 
         // Check systemd status
-        const statusResult = spawnSync({ cmd: ['systemctl', 'is-active', SERVICE_NAME], stdout: 'pipe' });
+        const statusResult = spawnSync({ cmd: ['systemctl', 'is-active', activeServiceName()], stdout: 'pipe' });
         const isActive = statusResult.stdout.toString().trim() === 'active';
 
         if (!isActive) {
@@ -325,7 +334,7 @@ export function registerDaemonCommands(program: Command): void {
           return;
         }
 
-        const args = ['journalctl', '-u', SERVICE_NAME, '--no-pager'];
+        const args = ['journalctl', '-u', activeServiceName(), '--no-pager'];
 
         if (options.follow) {
           args.push('-f');
@@ -365,12 +374,14 @@ export function registerDaemonCommands(program: Command): void {
         const { isRoot } = checkRoot();
         const useSudo = !isRoot;
 
-        console.log('Stopping and removing agentio-gateway service...');
+        const active = activeServiceName();
+        const activeFile = active === SERVICE_NAME ? SERVICE_FILE : LEGACY_SERVICE_FILE;
+        console.log(`Stopping and removing ${active} service...`);
 
         const commands = [
-          ['systemctl', 'stop', SERVICE_NAME],
-          ['systemctl', 'disable', SERVICE_NAME],
-          ['rm', SERVICE_FILE],
+          ['systemctl', 'stop', active],
+          ['systemctl', 'disable', active],
+          ['rm', activeFile],
           ['systemctl', 'daemon-reload'],
         ];
 
