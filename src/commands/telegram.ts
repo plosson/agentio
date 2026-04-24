@@ -6,7 +6,7 @@ import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
-import { getGatewayClient, isGatewayAvailable } from '../gateway/client';
+import { getGatewayClient, isGatewayAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,

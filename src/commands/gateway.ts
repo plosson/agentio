@@ -6,8 +6,8 @@ import { randomBytes } from 'crypto';
 import { password } from '@inquirer/prompts';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
-import { startGateway, getGatewayConfig, LOG_FILE } from '../gateway/daemon';
-import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../gateway/store';
+import { startGateway, getGatewayConfig, LOG_FILE } from '../daemon/daemon';
+import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/store';
 import { isInteractive } from '../utils/interactive';
 import type { Config } from '../types/config';
 
