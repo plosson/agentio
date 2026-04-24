@@ -760,6 +760,16 @@ async function handleRequest(request: Request): Promise<Response> {
     }
   }
 
+  if (request.method === 'POST' && path === '/scheduler/reload') {
+    if (!verifyAuth(request)) return new Response('Unauthorized', { status: 401 });
+    const { loadConfig } = await import('../config/config-manager');
+    const config = await loadConfig() as unknown as { daemon?: { scheduler?: { watchedFolders?: unknown[] } } };
+    const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+    const { reloadScheduler } = await import('./scheduler');
+    await reloadScheduler(folders as import('../types/config').WatchedFolder[]);
+    return Response.json({ folders: folders.length });
+  }
+
   if (request.method === 'POST') {
     if (path === '/inbox/pull') return handleInboxPull(request);
     if (path === '/inbox/get') return handleInboxGet(request);
