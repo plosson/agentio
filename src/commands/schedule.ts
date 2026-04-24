@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { existsSync, readFileSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, isAbsolute, resolve } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { isInteractive } from '../utils/interactive';
@@ -22,6 +22,8 @@ import { buildPlistDict } from '../services/schedule/plist-builder';
 import { nextRuns } from '../services/schedule/schedule-calculator';
 import { listRuns } from '../services/schedule/runs';
 import { getCurrentHost, hostMatches } from '../services/schedule/host';
+import { loadConfig, saveConfig } from '../config/config-manager';
+import { addWatchedFolder, removeWatchedFolder } from './schedule-watch';
 import type {
   FrontmatterConfig,
   Model,
@@ -802,6 +804,103 @@ export function registerScheduleCommands(program: Command): void {
         for (const r of runs) {
           const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
           console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('watch').description('Register a folder for the agentio daemon to scan')
+    .argument('<folder>', 'Folder to watch (absolute or relative)')
+    .option('--no-host-pin', 'Do not pin this folder to the current host')
+    .action(async (folder: string, opts: { hostPin: boolean }) => {
+      try {
+        const absPath = resolve(folder);
+        if (!existsSync(absPath)) {
+          throw new CliError('NOT_FOUND', `Folder does not exist: ${absPath}`);
+        }
+        const config = await loadConfig();
+        const host = opts.hostPin === false ? undefined : getCurrentHost();
+        const updated = addWatchedFolder(config, absPath, host, Date.now());
+        await saveConfig(updated);
+
+        const apiKey = updated.daemon?.apiKey;
+        const port = updated.daemon?.server?.port ?? 7890;
+
+        // Try to reload the daemon
+        let daemonAlive = false;
+        if (apiKey) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey },
+              signal: AbortSignal.timeout(1500),
+            });
+            daemonAlive = res.ok;
+          } catch { /* daemon not up */ }
+        }
+
+        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
+        if (daemonAlive) {
+          console.log('Daemon reloaded — new schedules will fire immediately.');
+        } else {
+          const installed = process.platform === 'darwin'
+            ? existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'))
+            : existsSync('/etc/systemd/system/agentio-daemon.service');
+          if (!installed) {
+            console.log('The agentio daemon is not installed.');
+            console.log('Install it with: agentio daemon install');
+          } else {
+            console.log('The agentio daemon is installed but not running.');
+            console.log('Start it with: agentio daemon start');
+          }
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('unwatch').description('Stop watching a folder')
+    .argument('<folder>', 'Folder to remove')
+    .action(async (folder: string) => {
+      try {
+        const absPath = resolve(folder);
+        const config = await loadConfig();
+        const updated = removeWatchedFolder(config, absPath);
+        await saveConfig(updated);
+
+        // Best-effort reload
+        const apiKey = updated.daemon?.apiKey;
+        const port = updated.daemon?.server?.port ?? 7890;
+        if (apiKey) {
+          try {
+            await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey },
+              signal: AbortSignal.timeout(1500),
+            });
+          } catch { /* ignore */ }
+        }
+
+        console.log(`Unwatched ${abbrHome(absPath)}.`);
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('watched').description('List watched folders')
+    .action(async () => {
+      try {
+        const config = await loadConfig();
+        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+        if (folders.length === 0) {
+          console.log('No folders watched.');
+          console.log('Add one with: agentio schedule watch <folder>');
+          return;
+        }
+        for (const f of folders) {
+          const pin = f.host ? ` (pinned to ${f.host})` : '';
+          console.log(`${abbrHome(f.path)}${pin}`);
         }
       } catch (e) {
         handleError(e);
