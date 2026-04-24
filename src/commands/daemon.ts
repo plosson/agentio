@@ -179,10 +179,23 @@ function daemonStopDarwin(): void {
   }
 }
 
-export function registerDaemonCommands(program: Command): void {
+export function registerDaemonCommands(
+  program: Command,
+  opts: { base?: string; deprecated?: boolean } = {}
+): void {
+  const baseName = opts.base ?? 'daemon';
+  const description = opts.deprecated
+    ? '[deprecated] alias of `agentio daemon`'
+    : 'Daemon lifecycle management (messaging connections + scheduler)';
   const daemon = program
-    .command('daemon')
-    .description('Daemon lifecycle management (messaging connections + scheduler)');
+    .command(baseName)
+    .description(description);
+
+  if (opts.deprecated) {
+    daemon.hook('preAction', () => {
+      console.error(`warning: \`agentio ${baseName}\` is deprecated; use \`agentio daemon\` instead.`);
+    });
+  }
 
   // Install command - creates systemd service (Linux) or LaunchAgent (macOS)
   daemon

@@ -73,6 +73,7 @@ registerConfigCommands(program);
 registerMcpCommands(program);
 registerDocsCommand(program);
 registerDaemonCommands(program);
+registerDaemonCommands(program, { base: 'gateway', deprecated: true });
 registerReauthCommand(program);
 registerScheduleCommands(program);
 registerServerCommands(program);
