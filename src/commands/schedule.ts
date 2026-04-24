@@ -1,8 +1,10 @@
 import { Command } from 'commander';
-import { existsSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, isAbsolute, join, resolve } from 'path';
+import plist from 'plist';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { isInteractive } from '../utils/interactive';
@@ -843,6 +845,56 @@ export function registerScheduleCommands(program: Command): void {
           const pin = f.host ? ` (pinned to ${f.host})` : '';
           console.log(`${abbrHome(f.path)}${pin}`);
         }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('migrate').description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
+    .action(async () => {
+      try {
+        if (process.platform !== 'darwin') {
+          console.log('`schedule migrate` only applies on macOS.');
+          return;
+        }
+        const dir = join(homedir(), 'Library', 'LaunchAgents');
+        if (!existsSync(dir)) {
+          console.log('Nothing to migrate.');
+          return;
+        }
+        const entries = readdirSync(dir)
+          .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
+        if (entries.length === 0) {
+          console.log('Nothing to migrate.');
+          return;
+        }
+        const folders = new Set<string>();
+        for (const file of entries) {
+          const full = join(dir, file);
+          try {
+            const raw = readFileSync(full, 'utf-8');
+            const parsed = plist.parse(raw) as Record<string, unknown>;
+            const args = parsed.ProgramArguments as string[] | undefined;
+            if (args) {
+              const fi = args.indexOf('--folder');
+              if (fi !== -1 && args[fi + 1]) folders.add(args[fi + 1]);
+            }
+            execFileSync('/bin/launchctl', ['unload', full], { stdio: 'ignore' });
+            unlinkSync(full);
+          } catch { /* continue */ }
+        }
+
+        let config = await loadConfig();
+        const host = getCurrentHost();
+        for (const f of folders) {
+          config = addWatchedFolder(config, f, host, Date.now());
+        }
+        await saveConfig(config);
+
+        console.log(`Migrated ${entries.length} schedule(s) across ${folders.size} folder(s).`);
+        console.log('Folders added to watch list:');
+        for (const f of folders) console.log(`  ${abbrHome(f)}`);
+        console.log('\nIf the daemon is not installed yet, run: agentio daemon install');
       } catch (e) {
         handleError(e);
       }
