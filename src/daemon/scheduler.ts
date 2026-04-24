@@ -93,6 +93,40 @@ export interface StopSchedulerOpts {
   waitMs?: number;
 }
 
+export interface SchedulerJobView {
+  folder: string;
+  id: string;
+  schedule: string;
+  enabled: boolean;
+  nextRun: string;
+  lastRunAt?: string;
+  lastExitCode?: number;
+  isRunning: boolean;
+}
+
+export async function listSchedulerJobs(): Promise<SchedulerJobView[]> {
+  if (!currentOpts) return [];
+  const host = currentOpts.currentHost ?? getCurrentHost();
+  const now = (currentOpts.now ?? (() => new Date()))();
+  const { describeSchedule } = await import('../services/schedule/describe');
+  const jobs = scanWatchedFolders(currentOpts.watchedFolders, host, now);
+  const out: SchedulerJobView[] = [];
+  for (const j of jobs) {
+    const state = await readState(j.folder).catch(() => ({} as Record<string, { lastRunAt?: string; lastExitCode?: number }>));
+    out.push({
+      folder: j.folder,
+      id: j.id,
+      schedule: describeSchedule(j.config.schedule),
+      enabled: j.config.enabled,
+      nextRun: j.nextRun.toISOString(),
+      lastRunAt: state[j.id]?.lastRunAt,
+      lastExitCode: state[j.id]?.lastExitCode,
+      isRunning: inFlight.has(jobKey(j)),
+    });
+  }
+  return out;
+}
+
 export async function stopScheduler(stopOpts: StopSchedulerOpts = {}): Promise<void> {
   if (tickInterval) {
     clearInterval(tickInterval);

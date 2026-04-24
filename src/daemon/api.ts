@@ -750,6 +750,12 @@ async function handleRequest(request: Request): Promise<Response> {
   // Route requests
   if (request.method === 'GET') {
     if (path === '/status') return handleStatus();
+    if (path === '/scheduler/list') {
+      if (!verifyAuth(request)) return new Response('Unauthorized', { status: 401 });
+      const { listSchedulerJobs } = await import('./scheduler');
+      const jobs = await listSchedulerJobs();
+      return Response.json({ jobs });
+    }
     if (path.startsWith('/media/')) {
       const id = path.slice('/media/'.length);
       return handleMedia(id);
