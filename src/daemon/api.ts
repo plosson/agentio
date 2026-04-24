@@ -766,6 +766,15 @@ async function handleRequest(request: Request): Promise<Response> {
     }
   }
 
+  if (request.method === 'POST' && path === '/scheduler/run') {
+    if (!verifyAuth(request)) return new Response('Unauthorized', { status: 401 });
+    const body = await request.json() as { folder?: string; id?: string };
+    if (!body.folder || !body.id) return new Response('missing folder or id', { status: 400 });
+    const { runOneJob } = await import('./scheduler');
+    const result = await runOneJob(body.folder, body.id);
+    return Response.json(result);
+  }
+
   if (request.method === 'POST' && path === '/scheduler/reload') {
     if (!verifyAuth(request)) return new Response('Unauthorized', { status: 401 });
     const { loadConfig } = await import('../config/config-manager');

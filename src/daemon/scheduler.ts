@@ -127,6 +127,20 @@ export async function listSchedulerJobs(): Promise<SchedulerJobView[]> {
   return out;
 }
 
+export async function runOneJob(folder: string, id: string): Promise<{
+  started: boolean;
+  reason?: string;
+}> {
+  if (!currentOpts) return { started: false, reason: 'scheduler not running' };
+  const host = currentOpts.currentHost ?? getCurrentHost();
+  const jobs = scanWatchedFolders(currentOpts.watchedFolders, host, new Date());
+  const job = jobs.find((j) => j.folder === folder && j.id === id);
+  if (!job) return { started: false, reason: 'job not found or disabled' };
+  if (inFlight.has(jobKey(job))) return { started: false, reason: 'already running' };
+  fireJob(job, currentOpts).catch((e) => console.error('[scheduler]', e));
+  return { started: true };
+}
+
 export async function stopScheduler(stopOpts: StopSchedulerOpts = {}): Promise<void> {
   if (tickInterval) {
     clearInterval(tickInterval);
