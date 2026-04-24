@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { nextRuns } from './schedule-calculator';
+import { nextRuns, prevRun } from './schedule-calculator';
 
 describe('nextRuns', () => {
   const now = new Date('2026-04-22T10:00:00Z'); // Wed
@@ -39,5 +39,25 @@ describe('nextRuns', () => {
     expect(runs).toHaveLength(2);
     expect(runs[0].getDate()).toBe(15);
     expect(runs[1].getDate()).toBe(15);
+  });
+});
+
+describe('prevRun', () => {
+  test('returns null for manual', () => {
+    expect(prevRun({ type: 'manual' }, new Date())).toBeNull();
+  });
+
+  test('daily: returns today at H:M if now is past, else yesterday', () => {
+    const now = new Date('2026-04-24T10:00:00Z');
+    expect(prevRun({ type: 'daily', hour: 9, minute: 0 }, now)?.toISOString())
+      .toBe('2026-04-24T09:00:00.000Z');
+    expect(prevRun({ type: 'daily', hour: 11, minute: 0 }, now)?.toISOString())
+      .toBe('2026-04-23T11:00:00.000Z');
+  });
+
+  test('interval: returns floor(now / interval)', () => {
+    const now = new Date('2026-04-24T10:07:00Z');
+    const result = prevRun({ type: 'interval', intervalMinutes: 30 }, now);
+    expect(result?.toISOString()).toBe('2026-04-24T10:00:00.000Z');
   });
 });
