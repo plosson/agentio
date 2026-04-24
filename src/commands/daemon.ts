@@ -1,14 +1,18 @@
 import { Command } from 'commander';
-import { existsSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { spawnSync } from 'bun';
 import { randomBytes } from 'crypto';
 import { password } from '@inquirer/prompts';
+import plist from 'plist';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { startDaemon, getDaemonConfig, LOG_FILE } from '../daemon/daemon';
 import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/store';
 import { isInteractive } from '../utils/interactive';
+import { buildDaemonPlist } from '../daemon/daemon-plist';
+import { DAEMON_PLIST_FILE } from '../daemon/labels';
 import type { Config } from '../types/config';
 
 const SERVICE_NAME = 'agentio-daemon';
@@ -99,97 +103,171 @@ WantedBy=multi-user.target
 `;
 }
 
+const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
+const DAEMON_PLIST_PATH = join(LAUNCH_AGENTS_DIR, DAEMON_PLIST_FILE);
+const DAEMON_LOG_PATH = join(homedir(), '.config', 'agentio', 'daemon.log');
+
+function isDaemonInstalledDarwin(): boolean {
+  return existsSync(DAEMON_PLIST_PATH);
+}
+
+function installDaemonDarwin(): void {
+  if (!existsSync(LAUNCH_AGENTS_DIR)) {
+    mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
+  }
+  const binaryPath = findBinaryPath();
+  const extraPath = existsSync('/opt/homebrew/bin') ? '/opt/homebrew/bin' : undefined;
+  const dict = buildDaemonPlist({
+    binaryPath,
+    logPath: DAEMON_LOG_PATH,
+    home: homedir(),
+    extraPath,
+  });
+  writeFileSync(DAEMON_PLIST_PATH, plist.build(dict as unknown as plist.PlistObject));
+
+  const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
+  const bootstrap = spawnSync({
+    cmd: ['launchctl', 'bootstrap', `gui/${uid}`, DAEMON_PLIST_PATH],
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  if (bootstrap.exitCode !== 0) {
+    const fallback = spawnSync({
+      cmd: ['launchctl', 'load', DAEMON_PLIST_PATH],
+      stdout: 'pipe', stderr: 'pipe',
+    });
+    if (fallback.exitCode !== 0) {
+      try { unlinkSync(DAEMON_PLIST_PATH); } catch { /* ignore */ }
+      throw new CliError(
+        'CONFIG_ERROR',
+        `launchctl failed: ${fallback.stderr.toString() || bootstrap.stderr.toString()}`,
+      );
+    }
+  }
+}
+
+function uninstallDaemonDarwin(): void {
+  if (!existsSync(DAEMON_PLIST_PATH)) return;
+  const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
+  spawnSync({
+    cmd: ['launchctl', 'bootout', `gui/${uid}/${DAEMON_PLIST_FILE.replace('.plist', '')}`],
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  spawnSync({ cmd: ['launchctl', 'unload', DAEMON_PLIST_PATH], stdout: 'pipe', stderr: 'pipe' });
+  try { unlinkSync(DAEMON_PLIST_PATH); } catch { /* ignore */ }
+}
+
 export function registerDaemonCommands(program: Command): void {
   const daemon = program
     .command('daemon')
     .description('Daemon lifecycle management (messaging connections + scheduler)');
 
-  // Install command - creates systemd service
+  // Install command - creates systemd service (Linux) or LaunchAgent (macOS)
   daemon
     .command('install')
-    .description('Install daemon as a systemd service')
+    .description('Install daemon as a system service (launchd on macOS, systemd on Linux)')
     .action(async () => {
       try {
-        console.log('Installing agentio-daemon service...\n');
-
-        // Check privileges
-        const { isRoot, canSudo } = checkRoot();
-        if (!isRoot && !canSudo) {
-          console.log('This command requires sudo privileges.');
-          console.log('Run with: sudo agentio daemon install');
-          process.exit(1);
-        }
-        const useSudo = !isRoot;
-
-        // Find binary
-        let binaryPath: string;
-        try {
-          binaryPath = findBinaryPath();
-        } catch {
-          throw new CliError('CONFIG_ERROR', 'Could not find agentio binary');
-        }
-
-        console.log(`Binary: ${binaryPath}`);
-
-        // Generate API key if not exists
-        const config = await loadConfig() as Config;
-        if (!config.daemon?.apiKey) {
-          const apiKey = `gw_${randomBytes(24).toString('base64url')}`;
-          config.daemon = { ...config.daemon, apiKey };
-          await saveConfig(config);
-          console.log(`Generated API key: ${apiKey}`);
-        } else {
-          console.log(`API key: ${config.daemon.apiKey.slice(0, 10)}...`);
-        }
-
-        // Create service file
-        console.log('\nCreating systemd service...');
-        const serviceContent = generateServiceFile(binaryPath, process.env.HOME + '/.config/agentio');
-        const tempFile = `/tmp/${SERVICE_NAME}.service`;
-        writeFileSync(tempFile, serviceContent);
-
-        const copyResult = runCommand(['cp', tempFile, SERVICE_FILE], useSudo);
-        if (!copyResult.success) {
-          throw new CliError('CONFIG_ERROR', `Failed to create service file: ${copyResult.error}`);
-        }
-
-        // Reload systemd and enable service
-        console.log('Enabling service...');
-        const commands = [
-          ['systemctl', 'daemon-reload'],
-          ['systemctl', 'enable', SERVICE_NAME],
-        ];
-
-        for (const cmd of commands) {
-          const result = runCommand(cmd, useSudo);
-          if (!result.success) {
-            throw new CliError('CONFIG_ERROR', `Command failed: ${cmd.join(' ')}`);
+        if (process.platform === 'darwin') {
+          console.log('Installing agentio daemon LaunchAgent...');
+          const config = await loadConfig() as Config;
+          if (!config.daemon?.apiKey) {
+            const apiKey = `gw_${randomBytes(24).toString('base64url')}`;
+            config.daemon = { ...config.daemon, apiKey };
+            await saveConfig(config);
+            console.log(`Generated API key: ${apiKey}`);
           }
+          installDaemonDarwin();
+          console.log('Installed and running via launchd.');
+          console.log(`Plist:  ${DAEMON_PLIST_PATH}`);
+          console.log(`Logs:   ${DAEMON_LOG_PATH}`);
+          return;
         }
+        if (process.platform === 'linux') {
+          console.log('Installing agentio-daemon service...\n');
 
-        // Start the service
-        console.log('Starting daemon...');
-        const startResult = runCommand(['systemctl', 'start', SERVICE_NAME], useSudo);
-        if (!startResult.success) {
-          throw new CliError('CONFIG_ERROR', `Failed to start service: ${startResult.error}`);
+          // Check privileges
+          const { isRoot, canSudo } = checkRoot();
+          if (!isRoot && !canSudo) {
+            console.log('This command requires sudo privileges.');
+            console.log('Run with: sudo agentio daemon install');
+            process.exit(1);
+          }
+          const useSudo = !isRoot;
+
+          // Find binary
+          let binaryPath: string;
+          try {
+            binaryPath = findBinaryPath();
+          } catch {
+            throw new CliError('CONFIG_ERROR', 'Could not find agentio binary');
+          }
+
+          console.log(`Binary: ${binaryPath}`);
+
+          // Generate API key if not exists
+          const config = await loadConfig() as Config;
+          if (!config.daemon?.apiKey) {
+            const apiKey = `gw_${randomBytes(24).toString('base64url')}`;
+            config.daemon = { ...config.daemon, apiKey };
+            await saveConfig(config);
+            console.log(`Generated API key: ${apiKey}`);
+          } else {
+            console.log(`API key: ${config.daemon.apiKey.slice(0, 10)}...`);
+          }
+
+          // Create service file
+          console.log('\nCreating systemd service...');
+          const serviceContent = generateServiceFile(binaryPath, process.env.HOME + '/.config/agentio');
+          const tempFile = `/tmp/${SERVICE_NAME}.service`;
+          writeFileSync(tempFile, serviceContent);
+
+          const copyResult = runCommand(['cp', tempFile, SERVICE_FILE], useSudo);
+          if (!copyResult.success) {
+            throw new CliError('CONFIG_ERROR', `Failed to create service file: ${copyResult.error}`);
+          }
+
+          // Reload systemd and enable service
+          console.log('Enabling service...');
+          const commands = [
+            ['systemctl', 'daemon-reload'],
+            ['systemctl', 'enable', SERVICE_NAME],
+          ];
+
+          for (const cmd of commands) {
+            const result = runCommand(cmd, useSudo);
+            if (!result.success) {
+              throw new CliError('CONFIG_ERROR', `Command failed: ${cmd.join(' ')}`);
+            }
+          }
+
+          // Start the service
+          console.log('Starting daemon...');
+          const startResult = runCommand(['systemctl', 'start', SERVICE_NAME], useSudo);
+          if (!startResult.success) {
+            throw new CliError('CONFIG_ERROR', `Failed to start service: ${startResult.error}`);
+          }
+
+          // Wait and check status
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const statusResult = spawnSync({ cmd: ['systemctl', 'is-active', SERVICE_NAME], stdout: 'pipe' });
+
+          if (statusResult.stdout.toString().trim() !== 'active') {
+            console.log('\nService failed to start. Check logs with:');
+            console.log('  journalctl -u agentio-daemon -f');
+            process.exit(1);
+          }
+
+          console.log('\nagentio-daemon installed and running!');
+          console.log('\nManage with:');
+          console.log('  agentio daemon status');
+          console.log('  agentio daemon stop');
+          console.log('  agentio daemon restart');
+          console.log('  agentio daemon logs');
+          return;
         }
-
-        // Wait and check status
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const statusResult = spawnSync({ cmd: ['systemctl', 'is-active', SERVICE_NAME], stdout: 'pipe' });
-
-        if (statusResult.stdout.toString().trim() !== 'active') {
-          console.log('\nService failed to start. Check logs with:');
-          console.log('  journalctl -u agentio-daemon -f');
-          process.exit(1);
-        }
-
-        console.log('\nagentio-daemon installed and running!');
-        console.log('\nManage with:');
-        console.log('  agentio daemon status');
-        console.log('  agentio daemon stop');
-        console.log('  agentio daemon restart');
-        console.log('  agentio daemon logs');
+        throw new CliError('CONFIG_ERROR',
+          `agentio daemon install is not supported on ${process.platform}`,
+          'Run the daemon manually with `agentio daemon start --foreground`');
       } catch (error) {
         handleError(error);
       }
@@ -363,34 +441,51 @@ export function registerDaemonCommands(program: Command): void {
   // Uninstall command
   daemon
     .command('uninstall')
-    .description('Remove daemon systemd service')
+    .description('Remove daemon system service (launchd on macOS, systemd on Linux)')
     .action(async () => {
       try {
-        if (!isServiceInstalled()) {
-          console.log('Daemon service not installed');
+        if (process.platform === 'darwin') {
+          if (!isDaemonInstalledDarwin()) {
+            console.log('Daemon LaunchAgent not installed');
+            return;
+          }
+          console.log('Removing agentio daemon LaunchAgent...');
+          uninstallDaemonDarwin();
+          console.log('Daemon LaunchAgent removed');
+          console.log('\nNote: Configuration and data files are preserved in ~/.config/agentio/');
           return;
         }
+        if (process.platform === 'linux') {
+          if (!isServiceInstalled()) {
+            console.log('Daemon service not installed');
+            return;
+          }
 
-        const { isRoot } = checkRoot();
-        const useSudo = !isRoot;
+          const { isRoot } = checkRoot();
+          const useSudo = !isRoot;
 
-        const active = activeServiceName();
-        const activeFile = active === SERVICE_NAME ? SERVICE_FILE : LEGACY_SERVICE_FILE;
-        console.log(`Stopping and removing ${active} service...`);
+          const active = activeServiceName();
+          const activeFile = active === SERVICE_NAME ? SERVICE_FILE : LEGACY_SERVICE_FILE;
+          console.log(`Stopping and removing ${active} service...`);
 
-        const commands = [
-          ['systemctl', 'stop', active],
-          ['systemctl', 'disable', active],
-          ['rm', activeFile],
-          ['systemctl', 'daemon-reload'],
-        ];
+          const commands = [
+            ['systemctl', 'stop', active],
+            ['systemctl', 'disable', active],
+            ['rm', activeFile],
+            ['systemctl', 'daemon-reload'],
+          ];
 
-        for (const cmd of commands) {
-          runCommand(cmd, useSudo);
+          for (const cmd of commands) {
+            runCommand(cmd, useSudo);
+          }
+
+          console.log('Daemon service removed');
+          console.log('\nNote: Configuration and data files are preserved in ~/.config/agentio/');
+          return;
         }
-
-        console.log('Daemon service removed');
-        console.log('\nNote: Configuration and data files are preserved in ~/.config/agentio/');
+        throw new CliError('CONFIG_ERROR',
+          `agentio daemon uninstall is not supported on ${process.platform}`,
+          'Run the daemon manually with `agentio daemon start --foreground`');
       } catch (error) {
         handleError(error);
       }
