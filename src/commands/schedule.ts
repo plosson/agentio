@@ -682,10 +682,35 @@ export function registerScheduleCommands(program: Command): void {
     .action(async (id: string, opts: { folder?: string; quiet?: boolean }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const config = await loadConfig();
+        const apiKey = config.daemon?.apiKey;
+        const port = config.daemon?.server?.port ?? 7890;
+
+        // Try daemon delegation
+        if (apiKey) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/scheduler/run`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder, id }),
+              signal: AbortSignal.timeout(2000),
+            });
+            if (res.ok) {
+              const result = await res.json() as { started: boolean; reason?: string };
+              if (result.started) {
+                console.log(`Run queued via daemon. Tail logs in ${folder}/.agentio/runs/${id}/`);
+                return;
+              }
+              console.error(`Daemon refused: ${result.reason}`);
+              process.exit(1);
+            }
+          } catch { /* daemon not up — fall through */ }
+        }
+
+        // Local fallback
         const matches = walkRunFiles(folder).filter((f) => f.id === id);
         if (matches.length !== 1) {
-          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`,
-            'Run `agentio schedule list` to see available ids');
+          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`);
         }
         const raw = await readFile(matches[0].path, 'utf-8');
         const parsed = parseFrontmatter(raw);
@@ -693,9 +718,7 @@ export function registerScheduleCommands(program: Command): void {
         const { exitCode, logPath } = await runSchedule({
           folder, id, promptBody: parsed.body, config: cfg, quiet: opts.quiet ?? false,
         });
-        if (!opts.quiet) {
-          console.log(`Run complete. Log: ${logPath}`);
-        }
+        if (!opts.quiet) console.log(`Run complete. Log: ${logPath}`);
         process.exit(exitCode);
       } catch (e) {
         handleError(e);
