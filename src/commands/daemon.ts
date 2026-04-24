@@ -90,13 +90,13 @@ WantedBy=multi-user.target
 `;
 }
 
-export function registerGatewayCommands(program: Command): void {
-  const gateway = program
-    .command('gateway')
-    .description('Gateway daemon management');
+export function registerDaemonCommands(program: Command): void {
+  const daemon = program
+    .command('daemon')
+    .description('Daemon lifecycle management (messaging connections + scheduler)');
 
   // Install command - creates systemd service
-  gateway
+  daemon
     .command('install')
     .description('Install gateway as a systemd service')
     .action(async () => {
@@ -187,7 +187,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Start command - either via systemd or direct
-  gateway
+  daemon
     .command('start')
     .description('Start the gateway')
     .option('--foreground', 'Run in foreground (used by systemd)')
@@ -214,7 +214,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Stop command
-  gateway
+  daemon
     .command('stop')
     .description('Stop the gateway')
     .action(async () => {
@@ -237,7 +237,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Restart command
-  gateway
+  daemon
     .command('restart')
     .description('Restart the gateway')
     .action(async () => {
@@ -260,7 +260,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Status command
-  gateway
+  daemon
     .command('status')
     .description('Show gateway status')
     .action(async () => {
@@ -313,7 +313,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Logs command
-  gateway
+  daemon
     .command('logs')
     .description('View gateway logs')
     .option('-f, --follow', 'Follow log output')
@@ -352,7 +352,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Uninstall command
-  gateway
+  daemon
     .command('uninstall')
     .description('Remove gateway systemd service')
     .action(async () => {
@@ -386,7 +386,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Profile subcommands
-  const profile = gateway.command('profile').description('Manage gateway connection');
+  const profile = daemon.command('profile').description('Manage gateway connection');
 
   profile
     .command('add')
@@ -489,7 +489,7 @@ export function registerGatewayCommands(program: Command): void {
     });
 
   // Teleport command
-  gateway
+  daemon
     .command('teleport')
     .description('Transfer auth state to remote gateway')
     .argument('<url>', 'Remote gateway URL (e.g., https://my-gateway.com)')
