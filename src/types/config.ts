@@ -32,6 +32,21 @@ export interface GatewayConfig {
   retention?: GatewayRetentionConfig;
 }
 
+export interface WatchedFolder {
+  path: string;      // absolute path
+  host?: string;     // optional hostname pin; skip if current host mismatches
+  addedAt: number;   // unix ms
+}
+
+export interface SchedulerConfig {
+  watchedFolders: WatchedFolder[];
+  tickIntervalSec?: number;  // default 60
+}
+
+export interface DaemonConfig extends GatewayConfig {
+  scheduler?: SchedulerConfig;
+}
+
 export interface ProfileEntry {
   name: string;
   readOnly?: boolean;
@@ -75,7 +90,8 @@ export interface Config {
     sql?: ProfileValue[];
   };
   env?: Record<string, string>;
-  gateway?: GatewayConfig;
+  daemon?: DaemonConfig;
+  gateway?: GatewayConfig;  // legacy; read-only, migrated to daemon on load
   server?: ServerConfig;
   teleport?: TeleportConfig;
 }
