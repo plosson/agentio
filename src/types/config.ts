@@ -22,7 +22,7 @@ export interface GatewayRetentionConfig {
   sentMessagesDays?: number;
 }
 
-export interface GatewayConfig {
+export interface BaseDaemonConfig {
   name?: string;           // Gateway identity name (for local server identification)
   apiUrl?: string;         // Gateway URL (e.g., "https://gateway.example.com:7890")
   apiKey?: string;         // API key for authentication
@@ -31,6 +31,9 @@ export interface GatewayConfig {
   media?: GatewayMediaConfig;
   retention?: GatewayRetentionConfig;
 }
+
+/** @deprecated use DaemonConfig */
+export type GatewayConfig = BaseDaemonConfig;
 
 export interface WatchedFolder {
   path: string;      // absolute path
@@ -43,7 +46,7 @@ export interface SchedulerConfig {
   tickIntervalSec?: number;  // default 60
 }
 
-export interface DaemonConfig extends GatewayConfig {
+export interface DaemonConfig extends BaseDaemonConfig {
   scheduler?: SchedulerConfig;
 }
 
