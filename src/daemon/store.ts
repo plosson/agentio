@@ -11,7 +11,7 @@ import type {
   MediaType,
 } from './types';
 
-const DATABASE_FILE = join(CONFIG_DIR, 'gateway.db');
+const DATABASE_FILE = join(CONFIG_DIR, 'daemon.db');
 
 let db: Database | null = null;
 

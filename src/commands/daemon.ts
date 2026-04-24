@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto';
 import { password } from '@inquirer/prompts';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
-import { startGateway, getGatewayConfig, LOG_FILE } from '../daemon/daemon';
+import { startDaemon, getDaemonConfig, LOG_FILE } from '../daemon/daemon';
 import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/store';
 import { isInteractive } from '../utils/interactive';
 import type { Config } from '../types/config';
@@ -204,7 +204,7 @@ export function registerDaemonCommands(program: Command): void {
       try {
         if (options.foreground) {
           // Run directly in foreground (called by systemd or for dev)
-          await startGateway();
+          await startDaemon();
         } else if (isServiceInstalled()) {
           // Use systemctl
           const { isRoot } = checkRoot();
@@ -215,7 +215,7 @@ export function registerDaemonCommands(program: Command): void {
           console.log('Daemon started');
         } else {
           // Run directly in foreground (for dev or when not installed as service)
-          await startGateway();
+          await startDaemon();
         }
       } catch (error) {
         handleError(error);
@@ -292,7 +292,7 @@ export function registerDaemonCommands(program: Command): void {
         console.log('Daemon: running');
 
         // Try to get detailed status from API
-        const gatewayConfig = await getGatewayConfig();
+        const gatewayConfig = await getDaemonConfig();
         const port = gatewayConfig.server?.port ?? 7890;
 
         try {

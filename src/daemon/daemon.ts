@@ -12,8 +12,9 @@ import { TelegramAdapter } from './adapters/telegram';
 import { WhatsAppAdapter } from './adapters/whatsapp';
 import type { TelegramCredentials } from '../types/telegram';
 import type { WhatsAppCredentials } from '../types/whatsapp';
+import { migrateLegacyFiles } from './path-migration';
 
-const LOG_FILE = join(CONFIG_DIR, 'gateway.log');
+const LOG_FILE = join(CONFIG_DIR, 'daemon.log');
 
 let shutdownRequested = false;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
@@ -23,7 +24,7 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 /**
  * Get the gateway configuration from config.json
  */
-export async function getGatewayConfig(): Promise<GatewayConfig> {
+export async function getDaemonConfig(): Promise<GatewayConfig> {
   const config = await loadConfig();
   return (config as unknown as { gateway?: GatewayConfig }).gateway ?? {};
 }
@@ -208,8 +209,8 @@ async function shutdownAdapters(): Promise<void> {
 /**
  * Start the gateway server (runs in foreground, managed by systemd)
  */
-export async function startGateway(): Promise<void> {
-  console.log(`agentio-gateway starting (PID ${process.pid})`);
+export async function startDaemon(): Promise<void> {
+  console.log(`agentio-daemon starting (PID ${process.pid})`);
 
   // Handle shutdown signals
   const shutdown = async (signal: string) => {
@@ -259,6 +260,9 @@ export async function startGateway(): Promise<void> {
 
     // Always display API key for easy access (e.g., Docker logs)
     console.log(`API Key: ${gatewayConfig.apiKey}`);
+
+    // Migrate legacy gateway.* files to daemon.*
+    migrateLegacyFiles(CONFIG_DIR);
 
     // Initialize database
     await initDatabase();
