@@ -156,6 +156,29 @@ function uninstallDaemonDarwin(): void {
   try { unlinkSync(DAEMON_PLIST_PATH); } catch { /* ignore */ }
 }
 
+function daemonStartDarwin(): void {
+  const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
+  // Try kickstart (modern), fall back to load.
+  const kick = spawnSync({
+    cmd: ['launchctl', 'kickstart', '-k', `gui/${uid}/${DAEMON_PLIST_FILE.replace('.plist', '')}`],
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  if (kick.exitCode !== 0) {
+    spawnSync({ cmd: ['launchctl', 'load', DAEMON_PLIST_PATH], stdout: 'pipe', stderr: 'pipe' });
+  }
+}
+
+function daemonStopDarwin(): void {
+  const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
+  const stop = spawnSync({
+    cmd: ['launchctl', 'bootout', `gui/${uid}/${DAEMON_PLIST_FILE.replace('.plist', '')}`],
+    stdout: 'pipe', stderr: 'pipe',
+  });
+  if (stop.exitCode !== 0) {
+    spawnSync({ cmd: ['launchctl', 'unload', DAEMON_PLIST_PATH], stdout: 'pipe', stderr: 'pipe' });
+  }
+}
+
 export function registerDaemonCommands(program: Command): void {
   const daemon = program
     .command('daemon')
@@ -283,8 +306,19 @@ export function registerDaemonCommands(program: Command): void {
         if (options.foreground) {
           // Run directly in foreground (called by systemd or for dev)
           await startDaemon();
-        } else if (isServiceInstalled()) {
-          // Use systemctl
+          return;
+        }
+        if (process.platform === 'darwin') {
+          if (!isDaemonInstalledDarwin()) {
+            await startDaemon();  // Not installed — run in foreground like systemd fallback
+            return;
+          }
+          daemonStartDarwin();
+          console.log('Daemon started (launchd)');
+          return;
+        }
+        // Linux/systemd branch
+        if (isServiceInstalled()) {
           const { isRoot } = checkRoot();
           const result = runCommand(['systemctl', 'start', activeServiceName()], !isRoot);
           if (!result.success) {
@@ -306,6 +340,16 @@ export function registerDaemonCommands(program: Command): void {
     .description('Stop the daemon')
     .action(async () => {
       try {
+        if (process.platform === 'darwin') {
+          if (!isDaemonInstalledDarwin()) {
+            console.log('Daemon LaunchAgent not installed');
+            return;
+          }
+          daemonStopDarwin();
+          console.log('Daemon stopped');
+          return;
+        }
+        // Linux/systemd branch
         if (!isServiceInstalled()) {
           console.log('Daemon service not installed');
           console.log('Run: agentio daemon install');
@@ -329,6 +373,17 @@ export function registerDaemonCommands(program: Command): void {
     .description('Restart the daemon')
     .action(async () => {
       try {
+        if (process.platform === 'darwin') {
+          if (!isDaemonInstalledDarwin()) {
+            console.log('Daemon LaunchAgent not installed');
+            return;
+          }
+          daemonStopDarwin();
+          daemonStartDarwin();
+          console.log('Daemon restarted');
+          return;
+        }
+        // Linux/systemd branch
         if (!isServiceInstalled()) {
           console.log('Daemon service not installed');
           console.log('Run: agentio daemon install');
@@ -352,47 +407,55 @@ export function registerDaemonCommands(program: Command): void {
     .description('Show daemon status')
     .action(async () => {
       try {
-        if (!isServiceInstalled()) {
-          console.log('Daemon: not installed');
-          console.log('Run: agentio daemon install');
-          return;
-        }
-
-        // Check systemd status
-        const statusResult = spawnSync({ cmd: ['systemctl', 'is-active', activeServiceName()], stdout: 'pipe' });
-        const isActive = statusResult.stdout.toString().trim() === 'active';
-
-        if (!isActive) {
-          console.log('Daemon: stopped');
-          return;
-        }
-
-        console.log('Daemon: running');
-
-        // Try to get detailed status from API
         const gatewayConfig = await getDaemonConfig();
         const port = gatewayConfig.server?.port ?? 7890;
-
+        let running = false;
         try {
-          const response = await fetch(`http://127.0.0.1:${port}/status`, {
+          const res = await fetch(`http://127.0.0.1:${port}/health`, {
             headers: gatewayConfig.apiKey ? { 'X-API-Key': gatewayConfig.apiKey } : {},
+            signal: AbortSignal.timeout(1500),
           });
+          running = res.ok;
+        } catch { /* not running */ }
 
-          if (response.ok) {
-            const data = await response.json() as { adapters: { service: string; profile: string; connected: boolean }[] };
+        if (running) {
+          console.log('Daemon: running');
 
-            if (data.adapters && data.adapters.length > 0) {
-              console.log('\nConnected adapters:');
-              for (const adapter of data.adapters) {
-                const icon = adapter.connected ? '✓' : '✗';
-                console.log(`  ${icon} ${adapter.service}:${adapter.profile}`);
+          // Fetch detailed status from API
+          try {
+            const response = await fetch(`http://127.0.0.1:${port}/status`, {
+              headers: gatewayConfig.apiKey ? { 'X-API-Key': gatewayConfig.apiKey } : {},
+            });
+
+            if (response.ok) {
+              const data = await response.json() as { adapters: { service: string; profile: string; connected: boolean }[] };
+
+              if (data.adapters && data.adapters.length > 0) {
+                console.log('\nConnected adapters:');
+                for (const adapter of data.adapters) {
+                  const icon = adapter.connected ? '✓' : '✗';
+                  console.log(`  ${icon} ${adapter.service}:${adapter.profile}`);
+                }
+              } else {
+                console.log('\nNo adapters connected');
               }
-            } else {
-              console.log('\nNo adapters connected');
             }
+          } catch {
+            // API not responding yet
           }
-        } catch {
-          // API not responding yet
+          return;
+        }
+
+        // Not running — report install state
+        const installed = process.platform === 'darwin'
+          ? isDaemonInstalledDarwin()
+          : isServiceInstalled();
+        if (installed) {
+          console.log('Daemon: installed but not running');
+          console.log('Start it with: agentio daemon start');
+        } else {
+          console.log('Daemon: not installed');
+          console.log('Install with: agentio daemon install');
         }
       } catch (error) {
         handleError(error);
@@ -407,6 +470,22 @@ export function registerDaemonCommands(program: Command): void {
     .option('-n, --lines <n>', 'Number of lines to show', '50')
     .action(async (options) => {
       try {
+        if (process.platform === 'darwin') {
+          if (!isDaemonInstalledDarwin()) {
+            console.log('Daemon LaunchAgent not installed');
+            return;
+          }
+          const args = options.follow
+            ? ['tail', '-f', DAEMON_LOG_PATH]
+            : ['tail', '-n', String(options.lines), DAEMON_LOG_PATH];
+          const proc = Bun.spawn(args, { stdout: 'inherit', stderr: 'inherit' });
+          if (options.follow) {
+            process.on('SIGINT', () => { proc.kill(); process.exit(0); });
+          }
+          await proc.exited;
+          return;
+        }
+        // Linux/systemd branch
         if (!isServiceInstalled()) {
           console.log('Daemon service not installed');
           return;
