@@ -107,16 +107,16 @@ export function registerDaemonCommands(program: Command): void {
   // Install command - creates systemd service
   daemon
     .command('install')
-    .description('Install gateway as a systemd service')
+    .description('Install daemon as a systemd service')
     .action(async () => {
       try {
-        console.log('Installing agentio-gateway service...\n');
+        console.log('Installing agentio-daemon service...\n');
 
         // Check privileges
         const { isRoot, canSudo } = checkRoot();
         if (!isRoot && !canSudo) {
           console.log('This command requires sudo privileges.');
-          console.log('Run with: sudo agentio gateway install');
+          console.log('Run with: sudo agentio daemon install');
           process.exit(1);
         }
         const useSudo = !isRoot;
@@ -133,13 +133,13 @@ export function registerDaemonCommands(program: Command): void {
 
         // Generate API key if not exists
         const config = await loadConfig() as Config;
-        if (!config.gateway?.apiKey) {
+        if (!config.daemon?.apiKey) {
           const apiKey = `gw_${randomBytes(24).toString('base64url')}`;
-          config.gateway = { ...config.gateway, apiKey };
+          config.daemon = { ...config.daemon, apiKey };
           await saveConfig(config);
           console.log(`Generated API key: ${apiKey}`);
         } else {
-          console.log(`API key: ${config.gateway.apiKey.slice(0, 10)}...`);
+          console.log(`API key: ${config.daemon.apiKey.slice(0, 10)}...`);
         }
 
         // Create service file
@@ -168,7 +168,7 @@ export function registerDaemonCommands(program: Command): void {
         }
 
         // Start the service
-        console.log('Starting gateway...');
+        console.log('Starting daemon...');
         const startResult = runCommand(['systemctl', 'start', SERVICE_NAME], useSudo);
         if (!startResult.success) {
           throw new CliError('CONFIG_ERROR', `Failed to start service: ${startResult.error}`);
@@ -180,16 +180,16 @@ export function registerDaemonCommands(program: Command): void {
 
         if (statusResult.stdout.toString().trim() !== 'active') {
           console.log('\nService failed to start. Check logs with:');
-          console.log('  journalctl -u agentio-gateway -f');
+          console.log('  journalctl -u agentio-daemon -f');
           process.exit(1);
         }
 
-        console.log('\nagentio-gateway installed and running!');
+        console.log('\nagentio-daemon installed and running!');
         console.log('\nManage with:');
-        console.log('  agentio gateway status');
-        console.log('  agentio gateway stop');
-        console.log('  agentio gateway restart');
-        console.log('  agentio gateway logs');
+        console.log('  agentio daemon status');
+        console.log('  agentio daemon stop');
+        console.log('  agentio daemon restart');
+        console.log('  agentio daemon logs');
       } catch (error) {
         handleError(error);
       }
@@ -198,7 +198,7 @@ export function registerDaemonCommands(program: Command): void {
   // Start command - either via systemd or direct
   daemon
     .command('start')
-    .description('Start the gateway')
+    .description('Start the daemon')
     .option('--foreground', 'Run in foreground (used by systemd)')
     .action(async (options) => {
       try {
@@ -212,7 +212,7 @@ export function registerDaemonCommands(program: Command): void {
           if (!result.success) {
             throw new CliError('CONFIG_ERROR', `Failed to start: ${result.error}`);
           }
-          console.log('Gateway started');
+          console.log('Daemon started');
         } else {
           // Run directly in foreground (for dev or when not installed as service)
           await startGateway();
@@ -225,12 +225,12 @@ export function registerDaemonCommands(program: Command): void {
   // Stop command
   daemon
     .command('stop')
-    .description('Stop the gateway')
+    .description('Stop the daemon')
     .action(async () => {
       try {
         if (!isServiceInstalled()) {
-          console.log('Gateway service not installed');
-          console.log('Run: agentio gateway install');
+          console.log('Daemon service not installed');
+          console.log('Run: agentio daemon install');
           return;
         }
 
@@ -239,7 +239,7 @@ export function registerDaemonCommands(program: Command): void {
         if (!result.success) {
           throw new CliError('CONFIG_ERROR', `Failed to stop: ${result.error}`);
         }
-        console.log('Gateway stopped');
+        console.log('Daemon stopped');
       } catch (error) {
         handleError(error);
       }
@@ -248,12 +248,12 @@ export function registerDaemonCommands(program: Command): void {
   // Restart command
   daemon
     .command('restart')
-    .description('Restart the gateway')
+    .description('Restart the daemon')
     .action(async () => {
       try {
         if (!isServiceInstalled()) {
-          console.log('Gateway service not installed');
-          console.log('Run: agentio gateway install');
+          console.log('Daemon service not installed');
+          console.log('Run: agentio daemon install');
           return;
         }
 
@@ -262,7 +262,7 @@ export function registerDaemonCommands(program: Command): void {
         if (!result.success) {
           throw new CliError('CONFIG_ERROR', `Failed to restart: ${result.error}`);
         }
-        console.log('Gateway restarted');
+        console.log('Daemon restarted');
       } catch (error) {
         handleError(error);
       }
@@ -271,12 +271,12 @@ export function registerDaemonCommands(program: Command): void {
   // Status command
   daemon
     .command('status')
-    .description('Show gateway status')
+    .description('Show daemon status')
     .action(async () => {
       try {
         if (!isServiceInstalled()) {
-          console.log('Gateway: not installed');
-          console.log('Run: agentio gateway install');
+          console.log('Daemon: not installed');
+          console.log('Run: agentio daemon install');
           return;
         }
 
@@ -285,11 +285,11 @@ export function registerDaemonCommands(program: Command): void {
         const isActive = statusResult.stdout.toString().trim() === 'active';
 
         if (!isActive) {
-          console.log('Gateway: stopped');
+          console.log('Daemon: stopped');
           return;
         }
 
-        console.log('Gateway: running');
+        console.log('Daemon: running');
 
         // Try to get detailed status from API
         const gatewayConfig = await getGatewayConfig();
@@ -324,13 +324,13 @@ export function registerDaemonCommands(program: Command): void {
   // Logs command
   daemon
     .command('logs')
-    .description('View gateway logs')
+    .description('View daemon logs')
     .option('-f, --follow', 'Follow log output')
     .option('-n, --lines <n>', 'Number of lines to show', '50')
     .action(async (options) => {
       try {
         if (!isServiceInstalled()) {
-          console.log('Gateway service not installed');
+          console.log('Daemon service not installed');
           return;
         }
 
@@ -363,11 +363,11 @@ export function registerDaemonCommands(program: Command): void {
   // Uninstall command
   daemon
     .command('uninstall')
-    .description('Remove gateway systemd service')
+    .description('Remove daemon systemd service')
     .action(async () => {
       try {
         if (!isServiceInstalled()) {
-          console.log('Gateway service not installed');
+          console.log('Daemon service not installed');
           return;
         }
 
@@ -389,7 +389,7 @@ export function registerDaemonCommands(program: Command): void {
           runCommand(cmd, useSudo);
         }
 
-        console.log('Gateway service removed');
+        console.log('Daemon service removed');
         console.log('\nNote: Configuration and data files are preserved in ~/.config/agentio/');
       } catch (error) {
         handleError(error);
@@ -397,20 +397,20 @@ export function registerDaemonCommands(program: Command): void {
     });
 
   // Profile subcommands
-  const profile = daemon.command('profile').description('Manage gateway connection');
+  const profile = daemon.command('profile').description('Manage daemon connection');
 
   profile
     .command('add')
-    .description('Configure connection to a gateway')
-    .argument('<url>', 'Gateway URL (e.g., https://my-vps.com:7890)')
+    .description('Configure connection to a daemon')
+    .argument('<url>', 'Daemon URL (e.g., https://my-vps.com:7890)')
     .option('--name <name>', 'Profile name', 'default')
     .option('--api-key <key>', 'API key (will prompt if not provided)')
     .action(async (url: string, options) => {
       try {
         const config = await loadConfig() as Config;
 
-        if (config.gateway?.apiUrl) {
-          throw new CliError('INVALID_PARAMS', `Gateway already configured: ${config.gateway.apiUrl}`, 'Use "gateway profile remove" first to reconfigure');
+        if (config.daemon?.apiUrl) {
+          throw new CliError('INVALID_PARAMS', `Daemon already configured: ${config.daemon.apiUrl}`, 'Use "daemon profile remove" first to reconfigure');
         }
 
         let key = options.apiKey;
@@ -426,8 +426,8 @@ export function registerDaemonCommands(program: Command): void {
           });
         }
 
-        config.gateway = {
-          ...config.gateway,
+        config.daemon = {
+          ...config.daemon,
           name: options.name,
           apiUrl: url,
           apiKey: key,
@@ -435,7 +435,7 @@ export function registerDaemonCommands(program: Command): void {
 
         await saveConfig(config);
 
-        console.log('Gateway profile saved');
+        console.log('Daemon profile saved');
         console.log(`  Name: ${options.name}`);
         console.log(`  URL: ${url}`);
         console.log(`  API Key: ${key.slice(0, 10)}...`);
@@ -446,30 +446,30 @@ export function registerDaemonCommands(program: Command): void {
 
   profile
     .command('list')
-    .description('Show gateway configuration')
+    .description('Show daemon configuration')
     .action(async () => {
       try {
         const config = await loadConfig() as Config;
 
-        if (!config.gateway?.apiUrl && !config.gateway?.apiKey) {
-          console.log('No gateway configured');
-          console.log('Run: agentio gateway profile add <url>');
+        if (!config.daemon?.apiUrl && !config.daemon?.apiKey) {
+          console.log('No daemon configured');
+          console.log('Run: agentio daemon profile add <url>');
           return;
         }
 
-        console.log('Gateway Profile');
-        if (config.gateway.name) {
-          console.log(`  Name: ${config.gateway.name}`);
+        console.log('Daemon Profile');
+        if (config.daemon.name) {
+          console.log(`  Name: ${config.daemon.name}`);
         }
-        if (config.gateway.apiUrl) {
-          console.log(`  URL: ${config.gateway.apiUrl}`);
+        if (config.daemon.apiUrl) {
+          console.log(`  URL: ${config.daemon.apiUrl}`);
         } else {
-          // Local gateway: construct URL from server host:port
-          const host = config.gateway.server?.host ?? '127.0.0.1';
-          const port = config.gateway.server?.port ?? 7890;
+          // Local daemon: construct URL from server host:port
+          const host = config.daemon.server?.host ?? '127.0.0.1';
+          const port = config.daemon.server?.port ?? 7890;
           console.log(`  URL: http://${host}:${port} (local)`);
         }
-        console.log(`  API Key: ${config.gateway.apiKey ? config.gateway.apiKey.slice(0, 10) + '...' : '(not set)'}`);
+        console.log(`  API Key: ${config.daemon.apiKey ? config.daemon.apiKey.slice(0, 10) + '...' : '(not set)'}`);
       } catch (error) {
         handleError(error);
       }
@@ -477,23 +477,23 @@ export function registerDaemonCommands(program: Command): void {
 
   profile
     .command('remove')
-    .description('Remove gateway configuration')
+    .description('Remove daemon configuration')
     .action(async () => {
       try {
         const config = await loadConfig() as Config;
 
-        if (!config.gateway?.apiUrl && !config.gateway?.apiKey) {
-          console.log('No gateway configured');
+        if (!config.daemon?.apiUrl && !config.daemon?.apiKey) {
+          console.log('No daemon configured');
           return;
         }
 
-        const name = config.gateway?.name || config.gateway?.apiUrl || 'gateway';
-        delete config.gateway?.name;
-        delete config.gateway?.apiUrl;
-        delete config.gateway?.apiKey;
+        const name = config.daemon?.name || config.daemon?.apiUrl || 'daemon';
+        delete config.daemon?.name;
+        delete config.daemon?.apiUrl;
+        delete config.daemon?.apiKey;
 
         await saveConfig(config);
-        console.log(`Gateway profile "${name}" removed`);
+        console.log(`Daemon profile "${name}" removed`);
       } catch (error) {
         handleError(error);
       }
@@ -510,12 +510,12 @@ export function registerDaemonCommands(program: Command): void {
       try {
         const config = await loadConfig() as Config;
 
-        let key = options.apiKey || config.gateway?.apiKey;
+        let key = options.apiKey || config.daemon?.apiKey;
 
         // Prompt for API key if not available
         if (!key) {
           if (!isInteractive()) {
-            throw new CliError('INVALID_PARAMS', 'API key is required', 'Provide --api-key or configure gateway profile');
+            throw new CliError('INVALID_PARAMS', 'API key is required', 'Provide --api-key or configure daemon profile');
           }
           key = await password({
             message: 'Enter remote gateway API key:',
