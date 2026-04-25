@@ -1,3 +1,5 @@
+import { spawnSync } from 'bun';
+
 export interface KeychainProvider {
   get(account: string): Promise<string | null>;
   set(account: string, value: string): Promise<void>;
@@ -10,39 +12,99 @@ const ACCOUNT = 'vault';
 let provider: KeychainProvider | null = null;
 let cached: string | null = null;
 
-function keytarProvider(): KeychainProvider {
-  const test = process.env.AGENTIO_KEYCHAIN;
-  if (test && test.startsWith('memory:')) {
-    const path = test.slice('memory:'.length);
-    return memoryFileKeychain(path);
-  }
-  // Lazy require so tests using an injected provider don't need keytar loadable.
-  // If keytar is unavailable (e.g., missing native binding in a compiled build),
-  // degrade to a no-op provider. Users must then set AGENTIO_PASSPHRASE.
-  let keytar: typeof import('keytar');
-  try {
-    keytar = require('keytar');
-  } catch {
-    return {
-      async get() { return null; },
-      async set() {
-        throw new Error('OS keychain is unavailable (keytar native binding missing). Use AGENTIO_PASSPHRASE.');
-      },
-      async delete() { /* no-op */ },
-    };
-  }
+function macKeychain(): KeychainProvider {
   return {
     async get(account: string) {
-      const v = await keytar.getPassword(SERVICE, account);
-      return v ?? null;
+      const r = spawnSync({
+        cmd: ['security', 'find-generic-password', '-s', SERVICE, '-a', account, '-w'],
+        stdout: 'pipe', stderr: 'pipe',
+      });
+      if (r.exitCode !== 0) return null;
+      return r.stdout.toString().replace(/\n$/, '');
     },
     async set(account: string, value: string) {
-      await keytar.setPassword(SERVICE, account, value);
+      const r = spawnSync({
+        cmd: ['security', 'add-generic-password', '-U', '-s', SERVICE, '-a', account, '-w', value],
+        stdout: 'pipe', stderr: 'pipe',
+      });
+      if (r.exitCode !== 0) {
+        throw new Error(`security add-generic-password failed: ${r.stderr.toString()}`);
+      }
     },
     async delete(account: string) {
-      await keytar.deletePassword(SERVICE, account);
+      spawnSync({
+        cmd: ['security', 'delete-generic-password', '-s', SERVICE, '-a', account],
+        stdout: 'pipe', stderr: 'pipe',
+      });
     },
   };
+}
+
+function hasCmd(cmd: string): boolean {
+  const r = spawnSync({ cmd: ['which', cmd], stdout: 'pipe', stderr: 'pipe' });
+  return r.exitCode === 0;
+}
+
+function secretToolKeychain(): KeychainProvider {
+  return {
+    async get(account: string) {
+      const r = spawnSync({
+        cmd: ['secret-tool', 'lookup', 'service', SERVICE, 'account', account],
+        stdout: 'pipe', stderr: 'pipe',
+      });
+      if (r.exitCode !== 0) return null;
+      return r.stdout.toString().replace(/\n$/, '');
+    },
+    async set(account: string, value: string) {
+      const proc = Bun.spawn({
+        cmd: ['secret-tool', 'store', '--label=agentio', 'service', SERVICE, 'account', account],
+        stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+      });
+      proc.stdin.write(value);
+      proc.stdin.end();
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        const stderr = await new Response(proc.stderr).text();
+        throw new Error(`secret-tool store failed: ${stderr}`);
+      }
+    },
+    async delete(account: string) {
+      spawnSync({
+        cmd: ['secret-tool', 'clear', 'service', SERVICE, 'account', account],
+        stdout: 'pipe', stderr: 'pipe',
+      });
+    },
+  };
+}
+
+function noopKeychain(reason: string): KeychainProvider {
+  return {
+    async get() { return null; },
+    async set() {
+      throw new Error(`OS keychain is unavailable (${reason}). Use AGENTIO_PASSPHRASE.`);
+    },
+    async delete() { /* no-op */ },
+  };
+}
+
+function osKeychain(): KeychainProvider {
+  const test = process.env.AGENTIO_KEYCHAIN;
+  if (test && test.startsWith('memory:')) {
+    return memoryFileKeychain(test.slice('memory:'.length));
+  }
+  if (process.platform === 'darwin') {
+    if (!hasCmd('security')) {
+      return noopKeychain('`security` CLI not found on PATH');
+    }
+    return macKeychain();
+  }
+  if (process.platform === 'linux') {
+    if (!hasCmd('secret-tool')) {
+      return noopKeychain('`secret-tool` not installed (apt: libsecret-tools)');
+    }
+    return secretToolKeychain();
+  }
+  return noopKeychain(`unsupported platform: ${process.platform}`);
 }
 
 function memoryFileKeychain(path: string): KeychainProvider {
@@ -77,7 +139,7 @@ function memoryFileKeychain(path: string): KeychainProvider {
 
 function getProvider(): KeychainProvider {
   if (provider) return provider;
-  provider = keytarProvider();
+  provider = osKeychain();
   return provider;
 }
 
@@ -116,8 +178,6 @@ export async function setPassphrase(passphrase: string): Promise<void> {
   try {
     await getProvider().set(ACCOUNT, passphrase);
   } catch (err) {
-    // Caller (setup) decides how to surface this; we still cache in-process
-    // so the same process can keep working.
     cached = passphrase;
     throw err;
   }
