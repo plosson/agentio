@@ -1,3 +1,5 @@
+import type { ServiceName } from '../types/config';
+
 export type ErrorCode =
   | 'AUTH_FAILED'
   | 'TOKEN_EXPIRED'
@@ -57,6 +59,15 @@ export function exitCodeForError(code: ErrorCode): number {
     default:
       return 1;
   }
+}
+
+export function multipleProfilesError(service: ServiceName, names: string[]): CliError {
+  const list = names.join(', ');
+  return new CliError(
+    'INVALID_PARAMS',
+    `Multiple ${service} profiles exist: ${list}.`,
+    `Use --profile <name> to pick one.`,
+  );
 }
 
 export function handleError(error: unknown): never {

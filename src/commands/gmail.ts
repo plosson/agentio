@@ -473,39 +473,43 @@ ${emailHeader}
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('Starting OAuth flow for Gmail...\n');
-
-        const tokens = await performOAuthFlow('gmail');
-
-        // Fetch the user's email to store with the profile
-        let email: string;
-        try {
-          email = await fetchGoogleUserEmail(tokens.access_token);
-        } catch (error) {
-          throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
-        }
-
-        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-        let profileName: string;
-        if (options.profile) {
-          profileName = options.profile;
-        } else if (options.readOnly && await getProfile('gmail', email)) {
-          // Profile with email already exists, use -readonly suffix
-          profileName = `${email}-readonly`;
-        } else {
-          profileName = email;
-        }
-
-        await setProfile('gmail', profileName, { readOnly: options.readOnly });
-        await setCredentials('gmail', profileName, { ...tokens, email });
-
-        console.log(`\nSuccess! Profile "${profileName}" configured.`);
-        console.log(`   Email: ${email}`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
+        await gmailProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gmailProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('Starting OAuth flow for Gmail...\n');
+
+  const tokens = await performOAuthFlow('gmail');
+
+  // Fetch the user's email to store with the profile
+  let email: string;
+  try {
+    email = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
+  }
+
+  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+  let profileName: string;
+  if (options.profile) {
+    profileName = options.profile;
+  } else if (options.readOnly && await getProfile('gmail', email)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${email}-readonly`;
+  } else {
+    profileName = email;
+  }
+
+  await setProfile('gmail', profileName, { readOnly: options.readOnly });
+  await setCredentials('gmail', profileName, { ...tokens, email });
+
+  console.log(`\nSuccess! Profile "${profileName}" configured.`);
+  console.log(`   Email: ${email}`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
 }

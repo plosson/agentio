@@ -308,39 +308,43 @@ export function registerGTasksCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('Starting OAuth flow for Google Tasks...\n');
-
-        const tokens = await performOAuthFlow('gtasks');
-
-        // Fetch user email
-        let email: string;
-        try {
-          email = await fetchGoogleUserEmail(tokens.access_token);
-        } catch (error) {
-          throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
-        }
-
-        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-        let profileName: string;
-        if (options.profile) {
-          profileName = options.profile;
-        } else if (options.readOnly && await getProfile('gtasks', email)) {
-          // Profile with email already exists, use -readonly suffix
-          profileName = `${email}-readonly`;
-        } else {
-          profileName = email;
-        }
-
-        await setProfile('gtasks', profileName, { readOnly: options.readOnly });
-        await setCredentials('gtasks', profileName, { ...tokens, email });
-
-        console.log(`\nSuccess! Profile "${profileName}" configured.`);
-        console.log(`   Email: ${email}`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
+        await gtasksProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gtasksProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('Starting OAuth flow for Google Tasks...\n');
+
+  const tokens = await performOAuthFlow('gtasks');
+
+  // Fetch user email
+  let email: string;
+  try {
+    email = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
+  }
+
+  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+  let profileName: string;
+  if (options.profile) {
+    profileName = options.profile;
+  } else if (options.readOnly && await getProfile('gtasks', email)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${email}-readonly`;
+  } else {
+    profileName = email;
+  }
+
+  await setProfile('gtasks', profileName, { readOnly: options.readOnly });
+  await setCredentials('gtasks', profileName, { ...tokens, email });
+
+  console.log(`\nSuccess! Profile "${profileName}" configured.`);
+  console.log(`   Email: ${email}`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
 }

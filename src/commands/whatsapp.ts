@@ -1,9 +1,10 @@
 import { Command } from 'commander';
 import { setCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, resolveProfile, removeProfile } from '../config/config-manager';
-import { CliError, handleError } from '../utils/errors';
+import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
 import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
+import { ensureDaemonRunning } from '../utils/daemon-ensure';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
@@ -78,7 +79,7 @@ async function runPairingFlow(profileName: string): Promise<boolean> {
 export function registerWhatsAppCommands(program: Command): void {
   const whatsapp = program
     .command('whatsapp')
-    .description('WhatsApp operations (requires daemon)');
+    .description('WhatsApp operations');
 
   // Profile management
   const profile = whatsapp.command('profile').description('Manage WhatsApp profiles');
@@ -90,52 +91,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('\nWhatsApp Profile Setup\n');
-
-        const profileName = options.profile || await prompt('? Profile name: ');
-
-        if (!profileName) {
-          throw new CliError('INVALID_PARAMS', 'Profile name is required');
-        }
-
-        // Check if profile already exists
-        const existing = await getCredentials<WhatsAppCredentials>('whatsapp', profileName);
-        if (existing?.paired) {
-          const overwrite = await confirm(`Profile "${profileName}" already exists and is paired. Overwrite?`);
-          if (!overwrite) {
-            console.log('Cancelled');
-            return;
-          }
-        }
-
-        // Create initial credentials (not yet paired)
-        const credentials: WhatsAppCredentials = {
-          paired: false,
-        };
-
-        await setProfile('whatsapp', profileName, { readOnly: options.readOnly });
-        await setCredentials('whatsapp', profileName, credentials);
-
-        console.log(`Profile "${profileName}" created.`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
-
-        // Check if gateway is running
-        const daemonRunning = await isDaemonAvailable();
-        if (!daemonRunning) {
-          console.log('\nDaemon is not running.');
-          console.log('Start the daemon first, then run this command again:');
-          console.log('  agentio daemon start');
-          console.log(`  agentio whatsapp profile add --profile ${profileName}`);
-          return;
-        }
-
-        // Gateway is running - proceed with pairing
-        await runPairingFlow(profileName);
-
-        console.log(`\nProfile "${profileName}" is ready to use.`);
-        console.log(`Try: agentio whatsapp inbox pull --profile ${profileName}`);
+        await whatsappProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
@@ -176,11 +132,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const profileName = profileResult.profile;
@@ -215,11 +171,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -339,11 +295,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (message: string | undefined, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.to && !options.group) {
@@ -461,11 +417,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -484,11 +440,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -520,11 +476,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (name: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.participants || options.participants.length === 0) {
@@ -556,11 +512,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.name && options.description === undefined && !options.picture) {
@@ -600,11 +556,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'add participants');
@@ -645,11 +601,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'remove participants');
@@ -690,11 +646,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'promote participants');
@@ -735,11 +691,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'demote participants');
@@ -779,11 +735,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'leave group');
@@ -821,11 +777,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -855,11 +811,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (code: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'join group');
@@ -870,4 +826,51 @@ export function registerWhatsAppCommands(program: Command): void {
         handleError(error);
       }
     });
+}
+
+export async function whatsappProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nWhatsApp Profile Setup\n');
+
+  const profileName = options.profile || await prompt('? Profile name: ');
+
+  if (!profileName) {
+    throw new CliError('INVALID_PARAMS', 'Profile name is required');
+  }
+
+  // Check if profile already exists
+  const existing = await getCredentials<WhatsAppCredentials>('whatsapp', profileName);
+  if (existing?.paired) {
+    const overwrite = await confirm(`Profile "${profileName}" already exists and is paired. Overwrite?`);
+    if (!overwrite) {
+      console.log('Cancelled');
+      return;
+    }
+  }
+
+  // Create initial credentials (not yet paired)
+  const credentials: WhatsAppCredentials = {
+    paired: false,
+  };
+
+  await setProfile('whatsapp', profileName, { readOnly: options.readOnly });
+  await setCredentials('whatsapp', profileName, credentials);
+
+  console.log(`Profile "${profileName}" created.`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
+
+  // Check if gateway is running (offer to install/start if not)
+  const daemonRunning = await ensureDaemonRunning();
+  if (!daemonRunning) {
+    console.log('\nCannot proceed without the daemon. Re-run after starting it:');
+    console.log(`  agentio whatsapp profile add --profile ${profileName}`);
+    return;
+  }
+
+  // Gateway is running - proceed with pairing
+  await runPairingFlow(profileName);
+
+  console.log(`\nProfile "${profileName}" is ready to use.`);
+  console.log(`Try: agentio whatsapp inbox pull --profile ${profileName}`);
 }

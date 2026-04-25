@@ -117,11 +117,18 @@ export function registerSlackCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await setupWebhookProfile(options.profile, options.readOnly);
+        await slackProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function slackProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  if (!options.profile) {
+    throw new CliError('INVALID_PARAMS', 'Profile name is required', 'Use --profile <name>');
+  }
+  await setupWebhookProfile(options.profile, options.readOnly);
 }
 
 async function setupWebhookProfile(profileName: string, readOnly?: boolean): Promise<void> {

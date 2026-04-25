@@ -232,32 +232,36 @@ export function registerGChatCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('\nGoogle Chat Setup\n');
-
-        const profileType = await interactiveSelect({
-          message: 'Choose profile type:',
-          choices: [
-            { name: 'Webhook', value: 'webhook', description: 'Simple incoming webhook URL' },
-            { name: 'OAuth', value: 'oauth', description: 'Full API access with Google Workspace account' },
-          ],
-        });
-
-        if (profileType === 'webhook') {
-          if (!options.profile) {
-            throw new CliError(
-              'INVALID_PARAMS',
-              'Profile name is required for webhook profiles',
-              'Run: agentio gchat profile add --profile <name>'
-            );
-          }
-          await setupWebhookProfile(options.profile, options.readOnly);
-        } else {
-          await setupOAuthProfile(options.profile, options.readOnly);
-        }
+        await gchatProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gchatProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nGoogle Chat Setup\n');
+
+  const profileType = await interactiveSelect({
+    message: 'Choose profile type:',
+    choices: [
+      { name: 'Webhook', value: 'webhook', description: 'Simple incoming webhook URL' },
+      { name: 'OAuth', value: 'oauth', description: 'Full API access with Google Workspace account' },
+    ],
+  });
+
+  if (profileType === 'webhook') {
+    if (!options.profile) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        'Profile name is required for webhook profiles',
+        'Run: agentio gchat profile add --profile <name>'
+      );
+    }
+    await setupWebhookProfile(options.profile, options.readOnly);
+  } else {
+    await setupOAuthProfile(options.profile, options.readOnly);
+  }
 }
 
 function printProfileSetupSuccess(profileName: string, authType: 'webhook' | 'oauth', readOnly?: boolean): void {

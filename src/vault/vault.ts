@@ -42,8 +42,8 @@ async function resolvePassphraseOrThrow(): Promise<string> {
   if (!pw) {
     throw new CliError(
       'VAULT_LOCKED',
-      'Vault is locked',
-      'Run: agentio setup, or set AGENTIO_PASSPHRASE'
+      'Vault is locked — passphrase not found',
+      'Run `agentio setup` to set the passphrase, or set the AGENTIO_PASSPHRASE env var.'
     );
   }
   return pw;
@@ -55,8 +55,8 @@ export async function loadVault(): Promise<VaultContents> {
   if (!(await pointerExists())) {
     throw new CliError(
       'VAULT_NOT_CONFIGURED',
-      'No vault configured',
-      'Run: agentio setup'
+      'agentio is not configured yet',
+      'Run `agentio setup` to initialize the vault.'
     );
   }
   const path = (await readPointer())!;
@@ -133,8 +133,8 @@ export async function saveVault(contents: VaultContents): Promise<void> {
   if (!(await pointerExists())) {
     throw new CliError(
       'VAULT_NOT_CONFIGURED',
-      'No vault configured',
-      'Run: agentio setup'
+      'agentio is not configured yet',
+      'Run `agentio setup` to initialize the vault.'
     );
   }
   const path = (await readPointer())!;

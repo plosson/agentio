@@ -111,42 +111,46 @@ export function registerGitHubCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('\nGitHub Setup\n');
-        console.error('This will open your browser to authorize agentio with GitHub.');
-        console.error('You will need to grant access to repositories where you want to set secrets.\n');
-
-        // Perform OAuth flow
-        const oauthResult = await performGitHubOAuthFlow();
-
-        // Create client to fetch user info
-        const credentials: GitHubCredentials = {
-          accessToken: oauthResult.accessToken,
-          username: '',
-          email: null,
-        };
-
-        const client = new GitHubClient(credentials);
-        const user = await client.getUser();
-
-        // Update credentials with user info
-        credentials.username = user.login;
-        credentials.email = user.email;
-
-        const profileName = options.profile || user.login;
-
-        console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
-
-        // Save credentials
-        await setProfile('github', profileName, { readOnly: options.readOnly });
-        await setCredentials('github', profileName, credentials);
-
-        console.log(`\nProfile "${profileName}" configured!`);
-        if (options.readOnly) {
-          console.log(`  Access: read-only`);
-        }
-        console.log(`  Install secrets: agentio github install owner/repo --profile ${profileName}`);
+        await githubProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function githubProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nGitHub Setup\n');
+  console.error('This will open your browser to authorize agentio with GitHub.');
+  console.error('You will need to grant access to repositories where you want to set secrets.\n');
+
+  // Perform OAuth flow
+  const oauthResult = await performGitHubOAuthFlow();
+
+  // Create client to fetch user info
+  const credentials: GitHubCredentials = {
+    accessToken: oauthResult.accessToken,
+    username: '',
+    email: null,
+  };
+
+  const client = new GitHubClient(credentials);
+  const user = await client.getUser();
+
+  // Update credentials with user info
+  credentials.username = user.login;
+  credentials.email = user.email;
+
+  const profileName = options.profile || user.login;
+
+  console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
+
+  // Save credentials
+  await setProfile('github', profileName, { readOnly: options.readOnly });
+  await setCredentials('github', profileName, credentials);
+
+  console.log(`\nProfile "${profileName}" configured!`);
+  if (options.readOnly) {
+    console.log(`  Access: read-only`);
+  }
+  console.log(`  Install secrets: agentio github install owner/repo --profile ${profileName}`);
 }

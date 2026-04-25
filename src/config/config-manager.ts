@@ -84,6 +84,11 @@ export async function getProfile(
   return profileName;
 }
 
+export type ResolveProfileResult =
+  | { profile: string; readOnly?: boolean }
+  | { profile: null; error: 'none' }
+  | { profile: null; error: 'multiple'; names: string[] };
+
 /**
  * Resolve profile name for a service.
  * - If profileName is provided, validates it exists
@@ -94,7 +99,7 @@ export async function getProfile(
 export async function resolveProfile(
   service: ServiceName,
   profileName?: string
-): Promise<{ profile: string | null; readOnly?: boolean; error?: 'none' | 'multiple' }> {
+): Promise<ResolveProfileResult> {
   const config = await loadConfig();
   const serviceProfiles = config.profiles[service] || [];
 
@@ -102,7 +107,7 @@ export async function resolveProfile(
     // Explicit profile requested - validate it exists
     const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
     if (!found) {
-      return { profile: null };
+      return { profile: null, error: 'none' };
     }
     const entry = normalizeProfile(found);
     return { profile: entry.name, readOnly: entry.readOnly };
@@ -119,7 +124,7 @@ export async function resolveProfile(
   }
 
   // Multiple profiles exist - user must specify
-  return { profile: null, error: 'multiple' };
+  return { profile: null, error: 'multiple', names: serviceProfiles.map(getProfileName) };
 }
 
 export interface SetProfileOptions {

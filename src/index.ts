@@ -25,6 +25,8 @@ import { registerConfigCommands } from './commands/config';
 import { registerMcpCommands } from './commands/mcp';
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
+import { registerDoctorCommand } from './commands/doctor';
+import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
 import { registerServerCommands } from './commands/server';
@@ -44,6 +46,11 @@ function getVersion(): string {
 }
 
 const program = new Command();
+
+function setGroup(name: string, group: string): void {
+  const cmd = program.commands.find((c) => c.name() === name);
+  if (cmd) cmd.helpGroup(group);
+}
 
 program
   .name('agentio')
@@ -74,6 +81,8 @@ registerMcpCommands(program);
 registerDocsCommand(program);
 registerDaemonCommands(program);
 registerDaemonCommands(program, { base: 'gateway', deprecated: true });
+registerDoctorCommand(program);
+registerProfileCommands(program);
 registerReauthCommand(program);
 registerScheduleCommands(program);
 registerServerCommands(program);
@@ -81,7 +90,7 @@ registerSetupCommand(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 
-const BYPASS_COMMANDS = new Set(['setup', 'docs', 'update']);
+const BYPASS_COMMANDS = new Set(['setup', 'docs', 'update', 'doctor']);
 
 program.hook('preAction', async (_thisCommand, actionCommand) => {
   const name = actionCommand.name();
@@ -97,6 +106,21 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
     process.exit(2);
   }
 });
+
+// Setup
+['setup', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
+
+// Services
+[
+  'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
+  'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+].forEach((n) => setGroup(n, 'Services'));
+
+// Automation
+['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
+
+// Advanced
+['config', 'mcp', 'server', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
 // Show help (exit 0) when no command is provided
 program.action(() => {

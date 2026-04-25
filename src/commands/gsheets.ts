@@ -549,50 +549,54 @@ Examples:
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('Starting OAuth flow for Google Sheets...\n');
-
-        const tokens = await performOAuthFlow('gsheets');
-
-        // Fetch user email for profile naming
-        let userEmail: string;
-        try {
-          userEmail = await fetchGoogleUserEmail(tokens.access_token);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
-        }
-
-        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-        let profileName: string;
-        if (options.profile) {
-          profileName = options.profile;
-        } else if (options.readOnly && await getProfile('gsheets', userEmail)) {
-          // Profile with email already exists, use -readonly suffix
-          profileName = `${userEmail}-readonly`;
-        } else {
-          profileName = userEmail;
-        }
-
-        const credentials: GSheetsCredentials = {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          expiryDate: tokens.expiry_date,
-          tokenType: tokens.token_type,
-          scope: tokens.scope,
-          email: userEmail,
-        };
-
-        await setProfile('gsheets', profileName, { readOnly: options.readOnly });
-        await setCredentials('gsheets', profileName, credentials);
-
-        console.log(`\nSuccess! Profile "${profileName}" configured.`);
-        console.log(`   Email: ${userEmail}`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
-        console.log(`   Test with: agentio gsheets list --profile ${profileName}`);
+        await gsheetsProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('Starting OAuth flow for Google Sheets...\n');
+
+  const tokens = await performOAuthFlow('gsheets');
+
+  // Fetch user email for profile naming
+  let userEmail: string;
+  try {
+    userEmail = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
+  }
+
+  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+  let profileName: string;
+  if (options.profile) {
+    profileName = options.profile;
+  } else if (options.readOnly && await getProfile('gsheets', userEmail)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${userEmail}-readonly`;
+  } else {
+    profileName = userEmail;
+  }
+
+  const credentials: GSheetsCredentials = {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiryDate: tokens.expiry_date,
+    tokenType: tokens.token_type,
+    scope: tokens.scope,
+    email: userEmail,
+  };
+
+  await setProfile('gsheets', profileName, { readOnly: options.readOnly });
+  await setCredentials('gsheets', profileName, credentials);
+
+  console.log(`\nSuccess! Profile "${profileName}" configured.`);
+  console.log(`   Email: ${userEmail}`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
+  console.log(`   Test with: agentio gsheets list --profile ${profileName}`);
 }

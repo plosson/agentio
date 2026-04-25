@@ -183,7 +183,7 @@ async function reauthJira(profileName: string): Promise<void> {
   console.error(`  Done (${result.siteUrl})`);
 }
 
-async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
+export async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
   if (GOOGLE_SIMPLE_SERVICES.includes(service)) {
     await reauthGoogleSimple(service, profileName);
     return;
@@ -225,7 +225,7 @@ async function reauthProfile(service: ServiceName, profileName: string): Promise
 
 export function registerReauthCommand(program: Command): void {
   program
-    .command('reauth')
+    .command('reauth', { hidden: true })
     .description('Re-authenticate expired or invalid profiles')
     .option('--all', 'Re-authenticate all invalid profiles without prompting')
     .action(async (options) => {

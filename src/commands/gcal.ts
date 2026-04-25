@@ -361,39 +361,43 @@ export function registerGCalCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('Starting OAuth flow for Google Calendar...\n');
-
-        const tokens = await performOAuthFlow('gcal');
-
-        // Fetch the user's email
-        let email: string;
-        try {
-          email = await fetchGoogleUserEmail(tokens.access_token);
-        } catch (error) {
-          throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
-        }
-
-        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-        let profileName: string;
-        if (options.profile) {
-          profileName = options.profile;
-        } else if (options.readOnly && await getProfile('gcal', email)) {
-          // Profile with email already exists, use -readonly suffix
-          profileName = `${email}-readonly`;
-        } else {
-          profileName = email;
-        }
-
-        await setProfile('gcal', profileName, { readOnly: options.readOnly });
-        await setCredentials('gcal', profileName, { ...tokens, email });
-
-        console.log(`\nSuccess! Profile "${profileName}" configured.`);
-        console.log(`   Email: ${email}`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
+        await gcalProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gcalProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('Starting OAuth flow for Google Calendar...\n');
+
+  const tokens = await performOAuthFlow('gcal');
+
+  // Fetch the user's email
+  let email: string;
+  try {
+    email = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
+  }
+
+  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+  let profileName: string;
+  if (options.profile) {
+    profileName = options.profile;
+  } else if (options.readOnly && await getProfile('gcal', email)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${email}-readonly`;
+  } else {
+    profileName = email;
+  }
+
+  await setProfile('gcal', profileName, { readOnly: options.readOnly });
+  await setCredentials('gcal', profileName, { ...tokens, email });
+
+  console.log(`\nSuccess! Profile "${profileName}" configured.`);
+  console.log(`   Email: ${email}`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
 }

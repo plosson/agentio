@@ -2,7 +2,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { getCredentials, setCredentials } from './token-store';
 import { resolveProfile } from '../config/config-manager';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
-import { CliError } from '../utils/errors';
+import { CliError, multipleProfilesError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
 
@@ -12,17 +12,19 @@ export async function getValidTokens(
   service: ServiceName,
   profileName?: string
 ): Promise<{ tokens: OAuthTokens; profile: string }> {
-  const { profile, error } = await resolveProfile(service, profileName);
+  const profileResult = await resolveProfile(service, profileName);
 
-  if (!profile) {
-    if (error === 'none') {
+  if (profileResult.profile === null) {
+    if (profileResult.error === 'none') {
+      if (profileName) {
+        throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
+      }
       throw new CliError('PROFILE_NOT_FOUND', `No ${service} profile configured`, `Run: agentio ${service} profile add`);
     }
-    if (error === 'multiple') {
-      throw new CliError('PROFILE_NOT_FOUND', `Multiple ${service} profiles exist`, 'Specify --profile <name>');
-    }
-    throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
+    throw multipleProfilesError(service, profileResult.names);
   }
+
+  const profile = profileResult.profile;
 
   const tokens = await getCredentials<OAuthTokens>(service, profile);
 

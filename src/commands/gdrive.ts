@@ -224,73 +224,77 @@ Examples:
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('Google Drive Setup\n');
-
-        let accessLevel: GDriveAccessLevel;
-
-        if (options.readonly) {
-          accessLevel = 'readonly';
-        } else if (options.full) {
-          accessLevel = 'full';
-        } else {
-          console.error('Access level options:');
-          console.error('  1. Read-only  - List, search, download files');
-          console.error('  2. Full       - Read-only + upload, create folders, modify files\n');
-
-          const choice = await prompt('? Select access level (1 or 2): ');
-          accessLevel = choice.trim() === '2' ? 'full' : 'readonly';
-        }
-
-        const oauthService = accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly';
-        console.error(`\nStarting OAuth flow (${accessLevel} access)...\n`);
-
-        const tokens = await performOAuthFlow(oauthService);
-
-        let userEmail: string;
-        try {
-          userEmail = await fetchGoogleUserEmail(tokens.access_token);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          throw new CliError(
-            'AUTH_FAILED',
-            `Failed to fetch user email: ${errorMessage}`,
-            'Ensure the account has an email address'
-          );
-        }
-
-        // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-        let profileName: string;
-        if (options.profile) {
-          profileName = options.profile;
-        } else if (options.readOnly && await getProfile('gdrive', userEmail)) {
-          // Profile with email already exists, use -readonly suffix
-          profileName = `${userEmail}-readonly`;
-        } else {
-          profileName = userEmail;
-        }
-
-        const credentials: GDriveCredentials = {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          expiryDate: tokens.expiry_date,
-          tokenType: tokens.token_type,
-          scope: tokens.scope,
-          email: userEmail,
-          accessLevel,
-        };
-
-        await setProfile('gdrive', profileName, { readOnly: options.readOnly });
-        await setCredentials('gdrive', profileName, credentials);
-
-        console.log(`\nSuccess! Profile "${profileName}" configured.`);
-        console.log(`   Email: ${userEmail}`);
-        console.log(`   API Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}`);
-        if (options.readOnly) {
-          console.log(`   Profile Access: read-only`);
-        }
-        console.log(`   Test with: agentio gdrive list --profile ${profileName}`);
+        await gdriveProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function gdriveProfileAdd(options: { profile?: string; readonly?: boolean; full?: boolean; readOnly?: boolean }): Promise<void> {
+  console.error('Google Drive Setup\n');
+
+  let accessLevel: GDriveAccessLevel;
+
+  if (options.readonly || options.readOnly) {
+    accessLevel = 'readonly';
+  } else if (options.full) {
+    accessLevel = 'full';
+  } else {
+    console.error('Access level options:');
+    console.error('  1. Read-only  - List, search, download files');
+    console.error('  2. Full       - Read-only + upload, create folders, modify files\n');
+
+    const choice = await prompt('? Select access level (1 or 2): ');
+    accessLevel = choice.trim() === '2' ? 'full' : 'readonly';
+  }
+
+  const oauthService = accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly';
+  console.error(`\nStarting OAuth flow (${accessLevel} access)...\n`);
+
+  const tokens = await performOAuthFlow(oauthService);
+
+  let userEmail: string;
+  try {
+    userEmail = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new CliError(
+      'AUTH_FAILED',
+      `Failed to fetch user email: ${errorMessage}`,
+      'Ensure the account has an email address'
+    );
+  }
+
+  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
+  let profileName: string;
+  if (options.profile) {
+    profileName = options.profile;
+  } else if (options.readOnly && await getProfile('gdrive', userEmail)) {
+    // Profile with email already exists, use -readonly suffix
+    profileName = `${userEmail}-readonly`;
+  } else {
+    profileName = userEmail;
+  }
+
+  const credentials: GDriveCredentials = {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiryDate: tokens.expiry_date,
+    tokenType: tokens.token_type,
+    scope: tokens.scope,
+    email: userEmail,
+    accessLevel,
+  };
+
+  await setProfile('gdrive', profileName, { readOnly: options.readOnly });
+  await setCredentials('gdrive', profileName, credentials);
+
+  console.log(`\nSuccess! Profile "${profileName}" configured.`);
+  console.log(`   Email: ${userEmail}`);
+  console.log(`   API Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}`);
+  if (options.readOnly) {
+    console.log(`   Profile Access: read-only`);
+  }
+  console.log(`   Test with: agentio gdrive list --profile ${profileName}`);
 }

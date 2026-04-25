@@ -339,7 +339,8 @@ export function registerConfigCommands(program: Command): void {
         const vars = await listEnv();
         const entries = Object.entries(vars).sort(([a], [b]) => a.localeCompare(b));
         if (entries.length === 0) {
-          console.log('No environment variables configured');
+          console.log('No environment variables configured.');
+          console.log('Add one with: agentio config env set <key> <value>');
           return;
         }
         for (const [key, value] of entries) {

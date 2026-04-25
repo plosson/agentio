@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import plist from 'plist';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
@@ -366,7 +366,11 @@ function renderJobs(jobs: Array<{
   const filtered = filterFolder
     ? jobs.filter((j) => j.folder === resolve(filterFolder))
     : jobs;
-  if (filtered.length === 0) { console.log('No schedules.'); return; }
+  if (filtered.length === 0) {
+    console.log('No schedules.');
+    console.log('Add one with: agentio schedule add <folder>/<id>.run.md');
+    return;
+  }
   const widths = {
     id: Math.max('ID'.length, ...filtered.map((r) => r.id.length)),
     folder: Math.max('FOLDER'.length, ...filtered.map((r) => abbrHome(r.folder).length)),
@@ -385,7 +389,7 @@ export function registerScheduleCommands(program: Command): void {
     .description('Schedule prompts to run on a cron-like schedule (executed by the agentio daemon)');
 
   schedule.command('add').description('Add or update a schedule (writes frontmatter to a .run.md file)')
-    .argument('<file>', 'Path to the .run.md file (must end in .run.md)')
+    .argument('<file-or-id>', 'Path to a .run.md file, or a bare id (creates <folder>/<id>.run.md)')
     .option('--folder <path>', 'Folder containing the file (default: CWD)')
     .option('--schedule <type>', 'manual | daily | weekly | monthly | interval')
     .option('--at <HH:MM>', 'Time of day shortcut for --hour/--minute')
@@ -403,11 +407,14 @@ export function registerScheduleCommands(program: Command): void {
     .option('-y, --yes', 'Non-interactive; error if required flags missing')
     .action(async (file: string, opts: AddFlags) => {
       try {
-        if (!file.endsWith('.run.md')) {
-          throw new CliError('INVALID_PARAMS', `File must end in .run.md: "${file}"`);
-        }
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const filePath = isAbsolute(file) ? file : resolve(folder, file);
+        let filePath: string;
+        if (file.endsWith('.run.md')) {
+          filePath = isAbsolute(file) ? file : resolve(folder, file);
+        } else {
+          // Treat as id
+          filePath = resolve(folder, `${file}.run.md`);
+        }
 
         let existingBody = '# TODO: write your prompt here\n';
         let existingConfig: Partial<FrontmatterConfig> = {};
@@ -536,10 +543,30 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
+  const listFolders = async () => {
+    const config = await loadConfig();
+    const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+    if (folders.length === 0) {
+      console.log('No folders watched.');
+      console.log('Add one with: agentio schedule watch <folder>');
+      return;
+    }
+    for (const f of folders) {
+      const pin = f.host ? ` (pinned to ${f.host})` : '';
+      console.log(`${abbrHome(f.path)}${pin}`);
+    }
+  };
+
   schedule.command('list').description('List scheduled tasks in watched folders')
     .option('--folder <path>', 'Filter to one folder')
-    .action(async (opts: { folder?: string }) => {
+    .option('--folders', 'Show watched folders instead of schedules')
+    .action(async (opts: { folder?: string; folders?: boolean }) => {
       try {
+        if (opts.folders) {
+          await listFolders();
+          return;
+        }
+
         const config = await loadConfig();
         const apiKey = config.daemon?.apiKey;
         const port = config.daemon?.server?.port ?? 7890;
@@ -583,83 +610,104 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('sync').description('Validate .run.md files in a folder (id collisions, missing frontmatter, .gitignore scaffolding)')
-    .option('--folder <path>', 'Folder to sync (default: CWD)')
+  const checkAction = async (opts: { folder?: string; yes?: boolean }) => {
+    try {
+      const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+
+      // 1. Walk for *.run.md files
+      const files = walkRunFiles(folder);
+
+      // 2. Collision check
+      const byId = new Map<string, string[]>();
+      for (const f of files) {
+        const arr = byId.get(f.id) ?? [];
+        arr.push(f.path);
+        byId.set(f.id, arr);
+      }
+      const collisions = [...byId.entries()].filter(([, v]) => v.length > 1);
+      if (collisions.length > 0) {
+        const lines = collisions.map(([id, paths]) => `  "${id}":\n    ${paths.join('\n    ')}`);
+        throw new CliError('INVALID_PARAMS',
+          `Multiple .run.md files share the same id:\n${lines.join('\n')}`,
+          'Rename one of the files');
+      }
+
+      // 3. Ensure .agentio/.gitignore exists (first-time scaffolding)
+      if (files.length > 0) {
+        const giPath = resolve(folder, '.agentio', '.gitignore');
+        await mkdir(dirname(giPath), { recursive: true });
+        if (!existsSync(giPath)) {
+          await writeFile(giPath, 'runs/\nstate.json\n');
+        }
+      }
+
+      // 4. Build desired configs, prompting for incomplete files
+      const desired = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
+      for (const f of files) {
+        const raw = await readFile(f.path, 'utf-8');
+        const parsed = parseFrontmatter(raw);
+        let config = parsed.config as Partial<FrontmatterConfig>;
+        const missing = missingScheduleFields(config.schedule);
+        if (missing.length > 0) {
+          if (opts.yes || !isInteractive()) {
+            throw new CliError('INVALID_PARAMS',
+              `${f.path} is missing required fields: ${missing.join(', ')}`,
+              'Fill in the frontmatter or run check interactively');
+          }
+          console.log(`Filling in missing frontmatter for ${f.path}:`);
+          config = await promptConfig(config, missing);
+          const finalConfig = mergeConfig({}, config);
+          await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
+          desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
+        } else {
+          desired.set(f.id, { config: mergeConfig({}, config), body: parsed.body, filePath: f.path });
+        }
+      }
+
+      console.log(`Check complete: ${desired.size} schedule(s) checked.`);
+
+      const cfg = await loadConfig();
+      const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
+      if (!watched.find((w) => w.path === folder)) {
+        console.log('\nThis folder is not watched. Run:');
+        console.log(`  agentio schedule watch ${abbrHome(folder)}`);
+      }
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
+  schedule.command('check').description('Validate .run.md files in a folder (id collisions, missing frontmatter, .gitignore scaffolding)')
+    .option('--folder <path>', 'Folder to check (default: CWD)')
+    .option('-y, --yes', 'Non-interactive')
+    .action(checkAction);
+
+  schedule.command('sync', { hidden: true })
+    .description('[deprecated] alias of `check`')
+    .option('--folder <path>', 'Folder to check (default: CWD)')
     .option('-y, --yes', 'Non-interactive')
     .action(async (opts: { folder?: string; yes?: boolean }) => {
-      try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-
-        // 1. Walk for *.run.md files
-        const files = walkRunFiles(folder);
-
-        // 2. Collision check
-        const byId = new Map<string, string[]>();
-        for (const f of files) {
-          const arr = byId.get(f.id) ?? [];
-          arr.push(f.path);
-          byId.set(f.id, arr);
-        }
-        const collisions = [...byId.entries()].filter(([, v]) => v.length > 1);
-        if (collisions.length > 0) {
-          const lines = collisions.map(([id, paths]) => `  "${id}":\n    ${paths.join('\n    ')}`);
-          throw new CliError('INVALID_PARAMS',
-            `Multiple .run.md files share the same id:\n${lines.join('\n')}`,
-            'Rename one of the files');
-        }
-
-        // 3. Ensure .agentio/.gitignore exists (first-time scaffolding)
-        if (files.length > 0) {
-          const giPath = resolve(folder, '.agentio', '.gitignore');
-          await mkdir(dirname(giPath), { recursive: true });
-          if (!existsSync(giPath)) {
-            await writeFile(giPath, 'runs/\nstate.json\n');
-          }
-        }
-
-        // 4. Build desired configs, prompting for incomplete files
-        const desired = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
-        for (const f of files) {
-          const raw = await readFile(f.path, 'utf-8');
-          const parsed = parseFrontmatter(raw);
-          let config = parsed.config as Partial<FrontmatterConfig>;
-          const missing = missingScheduleFields(config.schedule);
-          if (missing.length > 0) {
-            if (opts.yes || !isInteractive()) {
-              throw new CliError('INVALID_PARAMS',
-                `${f.path} is missing required fields: ${missing.join(', ')}`,
-                'Fill in the frontmatter or run sync interactively');
-            }
-            console.log(`Filling in missing frontmatter for ${f.path}:`);
-            config = await promptConfig(config, missing);
-            const finalConfig = mergeConfig({}, config);
-            await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
-            desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
-          } else {
-            desired.set(f.id, { config: mergeConfig({}, config), body: parsed.body, filePath: f.path });
-          }
-        }
-
-        console.log(`Sync complete: ${desired.size} schedule(s) checked.`);
-
-        const cfg = await loadConfig();
-        const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
-        if (!watched.find((w) => w.path === folder)) {
-          console.log('\nThis folder is not watched. Run:');
-          console.log(`  agentio schedule watch ${abbrHome(folder)}`);
-        }
-      } catch (e) {
-        handleError(e);
-      }
+      console.error('warning: `agentio schedule sync` is deprecated; use `schedule check`.');
+      await checkAction(opts);
     });
 
   schedule.command('remove').description('Delete a schedule (.run.md file)')
-    .argument('<id>', 'Schedule id')
+    .argument('<id-or-file>', 'Schedule id, or path to a .run.md file')
     .option('--folder <path>', 'Folder (default: CWD)')
     .action(async (id: string, opts: { folder?: string }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        let matches: ReturnType<typeof walkRunFiles>;
+        if (id.endsWith('.run.md')) {
+          const filePath = isAbsolute(id) ? id : resolve(folder, id);
+          if (!existsSync(filePath)) {
+            throw new CliError('NOT_FOUND', `No file at ${filePath}`);
+          }
+          const idFromPath = basename(filePath).slice(0, -'.run.md'.length);
+          matches = [{ path: filePath, id: idFromPath }];
+        } else {
+          matches = walkRunFiles(folder).filter((f) => f.id === id);
+        }
         if (matches.length === 0) {
           throw new CliError('NOT_FOUND', `No .run.md file found for id "${id}" under ${folder}`,
             'Check the id (ls **/*.run.md) or run schedule list');
@@ -759,21 +807,32 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('runs').description('List past runs for a schedule')
+  const historyAction = async (id: string, opts: { folder?: string }) => {
+    try {
+      const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+      const runs = listRuns(folder, id);
+      if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
+      for (const r of runs) {
+        const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
+        console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
+      }
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
+  schedule.command('history').description('List past runs for a schedule')
+    .argument('<id>', 'Schedule id')
+    .option('--folder <path>', 'Folder (default: CWD)')
+    .action(historyAction);
+
+  schedule.command('runs', { hidden: true })
+    .description('[deprecated] alias of `history`')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
     .action(async (id: string, opts: { folder?: string }) => {
-      try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const runs = listRuns(folder, id);
-        if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
-        for (const r of runs) {
-          const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
-          console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
-        }
-      } catch (e) {
-        handleError(e);
-      }
+      console.error('warning: `agentio schedule runs` is deprecated; use `schedule history`.');
+      await historyAction(id, opts);
     });
 
   schedule.command('watch').description('Register a folder for the agentio daemon to scan')
@@ -793,33 +852,25 @@ export function registerScheduleCommands(program: Command): void {
         const apiKey = updated.daemon?.apiKey;
         const port = updated.daemon?.server?.port ?? 7890;
 
-        // Try to reload the daemon
-        let daemonAlive = false;
-        if (apiKey) {
+        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
+
+        // Ensure daemon is running (offer to install/start if not), then reload
+        const { ensureDaemonRunning } = await import('../utils/daemon-ensure');
+        const daemonAlive = await ensureDaemonRunning();
+        if (daemonAlive) {
           try {
-            const res = await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+            await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
               method: 'POST',
-              headers: { 'X-API-Key': apiKey },
+              headers: { 'X-API-Key': apiKey ?? '' },
               signal: AbortSignal.timeout(1500),
             });
-            daemonAlive = res.ok;
-          } catch { /* daemon not up */ }
-        }
-
-        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
-        if (daemonAlive) {
-          console.log('Daemon reloaded — new schedules will fire immediately.');
-        } else {
-          const installed = process.platform === 'darwin'
-            ? existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'))
-            : existsSync('/etc/systemd/system/agentio-daemon.service');
-          if (!installed) {
-            console.log('The agentio daemon is not installed.');
-            console.log('Install it with: agentio daemon install');
-          } else {
-            console.log('The agentio daemon is installed but not running.');
-            console.log('Start it with: agentio daemon start');
+            console.log('Daemon reloaded — new schedules will fire immediately.');
+          } catch {
+            // Best-effort; ignore.
           }
+        } else {
+          console.log('Watched folder added; the daemon will pick it up when it starts.');
+          console.log('Start it with: agentio daemon start');
         }
       } catch (e) {
         handleError(e);
@@ -854,26 +905,18 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('watched').description('List watched folders')
+  schedule.command('watched', { hidden: true })
+    .description('[deprecated] alias of `list --folders`')
     .action(async () => {
+      console.error('warning: `agentio schedule watched` is deprecated; use `schedule list --folders`.');
       try {
-        const config = await loadConfig();
-        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
-        if (folders.length === 0) {
-          console.log('No folders watched.');
-          console.log('Add one with: agentio schedule watch <folder>');
-          return;
-        }
-        for (const f of folders) {
-          const pin = f.host ? ` (pinned to ${f.host})` : '';
-          console.log(`${abbrHome(f.path)}${pin}`);
-        }
+        await listFolders();
       } catch (e) {
         handleError(e);
       }
     });
 
-  schedule.command('migrate').description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
+  schedule.command('migrate', { hidden: true }).description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
     .action(async () => {
       try {
         if (process.platform !== 'darwin') {
