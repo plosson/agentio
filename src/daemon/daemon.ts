@@ -7,7 +7,11 @@ import type { ServiceName, Config, DaemonConfig } from '../types/config';
 import { startScheduler, stopScheduler } from './scheduler';
 import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
-import { initDatabase, closeDatabase, insertInboxMessage, inboxMessageExists, getPendingOutboxMessages, updateOutboxStatus, cleanupInbox, cleanupOutbox } from './store';
+import { initDatabase, closeDatabase, insertInboxMessage, inboxMessageExists, getPendingOutboxMessages, updateOutboxStatus, cleanupInbox, cleanupOutbox, ackInboxMessage, queueOutboxMessage, getDatabase } from './store';
+import { getProfileBot } from '../config/config-manager';
+import { runConversation } from '../services/conversation/runner';
+import { SerialQueue } from '../services/conversation/queue';
+import { locateClaude } from '../services/claude/claude-binary';
 import { startApiServer, stopApiServer } from './api';
 import { configureWebhook, queueWebhookNotification, flushWebhook, stopWebhook } from './webhook';
 import type { ServiceAdapter, AdapterInboundMessage } from './adapters/types';
@@ -23,6 +27,9 @@ let shutdownRequested = false;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
 let outboxInterval: ReturnType<typeof setInterval> | null = null;
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+const conversationQueue = new SerialQueue<string>();
+const BOT_LOG_DIR = join(CONFIG_DIR, 'bot-runs');
 
 /**
  * Get the daemon configuration from the vault.
@@ -52,7 +59,7 @@ function handleInboundMessage(service: ServiceName, profile: string, message: Ad
     senderHandle: message.senderHandle,
     content: message.content,
     mediaType: message.mediaType,
-    mediaPath: message.mediaUrl, // Store URL for now, download later if needed
+    mediaPath: message.mediaUrl,
     receivedAt: message.receivedAt,
     replyToId: message.replyToId,
     metadata: message.metadata,
@@ -67,6 +74,62 @@ function handleInboundMessage(service: ServiceName, profile: string, message: Ad
     profile,
     sender: message.senderName || message.senderHandle || message.senderId,
     preview: (message.content || '[media]').slice(0, 100),
+  });
+
+  // Bot dispatch (fire-and-forget, queued per chat to prevent concurrent --resume corruption)
+  void dispatchBot(service, profile, inboxMessage.id, message);
+}
+
+async function dispatchBot(
+  service: ServiceName,
+  profile: string,
+  inboxId: string,
+  message: AdapterInboundMessage,
+): Promise<void> {
+  let bot;
+  try {
+    bot = await getProfileBot(service, profile);
+  } catch (e) {
+    console.error(`[bot] Failed to load bot config for ${service}:${profile}:`, e instanceof Error ? e.message : e);
+    return;
+  }
+  if (!bot || !bot.enabled) return;
+  if (!message.content || !message.content.trim()) return; // skip media-only or empty messages
+
+  const claudePath = locateClaude();
+  if (!claudePath) {
+    console.error('[bot] claude CLI not found; skipping dispatch');
+    return;
+  }
+
+  const key = `${service}:${profile}:${message.conversationId}`;
+  conversationQueue.enqueue(key, async () => {
+    try {
+      await runConversation(
+        {
+          service,
+          profile,
+          chatId: message.conversationId,
+          inboxId,
+          message: message.content!,
+          bot,
+        },
+        {
+          db: getDatabase(),
+          claudePath,
+          logDir: BOT_LOG_DIR,
+          insertOutbox: (msg) => queueOutboxMessage({
+            service: msg.service,
+            profile: msg.profile,
+            conversationId: msg.conversationId,
+            content: msg.content,
+          }).id,
+          markInboxDone: (id) => { ackInboxMessage(id); },
+        },
+      );
+    } catch (e) {
+      console.error(`[bot] runConversation failed for ${key}:`, e instanceof Error ? e.message : e);
+    }
   });
 }
 
