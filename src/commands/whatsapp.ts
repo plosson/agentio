@@ -176,11 +176,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const profileName = profileResult.profile;
@@ -215,11 +215,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -339,11 +339,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (message: string | undefined, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.to && !options.group) {
@@ -461,11 +461,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -484,11 +484,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -520,11 +520,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (name: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.participants || options.participants.length === 0) {
@@ -556,11 +556,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         if (!options.name && options.description === undefined && !options.picture) {
@@ -600,11 +600,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'add participants');
@@ -645,11 +645,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'remove participants');
@@ -690,11 +690,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'promote participants');
@@ -735,11 +735,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'demote participants');
@@ -779,11 +779,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'leave group');
@@ -821,11 +821,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -855,11 +855,11 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (code: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
+          throw multipleProfilesError('whatsapp', profileResult.names);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'join group');

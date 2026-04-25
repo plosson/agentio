@@ -199,11 +199,11 @@ export function registerTelegramCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('telegram', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
           }
-          throw multipleProfilesError('telegram', profileResult.names ?? []);
+          throw multipleProfilesError('telegram', profileResult.names);
         }
 
         const client = await getDaemonClient();
@@ -309,11 +309,11 @@ export function registerTelegramCommands(program: Command): void {
     .action(async (message: string | undefined, options) => {
       try {
         const profileResult = await resolveProfile('telegram', options.profile);
-        if (!profileResult.profile) {
+        if (profileResult.profile === null) {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
           }
-          throw multipleProfilesError('telegram', profileResult.names ?? []);
+          throw multipleProfilesError('telegram', profileResult.names);
         }
 
         if (!options.to) {

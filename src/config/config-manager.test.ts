@@ -53,8 +53,11 @@ describe('resolveProfile multi-profile case', () => {
     await setProfile('whatsapp', 'personal');
     clearVaultCache();
     const r = await resolveProfile('whatsapp');
-    expect(r.error).toBe('multiple');
-    expect(r.names).toEqual(['work', 'personal']);
+    if (r.profile === null && r.error === 'multiple') {
+      expect(r.names).toEqual(['work', 'personal']);
+    } else {
+      throw new Error(`Expected multiple profiles error, got: ${JSON.stringify(r)}`);
+    }
   });
 });
 

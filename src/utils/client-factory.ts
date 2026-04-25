@@ -1,6 +1,6 @@
 import { getCredentials } from '../auth/token-store';
 import { resolveProfile } from '../config/config-manager';
-import { CliError } from './errors';
+import { CliError, multipleProfilesError } from './errors';
 import type { ServiceName } from '../types/config';
 
 export interface ClientFactoryConfig<TCredentials, TClient> {
@@ -26,17 +26,19 @@ export function createClientGetter<TCredentials, TClient>(
   const { service, createClient } = config;
 
   return async (profileName?: string): Promise<{ client: TClient; profile: string }> => {
-    const { profile, error } = await resolveProfile(service, profileName);
+    const profileResult = await resolveProfile(service, profileName);
 
-    if (!profile) {
-      if (error === 'none') {
+    if (profileResult.profile === null) {
+      if (profileResult.error === 'none') {
+        if (profileName) {
+          throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
+        }
         throw new CliError('PROFILE_NOT_FOUND', `No ${service} profile configured`, `Run: agentio ${service} profile add`);
       }
-      if (error === 'multiple') {
-        throw new CliError('PROFILE_NOT_FOUND', `Multiple ${service} profiles exist`, 'Specify --profile <name>');
-      }
-      throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
+      throw multipleProfilesError(service, profileResult.names);
     }
+
+    const profile = profileResult.profile;
 
     const credentials = await getCredentials<TCredentials>(service, profile);
 
