@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import type { ServiceName } from '../types/config';
-import { listProfiles, removeProfile } from '../config/config-manager';
+import { listProfiles, removeProfile, resolveProfile } from '../config/config-manager';
 import { handleError, CliError } from '../utils/errors';
 import { removeProfileForService } from '../utils/profile-commands';
+import { reauthProfile } from './reauth';
 import { gmailProfileAdd } from './gmail';
 import { gdocsProfileAdd } from './gdocs';
 import { gdriveProfileAdd } from './gdrive';
@@ -140,6 +141,42 @@ export function registerProfileCommands(program: Command): void {
         } else {
           await removeProfileForService(service as ServiceName, name);
         }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  profile
+    .command('reauth')
+    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('[name]', 'Profile name (auto-resolves if exactly one exists)')
+    .description('Re-authenticate an expired or invalid profile')
+    .action(async (service: string, name: string | undefined) => {
+      try {
+        if (!KNOWN_SERVICES.includes(service as ServiceName)) {
+          throw new CliError(
+            'INVALID_PARAMS',
+            `Unknown service "${service}"`,
+            `Known services: ${KNOWN_SERVICES.join(', ')}`
+          );
+        }
+        const resolved = await resolveProfile(service as ServiceName, name);
+        if (resolved.profile === null) {
+          if (resolved.error === 'none') {
+            throw new CliError(
+              'PROFILE_NOT_FOUND',
+              name ? `Profile "${name}" not found for ${service}` : `No profiles configured for ${service}`,
+              `Add one with: agentio profile add ${service}`
+            );
+          } else {
+            throw new CliError(
+              'INVALID_PARAMS',
+              `Multiple profiles found for ${service}`,
+              `Specify a profile name: agentio profile reauth ${service} <name>\nAvailable: ${resolved.names.join(', ')}`
+            );
+          }
+        }
+        await reauthProfile(service as ServiceName, resolved.profile);
       } catch (e) {
         handleError(e);
       }

@@ -183,7 +183,7 @@ async function reauthJira(profileName: string): Promise<void> {
   console.error(`  Done (${result.siteUrl})`);
 }
 
-async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
+export async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
   if (GOOGLE_SIMPLE_SERVICES.includes(service)) {
     await reauthGoogleSimple(service, profileName);
     return;
