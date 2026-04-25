@@ -16,8 +16,21 @@ import {
 import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
 import { detectLegacy, readLegacy, archiveLegacy, legacyPaths } from '../vault/migrate';
+import { loadConfig } from '../config/config-manager';
 
 const DEFAULT_VAULT_FILENAME = 'agentio.vault';
+
+async function maybeNudgeFirstService(): Promise<void> {
+  const cfg = await loadConfig();
+  const hasAny = Object.values(cfg.profiles).some((arr) => (arr ?? []).length > 0);
+  if (hasAny) return;
+  console.log('');
+  console.log('Next: configure a service. Examples:');
+  console.log('  agentio gmail profile add');
+  console.log('  agentio whatsapp profile add');
+  console.log('  agentio slack profile add');
+  console.log('Run `agentio --help` to see all available services.');
+}
 
 const MIN_PASSPHRASE_LEN = 8;
 
@@ -141,6 +154,7 @@ async function doFirstTimeSetup(inputs: NonInteractiveInputs): Promise<void> {
   }
 
   console.log(`Vault created at ${vaultPath}`);
+  await maybeNudgeFirstService();
 }
 
 async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
@@ -192,6 +206,7 @@ async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
   if (!result.tokensRecovered) {
     console.error('Warning: legacy credentials could not be recovered. Re-authenticate each service.');
   }
+  await maybeNudgeFirstService();
 }
 
 async function doAdoptExisting(inputs: NonInteractiveInputs): Promise<void> {
@@ -215,6 +230,7 @@ async function doAdoptExisting(inputs: NonInteractiveInputs): Promise<void> {
     console.error(`Warning: could not store passphrase:${(err as Error).message}`);
   }
   console.log(`Adopted vault at ${vaultPath}`);
+  await maybeNudgeFirstService();
 }
 
 async function doChangePassphrase(newPassphrase: string): Promise<void> {
