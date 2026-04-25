@@ -295,19 +295,19 @@ The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` 
 
 ### Schedule
 
-The daemon watches folders registered via `schedule watch` and fires due schedules on a 60-second tick.
+The daemon watches folders registered via `schedule add` and fires due `.run.md` schedules on a 60-second tick. Users author `.run.md` files directly in their text editor; the CLI only manages folder registration and visibility.
 
 ```bash
-agentio schedule list [--profile <name>]
-agentio schedule get <id>
-agentio schedule add <folder> [--cron <expr>] [--profile <name>]
-agentio schedule remove <id>
-agentio schedule run <id>                  # Run immediately (delegates to daemon if running)
-agentio schedule watch <folder>            # Register a folder with the daemon
-agentio schedule unwatch <folder>          # Stop watching a folder
-agentio schedule watched                   # List watched folders
-agentio schedule migrate                   # Clean up legacy per-schedule plists (macOS one-shot)
+agentio schedule add <folder>              # Watch a folder for .run.md files
+agentio schedule remove <folder>           # Stop watching a folder
+agentio schedule list                      # List watched folders + detected schedules
+agentio schedule show <id>                 # Show one schedule's frontmatter + next run times
+agentio schedule run <id>                  # Run a schedule immediately (delegates to daemon if running)
+agentio schedule history <id>              # List past runs for a schedule
+agentio schedule migrate                   # Clean up legacy per-schedule plists (macOS one-shot, hidden)
 ```
+
+`.run.md` frontmatter requires a `host:` field. The daemon only fires schedules whose `host` matches the current hostname — ensures Dropbox-synced folders don't double-fire across machines.
 
 ### Configuration
 

@@ -105,7 +105,7 @@ function checkWatchedFolders(cfg: Config | null): Check | null {
       status: 'warn',
       detail: `${folders.length} folder(s), ${missing.length} missing on disk`,
       items,
-      fix: `agentio schedule unwatch <folder>`,
+      fix: `agentio schedule remove <folder>`,
     };
   }
   return {
