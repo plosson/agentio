@@ -90,65 +90,69 @@ export function registerSqlCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        let url: string;
-
-        if (options.interactive) {
-          url = await promptInteractiveConnection();
-        } else {
-          console.error('\nSQL Database Setup\n');
-          console.error('Enter your database connection URL.');
-          console.error('Supported formats:');
-          console.error('  PostgreSQL: postgres://user:password@host:5432/database');
-          console.error('  MySQL:      mysql://user:password@host:3306/database');
-          console.error('  SQLite:     sqlite:///path/to/database.db\n');
-          console.error('Tip: Use --interactive to enter components separately (handles special characters)\n');
-
-          const urlInput = await prompt('? Connection URL: ');
-
-          if (!urlInput) {
-            throw new CliError('INVALID_PARAMS', 'Connection URL is required');
-          }
-          url = urlInput;
-        }
-
-        // Validate connection
-        console.error('\nValidating connection...');
-        const tempClient = new SqlClient({ url });
-        try {
-          await tempClient.query({ query: 'SELECT 1' });
-        } catch (error) {
-          tempClient.close();
-          if (error instanceof CliError) {
-            throw error;
-          }
-          throw new CliError('AUTH_FAILED', `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-        tempClient.close();
-
-        const displayName = extractDisplayName(url);
-        console.error(`\nConnected to: ${displayName}\n`);
-
-        // Auto-name based on connection display name
-        const profileName = options.profile || displayName;
-
-        // Save credentials
-        const credentials: SqlCredentials = {
-          url,
-          displayName,
-        };
-
-        await setProfile('sql', profileName, { readOnly: options.readOnly });
-        await setCredentials('sql', profileName, credentials);
-
-        console.log(`\nProfile "${profileName}" configured!`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
-        console.log(`   Test with: agentio sql query --profile ${profileName} "SELECT 1"`);
+        await sqlProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<void> {
+  let url: string;
+
+  if (options.interactive) {
+    url = await promptInteractiveConnection();
+  } else {
+    console.error('\nSQL Database Setup\n');
+    console.error('Enter your database connection URL.');
+    console.error('Supported formats:');
+    console.error('  PostgreSQL: postgres://user:password@host:5432/database');
+    console.error('  MySQL:      mysql://user:password@host:3306/database');
+    console.error('  SQLite:     sqlite:///path/to/database.db\n');
+    console.error('Tip: Use --interactive to enter components separately (handles special characters)\n');
+
+    const urlInput = await prompt('? Connection URL: ');
+
+    if (!urlInput) {
+      throw new CliError('INVALID_PARAMS', 'Connection URL is required');
+    }
+    url = urlInput;
+  }
+
+  // Validate connection
+  console.error('\nValidating connection...');
+  const tempClient = new SqlClient({ url });
+  try {
+    await tempClient.query({ query: 'SELECT 1' });
+  } catch (error) {
+    tempClient.close();
+    if (error instanceof CliError) {
+      throw error;
+    }
+    throw new CliError('AUTH_FAILED', `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+  tempClient.close();
+
+  const displayName = extractDisplayName(url);
+  console.error(`\nConnected to: ${displayName}\n`);
+
+  // Auto-name based on connection display name
+  const profileName = options.profile || displayName;
+
+  // Save credentials
+  const credentials: SqlCredentials = {
+    url,
+    displayName,
+  };
+
+  await setProfile('sql', profileName, { readOnly: options.readOnly });
+  await setCredentials('sql', profileName, credentials);
+
+  console.log(`\nProfile "${profileName}" configured!`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
+  console.log(`   Test with: agentio sql query --profile ${profileName} "SELECT 1"`);
 }
 
 async function promptInteractiveConnection(): Promise<string> {

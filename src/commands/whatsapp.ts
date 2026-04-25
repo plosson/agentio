@@ -91,50 +91,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('\nWhatsApp Profile Setup\n');
-
-        const profileName = options.profile || await prompt('? Profile name: ');
-
-        if (!profileName) {
-          throw new CliError('INVALID_PARAMS', 'Profile name is required');
-        }
-
-        // Check if profile already exists
-        const existing = await getCredentials<WhatsAppCredentials>('whatsapp', profileName);
-        if (existing?.paired) {
-          const overwrite = await confirm(`Profile "${profileName}" already exists and is paired. Overwrite?`);
-          if (!overwrite) {
-            console.log('Cancelled');
-            return;
-          }
-        }
-
-        // Create initial credentials (not yet paired)
-        const credentials: WhatsAppCredentials = {
-          paired: false,
-        };
-
-        await setProfile('whatsapp', profileName, { readOnly: options.readOnly });
-        await setCredentials('whatsapp', profileName, credentials);
-
-        console.log(`Profile "${profileName}" created.`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
-
-        // Check if gateway is running (offer to install/start if not)
-        const daemonRunning = await ensureDaemonRunning();
-        if (!daemonRunning) {
-          console.log('\nCannot proceed without the daemon. Re-run after starting it:');
-          console.log(`  agentio whatsapp profile add --profile ${profileName}`);
-          return;
-        }
-
-        // Gateway is running - proceed with pairing
-        await runPairingFlow(profileName);
-
-        console.log(`\nProfile "${profileName}" is ready to use.`);
-        console.log(`Try: agentio whatsapp inbox pull --profile ${profileName}`);
+        await whatsappProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
@@ -869,4 +826,51 @@ export function registerWhatsAppCommands(program: Command): void {
         handleError(error);
       }
     });
+}
+
+export async function whatsappProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nWhatsApp Profile Setup\n');
+
+  const profileName = options.profile || await prompt('? Profile name: ');
+
+  if (!profileName) {
+    throw new CliError('INVALID_PARAMS', 'Profile name is required');
+  }
+
+  // Check if profile already exists
+  const existing = await getCredentials<WhatsAppCredentials>('whatsapp', profileName);
+  if (existing?.paired) {
+    const overwrite = await confirm(`Profile "${profileName}" already exists and is paired. Overwrite?`);
+    if (!overwrite) {
+      console.log('Cancelled');
+      return;
+    }
+  }
+
+  // Create initial credentials (not yet paired)
+  const credentials: WhatsAppCredentials = {
+    paired: false,
+  };
+
+  await setProfile('whatsapp', profileName, { readOnly: options.readOnly });
+  await setCredentials('whatsapp', profileName, credentials);
+
+  console.log(`Profile "${profileName}" created.`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
+
+  // Check if gateway is running (offer to install/start if not)
+  const daemonRunning = await ensureDaemonRunning();
+  if (!daemonRunning) {
+    console.log('\nCannot proceed without the daemon. Re-run after starting it:');
+    console.log(`  agentio whatsapp profile add --profile ${profileName}`);
+    return;
+  }
+
+  // Gateway is running - proceed with pairing
+  await runPairingFlow(profileName);
+
+  console.log(`\nProfile "${profileName}" is ready to use.`);
+  console.log(`Try: agentio whatsapp inbox pull --profile ${profileName}`);
 }

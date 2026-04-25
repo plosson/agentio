@@ -4,6 +4,21 @@ import { removeCredentials, getCredentials } from '../auth/token-store';
 import { handleError, CliError } from './errors';
 import type { ServiceName } from '../types/config';
 
+/**
+ * Shared remove logic used both by the per-service `profile remove` command
+ * and by the unified `agentio profile remove <service> <name>` command.
+ */
+export async function removeProfileForService(service: ServiceName, profileName: string): Promise<void> {
+  const removed = await removeProfile(service, profileName);
+  await removeCredentials(service, profileName);
+
+  if (removed) {
+    console.log(`Removed profile "${profileName}"`);
+  } else {
+    console.error(`Profile "${profileName}" not found`);
+  }
+}
+
 export interface ProfileCommandsOptions<T> {
   service: ServiceName;
   displayName: string;
@@ -80,16 +95,7 @@ export function createProfileCommands<T>(
     .requiredOption('--profile <name>', 'Profile name')
     .action(async (opts) => {
       try {
-        const profileName = opts.profile;
-
-        const removed = await removeProfile(service, profileName);
-        await removeCredentials(service, profileName);
-
-        if (removed) {
-          console.log(`Removed profile "${profileName}"`);
-        } else {
-          console.error(`Profile "${profileName}" not found`);
-        }
+        await removeProfileForService(service, opts.profile);
       } catch (error) {
         handleError(error);
       }

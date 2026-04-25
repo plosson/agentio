@@ -223,47 +223,51 @@ export function registerJiraCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        console.error('\nJIRA OAuth Setup\n');
-
-        // Site selection callback
-        const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
-          return interactiveSelect({
-            message: 'Select a JIRA site:',
-            choices: sites.map((site) => ({
-              name: site.name,
-              value: site,
-              description: site.url,
-            })),
-          });
-        };
-
-        const result = await performJiraOAuthFlow(selectSite);
-
-        console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
-
-        // Auto-name based on site hostname
-        const siteHostname = new URL(result.siteUrl).hostname;
-        const profileName = options.profile || siteHostname;
-
-        // Save credentials
-        const credentials: JiraCredentials = {
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          expiryDate: result.expiryDate,
-          cloudId: result.cloudId,
-          siteUrl: result.siteUrl,
-        };
-
-        await setProfile('jira', profileName, { readOnly: options.readOnly });
-        await setCredentials('jira', profileName, credentials);
-
-        console.log(`\nProfile "${profileName}" configured!`);
-        if (options.readOnly) {
-          console.log(`   Access: read-only`);
-        }
-        console.log(`   Test with: agentio jira projects --profile ${profileName}`);
+        await jiraProfileAdd(options);
       } catch (error) {
         handleError(error);
       }
     });
+}
+
+export async function jiraProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nJIRA OAuth Setup\n');
+
+  // Site selection callback
+  const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
+    return interactiveSelect({
+      message: 'Select a JIRA site:',
+      choices: sites.map((site) => ({
+        name: site.name,
+        value: site,
+        description: site.url,
+      })),
+    });
+  };
+
+  const result = await performJiraOAuthFlow(selectSite);
+
+  console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
+
+  // Auto-name based on site hostname
+  const siteHostname = new URL(result.siteUrl).hostname;
+  const profileName = options.profile || siteHostname;
+
+  // Save credentials
+  const credentials: JiraCredentials = {
+    accessToken: result.accessToken,
+    refreshToken: result.refreshToken,
+    expiryDate: result.expiryDate,
+    cloudId: result.cloudId,
+    siteUrl: result.siteUrl,
+  };
+
+  await setProfile('jira', profileName, { readOnly: options.readOnly });
+  await setCredentials('jira', profileName, credentials);
+
+  console.log(`\nProfile "${profileName}" configured!`);
+  if (options.readOnly) {
+    console.log(`   Access: read-only`);
+  }
+  console.log(`   Test with: agentio jira projects --profile ${profileName}`);
 }
