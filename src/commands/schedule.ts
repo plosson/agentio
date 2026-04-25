@@ -389,7 +389,7 @@ export function registerScheduleCommands(program: Command): void {
     .description('Schedule prompts to run on a cron-like schedule (executed by the agentio daemon)');
 
   schedule.command('add').description('Add or update a schedule (writes frontmatter to a .run.md file)')
-    .argument('<file>', 'Path to the .run.md file (must end in .run.md)')
+    .argument('<file-or-id>', 'Path to a .run.md file, or a bare id (creates <folder>/<id>.run.md)')
     .option('--folder <path>', 'Folder containing the file (default: CWD)')
     .option('--schedule <type>', 'manual | daily | weekly | monthly | interval')
     .option('--at <HH:MM>', 'Time of day shortcut for --hour/--minute')
@@ -407,11 +407,14 @@ export function registerScheduleCommands(program: Command): void {
     .option('-y, --yes', 'Non-interactive; error if required flags missing')
     .action(async (file: string, opts: AddFlags) => {
       try {
-        if (!file.endsWith('.run.md')) {
-          throw new CliError('INVALID_PARAMS', `File must end in .run.md: "${file}"`);
-        }
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const filePath = isAbsolute(file) ? file : resolve(folder, file);
+        let filePath: string;
+        if (file.endsWith('.run.md')) {
+          filePath = isAbsolute(file) ? file : resolve(folder, file);
+        } else {
+          // Treat as id
+          filePath = resolve(folder, `${file}.run.md`);
+        }
 
         let existingBody = '# TODO: write your prompt here\n';
         let existingConfig: Partial<FrontmatterConfig> = {};
@@ -689,12 +692,23 @@ export function registerScheduleCommands(program: Command): void {
     });
 
   schedule.command('remove').description('Delete a schedule (.run.md file)')
-    .argument('<id>', 'Schedule id')
+    .argument('<id-or-file>', 'Schedule id, or path to a .run.md file')
     .option('--folder <path>', 'Folder (default: CWD)')
     .action(async (id: string, opts: { folder?: string }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const matches = walkRunFiles(folder).filter((f) => f.id === id);
+        let matches: ReturnType<typeof walkRunFiles>;
+        if (id.endsWith('.run.md')) {
+          const filePath = isAbsolute(id) ? id : resolve(folder, id);
+          if (!existsSync(filePath)) {
+            throw new CliError('NOT_FOUND', `No file at ${filePath}`);
+          }
+          const { basename } = await import('path');
+          const idFromPath = basename(filePath).slice(0, -'.run.md'.length);
+          matches = [{ path: filePath, id: idFromPath }];
+        } else {
+          matches = walkRunFiles(folder).filter((f) => f.id === id);
+        }
         if (matches.length === 0) {
           throw new CliError('NOT_FOUND', `No .run.md file found for id "${id}" under ${folder}`,
             'Check the id (ls **/*.run.md) or run schedule list');
