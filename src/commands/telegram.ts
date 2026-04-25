@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { setCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { setProfile, resolveProfile, setProfileBot, getProfileBot } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
@@ -87,6 +87,112 @@ export function registerTelegramCommands(program: Command): void {
     .action(async (options) => {
       try {
         await telegramProfileAdd(options);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  const botGroup = profile
+    .command('bot')
+    .description('Configure Claude bot auto-reply for a profile');
+
+  botGroup
+    .command('enable')
+    .description('Enable Claude auto-reply for inbound messages')
+    .option('--profile <name>', 'Profile name')
+    .option('--model <model>', 'Claude model (opus|sonnet|haiku)', 'sonnet')
+    .option('--permission-mode <mode>', 'Permission mode (default|bypassPermissions|plan|acceptEdits)', 'bypassPermissions')
+    .option('--system-prompt <text>', 'Optional --append-system-prompt content')
+    .option('--cwd <dir>', 'Working directory for the bot')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        if (profileResult.profile === null) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+          }
+          throw multipleProfilesError('telegram', profileResult.names);
+        }
+
+        const validModels = ['opus', 'sonnet', 'haiku'];
+        if (!validModels.includes(options.model)) {
+          throw new CliError('INVALID_PARAMS', `Invalid model "${options.model}". Must be one of: ${validModels.join(', ')}`);
+        }
+        const validModes = ['default', 'bypassPermissions', 'plan', 'acceptEdits'];
+        if (!validModes.includes(options.permissionMode)) {
+          throw new CliError('INVALID_PARAMS', `Invalid permission mode "${options.permissionMode}". Must be one of: ${validModes.join(', ')}`);
+        }
+
+        await setProfileBot('telegram', profileResult.profile, {
+          enabled: true,
+          model: options.model,
+          permissionMode: options.permissionMode,
+          systemPrompt: options.systemPrompt,
+          cwd: options.cwd,
+        });
+        console.log(`Bot enabled for profile "${profileResult.profile}"`);
+        console.log(`  Model: ${options.model}`);
+        console.log(`  Permission: ${options.permissionMode}`);
+        console.log('Restart the daemon to pick up changes: agentio daemon restart');
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  botGroup
+    .command('disable')
+    .description('Disable Claude auto-reply for a profile')
+    .option('--profile <name>', 'Profile name')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        if (profileResult.profile === null) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured');
+          }
+          throw multipleProfilesError('telegram', profileResult.names);
+        }
+        const existing = await getProfileBot('telegram', profileResult.profile);
+        await setProfileBot('telegram', profileResult.profile, {
+          enabled: false,
+          model: existing?.model ?? 'sonnet',
+          permissionMode: existing?.permissionMode ?? 'bypassPermissions',
+          systemPrompt: existing?.systemPrompt,
+          cwd: existing?.cwd,
+        });
+        console.log(`Bot disabled for profile "${profileResult.profile}"`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  botGroup
+    .command('show')
+    .description('Show bot configuration for a profile')
+    .option('--profile <name>', 'Profile name')
+    .action(async (options) => {
+      try {
+        const profileResult = await resolveProfile('telegram', options.profile);
+        if (profileResult.profile === null) {
+          if (profileResult.error === 'none') {
+            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured');
+          }
+          throw multipleProfilesError('telegram', profileResult.names);
+        }
+        const cfg = await getProfileBot('telegram', profileResult.profile);
+        if (!cfg) {
+          console.log(`No bot configuration for "${profileResult.profile}"`);
+          return;
+        }
+        console.log(`Profile: ${profileResult.profile}`);
+        console.log(`  Enabled: ${cfg.enabled}`);
+        console.log(`  Model: ${cfg.model}`);
+        console.log(`  Permission: ${cfg.permissionMode}`);
+        if (cfg.systemPrompt) {
+          const preview = cfg.systemPrompt.length > 80 ? cfg.systemPrompt.slice(0, 80) + '...' : cfg.systemPrompt;
+          console.log(`  System prompt: ${preview}`);
+        }
+        if (cfg.cwd) console.log(`  CWD: ${cfg.cwd}`);
       } catch (error) {
         handleError(error);
       }
