@@ -182,12 +182,9 @@ export function printGChatSpaceList(spaces: GChatSpace[]): void {
 
   for (const space of spaces) {
     const spaceId = space.name.replace('spaces/', '');
-    console.log(`[${space.type}] ${space.displayName}`);
-    console.log(`    ID: ${spaceId}`);
-    if (space.description) {
-      console.log(`    Description: ${space.description}`);
-    }
-    console.log('');
+    const name = space.displayName || 'Unnamed';
+    const desc = space.description ? `  - ${space.description}` : '';
+    console.log(`[${space.type}] ${spaceId}  ${name}${desc}`);
   }
 }
 
