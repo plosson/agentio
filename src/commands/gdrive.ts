@@ -236,7 +236,7 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
 
   let accessLevel: GDriveAccessLevel;
 
-  if (options.readonly) {
+  if (options.readonly || options.readOnly) {
     accessLevel = 'readonly';
   } else if (options.full) {
     accessLevel = 'full';

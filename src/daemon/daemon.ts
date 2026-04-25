@@ -1,5 +1,6 @@
 import { join } from 'path';
 import { existsSync, readdirSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { homedir } from 'os';
 import { randomBytes } from 'crypto';
 import type { ServiceName, Config, DaemonConfig } from '../types/config';
@@ -274,7 +275,7 @@ export async function startDaemon(): Promise<void> {
       try {
         const launchAgentsDir = join(homedir(), 'Library', 'LaunchAgents');
         if (existsSync(launchAgentsDir)) {
-          const legacy = readdirSync(launchAgentsDir)
+          const legacy = (await readdir(launchAgentsDir))
             .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
           if (legacy.length > 0) {
             console.log(`[migration] Found ${legacy.length} legacy schedule plist(s).`);

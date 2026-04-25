@@ -100,3 +100,8 @@ export interface Config {
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'github' | 'jira' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';
+
+export const ALL_SERVICES: readonly ServiceName[] = [
+  'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets',
+  'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql',
+];

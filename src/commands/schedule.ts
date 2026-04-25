@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import plist from 'plist';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
@@ -703,7 +703,6 @@ export function registerScheduleCommands(program: Command): void {
           if (!existsSync(filePath)) {
             throw new CliError('NOT_FOUND', `No file at ${filePath}`);
           }
-          const { basename } = await import('path');
           const idFromPath = basename(filePath).slice(0, -'.run.md'.length);
           matches = [{ path: filePath, id: idFromPath }];
         } else {

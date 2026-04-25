@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import type { ServiceName } from '../types/config';
+import { ALL_SERVICES } from '../types/config';
 import { listProfiles, removeProfile, resolveProfile } from '../config/config-manager';
-import { handleError, CliError } from '../utils/errors';
+import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
 import { gmailProfileAdd } from './gmail';
@@ -46,10 +47,17 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
   return lines.join('\n');
 }
 
-const KNOWN_SERVICES: ServiceName[] = [
-  'gmail', 'gdocs', 'gdrive', 'gcal', 'gtasks', 'gchat', 'gsheets',
-  'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql',
-];
+const KNOWN_SERVICES = ALL_SERVICES;
+
+function assertKnownService(service: string): asserts service is ServiceName {
+  if (!KNOWN_SERVICES.includes(service as ServiceName)) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Unknown service: "${service}"`,
+      `Known services: ${KNOWN_SERVICES.join(', ')}`,
+    );
+  }
+}
 
 type AddOpts = { profile?: string; readOnly?: boolean };
 
@@ -79,9 +87,10 @@ export function registerProfileCommands(program: Command): void {
     .command('list')
     .argument('[service]', 'Limit to one service (e.g. gmail, slack)')
     .description('List configured profiles')
-    .action(async (service?: ServiceName) => {
+    .action(async (service?: string) => {
       try {
-        const result = await listProfiles(service);
+        if (service) assertKnownService(service);
+        const result = await listProfiles(service as ServiceName | undefined);
         const summaries: ProfileSummary[] = [];
         for (const r of result) {
           for (const p of r.profiles) {
@@ -102,14 +111,8 @@ export function registerProfileCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
-        if (!KNOWN_SERVICES.includes(service as ServiceName)) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            `Unknown service "${service}"`,
-            `Known services: ${KNOWN_SERVICES.join(', ')}`
-          );
-        }
-        await ADD_HANDLERS[service as ServiceName](opts);
+        assertKnownService(service);
+        await ADD_HANDLERS[service](opts);
       } catch (e) {
         handleError(e);
       }
@@ -122,13 +125,7 @@ export function registerProfileCommands(program: Command): void {
     .description('Remove a profile')
     .action(async (service: string, name: string) => {
       try {
-        if (!KNOWN_SERVICES.includes(service as ServiceName)) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            `Unknown service "${service}"`,
-            `Known services: ${KNOWN_SERVICES.join(', ')}`
-          );
-        }
+        assertKnownService(service);
         if (service === 'whatsapp') {
           // WhatsApp auth state is in the daemon DB; only remove the profile entry
           const removed = await removeProfile('whatsapp', name);
@@ -153,14 +150,8 @@ export function registerProfileCommands(program: Command): void {
     .description('Re-authenticate an expired or invalid profile')
     .action(async (service: string, name: string | undefined) => {
       try {
-        if (!KNOWN_SERVICES.includes(service as ServiceName)) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            `Unknown service "${service}"`,
-            `Known services: ${KNOWN_SERVICES.join(', ')}`
-          );
-        }
-        const resolved = await resolveProfile(service as ServiceName, name);
+        assertKnownService(service);
+        const resolved = await resolveProfile(service, name);
         if (resolved.profile === null) {
           if (resolved.error === 'none') {
             throw new CliError(
@@ -169,14 +160,10 @@ export function registerProfileCommands(program: Command): void {
               `Add one with: agentio profile add ${service}`
             );
           } else {
-            throw new CliError(
-              'INVALID_PARAMS',
-              `Multiple profiles found for ${service}`,
-              `Specify a profile name: agentio profile reauth ${service} <name>\nAvailable: ${resolved.names.join(', ')}`
-            );
+            throw multipleProfilesError(service, resolved.names);
           }
         }
-        await reauthProfile(service as ServiceName, resolved.profile);
+        await reauthProfile(service, resolved.profile);
       } catch (e) {
         handleError(e);
       }

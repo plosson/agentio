@@ -5,6 +5,7 @@ import { join } from 'path';
 import { handleError } from '../utils/errors';
 import { vaultExists } from '../vault/vault';
 import { loadConfig } from '../config/config-manager';
+import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
 import { isDaemonInstalled } from '../utils/daemon-ensure';
 import { isDaemonAvailable } from '../daemon/client';
@@ -57,8 +58,7 @@ async function checkDaemon(): Promise<Check> {
   return { name: 'Daemon', status: 'warn', detail: 'not installed', fix: 'agentio daemon install' };
 }
 
-async function checkProfiles(): Promise<Check> {
-  const cfg = await loadConfig().catch(() => null);
+function checkProfiles(cfg: Config | null): Check {
   if (!cfg) return { name: 'Profiles', status: 'error', detail: 'cannot read config' };
   const total = Object.values(cfg.profiles).reduce((acc, arr) => acc + (arr ?? []).length, 0);
   if (total === 0) {
@@ -87,8 +87,7 @@ async function checkLegacyPlists(): Promise<Check | null> {
   };
 }
 
-async function checkWatchedFolders(): Promise<Check | null> {
-  const cfg = await loadConfig().catch(() => null);
+function checkWatchedFolders(cfg: Config | null): Check | null {
   const folders = cfg?.daemon?.scheduler?.watchedFolders ?? [];
   if (folders.length === 0) return null;
   const missing = folders.filter((f) => !existsSync(f.path));
@@ -109,11 +108,13 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose vault, daemon, profiles, and watched folders')
     .action(async () => {
       try {
+        const cfg = await loadConfig().catch(() => null);
+
         const checks: Check[] = [];
         checks.push(await checkVault());
         checks.push(await checkDaemon());
-        checks.push(await checkProfiles());
-        const w = await checkWatchedFolders();
+        checks.push(checkProfiles(cfg));
+        const w = checkWatchedFolders(cfg);
         if (w) checks.push(w);
         const legacy = await checkLegacyPlists();
         if (legacy) checks.push(legacy);
