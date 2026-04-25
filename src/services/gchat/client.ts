@@ -5,6 +5,7 @@ import { basename, extname } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
+import { GChatDirectory } from './directory';
 import type {
   GChatCredentials,
   GChatSendOptions,
@@ -51,6 +52,7 @@ export class GChatClient implements ServiceClient {
   private userCache = new Map<string, ResolvedUser>();
   private fullUserCache = new Map<string, GChatUser>();
   private spaceIdCache = new Map<string, string>();
+  private directory?: GChatDirectory;
 
   constructor(credentials: GChatCredentials) {
     this.credentials = credentials;
@@ -532,11 +534,11 @@ export class GChatClient implements ServiceClient {
         `https://people.googleapis.com/v1/people/${personId}?personFields=${personFields}`,
         { headers: { Authorization: `Bearer ${token.token}` } }
       );
-      if (!res.ok) return undefined;
+      if (!res.ok) return this.fallbackToDirectory(userResourceName, auth);
       const data = await res.json() as Record<string, any>;
 
-      const displayName = data.names?.[0]?.displayName;
-      const email = data.emailAddresses?.[0]?.value;
+      let displayName = data.names?.[0]?.displayName;
+      let email = data.emailAddresses?.[0]?.value;
       const phoneNumbers = (data.phoneNumbers as Array<{ value?: string }> | undefined)
         ?.map(p => p.value).filter((v): v is string => !!v);
       const organizations = (data.organizations as Array<{ name?: string; title?: string; department?: string }> | undefined)
@@ -544,6 +546,12 @@ export class GChatClient implements ServiceClient {
       const photoUrl = (data.photos as Array<{ url?: string }> | undefined)?.[0]?.url;
       const locations = (data.locations as Array<{ value?: string }> | undefined)
         ?.map(l => l.value).filter((v): v is string => !!v);
+
+      // Workspace coworkers come back as 200 OK with empty fields; fill in via directory cache.
+      if (!displayName && !email) {
+        const fallback = await this.fallbackToDirectory(userResourceName, auth);
+        if (fallback) return fallback;
+      }
 
       const user: GChatUser = {
         name: userResourceName,
@@ -565,6 +573,26 @@ export class GChatClient implements ServiceClient {
     } catch {
       return undefined;
     }
+  }
+
+  private async fallbackToDirectory(userResourceName: string, auth: OAuth2Client): Promise<GChatUser | undefined> {
+    const directory = this.getDirectory();
+    if (!directory) return undefined;
+    try {
+      await directory.ensureFresh(auth);
+    } catch {
+      return undefined;
+    }
+    const entry = directory.lookup(userResourceName);
+    if (!entry) return undefined;
+    const user: GChatUser = {
+      name: userResourceName,
+      displayName: entry.displayName,
+      email: entry.email,
+    };
+    this.fullUserCache.set(userResourceName, user);
+    this.userCache.set(userResourceName, { displayName: entry.displayName, email: entry.email });
+    return user;
   }
 
   /**
@@ -611,13 +639,31 @@ export class GChatClient implements ServiceClient {
     const unknown = userIds.filter(id => !this.userCache.has(id));
     if (unknown.length === 0) return;
 
+    // Try the workspace directory cache first (refreshes once per day).
+    const directory = this.getDirectory();
+    if (directory) {
+      try {
+        await directory.ensureFresh(auth);
+      } catch {
+        // Directory unavailable; fall through to per-user People API
+      }
+      for (const userId of unknown) {
+        const entry = directory.lookup(userId);
+        if (entry) {
+          this.userCache.set(userId, { displayName: entry.displayName, email: entry.email });
+        }
+      }
+    }
+
+    const stillUnknown = unknown.filter(id => !this.userCache.has(id));
+    if (stillUnknown.length === 0) return;
+
     const token = await auth.getAccessToken();
     if (!token.token) return;
 
-    // Resolve users in parallel via People API
-    await Promise.all(unknown.map(async (userId) => {
+    // Fall back to per-user People API for self / personal contacts.
+    await Promise.all(stillUnknown.map(async (userId) => {
       try {
-        // userId is like "users/123456", extract the numeric part
         const personId = userId.replace('users/', '');
         const res = await fetch(
           `https://people.googleapis.com/v1/people/${personId}?personFields=names,emailAddresses`,
@@ -634,6 +680,31 @@ export class GChatClient implements ServiceClient {
         // Silently skip unresolvable users
       }
     }));
+  }
+
+  getDirectory(): GChatDirectory | undefined {
+    if (this.credentials.type !== 'oauth') return undefined;
+    if (!this.directory) {
+      const oauth = this.credentials as GChatOAuthCredentials;
+      if (!oauth.email) return undefined;
+      this.directory = new GChatDirectory(oauth.email);
+    }
+    return this.directory;
+  }
+
+  async refreshDirectory(): Promise<{ size: number; path: string; fetchedAt: string }> {
+    this.ensureOAuth('Refreshing directory');
+    const directory = this.getDirectory();
+    if (!directory) {
+      throw new CliError('CONFIG_ERROR', 'Directory cache requires an OAuth profile with an email');
+    }
+    const { auth } = this.getOAuthChatApi();
+    await directory.ensureFresh(auth, { force: true });
+    return {
+      size: directory.size(),
+      path: directory.filePath(),
+      fetchedAt: directory.fetchedAt() || new Date().toISOString(),
+    };
   }
 
   private enrichSender(msg: chat_v1.Schema$Message): GChatMessage['sender'] {

@@ -218,6 +218,26 @@ export function registerGChatCommands(program: Command): void {
       }
     });
 
+  const directory = gchat
+    .command('directory')
+    .description('Manage the cached workspace directory used to resolve user IDs');
+
+  directory
+    .command('refresh')
+    .description('Force refresh the cached workspace directory (OAuth profiles only)')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (options) => {
+      try {
+        const { client } = await getGChatClient(options.profile);
+        const result = await client.refreshDirectory();
+        console.log(`Refreshed: ${result.size} users`);
+        console.log(`Path: ${result.path}`);
+        console.log(`Fetched at: ${result.fetchedAt}`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
   // Profile management
   const profile = createProfileCommands<GChatCredentials>(gchat, {
     service: 'gchat',
