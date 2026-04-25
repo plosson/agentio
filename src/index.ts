@@ -32,6 +32,7 @@ import { registerSetupCommand } from './commands/setup';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { vaultExists } from './vault/vault';
+import { applyGroupedHelp } from './utils/help-formatter';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -96,6 +97,16 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
     console.error('Suggestion: Run: agentio setup');
     process.exit(2);
   }
+});
+
+applyGroupedHelp(program, {
+  'Setup': ['setup', 'status', 'doctor', 'update'],
+  'Services': [
+    'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
+    'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+  ],
+  'Automation': ['schedule', 'daemon'],
+  'Advanced': ['config', 'mcp', 'server', 'profile'],
 });
 
 // Show help (exit 0) when no command is provided
