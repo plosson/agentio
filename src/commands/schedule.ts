@@ -1,8 +1,10 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, isAbsolute, resolve } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
+import plist from 'plist';
 import { select, input } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { isInteractive } from '../utils/interactive';
@@ -13,14 +15,16 @@ import {
 } from '../services/schedule/frontmatter';
 import { parseDuration } from '../services/schedule/duration';
 import { parseWeekdays, weekdayNames } from '../services/schedule/weekdays';
-import { installPlist, enumerateInstalledSchedules, uninstallPlist } from '../services/schedule/launchd';
+import { describeSchedule } from '../services/schedule/describe';
 import { walkRunFiles } from '../services/schedule/walker';
 import { runSchedule } from '../services/schedule/runner';
-import { folderHash } from '../services/schedule/folder-hash';
-import { buildPlistDict } from '../services/schedule/plist-builder';
 import { nextRuns } from '../services/schedule/schedule-calculator';
 import { listRuns } from '../services/schedule/runs';
 import { getCurrentHost, hostMatches } from '../services/schedule/host';
+import { scanWatchedFolders } from '../daemon/scheduler-core';
+import type { SchedulerJobView } from '../daemon/scheduler';
+import { loadConfig, saveConfig } from '../config/config-manager';
+import { addWatchedFolder, removeWatchedFolder } from './schedule-watch';
 import type {
   FrontmatterConfig,
   Model,
@@ -342,28 +346,6 @@ async function promptConfig(
   return out;
 }
 
-export function describeSchedule(s: Schedule): string {
-  switch (s.type) {
-    case 'manual': return 'Manual';
-    case 'daily':
-      return `Daily at ${fmtHM(s.hour, s.minute)}`;
-    case 'weekly':
-      return `Weekly ${weekdayNames(s.weekdays ?? [])} at ${fmtHM(s.hour, s.minute)}`;
-    case 'monthly':
-      return `Monthly on day ${s.day} at ${fmtHM(s.hour, s.minute)}`;
-    case 'interval': {
-      const m = s.intervalMinutes ?? 0;
-      if (m < 60) return `Every ${m}m`;
-      if (m % 60 === 0) return `Every ${m / 60}h`;
-      return `Every ${Math.floor(m / 60)}h${m % 60}m`;
-    }
-  }
-}
-
-function fmtHM(h?: number, m?: number): string {
-  return `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`;
-}
-
 const WEEKDAY_SHORT = ['', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 function formatWeekdaysShort(nums: number[]): string {
   return nums.map((n) => WEEKDAY_SHORT[n] ?? String(n)).join(',');
@@ -376,22 +358,24 @@ export function abbrHome(path: string, home: string = homedir()): string {
   return path;
 }
 
-/** Print a summary of a saved schedule's frontmatter and whether it will run here. */
-function printSaveResult(filePath: string, config: FrontmatterConfig): void {
-  console.log(`Saved ${abbrHome(filePath)}:`);
-  console.log(`  schedule:       ${describeSchedule(config.schedule)}`);
-  console.log(`  model:          ${config.model}`);
-  console.log(`  permissionMode: ${config.permissionMode}`);
-  console.log(`  sessionMode:    ${config.sessionMode}`);
-  console.log(`  enabled:        ${config.enabled ? 'yes' : 'no'}`);
-  if (config.command) console.log(`  command:        ${config.command}`);
-  if (config.host) console.log(`  host:           ${config.host}`);
-  const currentHost = getCurrentHost();
-  if (hostMatches(config)) {
-    console.log(`Will run on: this host (${currentHost})`);
-  } else {
-    console.log(`Will run on: ${config.host} (this host is "${currentHost}" — not scheduled here)`);
-    console.log(`Run \`agentio schedule sync\` on ${config.host} to install.`);
+
+function renderJobs(jobs: Array<{
+  folder: string; id: string; schedule: string;
+  enabled: boolean; nextRun: string; isRunning?: boolean;
+}>, filterFolder?: string): void {
+  const filtered = filterFolder
+    ? jobs.filter((j) => j.folder === resolve(filterFolder))
+    : jobs;
+  if (filtered.length === 0) { console.log('No schedules.'); return; }
+  const widths = {
+    id: Math.max('ID'.length, ...filtered.map((r) => r.id.length)),
+    folder: Math.max('FOLDER'.length, ...filtered.map((r) => abbrHome(r.folder).length)),
+    sched: Math.max('SCHEDULE'.length, ...filtered.map((r) => r.schedule.length)),
+  };
+  console.log(`${'ID'.padEnd(widths.id)}  ${'FOLDER'.padEnd(widths.folder)}  ${'SCHEDULE'.padEnd(widths.sched)}  NEXT`);
+  for (const r of filtered) {
+    const run = r.isRunning ? ' [running]' : '';
+    console.log(`${r.id.padEnd(widths.id)}  ${abbrHome(r.folder).padEnd(widths.folder)}  ${r.schedule.padEnd(widths.sched)}  ${r.nextRun}${run}`);
   }
 }
 
@@ -456,15 +440,18 @@ export function registerScheduleCommands(program: Command): void {
         await mkdir(dirname(filePath), { recursive: true });
         await writeFile(filePath, serializeFrontmatter(finalConfig, existingBody));
 
-        const id = file.split('/').pop()!.slice(0, -'.run.md'.length);
-        if (hostMatches(finalConfig)) {
-          installPlist(folder, id, finalConfig);
-        } else {
-          // Schedule pinned to another host — make sure a stale plist from a
-          // prior host match isn't left behind, then skip install.
-          uninstallPlist(folder, id);
+        console.log(`Saved ${abbrHome(filePath)}.`);
+        console.log(`  schedule: ${describeSchedule(finalConfig.schedule)}`);
+        console.log(`  enabled:  ${finalConfig.enabled ? 'yes' : 'no'}`);
+        if (finalConfig.host) console.log(`  host:     ${finalConfig.host}`);
+
+        // Hint: is this folder already watched?
+        const cfg = await loadConfig();
+        const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
+        if (!watched.find((w) => w.path === folder)) {
+          console.log('\nTo have the daemon fire this schedule, run:');
+          console.log(`  agentio schedule watch ${abbrHome(folder)}`);
         }
-        printSaveResult(filePath, finalConfig);
       } catch (e) {
         handleError(e);
       }
@@ -532,63 +519,65 @@ export function registerScheduleCommands(program: Command): void {
 
         await writeFile(filePath, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
 
-        if (hostMatches(finalConfig)) {
-          installPlist(folder, id, finalConfig);
-        } else {
-          uninstallPlist(folder, id);
+        console.log(`Saved ${abbrHome(filePath)}.`);
+        console.log(`  schedule: ${describeSchedule(finalConfig.schedule)}`);
+        console.log(`  enabled:  ${finalConfig.enabled ? 'yes' : 'no'}`);
+        if (finalConfig.host) console.log(`  host:     ${finalConfig.host}`);
+
+        // Hint: is this folder already watched?
+        const cfg = await loadConfig();
+        const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
+        if (!watched.find((w) => w.path === folder)) {
+          console.log('\nTo have the daemon fire this schedule, run:');
+          console.log(`  agentio schedule watch ${abbrHome(folder)}`);
         }
-        printSaveResult(filePath, finalConfig);
       } catch (e) {
         handleError(e);
       }
     });
 
-  schedule.command('list').description('List installed schedules')
+  schedule.command('list').description('List scheduled tasks in watched folders')
     .option('--folder <path>', 'Filter to one folder')
     .action(async (opts: { folder?: string }) => {
       try {
-        const filterFolder = opts.folder ? resolve(opts.folder) : undefined;
-        const installed = enumerateInstalledSchedules();
-        const rows = installed
-          .filter((p) => !filterFolder || p.folder === filterFolder)
-          .map((p) => {
-            const glob = walkRunFiles(p.folder).find((f) => f.id === p.id);
-            if (!glob) {
-              return {
-                id: p.id, folder: abbrHome(p.folder), enabled: '-',
-                schedule: '[broken: .run.md missing]', next: '-',
-              };
+        const config = await loadConfig();
+        const apiKey = config.daemon?.apiKey;
+        const port = config.daemon?.server?.port ?? 7890;
+
+        // Try daemon first
+        if (apiKey) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/scheduler/list`, {
+              headers: { 'X-API-Key': apiKey },
+              signal: AbortSignal.timeout(1500),
+            });
+            if (res.ok) {
+              const { jobs } = await res.json() as { jobs: SchedulerJobView[] };
+              renderJobs(jobs, opts.folder);
+              return;
             }
-            try {
-              const raw = readFileSync(glob.path, 'utf-8');
-              const parsed = parseFrontmatter(raw);
-              const cfg = mergeConfig({}, parsed.config);
-              const next = nextRuns(cfg.schedule, 1)[0];
-              return {
-                id: p.id, folder: abbrHome(p.folder),
-                enabled: cfg.enabled ? 'yes' : 'no',
-                schedule: describeSchedule(cfg.schedule),
-                next: next ? next.toISOString() : '-',
-              };
-            } catch {
-              return {
-                id: p.id, folder: abbrHome(p.folder), enabled: '-',
-                schedule: '[parse error]', next: '-',
-              };
-            }
-          });
-        if (rows.length === 0) { console.log('No schedules installed.'); return; }
-        const widths = {
-          id: Math.max('ID'.length, ...rows.map((r) => r.id.length)),
-          folder: Math.max('FOLDER'.length, ...rows.map((r) => r.folder.length)),
-          enabled: Math.max('ENABLED'.length, ...rows.map((r) => r.enabled.length)),
-          schedule: Math.max('SCHEDULE'.length, ...rows.map((r) => r.schedule.length)),
-        };
-        const header = `${'ID'.padEnd(widths.id)}  ${'FOLDER'.padEnd(widths.folder)}  ${'ENABLED'.padEnd(widths.enabled)}  ${'SCHEDULE'.padEnd(widths.schedule)}  NEXT`;
-        console.log(header);
-        for (const r of rows) {
-          console.log(`${r.id.padEnd(widths.id)}  ${r.folder.padEnd(widths.folder)}  ${r.enabled.padEnd(widths.enabled)}  ${r.schedule.padEnd(widths.schedule)}  ${r.next}`);
+          } catch { /* fall through to FS mode */ }
         }
+
+        // Daemon not up: read watched folders from config, walk them ourselves
+        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+        if (folders.length === 0) {
+          console.log('No folders watched.');
+          console.log('Add one with: agentio schedule watch <folder>');
+          return;
+        }
+        const now = new Date();
+        const host = getCurrentHost();
+        const jobs = scanWatchedFolders(folders, host, now).map((j) => ({
+          folder: j.folder,
+          id: j.id,
+          schedule: describeSchedule(j.config.schedule),
+          enabled: j.config.enabled,
+          nextRun: j.nextRun.toISOString(),
+          isRunning: false,
+        }));
+        renderJobs(jobs, opts.folder);
+        console.log('\n(daemon not running — showing filesystem view)');
       } catch (e) {
         handleError(e);
       }
@@ -651,76 +640,14 @@ export function registerScheduleCommands(program: Command): void {
           }
         }
 
-        // 5. Diff against installed plists
-        const installed = enumerateInstalledSchedules();
-        const targetHash = folderHash(folder);
-        const installedForFolder = installed.filter((p) => p.folder === folder || p.label.startsWith(`me.agentio.schedule.${targetHash}-`));
+        console.log(`Sync complete: ${desired.size} schedule(s) checked.`);
 
-        const installedIds = new Set(installedForFolder.map((p) => p.id));
-        const currentHost = getCurrentHost();
-
-        // Partition desired into those for this host vs. pinned elsewhere.
-        const desiredForThisHost = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
-        const desiredForOtherHost = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
-        for (const [id, entry] of desired) {
-          if (hostMatches(entry.config, currentHost)) desiredForThisHost.set(id, entry);
-          else desiredForOtherHost.set(id, entry);
+        const cfg = await loadConfig();
+        const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
+        if (!watched.find((w) => w.path === folder)) {
+          console.log('\nThis folder is not watched. Run:');
+          console.log(`  agentio schedule watch ${abbrHome(folder)}`);
         }
-
-        // 5a. Orphans: installed plist with no matching .run.md file -> uninstall
-        const allDesiredIds = new Set(desired.keys());
-        for (const p of installedForFolder) {
-          if (!allDesiredIds.has(p.id)) {
-            uninstallPlist(folder, p.id);
-            console.log(`Removed orphan plist: ${p.id}`);
-          }
-        }
-
-        // 5a-bis. Global cleanup: any installed plist whose folder no longer
-        // exists on disk is unreachable — uninstall it. Runs on every sync so
-        // users don't need a separate prune command.
-        let stalePruned = 0;
-        for (const p of installed) {
-          if (p.folder === folder) continue; // already handled above
-          if (!existsSync(p.folder)) {
-            uninstallPlist(p.folder, p.id);
-            console.log(`Pruned stale plist: ${p.id} (folder ${p.folder} is gone)`);
-            stalePruned += 1;
-          }
-        }
-
-        // 5b. Host-pinned-elsewhere but currently installed -> uninstall
-        for (const [id, { config }] of desiredForOtherHost) {
-          if (installedIds.has(id)) {
-            uninstallPlist(folder, id);
-            console.log(`Uninstalled "${id}" (pinned to host "${config.host}", this host is "${currentHost}")`);
-          }
-        }
-
-        // 5c. New or changed for this host: install/update
-        for (const [id, { config }] of desiredForThisHost) {
-          const dict = buildPlistDict(folder, id, config);
-          let needsInstall = !installedIds.has(id);
-          if (!needsInstall) {
-            const existing = installedForFolder.find((p) => p.id === id)!;
-            try {
-              const raw = await readFile(existing.plistPath, 'utf-8');
-              const parsedDict = (await import('plist')).default.parse(raw) as Record<string, unknown>;
-              if (JSON.stringify(parsedDict) !== JSON.stringify(dict)) needsInstall = true;
-            } catch { needsInstall = true; }
-          }
-          if (needsInstall) {
-            installPlist(folder, id, config);
-            console.log(`Installed/updated: ${id}`);
-          }
-        }
-
-        const skipped = desiredForOtherHost.size;
-        const notes = [];
-        if (skipped > 0) notes.push(`${skipped} pinned to other hosts`);
-        if (stalePruned > 0) notes.push(`${stalePruned} stale pruned`);
-        const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
-        console.log(`Sync complete: ${desiredForThisHost.size} on this host${suffix}.`);
       } catch (e) {
         handleError(e);
       }
@@ -734,8 +661,6 @@ export function registerScheduleCommands(program: Command): void {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
         const matches = walkRunFiles(folder).filter((f) => f.id === id);
         if (matches.length === 0) {
-          // still attempt plist uninstall in case the file was already removed
-          uninstallPlist(folder, id);
           throw new CliError('NOT_FOUND', `No .run.md file found for id "${id}" under ${folder}`,
             'Check the id (ls **/*.run.md) or run schedule list');
         }
@@ -744,8 +669,7 @@ export function registerScheduleCommands(program: Command): void {
             `Multiple files match id "${id}": ${matches.map((m) => m.path).join(', ')}`);
         }
         await unlink(matches[0].path);
-        uninstallPlist(folder, id);
-        console.log(`Removed schedule "${id}" (deleted ${matches[0].path}, uninstalled plist)`);
+        console.log(`Removed schedule "${id}" (deleted ${matches[0].path})`);
       } catch (e) {
         handleError(e);
       }
@@ -758,10 +682,35 @@ export function registerScheduleCommands(program: Command): void {
     .action(async (id: string, opts: { folder?: string; quiet?: boolean }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+        const config = await loadConfig();
+        const apiKey = config.daemon?.apiKey;
+        const port = config.daemon?.server?.port ?? 7890;
+
+        // Try daemon delegation
+        if (apiKey) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/scheduler/run`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder, id }),
+              signal: AbortSignal.timeout(2000),
+            });
+            if (res.ok) {
+              const result = await res.json() as { started: boolean; reason?: string };
+              if (result.started) {
+                console.log(`Run queued via daemon. Tail logs in ${folder}/.agentio/runs/${id}/`);
+                return;
+              }
+              console.error(`Daemon refused: ${result.reason}`);
+              process.exit(1);
+            }
+          } catch { /* daemon not up — fall through */ }
+        }
+
+        // Local fallback
         const matches = walkRunFiles(folder).filter((f) => f.id === id);
         if (matches.length !== 1) {
-          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`,
-            'Run `agentio schedule list` to see available ids');
+          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`);
         }
         const raw = await readFile(matches[0].path, 'utf-8');
         const parsed = parseFrontmatter(raw);
@@ -769,9 +718,7 @@ export function registerScheduleCommands(program: Command): void {
         const { exitCode, logPath } = await runSchedule({
           folder, id, promptBody: parsed.body, config: cfg, quiet: opts.quiet ?? false,
         });
-        if (!opts.quiet) {
-          console.log(`Run complete. Log: ${logPath}`);
-        }
+        if (!opts.quiet) console.log(`Run complete. Log: ${logPath}`);
         process.exit(exitCode);
       } catch (e) {
         handleError(e);
@@ -824,6 +771,153 @@ export function registerScheduleCommands(program: Command): void {
           const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
           console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
         }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('watch').description('Register a folder for the agentio daemon to scan')
+    .argument('<folder>', 'Folder to watch (absolute or relative)')
+    .option('--no-host-pin', 'Do not pin this folder to the current host')
+    .action(async (folder: string, opts: { hostPin: boolean }) => {
+      try {
+        const absPath = resolve(folder);
+        if (!existsSync(absPath)) {
+          throw new CliError('NOT_FOUND', `Folder does not exist: ${absPath}`);
+        }
+        const config = await loadConfig();
+        const host = opts.hostPin === false ? undefined : getCurrentHost();
+        const updated = addWatchedFolder(config, absPath, host, Date.now());
+        await saveConfig(updated);
+
+        const apiKey = updated.daemon?.apiKey;
+        const port = updated.daemon?.server?.port ?? 7890;
+
+        // Try to reload the daemon
+        let daemonAlive = false;
+        if (apiKey) {
+          try {
+            const res = await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey },
+              signal: AbortSignal.timeout(1500),
+            });
+            daemonAlive = res.ok;
+          } catch { /* daemon not up */ }
+        }
+
+        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
+        if (daemonAlive) {
+          console.log('Daemon reloaded — new schedules will fire immediately.');
+        } else {
+          const installed = process.platform === 'darwin'
+            ? existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'))
+            : existsSync('/etc/systemd/system/agentio-daemon.service');
+          if (!installed) {
+            console.log('The agentio daemon is not installed.');
+            console.log('Install it with: agentio daemon install');
+          } else {
+            console.log('The agentio daemon is installed but not running.');
+            console.log('Start it with: agentio daemon start');
+          }
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('unwatch').description('Stop watching a folder')
+    .argument('<folder>', 'Folder to remove')
+    .action(async (folder: string) => {
+      try {
+        const absPath = resolve(folder);
+        const config = await loadConfig();
+        const updated = removeWatchedFolder(config, absPath);
+        await saveConfig(updated);
+
+        // Best-effort reload
+        const apiKey = updated.daemon?.apiKey;
+        const port = updated.daemon?.server?.port ?? 7890;
+        if (apiKey) {
+          try {
+            await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+              method: 'POST',
+              headers: { 'X-API-Key': apiKey },
+              signal: AbortSignal.timeout(1500),
+            });
+          } catch { /* ignore */ }
+        }
+
+        console.log(`Unwatched ${abbrHome(absPath)}.`);
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('watched').description('List watched folders')
+    .action(async () => {
+      try {
+        const config = await loadConfig();
+        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+        if (folders.length === 0) {
+          console.log('No folders watched.');
+          console.log('Add one with: agentio schedule watch <folder>');
+          return;
+        }
+        for (const f of folders) {
+          const pin = f.host ? ` (pinned to ${f.host})` : '';
+          console.log(`${abbrHome(f.path)}${pin}`);
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  schedule.command('migrate').description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
+    .action(async () => {
+      try {
+        if (process.platform !== 'darwin') {
+          console.log('`schedule migrate` only applies on macOS.');
+          return;
+        }
+        const dir = join(homedir(), 'Library', 'LaunchAgents');
+        if (!existsSync(dir)) {
+          console.log('Nothing to migrate.');
+          return;
+        }
+        const entries = readdirSync(dir)
+          .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
+        if (entries.length === 0) {
+          console.log('Nothing to migrate.');
+          return;
+        }
+        const folders = new Set<string>();
+        for (const file of entries) {
+          const full = join(dir, file);
+          try {
+            const raw = readFileSync(full, 'utf-8');
+            const parsed = plist.parse(raw) as Record<string, unknown>;
+            const args = parsed.ProgramArguments as string[] | undefined;
+            if (args) {
+              const fi = args.indexOf('--folder');
+              if (fi !== -1 && args[fi + 1]) folders.add(args[fi + 1]);
+            }
+            execFileSync('/bin/launchctl', ['unload', full], { stdio: 'ignore' });
+            unlinkSync(full);
+          } catch { /* continue */ }
+        }
+
+        let config = await loadConfig();
+        const host = getCurrentHost();
+        for (const f of folders) {
+          config = addWatchedFolder(config, f, host, Date.now());
+        }
+        await saveConfig(config);
+
+        console.log(`Migrated ${entries.length} schedule(s) across ${folders.size} folder(s).`);
+        console.log('Folders added to watch list:');
+        for (const f of folders) console.log(`  ${abbrHome(f)}`);
+        console.log('\nIf the daemon is not installed yet, run: agentio daemon install');
       } catch (e) {
         handleError(e);
       }

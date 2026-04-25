@@ -3,7 +3,7 @@ import { setCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, resolveProfile, removeProfile } from '../config/config-manager';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
-import { getGatewayClient, isGatewayAvailable } from '../gateway/client';
+import { getGatewayClient, isGatewayAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,

@@ -1,7 +1,8 @@
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import type { ServiceName, Config } from '../types/config';
+import type { ServiceName, Config, DaemonConfig } from '../types/config';
 import type { GatewayConfig } from './types';
+import { startScheduler, stopScheduler } from './scheduler';
 import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { initDatabase, closeDatabase, insertInboxMessage, inboxMessageExists, getPendingOutboxMessages, updateOutboxStatus, cleanupInbox, cleanupOutbox } from './store';
@@ -12,8 +13,9 @@ import { TelegramAdapter } from './adapters/telegram';
 import { WhatsAppAdapter } from './adapters/whatsapp';
 import type { TelegramCredentials } from '../types/telegram';
 import type { WhatsAppCredentials } from '../types/whatsapp';
+import { migrateLegacyFiles } from './path-migration';
 
-const LOG_FILE = join(CONFIG_DIR, 'gateway.log');
+const LOG_FILE = join(CONFIG_DIR, 'daemon.log');
 
 let shutdownRequested = false;
 let adapters: Map<ServiceName, ServiceAdapter> = new Map();
@@ -23,7 +25,7 @@ let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 /**
  * Get the gateway configuration from config.json
  */
-export async function getGatewayConfig(): Promise<GatewayConfig> {
+export async function getDaemonConfig(): Promise<GatewayConfig> {
   const config = await loadConfig();
   return (config as unknown as { gateway?: GatewayConfig }).gateway ?? {};
 }
@@ -208,8 +210,8 @@ async function shutdownAdapters(): Promise<void> {
 /**
  * Start the gateway server (runs in foreground, managed by systemd)
  */
-export async function startGateway(): Promise<void> {
-  console.log(`agentio-gateway starting (PID ${process.pid})`);
+export async function startDaemon(): Promise<void> {
+  console.log(`agentio-daemon starting (PID ${process.pid})`);
 
   // Handle shutdown signals
   const shutdown = async (signal: string) => {
@@ -225,6 +227,9 @@ export async function startGateway(): Promise<void> {
     // Flush webhooks
     await flushWebhook();
     stopWebhook();
+
+    // Stop scheduler
+    await stopScheduler();
 
     // Shutdown adapters
     await shutdownAdapters();
@@ -245,42 +250,59 @@ export async function startGateway(): Promise<void> {
   try {
     // Load config and auto-generate API key on first run
     const config = await loadConfig() as Config;
-    let gatewayConfig = config.gateway ?? {};
+    let daemonConfig: DaemonConfig = config.daemon ?? {};
 
-    if (!gatewayConfig.apiKey) {
+    if (!daemonConfig.apiKey) {
       const generatedKey = `gw_${randomBytes(24).toString('base64url')}`;
-      gatewayConfig = {
-        ...gatewayConfig,
+      daemonConfig = {
+        ...daemonConfig,
         apiKey: generatedKey,
       };
-      config.gateway = gatewayConfig;
+      config.daemon = daemonConfig;
       await saveConfig(config);
     }
 
     // Always display API key for easy access (e.g., Docker logs)
-    console.log(`API Key: ${gatewayConfig.apiKey}`);
+    console.log(`API Key: ${daemonConfig.apiKey}`);
+
+    // Migrate legacy gateway.* files to daemon.*
+    migrateLegacyFiles(CONFIG_DIR);
 
     // Initialize database
     await initDatabase();
     console.log('Database initialized');
 
     // Configure webhook
-    if (gatewayConfig.webhook?.url) {
-      configureWebhook(gatewayConfig.webhook);
-      console.log(`Webhook configured: ${gatewayConfig.webhook.url}`);
+    if (daemonConfig.webhook?.url) {
+      configureWebhook(daemonConfig.webhook);
+      console.log(`Webhook configured: ${daemonConfig.webhook.url}`);
     }
 
     // Initialize adapters
     await initializeAdapters();
 
     // Start API server
-    startApiServer(gatewayConfig, adapters, handleInboundMessage);
+    startApiServer(daemonConfig, adapters, handleInboundMessage);
 
     // Start outbox processor (every 2 seconds)
     outboxInterval = setInterval(processOutbox, 2000);
 
     // Start cleanup job (every hour)
-    cleanupInterval = setInterval(() => runCleanup(gatewayConfig), 60 * 60 * 1000);
+    cleanupInterval = setInterval(() => runCleanup(daemonConfig), 60 * 60 * 1000);
+
+    // Start scheduler
+    const schedulerConfig = daemonConfig.scheduler;
+    const folders = schedulerConfig?.watchedFolders ?? [];
+    if (folders.length > 0) {
+      const tickMs = (schedulerConfig?.tickIntervalSec ?? 60) * 1000;
+      await startScheduler({
+        watchedFolders: folders,
+        tickIntervalMs: tickMs,
+      });
+      console.log(`[scheduler] watching ${folders.length} folder(s), tick=${tickMs}ms`);
+    } else {
+      console.log('[scheduler] no watched folders');
+    }
 
     console.log('Gateway ready');
 

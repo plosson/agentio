@@ -916,7 +916,7 @@ export function printGTasksCleared(tasklistId: string): void {
 }
 
 // Gateway inbox/outbox formatters
-import type { InboundMessage, OutboundMessage } from '../gateway/types';
+import type { InboundMessage, OutboundMessage } from '../daemon/types';
 
 function formatTimestamp(ts: number): string {
   return new Date(ts).toISOString().replace('T', ' ').split('.')[0];

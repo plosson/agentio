@@ -1,13 +1,13 @@
 # agentio - Agent I/O CLI
 
-A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a gateway daemon for real-time messaging.
+A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a daemon for real-time messaging and scheduled task execution.
 
 ## Tech Stack
 
 - **Runtime**: Bun
 - **Language**: TypeScript
 - **CLI Framework**: Commander.js
-- **Database**: SQLite (for gateway message storage and WhatsApp auth state)
+- **Database**: SQLite (for daemon message storage and WhatsApp auth state)
 - **APIs**: googleapis, Telegram Bot API, Baileys (WhatsApp), Slack Web API, JIRA REST API, GitHub API
 
 ## Running the CLI
@@ -43,7 +43,8 @@ src/
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
 │   ├── whatsapp.ts          # WhatsApp commands
-│   ├── gateway.ts           # Gateway daemon commands
+│   ├── daemon.ts            # Daemon commands
+│   ├── gateway.ts           # Gateway alias (deprecated)
 │   ├── config.ts            # Configuration management
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
@@ -61,13 +62,14 @@ src/
 │   ├── rss/client.ts        # RSS feed parser
 │   ├── discourse/client.ts  # Discourse API wrapper
 │   └── sql/client.ts        # SQL database client
-├── gateway/                 # Gateway daemon for real-time messaging
+├── daemon/                  # Daemon for real-time messaging and scheduling
 │   ├── daemon.ts            # Daemon lifecycle management
 │   ├── api.ts               # HTTP API server
-│   ├── client.ts            # Gateway client for CLI
+│   ├── client.ts            # Daemon client for CLI
 │   ├── store.ts             # SQLite message storage
 │   ├── webhook.ts           # Outbound webhook notifications
-│   ├── types.ts             # Gateway type definitions
+│   ├── types.ts             # Daemon type definitions
+│   ├── scheduler.ts         # In-process scheduler (60-second tick)
 │   └── adapters/            # Service adapters
 │       ├── types.ts         # Base adapter interface
 │       ├── whatsapp.ts      # WhatsApp adapter (Baileys)
@@ -123,7 +125,7 @@ agentio setup --reset --force  # Wipe vault, pointer, and keychain entry
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
 - Passphrase is stored in the OS keychain (macOS Keychain / libsecret / Windows Credential Manager). Commands read it silently.
 - For headless/CI use, set `AGENTIO_PASSPHRASE` env var to bypass the keychain.
-- Runtime files (`gateway.db`, `media/`, `gateway.log`) remain plaintext under `~/.config/agentio/`.
+- Runtime files (`daemon.db`, `media/`, `daemon.log`) remain plaintext under `~/.config/agentio/`.
 
 ### Gmail
 
@@ -167,7 +169,7 @@ agentio gdrive profile add|list|remove
 agentio telegram send [message] [--parse-mode html|markdown] [--silent]
 agentio telegram profile add|list|remove
 
-# Gateway-based operations
+# Daemon-based operations
 agentio telegram inbox pull [--limit N] [--status pending|done]
 agentio telegram inbox get <id>
 agentio telegram inbox ack <id>
@@ -238,10 +240,10 @@ agentio sql query [query] [--limit N] [--format table|json|csv]
 agentio sql profile add|list|remove
 ```
 
-### WhatsApp (requires gateway)
+### WhatsApp (requires daemon)
 
 ```bash
-# Profile (includes QR pairing flow if gateway is running)
+# Profile (includes QR pairing flow if daemon is running)
 agentio whatsapp profile add|list|remove
 
 # Inbox (receiving messages)
@@ -271,18 +273,40 @@ agentio whatsapp group invite <id-or-name>    # Get invite link
 agentio whatsapp group join <code-or-link>
 ```
 
-### Gateway
+### Daemon
 
-The gateway is a background daemon that maintains persistent connections to real-time messaging services (WhatsApp, Telegram).
+The daemon is a long-lived background process that (1) maintains messaging connections (WhatsApp, Telegram) and (2) fires scheduled `.run.md` prompts in watched folders.
 
 ```bash
-agentio gateway start [--foreground]
-agentio gateway stop
-agentio gateway status
-agentio gateway reload
-agentio gateway logs [--follow] [--lines N]
-agentio gateway profile add|list|remove    # Gateway identity for remote access
-agentio gateway teleport <url>             # Transfer auth state to remote gateway
+agentio daemon install           # macOS: LaunchAgent; Linux: systemd unit
+agentio daemon start [--foreground]
+agentio daemon stop
+agentio daemon restart
+agentio daemon status
+agentio daemon logs [--follow]
+agentio daemon uninstall
+agentio daemon profile add|list|remove    # Remote daemon identity
+agentio daemon teleport <url>             # Transfer auth state to remote daemon
+```
+
+The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` and runs as a user agent (no sudo).
+
+`agentio gateway ...` is a deprecated alias for `agentio daemon ...` and prints a stderr warning; it will be removed in a future release.
+
+### Schedule
+
+The daemon watches folders registered via `schedule watch` and fires due schedules on a 60-second tick.
+
+```bash
+agentio schedule list [--profile <name>]
+agentio schedule get <id>
+agentio schedule add <folder> [--cron <expr>] [--profile <name>]
+agentio schedule remove <id>
+agentio schedule run <id>                  # Run immediately (delegates to daemon if running)
+agentio schedule watch <folder>            # Register a folder with the daemon
+agentio schedule unwatch <folder>          # Stop watching a folder
+agentio schedule watched                   # List watched folders
+agentio schedule migrate                   # Clean up legacy per-schedule plists (macOS one-shot)
 ```
 
 ### Configuration
@@ -311,15 +335,16 @@ Each service supports multiple named profiles. Config and credentials are stored
 - **Config**: `~/.config/agentio/config.json` - profile names and defaults
 - **Credentials**: `~/.config/agentio/tokens.enc` - encrypted with AES-256-GCM
 
-### Gateway Architecture
+### Daemon Architecture
 
-The gateway daemon provides:
+The daemon provides:
 - **Persistent connections**: Maintains WebSocket connections to WhatsApp/Telegram
 - **Message queuing**: Inbox (received) and outbox (to send) message queues
-- **SQLite storage**: Messages stored in `~/.config/agentio/gateway.db`
+- **SQLite storage**: Messages stored in `~/.config/agentio/daemon.db`
 - **HTTP API**: RESTful API on port 7890 for CLI communication
 - **Webhook notifications**: Optional outbound webhooks for new messages
 - **Media handling**: Downloads and stores media attachments locally
+- **In-process scheduler**: Watches registered folders and fires due `.run.md` schedules on a 60-second tick; catches up on startup for schedules that missed their last expected run
 
 ### WhatsApp Integration
 
@@ -343,7 +368,7 @@ WhatsApp uses the Baileys library (unofficial WhatsApp Web API):
 - **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
 - **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
 - **Stdin support**: Commands like `send` and `reply` accept body via pipe
-- **Gateway for real-time**: WhatsApp/Telegram real-time features require the gateway daemon
+- **Daemon for real-time and scheduling**: WhatsApp/Telegram real-time features and folder-watched schedules require the daemon
 - **Group name resolution**: WhatsApp commands accept group names (fuzzy matched) or JIDs
 
 ## Service Development Guidelines

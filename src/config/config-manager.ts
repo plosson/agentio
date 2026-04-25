@@ -30,9 +30,34 @@ export async function ensureConfigDir(): Promise<void> {
   }
 }
 
+/**
+ * Migrate legacy `config.gateway` into `config.daemon` in place.
+ * Pure: returns a new Config value; does not mutate input.
+ * - If `daemon` already exists, drops `gateway` untouched.
+ * - Otherwise moves `gateway` verbatim under `daemon`.
+ */
+export function migrateGatewayToDaemon(config: Config): Config {
+  if (!config.gateway) return config;
+  if (config.daemon) {
+    const { gateway: _drop, ...rest } = config;
+    return rest;
+  }
+  const { gateway, ...rest } = config;
+  return { ...rest, daemon: gateway };
+}
+
 export async function loadConfig(): Promise<Config> {
   const vault = await loadVault();
-  return vault.config;
+  const migrated = migrateGatewayToDaemon(vault.config);
+  // If migration changed anything, persist it.
+  if (migrated !== vault.config) {
+    await saveVault({
+      version: CURRENT_VAULT_VERSION,
+      config: migrated,
+      credentials: vault.credentials,
+    });
+  }
+  return migrated;
 }
 
 export async function saveConfig(config: Config): Promise<void> {

@@ -8,7 +8,7 @@ import { loadVault, clearVaultCache } from '../vault/vault';
 /**
  * Subprocess tests for `agentio config import` — specifically the fix
  * that makes import preserve top-level config fields the export blob
- * doesn't contain (server, gateway).
+ * doesn't contain (server, gateway/daemon).
  *
  * Why subprocess: config import touches the real config-manager and
  * credential store (vault-backed). Each test runs in an isolated
@@ -194,7 +194,7 @@ describe('config import (replace mode) — preserves config.server', () => {
     expect(server.clients).toEqual(SAMPLE_SERVER.clients);
   });
 
-  test('preserves config.gateway across import', async () => {
+  test('preserves config.gateway across import (migrated to daemon)', async () => {
     await writeConfig({
       profiles: { rss: [{ name: 'feeds' }] },
       gateway: SAMPLE_GATEWAY,
@@ -211,12 +211,16 @@ describe('config import (replace mode) — preserves config.server', () => {
     });
     expect(importRes.exitCode).toBe(0);
 
+    // loadConfig migrates gateway → daemon on first load; the vault is
+    // re-persisted with daemon, so readConfig() (which reads the raw vault)
+    // sees daemon, not gateway.
     const final = await readConfig();
-    expect(final.gateway).toEqual(SAMPLE_GATEWAY);
+    expect(final.daemon).toEqual(SAMPLE_GATEWAY);
+    expect(final.gateway).toBeUndefined();
     expect(profileNames(final, 'rss')).toEqual(['feeds']);
   });
 
-  test('preserves both server and gateway in the same config', async () => {
+  test('preserves both server and gateway in the same config (gateway migrated to daemon)', async () => {
     await writeConfig({
       profiles: { gmail: [{ name: 'p1' }] },
       server: SAMPLE_SERVER,
@@ -235,9 +239,12 @@ describe('config import (replace mode) — preserves config.server', () => {
     });
     expect(importRes.exitCode).toBe(0);
 
+    // loadConfig migrates gateway → daemon on first load; the vault is
+    // re-persisted with daemon, not gateway.
     const final = await readConfig();
     expect(final.server).toEqual(SAMPLE_SERVER);
-    expect(final.gateway).toEqual(SAMPLE_GATEWAY);
+    expect(final.daemon).toEqual(SAMPLE_GATEWAY);
+    expect(final.gateway).toBeUndefined();
   });
 
   test('replace still REPLACES profiles (not merge)', async () => {

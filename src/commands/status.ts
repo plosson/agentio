@@ -32,7 +32,7 @@ import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
 import type { WhatsAppCredentials } from '../types/whatsapp';
-import { isGatewayAvailable, getGatewayClient } from '../gateway/client';
+import { isGatewayAvailable, getGatewayClient } from '../daemon/client';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 

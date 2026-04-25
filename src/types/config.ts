@@ -22,7 +22,7 @@ export interface GatewayRetentionConfig {
   sentMessagesDays?: number;
 }
 
-export interface GatewayConfig {
+export interface BaseDaemonConfig {
   name?: string;           // Gateway identity name (for local server identification)
   apiUrl?: string;         // Gateway URL (e.g., "https://gateway.example.com:7890")
   apiKey?: string;         // API key for authentication
@@ -30,6 +30,24 @@ export interface GatewayConfig {
   webhook?: GatewayWebhookConfig;
   media?: GatewayMediaConfig;
   retention?: GatewayRetentionConfig;
+}
+
+/** @deprecated use DaemonConfig */
+export type GatewayConfig = BaseDaemonConfig;
+
+export interface WatchedFolder {
+  path: string;      // absolute path
+  host?: string;     // optional hostname pin; skip if current host mismatches
+  addedAt: number;   // unix ms
+}
+
+export interface SchedulerConfig {
+  watchedFolders: WatchedFolder[];
+  tickIntervalSec?: number;  // default 60
+}
+
+export interface DaemonConfig extends BaseDaemonConfig {
+  scheduler?: SchedulerConfig;
 }
 
 export interface ProfileEntry {
@@ -75,7 +93,8 @@ export interface Config {
     sql?: ProfileValue[];
   };
   env?: Record<string, string>;
-  gateway?: GatewayConfig;
+  daemon?: DaemonConfig;
+  gateway?: GatewayConfig;  // legacy; read-only, migrated to daemon on load
   server?: ServerConfig;
   teleport?: TeleportConfig;
 }
