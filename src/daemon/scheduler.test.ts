@@ -25,7 +25,7 @@ describe('scheduler', () => {
 
   test('fires a schedule on startup (first-run via prev + absent state)', async () => {
     writeFileSync(join(root, 'x.run.md'),
-      '---\nschedule:\n  type: interval\n  intervalMinutes: 1\nenabled: true\n---\nbody\n');
+      '---\nschedule:\n  type: interval\n  intervalMinutes: 1\nenabled: true\nhost: h1\n---\nbody\n');
 
     const spawns: { folder: string }[] = [];
     const spawner = (_cmd: string, _args: string[], opts: { cwd: string }) => {
@@ -56,7 +56,7 @@ describe('scheduler', () => {
     // Seed state.json with a lastRunAt after the most recent interval boundary.
     const now = new Date();
     writeFileSync(join(root, 'x.run.md'),
-      '---\nschedule:\n  type: interval\n  intervalMinutes: 60\nenabled: true\n---\nbody\n');
+      '---\nschedule:\n  type: interval\n  intervalMinutes: 60\nenabled: true\nhost: h1\n---\nbody\n');
 
     mkdirSync(join(root, '.agentio'), { recursive: true });
     writeFileSync(join(root, '.agentio', 'state.json'),
@@ -80,7 +80,7 @@ describe('scheduler', () => {
 
   test('catches up when lastRunAt is older than prev boundary', async () => {
     writeFileSync(join(root, 'x.run.md'),
-      '---\nschedule:\n  type: interval\n  intervalMinutes: 30\nenabled: true\n---\n');
+      '---\nschedule:\n  type: interval\n  intervalMinutes: 30\nenabled: true\nhost: h1\n---\n');
 
     // Anchor now at an interval boundary. Seed lastRunAt as 2h ago.
     const now = new Date('2026-04-24T10:00:00Z');
@@ -107,7 +107,7 @@ describe('scheduler', () => {
 
   test('skips overlapping fires for the same id', async () => {
     writeFileSync(join(root, 'x.run.md'),
-      '---\nschedule:\n  type: interval\n  intervalMinutes: 1\nenabled: true\n---\n');
+      '---\nschedule:\n  type: interval\n  intervalMinutes: 1\nenabled: true\nhost: h1\n---\n');
 
     const spawns: number[] = [];
     let closeResolver: (() => void) | null = null;
@@ -139,7 +139,7 @@ describe('scheduler', () => {
 
   test('does not fire manual schedules', async () => {
     writeFileSync(join(root, 'x.run.md'),
-      '---\nschedule:\n  type: manual\nenabled: true\n---\n');
+      '---\nschedule:\n  type: manual\nenabled: true\nhost: h1\n---\n');
 
     const spawns: number[] = [];
     const spawner = () => { spawns.push(1); return fakeChild(); };

@@ -3,7 +3,6 @@ import type { WatchedFolder } from '../types/config';
 import type { FrontmatterConfig, Schedule } from '../types/schedule';
 import { walkRunFiles } from '../services/schedule/walker';
 import { mergeConfig, parseFrontmatter } from '../services/schedule/frontmatter';
-import { hostMatches } from '../services/schedule/host';
 import { nextRuns, prevRun } from '../services/schedule/schedule-calculator';
 
 export interface ScheduledJob {
@@ -37,7 +36,11 @@ export function scanWatchedFolders(
       let cfg: FrontmatterConfig;
       try { cfg = mergeConfig({}, parsed.config); } catch { continue; }
       if (!cfg.enabled) continue;
-      if (!hostMatches(cfg, currentHost)) continue;
+      if (!cfg.host) {
+        console.warn(`[scheduler] skipping ${file.path}: missing required \`host\` field`);
+        continue;
+      }
+      if (cfg.host !== currentHost) continue;
       const next = nextRuns(cfg.schedule, 1, now)[0];
       if (!next) continue;  // manual schedules
       out.push({

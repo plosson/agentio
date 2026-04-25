@@ -444,6 +444,10 @@ export function registerScheduleCommands(program: Command): void {
 
         const finalConfig: FrontmatterConfig = mergeConfig({}, merged);
 
+        if (!finalConfig.host) {
+          finalConfig.host = getCurrentHost();
+        }
+
         await mkdir(dirname(filePath), { recursive: true });
         await writeFile(filePath, serializeFrontmatter(finalConfig, existingBody));
 
@@ -523,6 +527,10 @@ export function registerScheduleCommands(program: Command): void {
         }
 
         const finalConfig: FrontmatterConfig = mergeConfig({}, merged);
+
+        if (!finalConfig.host) {
+          finalConfig.host = getCurrentHost();
+        }
 
         await writeFile(filePath, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
 
@@ -643,6 +651,7 @@ export function registerScheduleCommands(program: Command): void {
         const parsed = parseFrontmatter(raw);
         let config = parsed.config as Partial<FrontmatterConfig>;
         const missing = missingScheduleFields(config.schedule);
+        if (!config.host) missing.push('host' as ConfigField);
         if (missing.length > 0) {
           if (opts.yes || !isInteractive()) {
             throw new CliError('INVALID_PARAMS',
