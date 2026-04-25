@@ -67,6 +67,7 @@ export async function runConversation(
     `[${new Date(now()).toISOString()}] inbox=${input.inboxId} session=${existing?.sessionId ?? '(new)'} model=${input.bot.model}\n`,
   );
 
+  const pendingWrites: Promise<unknown>[] = [];
   const result = await executeClaude({
     claudePath: deps.claudePath,
     promptBody: input.message,
@@ -77,9 +78,11 @@ export async function runConversation(
     spawner: deps.spawner,
     resumeSessionId: existing?.sessionId,
     appendSystemPrompt: input.bot.systemPrompt,
-    onStdout: (chunk) => { void appendFile(logPath, chunk); },
-    onStderr: (chunk) => { void appendFile(logPath, chunk); },
+    onStdout: (chunk) => { pendingWrites.push(appendFile(logPath, chunk)); },
+    onStderr: (chunk) => { pendingWrites.push(appendFile(logPath, chunk)); },
   });
+
+  await Promise.all(pendingWrites);
 
   await appendFile(
     logPath,

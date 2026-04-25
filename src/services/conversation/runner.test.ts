@@ -136,4 +136,26 @@ describe('runConversation', () => {
     await runConversation(baseInput, deps(spawner));
     expect(outboxRows[0]?.content).toBe('partial');
   });
+
+  test('forwards bot.systemPrompt as --append-system-prompt', async () => {
+    let captured: string[] = [];
+    const spawner: Spawner = (_cmd, args) => {
+      captured = args;
+      const child = new FakeChild();
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', result: 'ok' }) + '\n'));
+        child.emit('close', 0);
+      });
+      return child as unknown as ReturnType<Spawner>;
+    };
+
+    await runConversation(
+      { ...baseInput, bot: { ...baseInput.bot, systemPrompt: 'Be concise.' } },
+      deps(spawner),
+    );
+
+    const idx = captured.indexOf('--append-system-prompt');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(captured[idx + 1]).toBe('Be concise.');
+  });
 });
