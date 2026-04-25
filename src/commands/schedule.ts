@@ -587,74 +587,85 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('sync').description('Validate .run.md files in a folder (id collisions, missing frontmatter, .gitignore scaffolding)')
-    .option('--folder <path>', 'Folder to sync (default: CWD)')
+  const checkAction = async (opts: { folder?: string; yes?: boolean }) => {
+    try {
+      const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+
+      // 1. Walk for *.run.md files
+      const files = walkRunFiles(folder);
+
+      // 2. Collision check
+      const byId = new Map<string, string[]>();
+      for (const f of files) {
+        const arr = byId.get(f.id) ?? [];
+        arr.push(f.path);
+        byId.set(f.id, arr);
+      }
+      const collisions = [...byId.entries()].filter(([, v]) => v.length > 1);
+      if (collisions.length > 0) {
+        const lines = collisions.map(([id, paths]) => `  "${id}":\n    ${paths.join('\n    ')}`);
+        throw new CliError('INVALID_PARAMS',
+          `Multiple .run.md files share the same id:\n${lines.join('\n')}`,
+          'Rename one of the files');
+      }
+
+      // 3. Ensure .agentio/.gitignore exists (first-time scaffolding)
+      if (files.length > 0) {
+        const giPath = resolve(folder, '.agentio', '.gitignore');
+        await mkdir(dirname(giPath), { recursive: true });
+        if (!existsSync(giPath)) {
+          await writeFile(giPath, 'runs/\nstate.json\n');
+        }
+      }
+
+      // 4. Build desired configs, prompting for incomplete files
+      const desired = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
+      for (const f of files) {
+        const raw = await readFile(f.path, 'utf-8');
+        const parsed = parseFrontmatter(raw);
+        let config = parsed.config as Partial<FrontmatterConfig>;
+        const missing = missingScheduleFields(config.schedule);
+        if (missing.length > 0) {
+          if (opts.yes || !isInteractive()) {
+            throw new CliError('INVALID_PARAMS',
+              `${f.path} is missing required fields: ${missing.join(', ')}`,
+              'Fill in the frontmatter or run check interactively');
+          }
+          console.log(`Filling in missing frontmatter for ${f.path}:`);
+          config = await promptConfig(config, missing);
+          const finalConfig = mergeConfig({}, config);
+          await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
+          desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
+        } else {
+          desired.set(f.id, { config: mergeConfig({}, config), body: parsed.body, filePath: f.path });
+        }
+      }
+
+      console.log(`Check complete: ${desired.size} schedule(s) checked.`);
+
+      const cfg = await loadConfig();
+      const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
+      if (!watched.find((w) => w.path === folder)) {
+        console.log('\nThis folder is not watched. Run:');
+        console.log(`  agentio schedule watch ${abbrHome(folder)}`);
+      }
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
+  schedule.command('check').description('Validate .run.md files in a folder (id collisions, missing frontmatter, .gitignore scaffolding)')
+    .option('--folder <path>', 'Folder to check (default: CWD)')
+    .option('-y, --yes', 'Non-interactive')
+    .action(checkAction);
+
+  schedule.command('sync', { hidden: true })
+    .description('[deprecated] alias of `check`')
+    .option('--folder <path>', 'Folder to check (default: CWD)')
     .option('-y, --yes', 'Non-interactive')
     .action(async (opts: { folder?: string; yes?: boolean }) => {
-      try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-
-        // 1. Walk for *.run.md files
-        const files = walkRunFiles(folder);
-
-        // 2. Collision check
-        const byId = new Map<string, string[]>();
-        for (const f of files) {
-          const arr = byId.get(f.id) ?? [];
-          arr.push(f.path);
-          byId.set(f.id, arr);
-        }
-        const collisions = [...byId.entries()].filter(([, v]) => v.length > 1);
-        if (collisions.length > 0) {
-          const lines = collisions.map(([id, paths]) => `  "${id}":\n    ${paths.join('\n    ')}`);
-          throw new CliError('INVALID_PARAMS',
-            `Multiple .run.md files share the same id:\n${lines.join('\n')}`,
-            'Rename one of the files');
-        }
-
-        // 3. Ensure .agentio/.gitignore exists (first-time scaffolding)
-        if (files.length > 0) {
-          const giPath = resolve(folder, '.agentio', '.gitignore');
-          await mkdir(dirname(giPath), { recursive: true });
-          if (!existsSync(giPath)) {
-            await writeFile(giPath, 'runs/\nstate.json\n');
-          }
-        }
-
-        // 4. Build desired configs, prompting for incomplete files
-        const desired = new Map<string, { config: FrontmatterConfig; body: string; filePath: string }>();
-        for (const f of files) {
-          const raw = await readFile(f.path, 'utf-8');
-          const parsed = parseFrontmatter(raw);
-          let config = parsed.config as Partial<FrontmatterConfig>;
-          const missing = missingScheduleFields(config.schedule);
-          if (missing.length > 0) {
-            if (opts.yes || !isInteractive()) {
-              throw new CliError('INVALID_PARAMS',
-                `${f.path} is missing required fields: ${missing.join(', ')}`,
-                'Fill in the frontmatter or run sync interactively');
-            }
-            console.log(`Filling in missing frontmatter for ${f.path}:`);
-            config = await promptConfig(config, missing);
-            const finalConfig = mergeConfig({}, config);
-            await writeFile(f.path, serializeFrontmatter(finalConfig, parsed.body || '# TODO\n'));
-            desired.set(f.id, { config: finalConfig, body: parsed.body, filePath: f.path });
-          } else {
-            desired.set(f.id, { config: mergeConfig({}, config), body: parsed.body, filePath: f.path });
-          }
-        }
-
-        console.log(`Sync complete: ${desired.size} schedule(s) checked.`);
-
-        const cfg = await loadConfig();
-        const watched = cfg.daemon?.scheduler?.watchedFolders ?? [];
-        if (!watched.find((w) => w.path === folder)) {
-          console.log('\nThis folder is not watched. Run:');
-          console.log(`  agentio schedule watch ${abbrHome(folder)}`);
-        }
-      } catch (e) {
-        handleError(e);
-      }
+      console.error('warning: `agentio schedule sync` is deprecated; use `schedule check`.');
+      await checkAction(opts);
     });
 
   schedule.command('remove').description('Delete a schedule (.run.md file)')
