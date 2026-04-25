@@ -78,7 +78,7 @@ async function runPairingFlow(profileName: string): Promise<boolean> {
 export function registerWhatsAppCommands(program: Command): void {
   const whatsapp = program
     .command('whatsapp')
-    .description('WhatsApp operations (requires daemon)');
+    .description('WhatsApp operations');
 
   // Profile management
   const profile = whatsapp.command('profile').description('Manage WhatsApp profiles');
