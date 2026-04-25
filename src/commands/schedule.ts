@@ -911,7 +911,7 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('migrate').description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
+  schedule.command('migrate', { hidden: true }).description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
     .action(async () => {
       try {
         if (process.platform !== 'darwin') {

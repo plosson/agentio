@@ -1,4 +1,6 @@
 import { join } from 'path';
+import { existsSync, readdirSync } from 'fs';
+import { homedir } from 'os';
 import { randomBytes } from 'crypto';
 import type { ServiceName, Config, DaemonConfig } from '../types/config';
 import { startScheduler, stopScheduler } from './scheduler';
@@ -266,6 +268,21 @@ export async function startDaemon(): Promise<void> {
 
     // Migrate legacy gateway.* files to daemon.*
     migrateLegacyFiles(CONFIG_DIR);
+
+    // Detect legacy per-schedule launchd plists (macOS only)
+    if (process.platform === 'darwin') {
+      try {
+        const launchAgentsDir = join(homedir(), 'Library', 'LaunchAgents');
+        if (existsSync(launchAgentsDir)) {
+          const legacy = readdirSync(launchAgentsDir)
+            .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
+          if (legacy.length > 0) {
+            console.log(`[migration] Found ${legacy.length} legacy schedule plist(s).`);
+            console.log('[migration] Run: agentio schedule migrate');
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
 
     // Initialize database
     await initDatabase();
