@@ -4,7 +4,7 @@ import { setProfile, resolveProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
-import { CliError, handleError } from '../utils/errors';
+import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -203,7 +203,7 @@ export function registerTelegramCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('telegram', profileResult.names ?? []);
         }
 
         const client = await getDaemonClient();
@@ -313,7 +313,7 @@ export function registerTelegramCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('telegram', profileResult.names ?? []);
         }
 
         if (!options.to) {

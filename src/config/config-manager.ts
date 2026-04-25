@@ -94,7 +94,7 @@ export async function getProfile(
 export async function resolveProfile(
   service: ServiceName,
   profileName?: string
-): Promise<{ profile: string | null; readOnly?: boolean; error?: 'none' | 'multiple' }> {
+): Promise<{ profile: string | null; readOnly?: boolean; error?: 'none' | 'multiple'; names?: string[] }> {
   const config = await loadConfig();
   const serviceProfiles = config.profiles[service] || [];
 
@@ -119,7 +119,7 @@ export async function resolveProfile(
   }
 
   // Multiple profiles exist - user must specify
-  return { profile: null, error: 'multiple' };
+  return { profile: null, error: 'multiple', names: serviceProfiles.map(getProfileName) };
 }
 
 export interface SetProfileOptions {

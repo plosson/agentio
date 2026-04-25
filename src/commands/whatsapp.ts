@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { setCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, resolveProfile, removeProfile } from '../config/config-manager';
-import { CliError, handleError } from '../utils/errors';
+import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
 import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -180,7 +180,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         const profileName = profileResult.profile;
@@ -219,7 +219,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         const client = await getDaemonClient();
@@ -343,7 +343,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         if (!options.to && !options.group) {
@@ -465,7 +465,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         const client = await getDaemonClient();
@@ -488,7 +488,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         const client = await getDaemonClient();
@@ -524,7 +524,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         if (!options.participants || options.participants.length === 0) {
@@ -560,7 +560,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         if (!options.name && options.description === undefined && !options.picture) {
@@ -604,7 +604,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'add participants');
@@ -649,7 +649,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'remove participants');
@@ -694,7 +694,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'promote participants');
@@ -739,7 +739,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'demote participants');
@@ -783,7 +783,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'leave group');
@@ -825,7 +825,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         const client = await getDaemonClient();
@@ -859,7 +859,7 @@ export function registerWhatsAppCommands(program: Command): void {
           if (profileResult.error === 'none') {
             throw new CliError('PROFILE_NOT_FOUND', 'No WhatsApp profiles configured', 'Run: agentio whatsapp profile add');
           }
-          throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
+          throw multipleProfilesError('whatsapp', profileResult.names ?? []);
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'join group');
