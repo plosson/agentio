@@ -1,16 +1,12 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { appendFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { FrontmatterConfig } from '../../types/schedule';
 import { shellEnv, locateClaude } from '../claude/claude-binary';
-import { executeClaude } from '../claude/runner';
+import { executeClaude, type Spawner } from '../claude/runner';
 import { updateState } from './state';
 
-export type Spawner = (
-  cmd: string,
-  args: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv },
-) => ChildProcess;
+export type { Spawner };
 
 export interface RunScheduleOpts {
   folder: string;
@@ -19,10 +15,15 @@ export interface RunScheduleOpts {
   config: FrontmatterConfig;
   /** When false, tee child stdout/stderr to process.stdout/stderr. Defaults to true. */
   quiet?: boolean;
+  /** injected for tests; defaults to child_process.spawn */
   spawner?: Spawner;
+  /** injected for tests; defaults to locateClaude() */
   claudePath?: string | null;
+  /** injected for tests */
   now?: () => Date;
+  /** injected for tests; defaults to process.stdout */
   stdout?: { write: (chunk: string | Buffer) => boolean };
+  /** injected for tests; defaults to process.stderr */
   stderr?: { write: (chunk: string | Buffer) => boolean };
 }
 
