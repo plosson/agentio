@@ -34,7 +34,6 @@ import { registerSetupCommand } from './commands/setup';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { vaultExists } from './vault/vault';
-import { applyGroupedHelp } from './utils/help-formatter';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -47,6 +46,11 @@ function getVersion(): string {
 }
 
 const program = new Command();
+
+function setGroup(name: string, group: string): void {
+  const cmd = program.commands.find((c) => c.name() === name);
+  if (cmd) cmd.helpGroup(group);
+}
 
 program
   .name('agentio')
@@ -103,15 +107,20 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
   }
 });
 
-applyGroupedHelp(program, {
-  'Setup': ['setup', 'status', 'doctor', 'update'],
-  'Services': [
-    'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
-    'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
-  ],
-  'Automation': ['schedule', 'daemon'],
-  'Advanced': ['config', 'mcp', 'server', 'profile'],
-});
+// Setup
+['setup', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
+
+// Services
+[
+  'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
+  'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+].forEach((n) => setGroup(n, 'Services'));
+
+// Automation
+['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
+
+// Advanced
+['config', 'mcp', 'server', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
 // Show help (exit 0) when no command is provided
 program.action(() => {
