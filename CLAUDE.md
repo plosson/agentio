@@ -179,6 +179,18 @@ agentio telegram outbox status <id>
 agentio telegram outbox list [--status pending|sending|sent|failed]
 ```
 
+### Telegram Bot Auto-Reply
+
+When enabled on a profile, the daemon spawns `claude` for every inbound message and sends the response back via the outbox. Each Telegram chat gets its own persistent Claude session (via `--resume`); messages within a chat are processed serially while different chats run in parallel.
+
+```bash
+agentio telegram profile bot enable --profile <name> [--model sonnet|opus|haiku] [--permission-mode bypassPermissions|...] [--system-prompt "..."] [--cwd <dir>]
+agentio telegram profile bot disable --profile <name>
+agentio telegram profile bot show --profile <name>
+```
+
+Sessions are stored in the `chat_sessions` table of `~/.config/agentio/daemon.db`. Logs land in `~/.config/agentio/bot-runs/<service>/<profile>/<chat_id>/`. Read-only profiles cannot have the bot enabled.
+
 ### Google Chat
 
 ```bash
@@ -345,6 +357,7 @@ The daemon provides:
 - **Webhook notifications**: Optional outbound webhooks for new messages
 - **Media handling**: Downloads and stores media attachments locally
 - **In-process scheduler**: Watches registered folders and fires due `.run.md` schedules on a 60-second tick; catches up on startup for schedules that missed their last expected run
+- **Conversation bot**: When a profile has `bot.enabled`, inbound messages spawn `claude --resume <session-id>` per chat (serialized per chat, parallel across chats); replies route back through the outbox.
 
 ### WhatsApp Integration
 
