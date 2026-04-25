@@ -5,18 +5,18 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-e2e-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
 });
 
 afterEach(async () => {
   await rm(tempHome, { recursive: true, force: true }).catch(() => {});
   delete process.env.AGENTIO_PASSPHRASE;
-  delete process.env.AGENTIO_KEYCHAIN;
+  delete process.env.AGENTIO_PASSPHRASE_STORE;
 });
 
 async function runCli(args: string[], extraEnv: Record<string, string> = {}): Promise<{
@@ -30,7 +30,7 @@ async function runCli(args: string[], extraEnv: Record<string, string> = {}): Pr
     env: {
       ...process.env,
       HOME: tempHome,
-      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${passphraseStoreFile}`,
       ...extraEnv,
     },
   });
@@ -57,7 +57,7 @@ describe('e2e: first-install → setup → status → reset', () => {
     });
     expect(r2.exitCode).toBe(0);
 
-    // Status now works — keychain-resolved passphrase
+    // Status now works — store-resolved passphrase
     const r3 = await runCli(['status', '--no-test']);
     expect(r3.exitCode).toBe(0);
 
@@ -73,20 +73,20 @@ describe('e2e: first-install → setup → status → reset', () => {
 });
 
 describe('e2e: daemon fails fast with VAULT_LOCKED when no passphrase source', () => {
-  test('non-bypass command without keychain or env fails cleanly', async () => {
-    // Create vault with passphrase written to keychain
+  test('non-bypass command without store or env fails cleanly', async () => {
+    // Create vault with passphrase written to passphrase store
     await runCli(['setup'], {
       AGENTIO_SETUP_NONINTERACTIVE: '1',
       AGENTIO_SETUP_VAULT_PATH: join(tempHome, '.config', 'agentio', 'vault.enc'),
       AGENTIO_SETUP_PASSPHRASE: 'daemon-pw-12345',
     });
 
-    // Run a non-bypass command (gmail list) with an EMPTY keychain file —
+    // Run a non-bypass command (gmail list) with an EMPTY store file —
     // simulates a subprocess with no cached passphrase (e.g. headless daemon).
-    const emptyKeychain = join(tempHome, 'empty-keychain.json');
-    await Bun.write(emptyKeychain, '{}');
+    const emptyStore = join(tempHome, 'empty-store.json');
+    await Bun.write(emptyStore, '{}');
     const res = await runCli(['gmail', 'list'], {
-      AGENTIO_KEYCHAIN: `memory:${emptyKeychain}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${emptyStore}`,
     });
     expect(res.exitCode).not.toBe(0);
     expect(res.stderr).toContain('VAULT_LOCKED');
@@ -95,7 +95,7 @@ describe('e2e: daemon fails fast with VAULT_LOCKED when no passphrase source', (
     // reach actual command logic (which will then hit a downstream error,
     // e.g. PROFILE_NOT_FOUND — that is fine, we only assert NOT VAULT_LOCKED).
     const res2 = await runCli(['gmail', 'list'], {
-      AGENTIO_KEYCHAIN: `memory:${emptyKeychain}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${emptyStore}`,
       AGENTIO_PASSPHRASE: 'daemon-pw-12345',
     });
     // exit code may be non-zero but it MUST NOT be VAULT_LOCKED

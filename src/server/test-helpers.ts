@@ -34,10 +34,10 @@ export interface StartSubprocessOptions {
    */
   passphrase?: string;
   /**
-   * Path to a memory-keychain file to back `AGENTIO_KEYCHAIN=memory:<path>`.
+   * Path to a memory passphrase store file to back `AGENTIO_PASSPHRASE_STORE=memory:<path>`.
    * Must be writable. If provided, the subprocess receives this env var.
    */
-  keychainFile?: string;
+  passphraseStoreFile?: string;
 }
 
 export interface StartedSubprocess {
@@ -73,8 +73,8 @@ export async function startServerSubprocess(
       AGENTIO_SERVER_HOST: '',
       AGENTIO_SERVER_API_KEY: '',
       ...(opts.passphrase ? { AGENTIO_PASSPHRASE: opts.passphrase } : {}),
-      ...(opts.keychainFile
-        ? { AGENTIO_KEYCHAIN: `memory:${opts.keychainFile}` }
+      ...(opts.passphraseStoreFile
+        ? { AGENTIO_PASSPHRASE_STORE: `memory:${opts.passphraseStoreFile}` }
         : {}),
       ...(opts.extraEnv ?? {}),
     };

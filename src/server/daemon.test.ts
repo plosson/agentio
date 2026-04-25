@@ -35,12 +35,12 @@ interface RunningServer {
 const TEST_PASSPHRASE = 'test-pw-12345';
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 let active: RunningServer | null = null;
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-server-test-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), {
     recursive: true,
     mode: 0o700,
@@ -69,7 +69,7 @@ afterEach(async () => {
     active = null;
   }
   delete process.env.AGENTIO_PASSPHRASE;
-  delete process.env.AGENTIO_KEYCHAIN;
+  delete process.env.AGENTIO_PASSPHRASE_STORE;
   clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
@@ -107,7 +107,7 @@ function baseEnv(home: string, extraEnv?: Record<string, string>): Record<string
     ...process.env,
     HOME: home,
     AGENTIO_PASSPHRASE: TEST_PASSPHRASE,
-    AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+    AGENTIO_PASSPHRASE_STORE: `memory:${passphraseStoreFile}`,
     AGENTIO_SERVER_PORT: '',
     AGENTIO_SERVER_HOST: '',
     AGENTIO_SERVER_API_KEY: '',

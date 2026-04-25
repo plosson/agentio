@@ -13,9 +13,9 @@ import {
 } from './vault';
 import {
   clearPassphraseCache,
-  resetKeychainProvider,
-  setKeychainProvider,
-  type KeychainProvider,
+  resetPassphraseProvider,
+  setPassphraseProvider,
+  type PassphraseProvider,
 } from './passphrase';
 import { writePointer, deletePointer } from './pointer';
 import { encryptVault } from './crypto';
@@ -24,7 +24,7 @@ let tempHome = '';
 let savedHome = '';
 let vaultFile = '';
 
-class MemoryKeychain implements KeychainProvider {
+class MemoryPassphraseStore implements PassphraseProvider {
   store = new Map<string, string>();
   async get(a: string) { return this.store.get(a) ?? null; }
   async set(a: string, v: string) { this.store.set(a, v); }
@@ -36,8 +36,8 @@ beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-vault-test-'));
   process.env.HOME = tempHome;
   vaultFile = join(tempHome, 'vault.enc');
-  const mem = new MemoryKeychain();
-  setKeychainProvider(mem);
+  const mem = new MemoryPassphraseStore();
+  setPassphraseProvider(mem);
   clearPassphraseCache();
   clearVaultCache();
   delete process.env.AGENTIO_PASSPHRASE;
@@ -45,7 +45,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   process.env.HOME = savedHome;
-  resetKeychainProvider();
+  resetPassphraseProvider();
   clearPassphraseCache();
   clearVaultCache();
   delete process.env.AGENTIO_PASSPHRASE;
@@ -104,9 +104,9 @@ describe('vault', () => {
     await expect(loadVault()).rejects.toMatchObject({ code: 'VAULT_LOCKED' });
   });
 
-  test('loadVault throws AUTH_FAILED on wrong passphrase and wipes stale keychain entry', async () => {
-    const mem = new MemoryKeychain();
-    setKeychainProvider(mem);
+  test('loadVault throws AUTH_FAILED on wrong passphrase and wipes stale passphrase store entry', async () => {
+    const mem = new MemoryPassphraseStore();
+    setPassphraseProvider(mem);
     await mem.set('vault', 'wrong-pw');
 
     await writePointer(vaultFile);
@@ -139,9 +139,9 @@ describe('vault', () => {
     await expect(loadVault()).rejects.toMatchObject({ code: 'VAULT_CORRUPT' });
   });
 
-  test('resetVault deletes pointer, vault file, and keychain entry', async () => {
-    const mem = new MemoryKeychain();
-    setKeychainProvider(mem);
+  test('resetVault deletes pointer, vault file, and passphrase store entry', async () => {
+    const mem = new MemoryPassphraseStore();
+    setPassphraseProvider(mem);
     await mem.set('vault', 'pw');
     await writePointer(vaultFile);
     await writeFile(vaultFile, 'anything');

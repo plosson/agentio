@@ -119,12 +119,12 @@ The agentio config + credentials are stored in a single encrypted **vault** file
 
 ```bash
 agentio setup                  # First-time, migration, adopt existing, or manage vault
-agentio setup --reset --force  # Wipe vault, pointer, and keychain entry
+agentio setup --reset --force  # Wipe vault, pointer, and stored passphrase
 ```
 
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
-- Passphrase is stored in the OS keychain (macOS Keychain / libsecret / Windows Credential Manager). Commands read it silently.
-- For headless/CI use, set `AGENTIO_PASSPHRASE` env var to bypass the keychain.
+- Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location (it's outside the typical Dropbox/iCloud roots by default).
+- `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
 - Runtime files (`daemon.db`, `media/`, `daemon.log`) remain plaintext under `~/.config/agentio/`.
 
 ### Gmail

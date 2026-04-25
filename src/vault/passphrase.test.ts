@@ -4,12 +4,12 @@ import {
   setPassphrase,
   clearPassphrase,
   clearPassphraseCache,
-  setKeychainProvider,
-  resetKeychainProvider,
-  type KeychainProvider,
+  setPassphraseProvider,
+  resetPassphraseProvider,
+  type PassphraseProvider,
 } from './passphrase';
 
-class MemoryKeychain implements KeychainProvider {
+class MemoryPassphraseStore implements PassphraseProvider {
   store = new Map<string, string>();
   async get(account: string): Promise<string | null> {
     return this.store.get(account) ?? null;
@@ -22,17 +22,17 @@ class MemoryKeychain implements KeychainProvider {
   }
 }
 
-let mem: MemoryKeychain;
+let mem: MemoryPassphraseStore;
 
 beforeEach(() => {
-  mem = new MemoryKeychain();
-  setKeychainProvider(mem);
+  mem = new MemoryPassphraseStore();
+  setPassphraseProvider(mem);
   clearPassphraseCache();
   delete process.env.AGENTIO_PASSPHRASE;
 });
 
 afterEach(() => {
-  resetKeychainProvider();
+  resetPassphraseProvider();
   clearPassphraseCache();
   delete process.env.AGENTIO_PASSPHRASE;
 });
@@ -40,21 +40,21 @@ afterEach(() => {
 describe('passphrase resolution', () => {
   test('env var takes precedence', async () => {
     process.env.AGENTIO_PASSPHRASE = 'from-env';
-    await mem.set('vault', 'from-keychain');
+    await mem.set('vault', 'from-store');
     expect(await getPassphrase()).toBe('from-env');
   });
 
-  test('keychain used when env not set', async () => {
-    await mem.set('vault', 'from-keychain');
-    expect(await getPassphrase()).toBe('from-keychain');
+  test('store used when env not set', async () => {
+    await mem.set('vault', 'from-store');
+    expect(await getPassphrase()).toBe('from-store');
   });
 
   test('process cache returns same value on second call', async () => {
-    await mem.set('vault', 'from-keychain');
-    expect(await getPassphrase()).toBe('from-keychain');
-    // Delete from keychain — cache should still serve
+    await mem.set('vault', 'from-store');
+    expect(await getPassphrase()).toBe('from-store');
+    // Delete from store — cache should still serve
     await mem.delete('vault');
-    expect(await getPassphrase()).toBe('from-keychain');
+    expect(await getPassphrase()).toBe('from-store');
   });
 
   test('clearPassphraseCache bypasses cache', async () => {
@@ -69,21 +69,21 @@ describe('passphrase resolution', () => {
     expect(await getPassphrase()).toBeNull();
   });
 
-  test('setPassphrase writes to keychain and populates cache', async () => {
+  test('setPassphrase writes to passphrase store and populates cache', async () => {
     await setPassphrase('new-pw');
     expect(await mem.get('vault')).toBe('new-pw');
     expect(await getPassphrase()).toBe('new-pw');
   });
 
-  test('clearPassphrase wipes keychain and cache', async () => {
+  test('clearPassphrase wipes passphrase store and cache', async () => {
     await setPassphrase('pw');
     await clearPassphrase();
     expect(await mem.get('vault')).toBeNull();
     expect(await getPassphrase()).toBeNull();
   });
 
-  test('keychain read error falls through gracefully', async () => {
-    setKeychainProvider({
+  test('passphrase store read error falls through gracefully', async () => {
+    setPassphraseProvider({
       async get() { throw new Error('no libsecret'); },
       async set() { throw new Error('no libsecret'); },
       async delete() { throw new Error('no libsecret'); },

@@ -42,13 +42,13 @@ interface RunningServer {
 }
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 let active: RunningServer | null = null;
 let fixtureServer: ReturnType<typeof Bun.serve> | null = null;
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-mcp-e2e-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), {
     recursive: true,
     mode: 0o700,
@@ -85,7 +85,7 @@ afterEach(async () => {
     fixtureServer = null;
   }
   delete process.env.AGENTIO_PASSPHRASE;
-  delete process.env.AGENTIO_KEYCHAIN;
+  delete process.env.AGENTIO_PASSPHRASE_STORE;
   clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
@@ -101,7 +101,7 @@ async function startAgentioServer(): Promise<RunningServer> {
   const started = await startServerSubprocess({
     home: tempHome,
     passphrase: TEST_PASSPHRASE,
-    keychainFile,
+    passphraseStoreFile,
   });
   const running: RunningServer = {
     proc: started.proc,

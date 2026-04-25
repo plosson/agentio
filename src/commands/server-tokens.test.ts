@@ -12,12 +12,12 @@ import { loadVault, clearVaultCache } from '../vault/vault';
  */
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 const TEST_PASSPHRASE = 'test-pw-12345';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-tokens-test-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), {
     recursive: true,
     mode: 0o700,
@@ -26,7 +26,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   delete process.env.AGENTIO_PASSPHRASE;
-  delete process.env.AGENTIO_KEYCHAIN;
+  delete process.env.AGENTIO_PASSPHRASE_STORE;
   clearVaultCache();
   if (tempHome) {
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
@@ -85,7 +85,7 @@ async function runCli(
       ...process.env,
       HOME: tempHome,
       AGENTIO_PASSPHRASE: TEST_PASSPHRASE,
-      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${passphraseStoreFile}`,
     },
   });
   const exitCode = await proc.exited;

@@ -135,7 +135,7 @@ async function doFirstTimeSetup(inputs: NonInteractiveInputs): Promise<void> {
     await setPassphrase(inputs.passphrase);
   } catch (err) {
     console.error(
-      `Warning: could not store passphrase in OS keychain: ${(err as Error).message}`
+      `Warning: could not store passphrase:${(err as Error).message}`
     );
     console.error('Set AGENTIO_PASSPHRASE in your environment for future commands.');
   }
@@ -181,7 +181,7 @@ async function doMigrationSetup(inputs: NonInteractiveInputs): Promise<void> {
   try {
     await setPassphrase(inputs.passphrase);
   } catch (err) {
-    console.error(`Warning: could not store passphrase in OS keychain: ${(err as Error).message}`);
+    console.error(`Warning: could not store passphrase:${(err as Error).message}`);
     console.error('Set AGENTIO_PASSPHRASE in your environment for future commands.');
   }
 
@@ -212,7 +212,7 @@ async function doAdoptExisting(inputs: NonInteractiveInputs): Promise<void> {
   try {
     await setPassphrase(inputs.passphrase);
   } catch (err) {
-    console.error(`Warning: could not store passphrase in OS keychain: ${(err as Error).message}`);
+    console.error(`Warning: could not store passphrase:${(err as Error).message}`);
   }
   console.log(`Adopted vault at ${vaultPath}`);
 }
@@ -221,7 +221,7 @@ async function doChangePassphrase(newPassphrase: string): Promise<void> {
   if (newPassphrase.length < MIN_PASSPHRASE_LEN) {
     throw new CliError('INVALID_PARAMS', `Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters`);
   }
-  // Decrypt with current passphrase (from keychain/env)
+  // Decrypt with current passphrase (from file/env)
   const current = await loadVault();
   // Re-encrypt with new passphrase
   process.env.AGENTIO_PASSPHRASE = newPassphrase;
@@ -230,7 +230,7 @@ async function doChangePassphrase(newPassphrase: string): Promise<void> {
   try {
     await setPassphrase(newPassphrase);
   } catch (err) {
-    console.error(`Warning: could not update keychain: ${(err as Error).message}`);
+    console.error(`Warning: could not store passphrase: ${(err as Error).message}`);
   }
   console.log('Passphrase changed');
 }
@@ -269,7 +269,7 @@ async function doMoveVault(newPath: string): Promise<void> {
 async function doReset(force: boolean): Promise<void> {
   if (!force) {
     const ok = await confirm({
-      message: 'This will delete the vault, pointer, and keychain entry. Continue?',
+      message: 'This will delete the vault, pointer, and stored passphrase. Continue?',
       default: false,
     });
     if (!ok) {
@@ -293,7 +293,7 @@ export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
     .description('Initialize or manage the agentio vault')
-    .option('--reset', 'Wipe vault, pointer, and keychain entry')
+    .option('--reset', 'Wipe vault, pointer, and stored passphrase')
     .option('--force', 'Skip confirmation prompts (for --reset)')
     .action(async (options) => {
       try {

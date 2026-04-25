@@ -89,7 +89,7 @@ export async function loadVault(): Promise<VaultContents> {
     })();
 
     if (looksStructurallyValid) {
-      // Wipe stale keychain entry if the passphrase came from there.
+      // Wipe stale passphrase file if the passphrase came from there.
       if (!passphraseFromEnv) {
         await clearPassphrase();
       }

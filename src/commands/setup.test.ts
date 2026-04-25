@@ -6,11 +6,11 @@ import { dirname, join } from 'path';
 import { encryptVault } from '../vault/crypto';
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-setup-test-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
 });
 
@@ -29,7 +29,7 @@ async function runCli(
     env: {
       ...process.env,
       HOME: tempHome,
-      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${passphraseStoreFile}`,
       ...(opts.env ?? {}),
     },
   });
@@ -44,7 +44,7 @@ async function runCli(
 }
 
 describe('agentio setup — first-time path', () => {
-  test('creates vault, pointer, and keychain entry with AGENTIO_PASSPHRASE env var', async () => {
+  test('creates vault, pointer, and passphrase store entry with AGENTIO_PASSPHRASE env var', async () => {
     const defaultVault = join(tempHome, '.config', 'agentio', 'vault.enc');
     const res = await runCli(['setup'], {
       env: {
@@ -58,7 +58,7 @@ describe('agentio setup — first-time path', () => {
     expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(true);
     const pointer = (await readFile(join(tempHome, '.config', 'agentio', 'vault.path'), 'utf-8')).trim();
     expect(pointer).toBe(defaultVault);
-    const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
+    const kc = JSON.parse(await readFile(passphraseStoreFile, 'utf-8'));
     expect(kc.vault).toBe('test-passphrase-12345');
   });
 
@@ -196,7 +196,7 @@ describe('agentio setup — migration path', () => {
 });
 
 describe('agentio setup — adopt existing vault', () => {
-  test('prompts for passphrase of an existing vault file and writes pointer + keychain', async () => {
+  test('prompts for passphrase of an existing vault file and writes pointer + passphrase store', async () => {
     const vaultPath = join(tempHome, 'dropbox', 'myvault.enc');
     await mkdir(dirname(vaultPath), { recursive: true });
     const payload = JSON.stringify({
@@ -216,7 +216,7 @@ describe('agentio setup — adopt existing vault', () => {
     });
     expect(res.exitCode).toBe(0);
 
-    const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
+    const kc = JSON.parse(await readFile(passphraseStoreFile, 'utf-8'));
     expect(kc.vault).toBe('adopt-pw-12345');
     const pointer = (await readFile(join(tempHome, '.config', 'agentio', 'vault.path'), 'utf-8')).trim();
     expect(pointer).toBe(vaultPath);
@@ -254,7 +254,7 @@ async function preSetupVault(passphrase: string): Promise<string> {
 }
 
 describe('agentio setup — existing vault menu', () => {
-  test('change passphrase re-encrypts vault and updates keychain', async () => {
+  test('change passphrase re-encrypts vault and updates passphrase store', async () => {
     await preSetupVault('old-pw-12345');
 
     const res = await runCli(['setup'], {
@@ -266,7 +266,7 @@ describe('agentio setup — existing vault menu', () => {
     });
     expect(res.exitCode).toBe(0);
 
-    const kc = JSON.parse(await readFile(keychainFile, 'utf-8'));
+    const kc = JSON.parse(await readFile(passphraseStoreFile, 'utf-8'));
     expect(kc.vault).toBe('new-pw-67890');
 
     // Now that config-manager reads from the vault, verify that running
@@ -303,14 +303,14 @@ describe('agentio setup — existing vault menu', () => {
 });
 
 describe('agentio setup --reset', () => {
-  test('wipes vault, pointer, and keychain entry', async () => {
+  test('wipes vault, pointer, and passphrase store entry', async () => {
     const vaultPath = await preSetupVault('pw-12345');
 
     const res = await runCli(['setup', '--reset', '--force']);
     expect(res.exitCode).toBe(0);
     expect(existsSync(vaultPath)).toBe(false);
     expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
-    const kcRaw = existsSync(keychainFile) ? await readFile(keychainFile, 'utf-8') : '{}';
+    const kcRaw = existsSync(passphraseStoreFile) ? await readFile(passphraseStoreFile, 'utf-8') : '{}';
     const kc = JSON.parse(kcRaw || '{}');
     expect(kc.vault).toBeUndefined();
   });
@@ -352,7 +352,7 @@ describe('agentio setup — directory path normalization', () => {
 });
 
 describe('agentio setup — migration rollback on failure', () => {
-  test('legacy files and keychain are untouched if vault write fails', async () => {
+  test('legacy files and passphrase store is untouched if vault write fails', async () => {
     const cfgDir = join(tempHome, '.config', 'agentio');
     const legacyConfigPath = join(cfgDir, 'config.json');
     const legacyTokensPath = join(cfgDir, 'tokens.enc');
@@ -383,8 +383,8 @@ describe('agentio setup — migration rollback on failure', () => {
     // Pointer must be cleaned up so the next setup run starts fresh
     expect(existsSync(join(cfgDir, 'vault.path'))).toBe(false);
 
-    // Keychain must not have been written (setPassphrase runs after saveVault)
-    const kcRaw = existsSync(keychainFile) ? await readFile(keychainFile, 'utf-8') : '{}';
+    // Passphrase store must not have been written (setPassphrase runs after saveVault)
+    const kcRaw = existsSync(passphraseStoreFile) ? await readFile(passphraseStoreFile, 'utf-8') : '{}';
     const kc = JSON.parse(kcRaw || '{}');
     expect(kc.vault).toBeUndefined();
   });

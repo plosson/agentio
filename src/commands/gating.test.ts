@@ -4,11 +4,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 let tempHome = '';
-let keychainFile = '';
+let passphraseStoreFile = '';
 
 beforeEach(async () => {
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-gating-test-'));
-  keychainFile = join(tempHome, 'keychain.json');
+  passphraseStoreFile = join(tempHome, 'passphrase-store.json');
   await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
 });
 
@@ -23,7 +23,7 @@ async function runCli(args: string[]): Promise<{ exitCode: number; stdout: strin
     env: {
       ...process.env,
       HOME: tempHome,
-      AGENTIO_KEYCHAIN: `memory:${keychainFile}`,
+      AGENTIO_PASSPHRASE_STORE: `memory:${passphraseStoreFile}`,
     },
   });
   const exitCode = await proc.exited;

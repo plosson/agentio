@@ -1,135 +1,70 @@
-import { spawnSync } from 'bun';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
+import { join, dirname } from 'path';
 
-export interface KeychainProvider {
+export interface PassphraseProvider {
   get(account: string): Promise<string | null>;
   set(account: string, value: string): Promise<void>;
   delete(account: string): Promise<void>;
 }
 
-const SERVICE = 'agentio';
 const ACCOUNT = 'vault';
 
-let provider: KeychainProvider | null = null;
+let provider: PassphraseProvider | null = null;
 let cached: string | null = null;
 
-function macKeychain(): KeychainProvider {
+function passphraseFilePath(): string {
+  return join(process.env.HOME || homedir(), '.config', 'agentio', 'vault.passphrase');
+}
+
+function fileProvider(): PassphraseProvider {
   return {
-    async get(account: string) {
-      const r = spawnSync({
-        cmd: ['security', 'find-generic-password', '-s', SERVICE, '-a', account, '-w'],
-        stdout: 'pipe', stderr: 'pipe',
-      });
-      if (r.exitCode !== 0) return null;
-      return r.stdout.toString().replace(/\n$/, '');
-    },
-    async set(account: string, value: string) {
-      const r = spawnSync({
-        cmd: ['security', 'add-generic-password', '-U', '-s', SERVICE, '-a', account, '-w', value],
-        stdout: 'pipe', stderr: 'pipe',
-      });
-      if (r.exitCode !== 0) {
-        throw new Error(`security add-generic-password failed: ${r.stderr.toString()}`);
+    async get() {
+      const p = passphraseFilePath();
+      if (!existsSync(p)) return null;
+      try {
+        return readFileSync(p, 'utf-8').replace(/\n$/, '');
+      } catch {
+        return null;
       }
     },
-    async delete(account: string) {
-      spawnSync({
-        cmd: ['security', 'delete-generic-password', '-s', SERVICE, '-a', account],
-        stdout: 'pipe', stderr: 'pipe',
-      });
+    async set(_account, value) {
+      const p = passphraseFilePath();
+      const dir = dirname(p);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+      writeFileSync(p, value, { mode: 0o600 });
     },
-  };
-}
-
-function hasCmd(cmd: string): boolean {
-  const r = spawnSync({ cmd: ['which', cmd], stdout: 'pipe', stderr: 'pipe' });
-  return r.exitCode === 0;
-}
-
-function secretToolKeychain(): KeychainProvider {
-  return {
-    async get(account: string) {
-      const r = spawnSync({
-        cmd: ['secret-tool', 'lookup', 'service', SERVICE, 'account', account],
-        stdout: 'pipe', stderr: 'pipe',
-      });
-      if (r.exitCode !== 0) return null;
-      return r.stdout.toString().replace(/\n$/, '');
-    },
-    async set(account: string, value: string) {
-      const proc = Bun.spawn({
-        cmd: ['secret-tool', 'store', '--label=agentio', 'service', SERVICE, 'account', account],
-        stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
-      });
-      proc.stdin.write(value);
-      proc.stdin.end();
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
-        throw new Error(`secret-tool store failed: ${stderr}`);
+    async delete() {
+      const p = passphraseFilePath();
+      if (existsSync(p)) {
+        try { unlinkSync(p); } catch { /* ignore */ }
       }
     },
-    async delete(account: string) {
-      spawnSync({
-        cmd: ['secret-tool', 'clear', 'service', SERVICE, 'account', account],
-        stdout: 'pipe', stderr: 'pipe',
-      });
-    },
   };
 }
 
-function noopKeychain(reason: string): KeychainProvider {
-  return {
-    async get() { return null; },
-    async set() {
-      throw new Error(`OS keychain is unavailable (${reason}). Use AGENTIO_PASSPHRASE.`);
-    },
-    async delete() { /* no-op */ },
-  };
-}
-
-function osKeychain(): KeychainProvider {
-  const test = process.env.AGENTIO_KEYCHAIN;
-  if (test && test.startsWith('memory:')) {
-    return memoryFileKeychain(test.slice('memory:'.length));
-  }
-  if (process.platform === 'darwin') {
-    if (!hasCmd('security')) {
-      return noopKeychain('`security` CLI not found on PATH');
-    }
-    return macKeychain();
-  }
-  if (process.platform === 'linux') {
-    if (!hasCmd('secret-tool')) {
-      return noopKeychain('`secret-tool` not installed (apt: libsecret-tools)');
-    }
-    return secretToolKeychain();
-  }
-  return noopKeychain(`unsupported platform: ${process.platform}`);
-}
-
-function memoryFileKeychain(path: string): KeychainProvider {
-  const fs = require('fs');
+function memoryFileProvider(path: string): PassphraseProvider {
   function read(): Record<string, string> {
-    if (!fs.existsSync(path)) return {};
+    if (!existsSync(path)) return {};
     try {
-      return JSON.parse(fs.readFileSync(path, 'utf-8'));
+      return JSON.parse(readFileSync(path, 'utf-8'));
     } catch {
       return {};
     }
   }
   function write(data: Record<string, string>) {
-    fs.writeFileSync(path, JSON.stringify(data), { mode: 0o600 });
+    writeFileSync(path, JSON.stringify(data), { mode: 0o600 });
   }
   return {
-    async get(account: string) {
+    async get(account) {
       return read()[account] ?? null;
     },
-    async set(account: string, value: string) {
+    async set(account, value) {
       const d = read();
       d[account] = value;
       write(d);
     },
-    async delete(account: string) {
+    async delete(account) {
       const d = read();
       delete d[account];
       write(d);
@@ -137,17 +72,25 @@ function memoryFileKeychain(path: string): KeychainProvider {
   };
 }
 
-function getProvider(): KeychainProvider {
+function defaultProvider(): PassphraseProvider {
+  const test = process.env.AGENTIO_PASSPHRASE_STORE;
+  if (test && test.startsWith('memory:')) {
+    return memoryFileProvider(test.slice('memory:'.length));
+  }
+  return fileProvider();
+}
+
+function getProvider(): PassphraseProvider {
   if (provider) return provider;
-  provider = osKeychain();
+  provider = defaultProvider();
   return provider;
 }
 
-export function setKeychainProvider(p: KeychainProvider): void {
+export function setPassphraseProvider(p: PassphraseProvider): void {
   provider = p;
 }
 
-export function resetKeychainProvider(): void {
+export function resetPassphraseProvider(): void {
   provider = null;
 }
 
@@ -169,7 +112,7 @@ export async function getPassphrase(): Promise<string | null> {
       return v;
     }
   } catch {
-    // Keychain unavailable — fall through to null.
+    // Fall through to null.
   }
   return null;
 }
@@ -189,6 +132,6 @@ export async function clearPassphrase(): Promise<void> {
   try {
     await getProvider().delete(ACCOUNT);
   } catch {
-    // Ignore — nothing we can do.
+    // Ignore.
   }
 }
