@@ -4,6 +4,8 @@ import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { loadVault, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
+import type { BotConfig } from '../types/bot';
+import { CliError } from '../utils/errors';
 
 const CONFIG_DIR = join(process.env.HOME || homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json'); // kept for backward-compat imports elsewhere
@@ -272,6 +274,57 @@ export async function setProfileReadOnly(
 
   await saveConfig(config);
   return true;
+}
+
+/**
+ * Set bot configuration for a profile.
+ * Enabling bot on a read-only profile is not allowed.
+ */
+export async function setProfileBot(
+  service: ServiceName,
+  profileName: string,
+  bot: BotConfig
+): Promise<void> {
+  const config = await loadConfig();
+  const serviceProfiles = config.profiles[service];
+  if (!serviceProfiles) {
+    throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`);
+  }
+
+  const index = serviceProfiles.findIndex((p) => getProfileName(p) === profileName);
+  if (index === -1) {
+    throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`);
+  }
+
+  const existing = normalizeProfile(serviceProfiles[index]);
+  if (bot.enabled && existing.readOnly) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      'Cannot enable bot on a read-only profile',
+      'Remove --read-only or create a new profile.'
+    );
+  }
+
+  serviceProfiles[index] = { ...existing, bot };
+  await saveConfig(config);
+}
+
+/**
+ * Get bot configuration for a profile.
+ * Returns undefined if the profile has no bot config or does not exist.
+ */
+export async function getProfileBot(
+  service: ServiceName,
+  profileName: string
+): Promise<BotConfig | undefined> {
+  const config = await loadConfig();
+  const serviceProfiles = config.profiles[service];
+  if (!serviceProfiles) return undefined;
+
+  const entry = serviceProfiles.find((p) => getProfileName(p) === profileName);
+  if (!entry) return undefined;
+  if (typeof entry === 'string') return undefined;
+  return entry.bot;
 }
 
 export { CONFIG_DIR, CONFIG_FILE };
