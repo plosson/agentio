@@ -3,6 +3,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { ensureConfigDir, CONFIG_DIR } from '../config/config-manager';
 import type { ServiceName } from '../types/config';
+import { createChatSessionsTable } from '../services/conversation/session-store';
 import type {
   InboundMessage,
   OutboundMessage,
@@ -108,6 +109,9 @@ export async function initDatabase(): Promise<Database> {
   `);
 
   db.run('CREATE INDEX IF NOT EXISTS idx_whatsapp_keys ON whatsapp_auth_keys(profile, type)');
+
+  // Conversation bot session tracking
+  createChatSessionsTable(db);
 
   return db;
 }
