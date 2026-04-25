@@ -1,4 +1,5 @@
 import type { ServerConfig } from './server';
+import type { BotConfig } from './bot';
 
 export interface GatewayServerConfig {
   // Server binding (for running a gateway daemon)
@@ -53,6 +54,7 @@ export interface DaemonConfig extends BaseDaemonConfig {
 export interface ProfileEntry {
   name: string;
   readOnly?: boolean;
+  bot?: BotConfig;
 }
 
 // Helper type for backward compatibility during migration
