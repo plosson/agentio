@@ -20,12 +20,14 @@ import { scanWatchedFolders } from '../daemon/scheduler-core';
 import type { SchedulerJobView } from '../daemon/scheduler';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { addWatchedFolder, removeWatchedFolder } from './schedule-watch';
+import { abbrHome } from '../utils/output';
+import type { Config } from '../types/config';
 
-/** Replace $HOME prefix with `~` for display. */
-export function abbrHome(path: string, home: string = homedir()): string {
-  if (path === home) return '~';
-  if (path.startsWith(home + '/')) return '~' + path.slice(home.length);
-  return path;
+function getDaemonEndpoint(config: Config): { apiKey?: string; port: number } {
+  return {
+    apiKey: config.daemon?.apiKey,
+    port: config.daemon?.server?.port ?? 7890,
+  };
 }
 
 
@@ -73,23 +75,29 @@ export function registerScheduleCommands(program: Command): void {
         const updated = addWatchedFolder(config, absPath, host, Date.now());
         await saveConfig(updated);
 
-        const apiKey = updated.daemon?.apiKey;
-        const port = updated.daemon?.server?.port ?? 7890;
-        const { ensureDaemonRunning } = await import('../utils/daemon-ensure');
-        const daemonAlive = await ensureDaemonRunning();
+        const { apiKey, port } = getDaemonEndpoint(updated);
 
         console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
-        if (daemonAlive && apiKey) {
-          try {
-            await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
-              method: 'POST',
-              headers: { 'X-API-Key': apiKey },
-              signal: AbortSignal.timeout(1500),
-            });
-            console.log('Daemon reloaded — new schedules will fire immediately.');
-          } catch { /* ignore */ }
+
+        if (apiKey) {
+          const { ensureDaemonRunning } = await import('../utils/daemon-ensure');
+          const daemonAlive = await ensureDaemonRunning();
+          if (daemonAlive) {
+            try {
+              await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+                method: 'POST',
+                headers: { 'X-API-Key': apiKey },
+                signal: AbortSignal.timeout(1500),
+              });
+              console.log('Daemon reloaded — new schedules will fire immediately.');
+            } catch { /* ignore */ }
+          } else {
+            console.log('Watched folder added; the daemon will pick it up when it starts.');
+            console.log('Start it with: agentio daemon start');
+          }
         } else {
           console.log('Watched folder added; the daemon will pick it up when it starts.');
+          console.log('Install it with: agentio daemon install');
         }
       } catch (e) {
         handleError(e);
@@ -121,8 +129,7 @@ export function registerScheduleCommands(program: Command): void {
 
         if (opts.folders || folders.length === 0) return;
 
-        const apiKey = config.daemon?.apiKey;
-        const port = config.daemon?.server?.port ?? 7890;
+        const { apiKey, port } = getDaemonEndpoint(config);
 
         console.log('');
         console.log('Schedules:');
@@ -200,8 +207,7 @@ export function registerScheduleCommands(program: Command): void {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();
         const config = await loadConfig();
-        const apiKey = config.daemon?.apiKey;
-        const port = config.daemon?.server?.port ?? 7890;
+        const { apiKey, port } = getDaemonEndpoint(config);
 
         // Try daemon delegation
         if (apiKey) {
@@ -268,11 +274,18 @@ export function registerScheduleCommands(program: Command): void {
       try {
         const absPath = resolve(folder);
         const config = await loadConfig();
+        const before = config.daemon?.scheduler?.watchedFolders ?? [];
+        const wasWatched = before.some((f) => f.path === absPath);
+
+        if (!wasWatched) {
+          console.log(`Not watching ${abbrHome(absPath)}.`);
+          return;
+        }
+
         const updated = removeWatchedFolder(config, absPath);
         await saveConfig(updated);
 
-        const apiKey = updated.daemon?.apiKey;
-        const port = updated.daemon?.server?.port ?? 7890;
+        const { apiKey, port } = getDaemonEndpoint(updated);
         if (apiKey) {
           try {
             await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {

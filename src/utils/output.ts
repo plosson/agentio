@@ -1,3 +1,4 @@
+import { homedir } from 'os';
 import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
@@ -8,6 +9,13 @@ import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTra
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
 import type { DiscourseCategory, DiscourseTopic, DiscourseTopicDetail } from '../types/discourse';
+
+/** Replace $HOME prefix with `~` for display. */
+export function abbrHome(p: string, home: string = homedir()): string {
+  if (p === home) return '~';
+  if (p.startsWith(home + '/')) return '~' + p.slice(home.length);
+  return p;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';

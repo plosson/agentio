@@ -9,6 +9,7 @@ import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
 import { isDaemonInstalled } from '../utils/daemon-ensure';
 import { isDaemonAvailable } from '../daemon/client';
+import { abbrHome } from '../utils/output';
 
 export interface Check {
   name: string;
@@ -35,13 +36,6 @@ export function renderChecks(checks: Check[]): string {
     if (c.fix) lines.push(`    fix: ${c.fix}`);
   }
   return lines.join('\n');
-}
-
-function abbrHome(p: string): string {
-  const home = homedir();
-  if (p === home) return '~';
-  if (p.startsWith(home + '/')) return '~' + p.slice(home.length);
-  return p;
 }
 
 async function checkVault(): Promise<Check> {
