@@ -188,7 +188,7 @@ export function registerDaemonCommands(
     ? '[deprecated] alias of `agentio daemon`'
     : 'Daemon lifecycle management (messaging connections + scheduler)';
   const daemon = program
-    .command(baseName)
+    .command(baseName, opts.deprecated ? { hidden: true } : {})
     .description(description);
 
   if (opts.deprecated) {
