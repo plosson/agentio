@@ -543,35 +543,37 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  const listFolders = async () => {
-    const config = await loadConfig();
-    const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+  const printWatchedFolders = (folders: { path: string; host?: string }[]): void => {
     if (folders.length === 0) {
       console.log('No folders watched.');
       console.log('Add one with: agentio schedule watch <folder>');
       return;
     }
+    console.log('Watched folders:');
     for (const f of folders) {
       const pin = f.host ? ` (pinned to ${f.host})` : '';
-      console.log(`${abbrHome(f.path)}${pin}`);
+      console.log(`  ${abbrHome(f.path)}${pin}`);
     }
   };
 
-  schedule.command('list').description('List scheduled tasks in watched folders')
-    .option('--folder <path>', 'Filter to one folder')
-    .option('--folders', 'Show watched folders instead of schedules')
+  schedule.command('list').description('List watched folders and scheduled tasks')
+    .option('--folder <path>', 'Filter schedules to one folder')
+    .option('--folders', 'Show watched folders only (no schedules)')
     .action(async (opts: { folder?: string; folders?: boolean }) => {
       try {
-        if (opts.folders) {
-          await listFolders();
-          return;
-        }
-
         const config = await loadConfig();
+        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+
+        printWatchedFolders(folders);
+
+        if (opts.folders || folders.length === 0) return;
+
         const apiKey = config.daemon?.apiKey;
         const port = config.daemon?.server?.port ?? 7890;
 
-        // Try daemon first
+        console.log('');
+        console.log('Schedules:');
+
         if (apiKey) {
           try {
             const res = await fetch(`http://127.0.0.1:${port}/scheduler/list`, {
@@ -586,13 +588,6 @@ export function registerScheduleCommands(program: Command): void {
           } catch { /* fall through to FS mode */ }
         }
 
-        // Daemon not up: read watched folders from config, walk them ourselves
-        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
-        if (folders.length === 0) {
-          console.log('No folders watched.');
-          console.log('Add one with: agentio schedule watch <folder>');
-          return;
-        }
         const now = new Date();
         const host = getCurrentHost();
         const jobs = scanWatchedFolders(folders, host, now).map((j) => ({
@@ -910,7 +905,9 @@ export function registerScheduleCommands(program: Command): void {
     .action(async () => {
       console.error('warning: `agentio schedule watched` is deprecated; use `schedule list --folders`.');
       try {
-        await listFolders();
+        const config = await loadConfig();
+        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+        printWatchedFolders(folders);
       } catch (e) {
         handleError(e);
       }
