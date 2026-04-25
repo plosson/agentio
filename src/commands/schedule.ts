@@ -763,21 +763,32 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('runs').description('List past runs for a schedule')
+  const historyAction = async (id: string, opts: { folder?: string }) => {
+    try {
+      const folder = opts.folder ? resolve(opts.folder) : process.cwd();
+      const runs = listRuns(folder, id);
+      if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
+      for (const r of runs) {
+        const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
+        console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
+      }
+    } catch (e) {
+      handleError(e);
+    }
+  };
+
+  schedule.command('history').description('List past runs for a schedule')
+    .argument('<id>', 'Schedule id')
+    .option('--folder <path>', 'Folder (default: CWD)')
+    .action(historyAction);
+
+  schedule.command('runs', { hidden: true })
+    .description('[deprecated] alias of `history`')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
     .action(async (id: string, opts: { folder?: string }) => {
-      try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const runs = listRuns(folder, id);
-        if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
-        for (const r of runs) {
-          const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
-          console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
-        }
-      } catch (e) {
-        handleError(e);
-      }
+      console.error('warning: `agentio schedule runs` is deprecated; use `schedule history`.');
+      await historyAction(id, opts);
     });
 
   schedule.command('watch').description('Register a folder for the agentio daemon to scan')
