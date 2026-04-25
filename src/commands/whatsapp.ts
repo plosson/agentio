@@ -4,6 +4,7 @@ import { setProfile, resolveProfile, removeProfile } from '../config/config-mana
 import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
 import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
+import { ensureDaemonRunning } from '../utils/daemon-ensure';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
@@ -121,12 +122,10 @@ export function registerWhatsAppCommands(program: Command): void {
           console.log(`   Access: read-only`);
         }
 
-        // Check if gateway is running
-        const daemonRunning = await isDaemonAvailable();
+        // Check if gateway is running (offer to install/start if not)
+        const daemonRunning = await ensureDaemonRunning();
         if (!daemonRunning) {
-          console.log('\nDaemon is not running.');
-          console.log('Start the daemon first, then run this command again:');
-          console.log('  agentio daemon start');
+          console.log('\nCannot proceed without the daemon. Re-run after starting it:');
           console.log(`  agentio whatsapp profile add --profile ${profileName}`);
           return;
         }

@@ -853,33 +853,25 @@ export function registerScheduleCommands(program: Command): void {
         const apiKey = updated.daemon?.apiKey;
         const port = updated.daemon?.server?.port ?? 7890;
 
-        // Try to reload the daemon
-        let daemonAlive = false;
-        if (apiKey) {
+        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
+
+        // Ensure daemon is running (offer to install/start if not), then reload
+        const { ensureDaemonRunning } = await import('../utils/daemon-ensure');
+        const daemonAlive = await ensureDaemonRunning();
+        if (daemonAlive) {
           try {
-            const res = await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+            await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
               method: 'POST',
-              headers: { 'X-API-Key': apiKey },
+              headers: { 'X-API-Key': apiKey ?? '' },
               signal: AbortSignal.timeout(1500),
             });
-            daemonAlive = res.ok;
-          } catch { /* daemon not up */ }
-        }
-
-        console.log(`Watching ${abbrHome(absPath)}${host ? ` (pinned to ${host})` : ''}.`);
-        if (daemonAlive) {
-          console.log('Daemon reloaded — new schedules will fire immediately.');
-        } else {
-          const installed = process.platform === 'darwin'
-            ? existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'))
-            : existsSync('/etc/systemd/system/agentio-daemon.service');
-          if (!installed) {
-            console.log('The agentio daemon is not installed.');
-            console.log('Install it with: agentio daemon install');
-          } else {
-            console.log('The agentio daemon is installed but not running.');
-            console.log('Start it with: agentio daemon start');
+            console.log('Daemon reloaded — new schedules will fire immediately.');
+          } catch {
+            // Best-effort; ignore.
           }
+        } else {
+          console.log('Watched folder added; the daemon will pick it up when it starts.');
+          console.log('Start it with: agentio daemon start');
         }
       } catch (e) {
         handleError(e);
