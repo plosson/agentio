@@ -6,6 +6,8 @@ import { handleError } from '../utils/errors';
 import { vaultExists } from '../vault/vault';
 import { loadConfig } from '../config/config-manager';
 import { readPointer } from '../vault/pointer';
+import { isDaemonInstalled } from '../utils/daemon-ensure';
+import { isDaemonAvailable } from '../daemon/client';
 
 export interface Check {
   name: string;
@@ -46,24 +48,10 @@ async function checkVault(): Promise<Check> {
 }
 
 async function checkDaemon(): Promise<Check> {
-  const cfg = await loadConfig().catch(() => null);
-  const port = cfg?.daemon?.server?.port ?? 7890;
-  const apiKey = cfg?.daemon?.apiKey;
-
-  let healthy = false;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      headers: apiKey ? { 'X-API-Key': apiKey } : {},
-      signal: AbortSignal.timeout(1000),
-    });
-    healthy = res.ok;
-  } catch { /* not running */ }
-
+  const healthy = await isDaemonAvailable();
   if (healthy) return { name: 'Daemon', status: 'ok', detail: 'running' };
 
-  const installedDarwin = existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'));
-  const installedLinux = existsSync('/etc/systemd/system/agentio-daemon.service');
-  if (installedDarwin || installedLinux) {
+  if (isDaemonInstalled()) {
     return { name: 'Daemon', status: 'warn', detail: 'installed but not running', fix: 'agentio daemon start' };
   }
   return { name: 'Daemon', status: 'warn', detail: 'not installed', fix: 'agentio daemon install' };

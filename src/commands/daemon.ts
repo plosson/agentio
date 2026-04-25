@@ -107,6 +107,12 @@ const LAUNCH_AGENTS_DIR = join(homedir(), 'Library', 'LaunchAgents');
 const DAEMON_PLIST_PATH = join(LAUNCH_AGENTS_DIR, DAEMON_PLIST_FILE);
 const DAEMON_LOG_PATH = join(homedir(), '.config', 'agentio', 'daemon.log');
 
+/**
+ * Darwin-specific install check used by the daemon install/uninstall/start/stop
+ * actions in this file. Kept separate from the cross-platform isDaemonInstalled()
+ * in utils/daemon-ensure because it checks the canonical plist path constant
+ * defined above and is only ever called on macOS code paths.
+ */
 function isDaemonInstalledDarwin(): boolean {
   return existsSync(DAEMON_PLIST_PATH);
 }

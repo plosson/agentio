@@ -4,7 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { spawnSync } from 'bun';
 import { isInteractive } from './interactive';
-import { loadConfig } from '../config/config-manager';
+import { isDaemonAvailable } from '../daemon/client';
 
 export type DaemonAction = 'running' | 'start' | 'install';
 
@@ -18,7 +18,7 @@ export function decideDaemonAction(input: {
   return 'install';
 }
 
-function isDaemonInstalled(): boolean {
+export function isDaemonInstalled(): boolean {
   if (process.platform === 'darwin') {
     return existsSync(join(homedir(), 'Library', 'LaunchAgents', 'me.agentio.daemon.plist'));
   }
@@ -29,23 +29,7 @@ function isDaemonInstalled(): boolean {
 }
 
 async function isDaemonHealthy(): Promise<boolean> {
-  let cfg;
-  try {
-    cfg = await loadConfig();
-  } catch {
-    return false;
-  }
-  const port = cfg.daemon?.server?.port ?? 7890;
-  const apiKey = cfg.daemon?.apiKey;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/health`, {
-      headers: apiKey ? { 'X-API-Key': apiKey } : {},
-      signal: AbortSignal.timeout(1000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  return isDaemonAvailable();
 }
 
 /**
@@ -71,6 +55,8 @@ export async function ensureDaemonRunning(opts: { autoYes?: boolean } = {}): Pro
       cmd: [process.execPath, ...process.argv.slice(1, 2), 'daemon', 'install'],
       stdout: 'inherit', stderr: 'inherit',
     });
+    // Give the daemon a moment to come up after install (launchctl bootstrap is async).
+    await new Promise((r) => setTimeout(r, 1500));
     return await isDaemonHealthy();
   }
   if (action === 'start') {
