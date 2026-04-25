@@ -2,7 +2,7 @@ import type { Schedule } from '../../types/schedule';
 
 /**
  * Return the next N scheduled run times, strictly after `now`.
- * All Date math uses local time (same timezone launchd schedules against).
+ * All Date math uses local time (the daemon's local timezone).
  */
 export function nextRuns(schedule: Schedule, count: number, now: Date = new Date()): Date[] {
   const runs: Date[] = [];

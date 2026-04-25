@@ -689,9 +689,9 @@ export function registerDaemonCommands(
   // Teleport command
   daemon
     .command('teleport')
-    .description('Transfer auth state to remote gateway')
-    .argument('<url>', 'Remote gateway URL (e.g., https://my-gateway.com)')
-    .option('--api-key <key>', 'Remote gateway API key (will prompt if not provided)')
+    .description('Transfer auth state to a remote daemon')
+    .argument('<url>', 'Remote daemon URL (e.g., https://my-daemon.example.com)')
+    .option('--api-key <key>', 'Remote daemon API key (will prompt if not provided)')
     .option('--service <service>', 'Service to teleport (default: all)', 'all')
     .action(async (url: string, options) => {
       try {
@@ -705,7 +705,7 @@ export function registerDaemonCommands(
             throw new CliError('INVALID_PARAMS', 'API key is required', 'Provide --api-key or configure daemon profile');
           }
           key = await password({
-            message: 'Enter remote gateway API key:',
+            message: 'Enter remote daemon API key:',
             mask: '*',
           });
         }
@@ -731,7 +731,7 @@ export function registerDaemonCommands(
                 continue;
               }
 
-              // Send to remote gateway
+              // Send to remote daemon
               const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profileName)}`, {
                 method: 'POST',
                 headers: {
@@ -754,7 +754,7 @@ export function registerDaemonCommands(
         }
 
         console.log('\nTeleport complete!');
-        console.log('You can now stop the local gateway and use the remote one.');
+        console.log('You can now stop the local daemon and use the remote one.');
       } catch (error) {
         handleError(error);
       }

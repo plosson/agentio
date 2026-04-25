@@ -6,7 +6,7 @@ import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
-import { getGatewayClient, isGatewayAvailable } from '../daemon/client';
+import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
@@ -187,8 +187,8 @@ export function registerTelegramCommands(program: Command): void {
       }
     });
 
-  // Inbox subcommands (requires gateway)
-  const inbox = telegram.command('inbox').description('Inbox operations (requires gateway)');
+  // Inbox subcommands (requires daemon)
+  const inbox = telegram.command('inbox').description('Inbox operations (requires daemon)');
 
   inbox
     .command('pull')
@@ -206,7 +206,7 @@ export function registerTelegramCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const messages = await client.inboxPull({
           service: 'telegram',
           profile: profileResult.profile,
@@ -225,7 +225,7 @@ export function registerTelegramCommands(program: Command): void {
     .argument('<id>', 'Message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const message = await client.inboxGet(id);
         if (!message) {
           throw new CliError('NOT_FOUND', `Message not found: ${id}`);
@@ -242,7 +242,7 @@ export function registerTelegramCommands(program: Command): void {
     .argument('<id>', 'Message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const success = await client.inboxAck(id);
         printInboxAckResult(success, id);
       } catch (error) {
@@ -265,7 +265,7 @@ export function registerTelegramCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         // Get the inbox message to determine the profile for read-only check
         const inboxMessage = await client.inboxGet(id);
         if (inboxMessage) {
@@ -285,7 +285,7 @@ export function registerTelegramCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('telegram', options.profile);
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const stats = await client.inboxStats({
           service: 'telegram',
           profile: profileResult.profile ?? undefined,
@@ -296,8 +296,8 @@ export function registerTelegramCommands(program: Command): void {
       }
     });
 
-  // Outbox subcommands (requires gateway)
-  const outbox = telegram.command('outbox').description('Outbox operations (requires gateway)');
+  // Outbox subcommands (requires daemon)
+  const outbox = telegram.command('outbox').description('Outbox operations (requires daemon)');
 
   outbox
     .command('send')
@@ -337,7 +337,7 @@ export function registerTelegramCommands(program: Command): void {
         }
 
         await enforceWriteAccess('telegram', profileResult.profile, 'send message');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const result = await client.outboxSend({
           service: 'telegram',
           profile: profileResult.profile,
@@ -357,7 +357,7 @@ export function registerTelegramCommands(program: Command): void {
     .argument('<id>', 'Outbox message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const message = await client.outboxStatus(id);
         if (!message) {
           throw new CliError('NOT_FOUND', `Message not found: ${id}`);
@@ -377,7 +377,7 @@ export function registerTelegramCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('telegram', options.profile);
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const messages = await client.outboxList({
           service: 'telegram',
           profile: profileResult.profile ?? undefined,

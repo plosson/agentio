@@ -138,7 +138,7 @@ async function request<T>(method: string, endpoint: string, body?: unknown): Pro
 /**
  * Gateway client for CLI commands
  */
-export class GatewayClient {
+export class DaemonClient {
   /**
    * Check gateway health
    */
@@ -392,18 +392,18 @@ export class GatewayClient {
 /**
  * Get a gateway client instance
  */
-export async function getGatewayClient(): Promise<GatewayClient> {
+export async function getDaemonClient(): Promise<DaemonClient> {
   // Ensure config is loaded
   await getDaemonConnection();
-  return new GatewayClient();
+  return new DaemonClient();
 }
 
 /**
  * Check if gateway is available
  */
-export async function isGatewayAvailable(): Promise<boolean> {
+export async function isDaemonAvailable(): Promise<boolean> {
   try {
-    const client = await getGatewayClient();
+    const client = await getDaemonClient();
     await client.health();
     return true;
   } catch {

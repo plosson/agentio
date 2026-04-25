@@ -1,7 +1,6 @@
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import type { ServiceName, Config, DaemonConfig } from '../types/config';
-import type { GatewayConfig } from './types';
 import { startScheduler, stopScheduler } from './scheduler';
 import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
@@ -23,11 +22,11 @@ let outboxInterval: ReturnType<typeof setInterval> | null = null;
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Get the gateway configuration from config.json
+ * Get the daemon configuration from the vault.
  */
-export async function getDaemonConfig(): Promise<GatewayConfig> {
+export async function getDaemonConfig(): Promise<DaemonConfig> {
   const config = await loadConfig();
-  return (config as unknown as { gateway?: GatewayConfig }).gateway ?? {};
+  return config.daemon ?? {};
 }
 
 /**
@@ -117,7 +116,7 @@ async function processOutbox(): Promise<void> {
 /**
  * Run retention cleanup
  */
-async function runCleanup(config: GatewayConfig): Promise<void> {
+async function runCleanup(config: DaemonConfig): Promise<void> {
   const retention = config.retention ?? {};
 
   if (retention.doneMessagesDays && retention.doneMessagesDays > 0) {
@@ -208,7 +207,7 @@ async function shutdownAdapters(): Promise<void> {
 }
 
 /**
- * Start the gateway server (runs in foreground, managed by systemd)
+ * Start the daemon (runs in foreground, managed by launchd on macOS / systemd on Linux).
  */
 export async function startDaemon(): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);

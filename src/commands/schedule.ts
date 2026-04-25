@@ -382,9 +382,9 @@ function renderJobs(jobs: Array<{
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
-    .description('Schedule prompts to run on a cron-like schedule via launchd');
+    .description('Schedule prompts to run on a cron-like schedule (executed by the agentio daemon)');
 
-  schedule.command('add').description('Add or update a schedule (writes frontmatter + installs plist)')
+  schedule.command('add').description('Add or update a schedule (writes frontmatter to a .run.md file)')
     .argument('<file>', 'Path to the .run.md file (must end in .run.md)')
     .option('--folder <path>', 'Folder containing the file (default: CWD)')
     .option('--schedule <type>', 'manual | daily | weekly | monthly | interval')
@@ -583,7 +583,7 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('sync').description('Reconcile launchd plists with *.run.md files')
+  schedule.command('sync').description('Validate .run.md files in a folder (id collisions, missing frontmatter, .gitignore scaffolding)')
     .option('--folder <path>', 'Folder to sync (default: CWD)')
     .option('-y, --yes', 'Non-interactive')
     .action(async (opts: { folder?: string; yes?: boolean }) => {
@@ -653,7 +653,7 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('remove').description('Delete a schedule and uninstall its plist')
+  schedule.command('remove').description('Delete a schedule (.run.md file)')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
     .action(async (id: string, opts: { folder?: string }) => {
@@ -678,7 +678,7 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('run').description('Run a schedule immediately')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Folder (default: CWD)')
-    .option('-q, --quiet', 'Suppress streaming child output to stdout/stderr (used by launchd)')
+    .option('-q, --quiet', 'Suppress streaming child output to stdout/stderr (used when invoked by the daemon)')
     .action(async (id: string, opts: { folder?: string; quiet?: boolean }) => {
       try {
         const folder = opts.folder ? resolve(opts.folder) : process.cwd();

@@ -32,7 +32,7 @@ import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
 import type { WhatsAppCredentials } from '../types/whatsapp';
-import { isGatewayAvailable, getGatewayClient } from '../daemon/client';
+import { isDaemonAvailable, getDaemonClient } from '../daemon/client';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -191,28 +191,28 @@ async function createServiceClient(
       const creds = credentials as WhatsAppCredentials;
       return {
         validate: async (): Promise<ValidationResult> => {
-          // Check if gateway is running
-          const gatewayAvailable = await isGatewayAvailable();
-          if (!gatewayAvailable) {
+          // Check if daemon is running
+          const daemonAvailable = await isDaemonAvailable();
+          if (!daemonAvailable) {
             if (creds.paired) {
               return {
                 valid: true,
-                info: `${creds.phoneNumber || 'paired'} (gateway not running)`,
+                info: `${creds.phoneNumber || 'paired'} (daemon not running)`,
               };
             }
-            return { valid: false, error: 'not paired (gateway not running)' };
+            return { valid: false, error: 'not paired (daemon not running)' };
           }
 
-          // Check connection status via gateway - this is the source of truth
+          // Check connection status via daemon - this is the source of truth
           try {
-            const client = await getGatewayClient();
+            const client = await getDaemonClient();
             const status = await client.status();
             const adapter = status.adapters.find(
               (a) => a.service === 'whatsapp' && a.profile === profileName
             );
 
             if (adapter?.connected) {
-              // Connected via gateway = working
+              // Connected via daemon = working
               return { valid: true, info: creds.phoneNumber || 'connected' };
             } else if (adapter) {
               // Adapter exists but not connected
@@ -221,10 +221,10 @@ async function createServiceClient(
                 info: `${creds.phoneNumber || 'configured'} (disconnected)`,
               };
             } else if (creds.paired) {
-              // Has paired credentials but no adapter in gateway
+              // Has paired credentials but no adapter in daemon
               return {
                 valid: true,
-                info: `${creds.phoneNumber || 'paired'} (not loaded in gateway)`,
+                info: `${creds.phoneNumber || 'paired'} (not loaded in daemon)`,
               };
             } else {
               return { valid: false, error: 'not paired' };
@@ -233,10 +233,10 @@ async function createServiceClient(
             if (creds.paired) {
               return {
                 valid: true,
-                info: `${creds.phoneNumber || 'paired'} (gateway error)`,
+                info: `${creds.phoneNumber || 'paired'} (daemon error)`,
               };
             }
-            return { valid: false, error: 'gateway error' };
+            return { valid: false, error: 'daemon error' };
           }
         },
       };

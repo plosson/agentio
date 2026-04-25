@@ -16,7 +16,7 @@ export function listRuns(folder: string, id: string): RunEntry[] {
   const dir = join(folder, '.agentio', 'runs', id);
   if (!existsSync(dir)) return [];
   const files = readdirSync(dir)
-    .filter((f) => f.endsWith('.log') && f !== 'launchd.log')
+    .filter((f) => f.endsWith('.log'))
     .sort()
     .reverse();
   return files.map((file) => {

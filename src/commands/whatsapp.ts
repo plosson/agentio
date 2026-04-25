@@ -3,7 +3,7 @@ import { setCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, resolveProfile, removeProfile } from '../config/config-manager';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt, confirm } from '../utils/stdin';
-import { getGatewayClient, isGatewayAvailable } from '../daemon/client';
+import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
 import {
   printInboxMessageList,
@@ -29,7 +29,7 @@ import qrcode from 'qrcode-terminal';
  * Run the WhatsApp pairing flow - polls for QR code until connected
  */
 async function runPairingFlow(profileName: string): Promise<boolean> {
-  const client = await getGatewayClient();
+  const client = await getDaemonClient();
   let lastQr = '';
 
   console.log('\nWaiting for QR code... (Ctrl+C to cancel)\n');
@@ -78,7 +78,7 @@ async function runPairingFlow(profileName: string): Promise<boolean> {
 export function registerWhatsAppCommands(program: Command): void {
   const whatsapp = program
     .command('whatsapp')
-    .description('WhatsApp operations (requires gateway)');
+    .description('WhatsApp operations (requires daemon)');
 
   // Profile management
   const profile = whatsapp.command('profile').description('Manage WhatsApp profiles');
@@ -122,8 +122,8 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         // Check if gateway is running
-        const gatewayRunning = await isGatewayAvailable();
-        if (!gatewayRunning) {
+        const daemonRunning = await isDaemonAvailable();
+        if (!daemonRunning) {
           console.log('\nDaemon is not running.');
           console.log('Start the daemon first, then run this command again:');
           console.log('  agentio daemon start');
@@ -192,7 +192,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await removeProfile('whatsapp', profileName);
-        // Note: Auth state in gateway DB will be cleaned up when gateway restarts
+        // Note: Auth state in daemon DB will be cleaned up when daemon restarts
         // or we could add a direct cleanup call here
 
         console.log(`Profile "${profileName}" removed`);
@@ -202,8 +202,8 @@ export function registerWhatsAppCommands(program: Command): void {
       }
     });
 
-  // Inbox subcommands (requires gateway)
-  const inbox = whatsapp.command('inbox').description('Inbox operations (requires gateway)');
+  // Inbox subcommands (requires daemon)
+  const inbox = whatsapp.command('inbox').description('Inbox operations (requires daemon)');
 
   inbox
     .command('pull')
@@ -222,7 +222,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve conversation name to JID if needed
         let conversationId = options.conversation;
@@ -253,7 +253,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .argument('<id>', 'Message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const message = await client.inboxGet(id);
         if (!message) {
           throw new CliError('NOT_FOUND', `Message not found: ${id}`);
@@ -270,7 +270,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .argument('<id>', 'Message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const success = await client.inboxAck(id);
         printInboxAckResult(success, id);
       } catch (error) {
@@ -293,7 +293,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         // Get the inbox message to determine the profile for read-only check
         const inboxMessage = await client.inboxGet(id);
         if (inboxMessage) {
@@ -313,7 +313,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const stats = await client.inboxStats({
           service: 'whatsapp',
           profile: profileResult.profile ?? undefined,
@@ -324,8 +324,8 @@ export function registerWhatsAppCommands(program: Command): void {
       }
     });
 
-  // Outbox subcommands (requires gateway)
-  const outbox = whatsapp.command('outbox').description('Outbox operations (requires gateway)');
+  // Outbox subcommands (requires daemon)
+  const outbox = whatsapp.command('outbox').description('Outbox operations (requires daemon)');
 
   outbox
     .command('send')
@@ -380,7 +380,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'send message');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve destination
         let conversationId = options.to;
@@ -418,7 +418,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .argument('<id>', 'Outbox message ID')
     .action(async (id: string) => {
       try {
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const message = await client.outboxStatus(id);
         if (!message) {
           throw new CliError('NOT_FOUND', `Message not found: ${id}`);
@@ -438,7 +438,7 @@ export function registerWhatsAppCommands(program: Command): void {
     .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const messages = await client.outboxList({
           service: 'whatsapp',
           profile: profileResult.profile ?? undefined,
@@ -452,7 +452,7 @@ export function registerWhatsAppCommands(program: Command): void {
     });
 
   // Group subcommands
-  const group = whatsapp.command('group').description('Group management (requires gateway)');
+  const group = whatsapp.command('group').description('Group management (requires daemon)');
 
   group
     .command('list')
@@ -468,7 +468,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const groups = await client.whatsappGroupList(profileResult.profile);
         printWhatsAppGroupList(groups);
       } catch (error) {
@@ -491,7 +491,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -532,7 +532,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'create group');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const group = await client.whatsappGroupCreate(
           profileResult.profile,
           name,
@@ -568,7 +568,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'update group');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -608,7 +608,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'add participants');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -653,7 +653,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'remove participants');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -698,7 +698,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'promote participants');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -743,7 +743,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'demote participants');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -787,7 +787,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'leave group');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -828,7 +828,7 @@ export function registerWhatsAppCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Multiple profiles exist. Use --profile to specify one.');
         }
 
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
 
         // Resolve name to ID if needed
         let groupId = id;
@@ -863,7 +863,7 @@ export function registerWhatsAppCommands(program: Command): void {
         }
 
         await enforceWriteAccess('whatsapp', profileResult.profile, 'join group');
-        const client = await getGatewayClient();
+        const client = await getDaemonClient();
         const groupId = await client.whatsappGroupJoin(profileResult.profile, code);
         printWhatsAppGroupJoined(groupId);
       } catch (error) {
