@@ -29,7 +29,8 @@ export function createProfileCommands<T>(
         const { profiles } = result[0];
 
         if (profiles.length === 0) {
-          console.log('No profiles configured');
+          console.log(`No ${displayName} profiles configured.`);
+          console.log(`Run: agentio ${service} profile add`);
         } else {
           for (const entry of profiles) {
             const credentials = await getCredentials<T>(service, entry.name);

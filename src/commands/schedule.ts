@@ -366,7 +366,11 @@ function renderJobs(jobs: Array<{
   const filtered = filterFolder
     ? jobs.filter((j) => j.folder === resolve(filterFolder))
     : jobs;
-  if (filtered.length === 0) { console.log('No schedules.'); return; }
+  if (filtered.length === 0) {
+    console.log('No schedules.');
+    console.log('Add one with: agentio schedule add <folder>/<id>.run.md');
+    return;
+  }
   const widths = {
     id: Math.max('ID'.length, ...filtered.map((r) => r.id.length)),
     folder: Math.max('FOLDER'.length, ...filtered.map((r) => abbrHome(r.folder).length)),
