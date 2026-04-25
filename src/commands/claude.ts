@@ -200,7 +200,7 @@ async function uninstallPluginCmd(name: string): Promise<boolean> {
 
 export function registerClaudeCommands(program: Command): void {
   const claude = program
-    .command('claude')
+    .command('claude', { hidden: true })
     .description('Claude Code plugin operations');
 
   // install command - auto-detects marketplace vs plugin

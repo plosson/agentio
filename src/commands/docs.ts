@@ -117,7 +117,7 @@ function generateDocs(program: Command, services?: string[]): string {
 
 export function registerDocsCommand(program: Command): void {
   program
-    .command('docs')
+    .command('docs', { hidden: true })
     .description('Output CLI reference for LLMs')
     .option('--service <names>', 'Filter by service (comma-separated)', (val) => val.split(',').map((s: string) => s.trim()))
     .action((options) => {
