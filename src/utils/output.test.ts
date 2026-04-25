@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { abbrHome } from '../utils/output';
+import { abbrHome } from './output';
 
 describe('abbrHome', () => {
   test('replaces $HOME prefix with ~', () => {

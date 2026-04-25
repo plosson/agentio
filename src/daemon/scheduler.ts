@@ -1,9 +1,11 @@
 import type { WatchedFolder } from '../types/config';
 import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { scanWatchedFolders, type ScheduledJob } from './scheduler-core';
 import { runSchedule, type Spawner } from '../services/schedule/runner';
 import { readState } from '../services/schedule/state';
-import { parseFrontmatter } from '../services/schedule/frontmatter';
+import { parseFrontmatter, mergeConfig } from '../services/schedule/frontmatter';
 import { getCurrentHost } from '../services/schedule/host';
 import { prevRun } from '../services/schedule/schedule-calculator';
 
@@ -132,11 +134,26 @@ export async function runOneJob(folder: string, id: string): Promise<{
   reason?: string;
 }> {
   if (!currentOpts) return { started: false, reason: 'scheduler not running' };
-  const host = currentOpts.currentHost ?? getCurrentHost();
-  const jobs = scanWatchedFolders(currentOpts.watchedFolders, host, new Date());
-  const job = jobs.find((j) => j.folder === folder && j.id === id);
-  if (!job) return { started: false, reason: 'job not found or disabled' };
+
+  const watched = currentOpts.watchedFolders.some((f) => f.path === folder);
+  if (!watched) return { started: false, reason: 'folder not watched' };
+
+  const filePath = join(folder, `${id}.run.md`);
+  if (!existsSync(filePath)) return { started: false, reason: 'no .run.md found for this id' };
+
+  const raw = await readFile(filePath, 'utf-8');
+  const parsed = parseFrontmatter(raw);
+  const cfg = mergeConfig({}, parsed.config);
+
+  const job: ScheduledJob = {
+    folder,
+    id,
+    filePath,
+    config: cfg,
+    nextRun: new Date(),
+  };
   if (inFlight.has(jobKey(job))) return { started: false, reason: 'already running' };
+
   fireJob(job, currentOpts).catch((e) => console.error('[scheduler]', e));
   return { started: true };
 }

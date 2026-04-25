@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { EventEmitter } from 'events';
-import { startScheduler, stopScheduler } from './scheduler';
+import { startScheduler, stopScheduler, runOneJob } from './scheduler';
 
 function fakeChild(autoClose = true) {
   const c = new EventEmitter() as any;
@@ -155,5 +155,33 @@ describe('scheduler', () => {
 
     await new Promise((r) => setTimeout(r, 200));
     expect(spawns.length).toBe(0);
+  });
+
+  test('runOneJob bypasses host pinning for manual runs', async () => {
+    writeFileSync(join(root, 'x.run.md'),
+      '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\nenabled: true\nhost: other-host\n---\nbody\n');
+
+    const spawns: number[] = [];
+    const spawner = () => { spawns.push(1); return fakeChild(); };
+
+    await startScheduler({
+      watchedFolders: [{ path: root, addedAt: 0 }],
+      currentHost: 'me',     // mismatched on purpose
+      tickIntervalMs: 60_000,  // long interval — we don't want a tick to fire
+      spawner,
+      claudePath: '/bin/true',
+      now: () => new Date(),
+    });
+
+    // Wait for initial tick to settle (it should NOT fire — host mismatch)
+    await new Promise((r) => setTimeout(r, 100));
+    expect(spawns.length).toBe(0);
+
+    // Manual run — should fire despite host mismatch
+    const result = await runOneJob(root, 'x');
+    expect(result.started).toBe(true);
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(spawns.length).toBe(1);
   });
 });
