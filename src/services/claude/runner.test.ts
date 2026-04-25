@@ -142,6 +142,34 @@ describe('executeClaude', () => {
     expect(result.exitCode).toBe(7);
   });
 
+  test('handles JSON line split across multiple data chunks', async () => {
+    const initLine = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'split-sess' });
+    const half = Math.floor(initLine.length / 2);
+    const part1 = initLine.slice(0, half);
+    const part2 = initLine.slice(half) + '\n';
+
+    const child = new FakeChild();
+    const spawner: Spawner = () => {
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from(part1));
+        child.stdout.emit('data', Buffer.from(part2));
+        child.emit('close', 0);
+      });
+      return child as unknown as ReturnType<Spawner>;
+    };
+
+    const result = await executeClaude({
+      claudePath: '/fake/claude',
+      promptBody: 'hi',
+      model: 'sonnet',
+      permissionMode: 'default',
+      env: {},
+      cwd: '/tmp',
+      spawner,
+    });
+    expect(result.sessionId).toBe('split-sess');
+  });
+
   test('appends --append-system-prompt when given', async () => {
     const { spawner, capturedArgs } = makeSpawner([], 0);
     await executeClaude({

@@ -13,7 +13,7 @@ export interface ExecuteClaudeOpts {
   promptBody: string;
   model: Model;
   permissionMode: PermissionMode;
-  env: Record<string, string>;
+  env: NodeJS.ProcessEnv;
   cwd: string;
   resumeSessionId?: string;
   appendSystemPrompt?: string;
