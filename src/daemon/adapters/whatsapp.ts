@@ -19,7 +19,7 @@ import type {
   WhatsAppGroupParticipant,
   WhatsAppParticipantAction,
 } from '../../types/whatsapp';
-import { CONFIG_DIR } from '../../config/config-manager';
+import { CONFIG_DIR, loadConfig } from '../../config/config-manager';
 import { BaseAdapter, type AdapterInboundMessage, type AdapterOutboundMessage, type SendResult, type ConnectionState as AdapterConnectionState } from './types';
 import { useSQLiteAuthState, hasAuthState } from './whatsapp-auth';
 
@@ -200,10 +200,24 @@ export class WhatsAppAdapter extends BaseAdapter {
         console.log(`[whatsapp:${profile}] Reconnecting in ${delay / 1000}s...`);
         this.setConnected(profile, false, 'Reconnecting...');
 
-        setTimeout(() => {
-          if (!connection.shouldStop) {
-            this.createSocket(profile);
+        setTimeout(async () => {
+          if (connection.shouldStop) return;
+          // Bail if the profile was removed from config since we last tried.
+          try {
+            const cfg = await loadConfig();
+            const exists = (cfg.profiles.whatsapp ?? []).some(
+              (p) => (typeof p === 'string' ? p : p.name) === profile,
+            );
+            if (!exists) {
+              console.log(`[whatsapp:${profile}] profile removed; stopping reconnect`);
+              connection.shouldStop = true;
+              this.setConnected(profile, false, 'Profile removed');
+              return;
+            }
+          } catch {
+            // If config can't be loaded, fall through and try anyway.
           }
+          this.createSocket(profile);
         }, delay);
       } else {
         this.setConnected(profile, false, 'Disconnected');

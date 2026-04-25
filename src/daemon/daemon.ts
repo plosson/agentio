@@ -240,7 +240,7 @@ export async function startDaemon(): Promise<void> {
     // Close database
     closeDatabase();
 
-    console.log('Gateway stopped');
+    console.log('Daemon stopped');
     process.exit(0);
   };
 
@@ -304,12 +304,12 @@ export async function startDaemon(): Promise<void> {
       console.log('[scheduler] no watched folders');
     }
 
-    console.log('Gateway ready');
+    console.log('Daemon ready');
 
     // Keep running
     await new Promise(() => {}); // Wait forever
   } catch (error) {
-    console.error('Gateway error:', error instanceof Error ? error.message : error);
+    console.error('Daemon error:', error instanceof Error ? error.message : error);
     process.exit(1);
   }
 }

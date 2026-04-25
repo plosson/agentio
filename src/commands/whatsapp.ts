@@ -124,9 +124,9 @@ export function registerWhatsAppCommands(program: Command): void {
         // Check if gateway is running
         const gatewayRunning = await isGatewayAvailable();
         if (!gatewayRunning) {
-          console.log('\nGateway is not running.');
-          console.log('Start the gateway first, then run this command again:');
-          console.log('  agentio gateway start');
+          console.log('\nDaemon is not running.');
+          console.log('Start the daemon first, then run this command again:');
+          console.log('  agentio daemon start');
           console.log(`  agentio whatsapp profile add --profile ${profileName}`);
           return;
         }
@@ -196,7 +196,7 @@ export function registerWhatsAppCommands(program: Command): void {
         // or we could add a direct cleanup call here
 
         console.log(`Profile "${profileName}" removed`);
-        console.log('Note: Restart the gateway to fully disconnect this session.');
+        console.log('Note: if the daemon is running, it will stop reconnecting this profile within ~30 seconds.');
       } catch (error) {
         handleError(error);
       }
