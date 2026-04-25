@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { appendFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { FrontmatterConfig } from '../../types/schedule';
-import { shellEnv, locateClaude } from './claude-binary';
+import { shellEnv, locateClaude } from '../claude/claude-binary';
 import { updateState } from './state';
 
 export type Spawner = (
