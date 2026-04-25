@@ -14,6 +14,7 @@ export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'error';
   detail?: string;
+  items?: string[];
   fix?: string;
 }
 
@@ -30,9 +31,17 @@ export function renderChecks(checks: Check[]): string {
     const head = `${symbol} ${c.name}`.padEnd(20);
     const detail = c.detail ? `— ${c.detail}` : '';
     lines.push(`${head} ${detail}`.trimEnd());
+    if (c.items) for (const it of c.items) lines.push(`    ${it}`);
     if (c.fix) lines.push(`    fix: ${c.fix}`);
   }
   return lines.join('\n');
+}
+
+function abbrHome(p: string): string {
+  const home = homedir();
+  if (p === home) return '~';
+  if (p.startsWith(home + '/')) return '~' + p.slice(home.length);
+  return p;
 }
 
 async function checkVault(): Promise<Check> {
@@ -90,16 +99,27 @@ async function checkLegacyPlists(): Promise<Check | null> {
 function checkWatchedFolders(cfg: Config | null): Check | null {
   const folders = cfg?.daemon?.scheduler?.watchedFolders ?? [];
   if (folders.length === 0) return null;
+  const items = folders.map((f) => {
+    const pin = f.host ? ` (pinned to ${f.host})` : '';
+    const missing = !existsSync(f.path) ? ' [missing]' : '';
+    return `${abbrHome(f.path)}${pin}${missing}`;
+  });
   const missing = folders.filter((f) => !existsSync(f.path));
   if (missing.length > 0) {
     return {
       name: 'Watched folders',
       status: 'warn',
-      detail: `${missing.length} folder(s) missing on disk: ${missing.map((m) => m.path).join(', ')}`,
+      detail: `${folders.length} folder(s), ${missing.length} missing on disk`,
+      items,
       fix: `agentio schedule unwatch <folder>`,
     };
   }
-  return { name: 'Watched folders', status: 'ok', detail: `${folders.length} folder(s)` };
+  return {
+    name: 'Watched folders',
+    status: 'ok',
+    detail: `${folders.length} folder(s)`,
+    items,
+  };
 }
 
 export function registerDoctorCommand(program: Command): void {
