@@ -540,10 +540,30 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
+  const listFolders = async () => {
+    const config = await loadConfig();
+    const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+    if (folders.length === 0) {
+      console.log('No folders watched.');
+      console.log('Add one with: agentio schedule watch <folder>');
+      return;
+    }
+    for (const f of folders) {
+      const pin = f.host ? ` (pinned to ${f.host})` : '';
+      console.log(`${abbrHome(f.path)}${pin}`);
+    }
+  };
+
   schedule.command('list').description('List scheduled tasks in watched folders')
     .option('--folder <path>', 'Filter to one folder')
-    .action(async (opts: { folder?: string }) => {
+    .option('--folders', 'Show watched folders instead of schedules')
+    .action(async (opts: { folder?: string; folders?: boolean }) => {
       try {
+        if (opts.folders) {
+          await listFolders();
+          return;
+        }
+
         const config = await loadConfig();
         const apiKey = config.daemon?.apiKey;
         const port = config.daemon?.server?.port ?? 7890;
@@ -880,20 +900,12 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('watched').description('List watched folders')
+  schedule.command('watched', { hidden: true })
+    .description('[deprecated] alias of `list --folders`')
     .action(async () => {
+      console.error('warning: `agentio schedule watched` is deprecated; use `schedule list --folders`.');
       try {
-        const config = await loadConfig();
-        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
-        if (folders.length === 0) {
-          console.log('No folders watched.');
-          console.log('Add one with: agentio schedule watch <folder>');
-          return;
-        }
-        for (const f of folders) {
-          const pin = f.host ? ` (pinned to ${f.host})` : '';
-          console.log(`${abbrHome(f.path)}${pin}`);
-        }
+        await listFolders();
       } catch (e) {
         handleError(e);
       }
