@@ -3,6 +3,7 @@
 import './polyfills';
 import { Command } from 'commander';
 // Services (alphabetical)
+import { registerConfluenceCommands } from './commands/confluence';
 import { registerDiscourseCommands } from './commands/discourse';
 import { registerGCalCommands } from './commands/gcal';
 import { registerGChatCommands } from './commands/gchat';
@@ -58,6 +59,7 @@ program
   .version(getVersion());
 
 // Services (alphabetical)
+registerConfluenceCommands(program);
 registerDiscourseCommands(program);
 registerGCalCommands(program);
 registerGChatCommands(program);
@@ -113,7 +115,7 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
 // Services
 [
   'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
-  'github', 'jira', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+  'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
 ].forEach((n) => setGroup(n, 'Services'));
 
 // Automation
