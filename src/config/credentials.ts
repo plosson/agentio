@@ -21,6 +21,10 @@ export const JIRA_OAUTH_CONFIG = {
   clientSecret: reveal(JIRA_CLIENT_SECRET_ENC),
 };
 
+// Atlassian OAuth client is shared between JIRA and Confluence (same Atlassian app).
+// The granted scopes determine which products the access token can call.
+export const ATLASSIAN_OAUTH_CONFIG = JIRA_OAUTH_CONFIG;
+
 // GitHub OAuth credentials
 const GITHUB_CLIENT_ID = 'Ov23liR1X63IRAf6eONJ';
 const GITHUB_CLIENT_SECRET_ENC = 'Sztvs0AEbI5enapA40GFdqQc4RMgf8tmrMGXZ7RQIxYnuKmllPl8bZluGh5e15QfTjRe7HwZ5Bc';
