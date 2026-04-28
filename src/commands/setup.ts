@@ -17,6 +17,7 @@ import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
 import { detectLegacy, readLegacy, archiveLegacy, legacyPaths } from '../vault/migrate';
 import { loadConfig } from '../config/config-manager';
+import { addExamples } from '../utils/command-tree';
 
 const DEFAULT_VAULT_FILENAME = 'agentio.vault';
 
@@ -306,7 +307,7 @@ async function doReset(force: boolean): Promise<void> {
 }
 
 export function registerSetupCommand(program: Command): void {
-  program
+  const setupCmd = program
     .command('setup')
     .description('Initialize or manage the agentio vault')
     .option('--reset', 'Wipe vault, pointer, and stored passphrase')
@@ -409,4 +410,21 @@ export function registerSetupCommand(program: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    setupCmd,
+    `Examples:
+
+  # first-time setup (interactive: prompts for vault path + passphrase)
+  agentio setup
+
+  # re-run on an already-configured vault to change passphrase or move it
+  agentio setup
+
+  # wipe the vault, pointer, and stored passphrase (asks for confirmation)
+  agentio setup --reset
+
+  # wipe non-interactively (CI / scripted reset)
+  agentio setup --reset --force`,
+  );
 }

@@ -13,7 +13,6 @@ const EXEMPT_PENDING = new Set<string>([
   'config env set',
   'config env unset',
   'config clear',
-  'setup',
   'status',
   'update',
 ]);
