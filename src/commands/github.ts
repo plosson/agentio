@@ -8,6 +8,7 @@ import { performGitHubOAuthFlow } from '../auth/github-oauth';
 import { generateExportData } from './config';
 import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type { GitHubCredentials } from '../types/github';
 
 const getGitHubClient = createClientGetter<GitHubCredentials, GitHubClient>({
@@ -32,70 +33,88 @@ export function registerGitHubCommands(program: Command): void {
     .command('github')
     .description('GitHub operations');
 
-  github
-    .command('install')
-    .description('Install AGENTIO_KEY and AGENTIO_CONFIG as GitHub Actions secrets')
-    .argument('<repo>', 'Repository in owner/repo format')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (repo: string, options) => {
-      try {
-        // Validate repo format
-        parseRepo(repo);
+  addExamples(
+    github
+      .command('install')
+      .description('Install AGENTIO_KEY and AGENTIO_CONFIG as GitHub Actions secrets')
+      .argument('<repo>', 'Repository in owner/repo format')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (repo: string, options) => {
+        try {
+          // Validate repo format
+          parseRepo(repo);
 
-        const { client, profile } = await getGitHubClient(options.profile);
-        await enforceWriteAccess('github', profile, 'install secrets');
+          const { client, profile } = await getGitHubClient(options.profile);
+          await enforceWriteAccess('github', profile, 'install secrets');
 
-        console.error(`Using GitHub profile: ${profile}`);
-        console.error(`Installing secrets to: ${repo}`);
+          console.error(`Using GitHub profile: ${profile}`);
+          console.error(`Installing secrets to: ${repo}`);
 
-        // Generate the export data
-        const exportData = await generateExportData();
+          // Generate the export data
+          const exportData = await generateExportData();
 
-        // Set secrets on the repo
-        console.error('\nSetting AGENTIO_KEY...');
-        await client.setRepoSecret(repo, 'AGENTIO_KEY', exportData.key);
+          // Set secrets on the repo
+          console.error('\nSetting AGENTIO_KEY...');
+          await client.setRepoSecret(repo, 'AGENTIO_KEY', exportData.key);
 
-        console.error('Setting AGENTIO_CONFIG...');
-        await client.setRepoSecret(repo, 'AGENTIO_CONFIG', exportData.config);
+          console.error('Setting AGENTIO_CONFIG...');
+          await client.setRepoSecret(repo, 'AGENTIO_CONFIG', exportData.config);
 
-        console.log(`\nInstalled AGENTIO_KEY and AGENTIO_CONFIG to ${repo}`);
-        console.log('\nIn your GitHub Actions workflow, use:');
-        console.log('  env:');
-        console.log('    AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}');
-        console.log('    AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}');
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          console.log(`\nInstalled AGENTIO_KEY and AGENTIO_CONFIG to ${repo}`);
+          console.log('\nIn your GitHub Actions workflow, use:');
+          console.log('  env:');
+          console.log('    AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}');
+          console.log('    AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}');
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
 
-  github
-    .command('uninstall')
-    .description('Remove AGENTIO_KEY and AGENTIO_CONFIG secrets from a repository')
-    .argument('<repo>', 'Repository in owner/repo format')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (repo: string, options) => {
-      try {
-        // Validate repo format
-        parseRepo(repo);
+  # install secrets into a repo using the default github profile
+  agentio github install octocat/hello-world
 
-        const { client, profile } = await getGitHubClient(options.profile);
-        await enforceWriteAccess('github', profile, 'uninstall secrets');
+  # install secrets using a named profile
+  agentio github install octocat/hello-world --profile work`,
+  );
 
-        console.error(`Using GitHub profile: ${profile}`);
-        console.error(`Removing secrets from: ${repo}`);
+  addExamples(
+    github
+      .command('uninstall')
+      .description('Remove AGENTIO_KEY and AGENTIO_CONFIG secrets from a repository')
+      .argument('<repo>', 'Repository in owner/repo format')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (repo: string, options) => {
+        try {
+          // Validate repo format
+          parseRepo(repo);
 
-        // Delete secrets from the repo
-        console.error('\nDeleting AGENTIO_KEY...');
-        await client.deleteRepoSecret(repo, 'AGENTIO_KEY');
+          const { client, profile } = await getGitHubClient(options.profile);
+          await enforceWriteAccess('github', profile, 'uninstall secrets');
 
-        console.error('Deleting AGENTIO_CONFIG...');
-        await client.deleteRepoSecret(repo, 'AGENTIO_CONFIG');
+          console.error(`Using GitHub profile: ${profile}`);
+          console.error(`Removing secrets from: ${repo}`);
 
-        console.log(`\nRemoved AGENTIO_KEY and AGENTIO_CONFIG from ${repo}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          // Delete secrets from the repo
+          console.error('\nDeleting AGENTIO_KEY...');
+          await client.deleteRepoSecret(repo, 'AGENTIO_KEY');
+
+          console.error('Deleting AGENTIO_CONFIG...');
+          await client.deleteRepoSecret(repo, 'AGENTIO_CONFIG');
+
+          console.log(`\nRemoved AGENTIO_KEY and AGENTIO_CONFIG from ${repo}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # remove the agentio secrets from a repo
+  agentio github uninstall octocat/hello-world
+
+  # uninstall using a named profile
+  agentio github uninstall octocat/hello-world --profile work`,
+  );
 
   // Profile management
   const profile = createProfileCommands<GitHubCredentials>(github, {
