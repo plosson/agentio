@@ -129,5 +129,10 @@ export function createProgram(): Command {
     program.help();
   });
 
+  program.addHelpText(
+    'after',
+    '\nFor agent/LLM usage: run `agentio skill <service>` to dump a full SKILL.md, or `agentio docs` for the machine-readable command index.\n',
+  );
+
   return program;
 }
