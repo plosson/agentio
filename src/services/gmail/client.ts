@@ -1,7 +1,7 @@
 import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo } from '../../types/gmail';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo, GmailLabel } from '../../types/gmail';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
 
@@ -585,6 +585,128 @@ export class GmailClient implements ServiceClient {
       }
       const message = error instanceof Error ? error.message : String(error);
       throw new CliError('API_ERROR', `Failed to update message: ${message}`);
+    }
+  }
+
+  private mapLabel(label: gmail_v1.Schema$Label): GmailLabel {
+    return {
+      id: label.id!,
+      name: label.name!,
+      type: label.type === 'system' ? 'system' : 'user',
+      ...(label.messageListVisibility ? { messageListVisibility: label.messageListVisibility } : {}),
+      ...(label.labelListVisibility ? { labelListVisibility: label.labelListVisibility } : {}),
+    };
+  }
+
+  async listLabels(): Promise<GmailLabel[]> {
+    try {
+      const response = await this.gmail.users.labels.list({ userId: 'me' });
+      const labels = (response.data.labels || []).map((l) => this.mapLabel(l));
+      labels.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'system' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      return labels;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
+    }
+  }
+
+  async createLabel(name: string): Promise<GmailLabel> {
+    try {
+      const response = await this.gmail.users.labels.create({
+        userId: 'me',
+        requestBody: {
+          name,
+          messageListVisibility: 'show',
+          labelListVisibility: 'labelShow',
+        },
+      });
+      return this.mapLabel(response.data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to create label: ${message}`);
+    }
+  }
+
+  async deleteLabel(nameOrId: string): Promise<{ id: string; name: string }> {
+    const label = await this.resolveLabel(nameOrId);
+    if (label.type === 'system') {
+      throw new CliError('INVALID_PARAMS', `Cannot delete system label: ${label.name}`);
+    }
+    try {
+      await this.gmail.users.labels.delete({ userId: 'me', id: label.id });
+      return { id: label.id, name: label.name };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to delete label: ${message}`);
+    }
+  }
+
+  async renameLabel(oldNameOrId: string, newName: string): Promise<GmailLabel> {
+    const label = await this.resolveLabel(oldNameOrId);
+    if (label.type === 'system') {
+      throw new CliError('INVALID_PARAMS', `Cannot rename system label: ${label.name}`);
+    }
+    try {
+      const response = await this.gmail.users.labels.patch({
+        userId: 'me',
+        id: label.id,
+        requestBody: { name: newName },
+      });
+      return this.mapLabel(response.data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to rename label: ${message}`);
+    }
+  }
+
+  async resolveLabelIds(namesOrIds: string[]): Promise<string[]> {
+    if (namesOrIds.length === 0) return [];
+    const labels = await this.listLabels();
+    const byId = new Map(labels.map((l) => [l.id, l]));
+    const byName = new Map(labels.map((l) => [l.name.toLowerCase(), l]));
+    return namesOrIds.map((input) => {
+      const direct = byId.get(input);
+      if (direct) return direct.id;
+      const named = byName.get(input.toLowerCase());
+      if (named) return named.id;
+      throw new CliError('NOT_FOUND', `Label not found: ${input}`);
+    });
+  }
+
+  private async resolveLabel(nameOrId: string): Promise<GmailLabel> {
+    const labels = await this.listLabels();
+    const direct = labels.find((l) => l.id === nameOrId);
+    if (direct) return direct;
+    const named = labels.find((l) => l.name.toLowerCase() === nameOrId.toLowerCase());
+    if (named) return named;
+    throw new CliError('NOT_FOUND', `Label not found: ${nameOrId}`);
+  }
+
+  async modifyLabels(
+    id: string,
+    addLabelIds: string[],
+    removeLabelIds: string[],
+    isThread: boolean,
+  ): Promise<void> {
+    const requestBody = {
+      ...(addLabelIds.length ? { addLabelIds } : {}),
+      ...(removeLabelIds.length ? { removeLabelIds } : {}),
+    };
+    try {
+      if (isThread) {
+        await this.gmail.users.threads.modify({ userId: 'me', id, requestBody });
+      } else {
+        await this.gmail.users.messages.modify({ userId: 'me', id, requestBody });
+      }
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        throw new CliError('NOT_FOUND', `${isThread ? 'Thread' : 'Message'} not found: ${id}`);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to modify labels: ${message}`);
     }
   }
 

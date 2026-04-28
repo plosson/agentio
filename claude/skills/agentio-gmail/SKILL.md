@@ -1,6 +1,6 @@
 ---
 name: agentio-gmail
-description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), draft, reply (via --reply-to), archive, mark, download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
+description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), draft, reply (via --reply-to), archive, mark, manage labels (list/create/delete/rename, apply/remove on messages or threads), download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
 ---
 
 # Gmail Operations with agentio
@@ -110,6 +110,26 @@ agentio gmail archive <message-id>
 agentio gmail mark <message-id> --read
 agentio gmail mark <message-id> --unread
 ```
+
+## Manage Labels
+
+```bash
+agentio gmail labels list
+agentio gmail labels create <name>            # Use "/" for nesting, e.g. "auto/receipts"
+agentio gmail labels delete <name-or-id>      # User labels only (system labels refused)
+agentio gmail labels rename <old> <new>
+```
+
+## Apply / Remove Labels
+
+```bash
+agentio gmail label <id...> [--apply <name>]... [--remove <name>]... [--thread]
+```
+
+- `--apply` and `--remove` are repeatable and can be combined in one call.
+- IDs are message IDs by default; pass `--thread` to operate on threads instead.
+- Labels can be referenced by name or ID. System labels (`INBOX`, `STARRED`, `UNREAD`, `IMPORTANT`, ...) work too — e.g. `--remove INBOX` archives, `--apply STARRED` stars.
+- Idempotent: applying a label that's already present (or removing one that isn't) is a successful no-op.
 
 ## Download Attachments
 

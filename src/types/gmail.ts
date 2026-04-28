@@ -32,6 +32,14 @@ export interface GmailAttachmentInfo {
   size: number;
 }
 
+export interface GmailLabel {
+  id: string;
+  name: string;
+  type: 'system' | 'user';
+  messageListVisibility?: string;
+  labelListVisibility?: string;
+}
+
 export interface GmailSendOptions {
   to: string[];
   cc?: string[];

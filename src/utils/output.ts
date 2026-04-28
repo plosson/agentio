@@ -1,5 +1,5 @@
 import { homedir } from 'os';
-import type { GmailMessage, GmailAttachmentInfo } from '../types/gmail';
+import type { GmailMessage, GmailAttachmentInfo, GmailLabel } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult } from '../types/gdrive';
@@ -114,6 +114,48 @@ export function printMarked(messageId: string, read: boolean): void {
 // Output raw text (for body-only mode)
 export function raw(text: string): void {
   console.log(text);
+}
+
+// Format Gmail label list
+export function printLabelList(labels: GmailLabel[]): void {
+  if (labels.length === 0) {
+    console.log('No labels found');
+    return;
+  }
+  const nameWidth = Math.max(4, ...labels.map((l) => l.name.length));
+  const typeWidth = 6;
+  console.log(`${'NAME'.padEnd(nameWidth)}  ${'TYPE'.padEnd(typeWidth)}  ID`);
+  for (const label of labels) {
+    console.log(`${label.name.padEnd(nameWidth)}  ${label.type.padEnd(typeWidth)}  ${label.id}`);
+  }
+  console.log(`\n${labels.length} label(s)`);
+}
+
+export function printLabelCreated(label: GmailLabel): void {
+  console.log(`Created label: ${label.name}`);
+  console.log(`ID: ${label.id}`);
+}
+
+export function printLabelDeleted(name: string, id: string): void {
+  console.log(`Deleted label: ${name} (${id})`);
+}
+
+export function printLabelRenamed(oldName: string, label: GmailLabel): void {
+  console.log(`Renamed label: ${oldName} -> ${label.name}`);
+  console.log(`ID: ${label.id}`);
+}
+
+export function printLabelModified(
+  id: string,
+  isThread: boolean,
+  applied: string[],
+  removed: string[],
+): void {
+  const target = isThread ? 'thread' : 'message';
+  const parts: string[] = [];
+  if (applied.length) parts.push(`applied [${applied.join(', ')}]`);
+  if (removed.length) parts.push(`removed [${removed.join(', ')}]`);
+  console.log(`${target} ${id}: ${parts.join('; ')}`);
 }
 
 // Google Chat specific formatters

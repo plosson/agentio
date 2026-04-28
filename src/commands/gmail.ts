@@ -7,7 +7,7 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -324,6 +324,107 @@ Query Syntax Examples:
         for (const messageId of messageIds) {
           await client.mark(messageId, options.read);
           printMarked(messageId, options.read);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  const labels = gmail
+    .command('labels')
+    .description('Manage Gmail labels');
+
+  labels
+    .command('list')
+    .description('List all labels')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (options) => {
+      try {
+        const { client } = await getGmailClient(options.profile);
+        const result = await client.listLabels();
+        printLabelList(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  labels
+    .command('create')
+    .argument('<name>', 'Label name (use "/" for nesting, e.g. "auto/receipts")')
+    .description('Create a new label')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (name: string, options) => {
+      try {
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'create label');
+        const result = await client.createLabel(name);
+        printLabelCreated(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  labels
+    .command('delete')
+    .argument('<name-or-id>', 'Label name or ID')
+    .description('Delete a user label')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (nameOrId: string, options) => {
+      try {
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'delete label');
+        const result = await client.deleteLabel(nameOrId);
+        printLabelDeleted(result.name, result.id);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  labels
+    .command('rename')
+    .argument('<old>', 'Existing label name or ID')
+    .argument('<new>', 'New label name')
+    .description('Rename a user label')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .action(async (oldName: string, newName: string, options) => {
+      try {
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'rename label');
+        const result = await client.renameLabel(oldName, newName);
+        printLabelRenamed(oldName, result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  gmail
+    .command('label')
+    .argument('<id...>', 'Message ID(s) (or thread ID(s) with --thread)')
+    .description('Apply and/or remove labels on messages or threads')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .option('--apply <name>', 'Label to apply (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--remove <name>', 'Label to remove (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+    .option('--thread', 'Treat IDs as thread IDs')
+    .action(async (ids: string[], options) => {
+      try {
+        const apply = options.apply as string[];
+        const remove = options.remove as string[];
+        if (!apply.length && !remove.length) {
+          throw new CliError('INVALID_PARAMS', 'Specify at least one --apply or --remove');
+        }
+
+        const { client, profile } = await getGmailClient(options.profile);
+        await enforceWriteAccess('gmail', profile, 'modify labels');
+
+        const [addLabelIds, removeLabelIds] = await Promise.all([
+          client.resolveLabelIds(apply),
+          client.resolveLabelIds(remove),
+        ]);
+
+        const isThread = options.thread === true;
+        for (const id of ids) {
+          await client.modifyLabels(id, addLabelIds, removeLabelIds, isThread);
+          printLabelModified(id, isThread, apply, remove);
         }
       } catch (error) {
         handleError(error);

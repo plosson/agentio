@@ -137,6 +137,11 @@ agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachmen
 agentio gmail draft --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]
 agentio gmail archive <message-id...>
 agentio gmail mark <message-id...> --read|--unread
+agentio gmail labels list
+agentio gmail labels create <name>            # "/" nests in the Gmail UI
+agentio gmail labels delete <name-or-id>      # user labels only
+agentio gmail labels rename <old> <new>
+agentio gmail label <id...> [--apply <name>]... [--remove <name>]... [--thread]
 agentio gmail attachment <message-id> [--output <dir>]
 agentio gmail export <message-id> [--output <path>]  # Export as PDF
 agentio gmail profile add|list|remove
