@@ -1,87 +1,130 @@
 ---
 name: agentio-schedule
-description: Use when scheduling Claude Code prompts to run on a cron-like schedule locally via the agentio daemon. Watch folders containing .run.md files; the CLI handles folder registration, the user authors files in their text editor.
+description: Use to manage agentio scheduled .run.md prompts in watched folders.
 ---
 
-# Scheduling Claude Prompts with agentio
+# Schedule via agentio
 
-The **agentio daemon** scans watched folders every minute and fires due `.run.md` schedules. There are no per-schedule launchd plists; the daemon itself runs as a single LaunchAgent (macOS) or systemd unit (Linux).
+Auto-generated from `agentio skill schedule`. Do not edit by hand.
 
-The CLI manages **folder registration only**. Users author `.run.md` files directly in their text editor.
+## agentio schedule add <folder>
 
-## Prerequisites
+Watch a folder for .run.md files
 
-Install and start the daemon once per machine:
+Options:
 
-```bash
-agentio daemon install   # macOS: ~/Library/LaunchAgents/me.agentio.daemon.plist
-                         # Linux: /etc/systemd/system/agentio-daemon.service
-agentio daemon status
+- `--no-host-pin`: Do not pin this folder to the current host
+
+```
+Examples:
+
+  # watch a folder of .run.md files (pinned to this hostname by default)
+  agentio schedule add ~/Dropbox/schedules
+
+  # watch but allow any host to fire (for non-Dropbox-synced folders)
+  agentio schedule add ./agents --no-host-pin
+
+After adding, author .run.md files in the folder directly. The daemon picks
+them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.
 ```
 
-## Watch a folder
+## agentio schedule list
 
-```bash
-agentio schedule add ~/Dropbox/schedules    # watch this folder
-agentio schedule list                       # show watched folders + detected schedules
-agentio schedule remove ~/Dropbox/schedules # stop watching
+List watched folders and scheduled tasks
+
+Options:
+
+- `--folder <path>`: Filter schedules to one folder
+- `--folders`: Show watched folders only (no schedules)
+- `--all-hosts`: Include schedules pinned to other hosts
+
+```
+Examples:
+
+  # watched folders + their detected schedules (host-pinned only)
+  agentio schedule list
+
+  # also show schedules pinned to other machines (Dropbox-shared folders)
+  agentio schedule list --all-hosts
+
+  # only schedules in one specific folder
+  agentio schedule list --folder ~/Dropbox/schedules
+
+  # just the watched-folder list, no schedule scan
+  agentio schedule list --folders
 ```
 
-By default `add` pins the folder to the current hostname (so a Dropbox-synced folder fires only on the machine that watched it). Pass `--no-host-pin` to allow any machine to run it.
+## agentio schedule show <id>
 
-## Author a `.run.md` file
+Show a schedule and next run times
 
-Create a file like `~/Dropbox/schedules/weekly-report.run.md` in your editor:
+Options:
 
-```markdown
----
-schedule:
-  type: daily
-  hour: 21
-  minute: 0
-model: sonnet
-permissionMode: bypassPermissions
-sessionMode: new
-enabled: true
-host: mac-mini
----
+- `--folder <path>`: Restrict resolution to this folder
 
-Your prompt text here. Everything below the `---` is sent to claude as-is.
+```
+Examples:
+
+  # frontmatter + next 5 fire times for one schedule (id is the .run.md basename)
+  agentio schedule show weekly-report
+
+  # disambiguate when the same id exists in multiple watched folders
+  agentio schedule show weekly-report --folder ~/Dropbox/schedules
 ```
 
-**`host:` is required.** The daemon skips schedules without a host. This prevents Dropbox-synced folders from double-firing across machines.
+## agentio schedule run <id>
 
-Schedule types:
+Run a schedule immediately
 
-| type | required fields |
-|------|-----------------|
-| `daily` | `hour`, `minute` |
-| `weekly` | `hour`, `minute`, `weekdays: [1,3,5]` (1=Mon, 7=Sun) |
-| `monthly` | `hour`, `minute`, `day` (1-31) |
-| `interval` | `intervalMinutes` |
-| `manual` | (no auto-fire; only via `schedule run`) |
+Options:
 
-Setting `enabled: false` pauses without deleting. `sessionMode: resume` continues the previous session on the next run.
+- `--folder <path>`: Restrict resolution to this folder
+- `-q, --quiet`: Suppress streaming child output to stdout/stderr (used when invoked by the daemon)
 
-## Inspect / run
+```
+Examples:
 
-```bash
-agentio schedule list                # all watched folders + their schedules
-agentio schedule list --all-hosts    # also show schedules pinned to other machines
-agentio schedule show <id>           # one schedule's frontmatter + next 5 run times
-agentio schedule run <id>            # fire now (ignores host pinning — manual runs work anywhere)
-agentio schedule history             # last run of every job across watched folders
-agentio schedule history <id>        # all runs of one schedule
+  # fire a schedule now (delegates to the daemon if running, else runs in-process)
+  agentio schedule run weekly-report
+
+  # restrict id resolution to one watched folder
+  agentio schedule run weekly-report --folder ~/Dropbox/schedules
+
+Manual runs ignore the host pin — useful for testing on a machine that isn't
+the schedule's normal home.
 ```
 
-The id-based commands (`show`, `run`, `history <id>`) resolve `<id>` by scanning watched folders — the current working directory is irrelevant. Use `--folder <path>` only to disambiguate when the same id exists in multiple watched folders.
+## agentio schedule history [id]
 
-Logs land in `<folder>/.agentio/runs/<id>/<ISO>.log`.
+List past runs (no id: last run of every job; with id: all runs of that job)
 
-## How firing works
+Options:
 
-- The daemon watches each registered folder via `fs.watch` and re-ticks within ~500ms of any `.run.md` change. A 60-second timer (configurable via `config.daemon.scheduler.tickIntervalSec`) provides the safety net.
-- On each tick, it walks every watched folder, parses every `.run.md`, computes the most recent boundary (`prevRun`), and fires any schedule whose `lastRunAt` is older than that boundary (or absent — first run).
-- Schedules naturally catch up if the daemon was off when a fire was due (one catch-up per missed boundary).
-- A schedule already running is skipped on the next tick (no overlapping same-id runs).
-- A schedule whose `host:` doesn't match the current hostname is skipped silently.
+- `--folder <path>`: Restrict to one folder
+
+```
+Examples:
+
+  # overview: last run of every job across all watched folders
+  agentio schedule history
+
+  # full run history for one schedule (newest first)
+  agentio schedule history weekly-report
+
+  # restrict the overview to one folder
+  agentio schedule history --folder ~/Dropbox/schedules
+
+Per-run logs land in <folder>/.agentio/runs/<id>/<ISO>.log.
+```
+
+## agentio schedule remove <folder>
+
+Stop watching a folder
+
+```
+Examples:
+
+  # stop watching a folder (existing .run.md files are not deleted)
+  agentio schedule remove ~/Dropbox/schedules
+```
+

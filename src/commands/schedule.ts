@@ -18,6 +18,7 @@ import type { SchedulerJobView } from '../daemon/scheduler';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { addWatchedFolder, removeWatchedFolder } from './schedule-watch';
 import { abbrHome } from '../utils/output';
+import { addExamples } from '../utils/command-tree';
 import type { Config, WatchedFolder } from '../types/config';
 
 function getDaemonEndpoint(config: Config): { apiKey?: string; port: number } {
@@ -171,7 +172,7 @@ export function registerScheduleCommands(program: Command): void {
     .command('schedule')
     .description('Watch folders for .run.md files (executed by the agentio daemon)');
 
-  schedule.command('add')
+  const addCmd = schedule.command('add')
     .description('Watch a folder for .run.md files')
     .argument('<folder>', 'Folder to watch')
     .option('--no-host-pin', 'Do not pin this folder to the current host')
@@ -215,6 +216,20 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    addCmd,
+    `Examples:
+
+  # watch a folder of .run.md files (pinned to this hostname by default)
+  agentio schedule add ~/Dropbox/schedules
+
+  # watch but allow any host to fire (for non-Dropbox-synced folders)
+  agentio schedule add ./agents --no-host-pin
+
+After adding, author .run.md files in the folder directly. The daemon picks
+them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.`,
+  );
+
   const printWatchedFolders = (folders: WatchedFolder[]): void => {
     if (folders.length === 0) {
       console.log('No folders watched.');
@@ -228,7 +243,7 @@ export function registerScheduleCommands(program: Command): void {
     }
   };
 
-  schedule.command('list').description('List watched folders and scheduled tasks')
+  const listCmd = schedule.command('list').description('List watched folders and scheduled tasks')
     .option('--folder <path>', 'Filter schedules to one folder')
     .option('--folders', 'Show watched folders only (no schedules)')
     .option('--all-hosts', 'Include schedules pinned to other hosts')
@@ -275,7 +290,24 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('show').description('Show a schedule and next run times')
+  addExamples(
+    listCmd,
+    `Examples:
+
+  # watched folders + their detected schedules (host-pinned only)
+  agentio schedule list
+
+  # also show schedules pinned to other machines (Dropbox-shared folders)
+  agentio schedule list --all-hosts
+
+  # only schedules in one specific folder
+  agentio schedule list --folder ~/Dropbox/schedules
+
+  # just the watched-folder list, no schedule scan
+  agentio schedule list --folders`,
+  );
+
+  const showCmd = schedule.command('show').description('Show a schedule and next run times')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Restrict resolution to this folder')
     .action(async (id: string, opts: { folder?: string }) => {
@@ -307,7 +339,18 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('run').description('Run a schedule immediately')
+  addExamples(
+    showCmd,
+    `Examples:
+
+  # frontmatter + next 5 fire times for one schedule (id is the .run.md basename)
+  agentio schedule show weekly-report
+
+  # disambiguate when the same id exists in multiple watched folders
+  agentio schedule show weekly-report --folder ~/Dropbox/schedules`,
+  );
+
+  const runCmd = schedule.command('run').description('Run a schedule immediately')
     .argument('<id>', 'Schedule id')
     .option('--folder <path>', 'Restrict resolution to this folder')
     .option('-q, --quiet', 'Suppress streaming child output to stdout/stderr (used when invoked by the daemon)')
@@ -350,6 +393,20 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    runCmd,
+    `Examples:
+
+  # fire a schedule now (delegates to the daemon if running, else runs in-process)
+  agentio schedule run weekly-report
+
+  # restrict id resolution to one watched folder
+  agentio schedule run weekly-report --folder ~/Dropbox/schedules
+
+Manual runs ignore the host pin — useful for testing on a machine that isn't
+the schedule's normal home.`,
+  );
+
   interface AggregatedRun {
     id: string;
     folder: string;
@@ -386,7 +443,7 @@ export function registerScheduleCommands(program: Command): void {
     return `${when}  status=${status ?? '?'}  exit=${exitCode ?? '?'}  duration=${formatDuration(durationMs)}  session=${session ?? '-'}`;
   }
 
-  schedule.command('history').description('List past runs (no id: last run of every job; with id: all runs of that job)')
+  const historyCmd = schedule.command('history').description('List past runs (no id: last run of every job; with id: all runs of that job)')
     .argument('[id]', 'Schedule id (optional)')
     .option('--folder <path>', 'Restrict to one folder')
     .action(async (id: string | undefined, opts: { folder?: string }) => {
@@ -444,7 +501,23 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  schedule.command('remove')
+  addExamples(
+    historyCmd,
+    `Examples:
+
+  # overview: last run of every job across all watched folders
+  agentio schedule history
+
+  # full run history for one schedule (newest first)
+  agentio schedule history weekly-report
+
+  # restrict the overview to one folder
+  agentio schedule history --folder ~/Dropbox/schedules
+
+Per-run logs land in <folder>/.agentio/runs/<id>/<ISO>.log.`,
+  );
+
+  const removeCmd = schedule.command('remove')
     .description('Stop watching a folder')
     .argument('<folder>', 'Folder to remove')
     .action(async (folder: string) => {
@@ -478,4 +551,12 @@ export function registerScheduleCommands(program: Command): void {
         handleError(e);
       }
     });
+
+  addExamples(
+    removeCmd,
+    `Examples:
+
+  # stop watching a folder (existing .run.md files are not deleted)
+  agentio schedule remove ~/Dropbox/schedules`,
+  );
 }
