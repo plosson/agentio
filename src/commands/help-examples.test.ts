@@ -8,11 +8,6 @@ const EXEMPT_PENDING = new Set<string>([
   // Populated by Task 3 step 1 — every currently-visible leaf command
   // that does not yet have an Examples: block. Drive this list to empty as
   // each service is migrated to use addExamples().
-  'config export',
-  'config import',
-  'config env set',
-  'config env unset',
-  'config clear',
 ]);
 
 describe('help examples gate', () => {
