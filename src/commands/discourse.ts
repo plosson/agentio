@@ -6,6 +6,7 @@ import { createClientGetter } from '../utils/client-factory';
 import { DiscourseClient } from '../services/discourse/client';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
+import { addExamples } from '../utils/command-tree';
 import type { DiscourseCredentials } from '../types/discourse';
 import {
   printDiscourseTopicList,
@@ -22,60 +23,90 @@ export function registerDiscourseCommands(program: Command): void {
   const discourse = program.command('discourse').description('Discourse forum operations');
 
   // List topics
-  discourse
-    .command('list')
-    .description('List latest topics')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--category <slug>', 'Filter by category slug or name')
-    .option('--page <number>', 'Page number (0-indexed)', '0')
-    .action(async (options) => {
-      try {
-        const { client } = await getDiscourseClient(options.profile);
-        const topics = await client.listTopics({
-          category: options.category,
-          page: parseInt(options.page, 10),
-        });
-        printDiscourseTopicList(topics);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    discourse
+      .command('list')
+      .description('List latest topics')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--category <slug>', 'Filter by category slug or name')
+      .option('--page <number>', 'Page number (0-indexed)', '0')
+      .action(async (options) => {
+        try {
+          const { client } = await getDiscourseClient(options.profile);
+          const topics = await client.listTopics({
+            category: options.category,
+            page: parseInt(options.page, 10),
+          });
+          printDiscourseTopicList(topics);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # latest topics on the default profile
+  agentio discourse list
+
+  # second page of topics in a specific category
+  agentio discourse list --category support --page 1
+
+  # latest topics on a named profile
+  agentio discourse list --profile meta`,
+  );
 
   // Get topic detail
-  discourse
-    .command('get')
-    .description('Get a topic with its posts')
-    .argument('<topic-id>', 'Topic ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (topicId: string, options) => {
-      try {
-        const id = parseInt(topicId, 10);
-        if (isNaN(id)) {
-          throw new CliError('INVALID_PARAMS', 'Topic ID must be a number');
-        }
+  addExamples(
+    discourse
+      .command('get')
+      .description('Get a topic with its posts')
+      .argument('<topic-id>', 'Topic ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (topicId: string, options) => {
+        try {
+          const id = parseInt(topicId, 10);
+          if (isNaN(id)) {
+            throw new CliError('INVALID_PARAMS', 'Topic ID must be a number');
+          }
 
-        const { client } = await getDiscourseClient(options.profile);
-        const topic = await client.getTopic(id);
-        printDiscourseTopic(topic);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          const { client } = await getDiscourseClient(options.profile);
+          const topic = await client.getTopic(id);
+          printDiscourseTopic(topic);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # get a topic and its posts by numeric ID
+  agentio discourse get 12345
+
+  # use a named profile
+  agentio discourse get 12345 --profile meta`,
+  );
 
   // List categories
-  discourse
-    .command('categories')
-    .description('List all categories')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (options) => {
-      try {
-        const { client } = await getDiscourseClient(options.profile);
-        const categories = await client.getCategories();
-        printDiscourseCategoryList(categories);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    discourse
+      .command('categories')
+      .description('List all categories')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (options) => {
+        try {
+          const { client } = await getDiscourseClient(options.profile);
+          const categories = await client.getCategories();
+          printDiscourseCategoryList(categories);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list all visible categories
+  agentio discourse categories
+
+  # categories on a named forum profile
+  agentio discourse categories --profile meta`,
+  );
 
   // Profile management
   const profile = createProfileCommands<DiscourseCredentials>(discourse, {
