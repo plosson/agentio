@@ -132,4 +132,3 @@ Examples:
   # only teleport WhatsApp; pass api key inline (default: prompt)
   agentio daemon teleport https://my-daemon.example.com --service whatsapp --api-key gw_xxx
 ```
-

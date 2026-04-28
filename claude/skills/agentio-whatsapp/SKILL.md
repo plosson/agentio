@@ -357,4 +357,3 @@ Examples:
   # join via the full invite URL
   agentio whatsapp group join https://chat.whatsapp.com/AbCdEf1234567890
 ```
-

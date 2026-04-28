@@ -125,4 +125,3 @@ Examples:
   agentio jira transitions PROJ-123
   agentio jira transition PROJ-123 41
 ```
-

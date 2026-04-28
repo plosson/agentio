@@ -31,4 +31,3 @@ Examples:
   # wipe non-interactively (CI / scripted reset)
   agentio setup --reset --force
 ```
-

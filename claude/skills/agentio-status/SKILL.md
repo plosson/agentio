@@ -28,4 +28,3 @@ Examples:
   # JSON output (good for piping to jq or another agent)
   agentio status --json
 ```
-

@@ -97,4 +97,3 @@ Examples:
   # non-interactive (CI / scripted reset)
   agentio config clear --force
 ```
-

@@ -127,4 +127,3 @@ Examples:
   # stop watching a folder (existing .run.md files are not deleted)
   agentio schedule remove ~/Dropbox/schedules
 ```
-

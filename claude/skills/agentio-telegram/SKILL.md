@@ -166,4 +166,3 @@ Examples:
   # last 10 successfully delivered messages on a specific bot
   agentio telegram outbox list --profile my_announce_bot --status sent --limit 10
 ```
-

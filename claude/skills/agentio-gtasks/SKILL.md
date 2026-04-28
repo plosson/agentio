@@ -248,4 +248,3 @@ Examples:
 
 At least one of --parent or --previous is required.
 ```
-

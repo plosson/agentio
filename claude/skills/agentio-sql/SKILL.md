@@ -31,4 +31,3 @@ Examples:
   # run against a specific profile
   agentio sql query --profile prod "SELECT count(*) FROM orders"
 ```
-

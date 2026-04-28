@@ -17,4 +17,3 @@ Examples:
   # run all health checks (vault, daemon, profiles, watched folders, legacy plists)
   agentio doctor
 ```
-

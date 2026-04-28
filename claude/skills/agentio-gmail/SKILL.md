@@ -340,4 +340,3 @@ Examples:
 
 Requires Chrome, Chromium, or Microsoft Edge installed locally.
 ```
-

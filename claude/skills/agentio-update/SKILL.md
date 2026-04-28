@@ -32,4 +32,3 @@ Examples:
   # reinstall the same version (e.g. recover a corrupted binary)
   agentio update --force --yes
 ```
-

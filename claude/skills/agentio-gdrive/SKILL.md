@@ -169,4 +169,3 @@ Examples:
 Conversion: docx/doc/odt/txt/html/rtf -> Google Doc,
 xlsx/xls/ods/csv/tsv -> Google Sheet, pptx/ppt/odp -> Google Slides.
 ```
-

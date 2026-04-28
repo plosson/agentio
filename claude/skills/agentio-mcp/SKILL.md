@@ -73,4 +73,3 @@ Examples:
   # inspect the generated Dockerfile without calling siteio
   agentio mcp teleport mcp --dockerfile-only
 ```
-

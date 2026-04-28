@@ -42,4 +42,3 @@ Examples:
   # uninstall using a named profile
   agentio github uninstall octocat/hello-world --profile work
 ```
-

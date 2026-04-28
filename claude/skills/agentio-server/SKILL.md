@@ -149,4 +149,3 @@ Examples:
   # remove the systemd unit (config in ~/.config/agentio is preserved)
   sudo agentio server uninstall
 ```
-

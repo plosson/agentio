@@ -62,4 +62,3 @@ Examples:
 Auto-discovery looks for HTML <link rel="alternate"> tags first, then falls
 back to common paths: /feed, /feed.xml, /rss.xml, /atom.xml, /index.xml.
 ```
-

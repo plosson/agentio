@@ -244,4 +244,3 @@ Examples:
   agentio gcal freebusy alice@example.com,bob@example.com \
     --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00
 ```
-

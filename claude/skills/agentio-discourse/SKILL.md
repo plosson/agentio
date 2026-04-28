@@ -65,4 +65,3 @@ Examples:
   # categories on a named forum profile
   agentio discourse categories --profile meta
 ```
-

@@ -31,4 +31,3 @@ Examples:
   # send to a specific profile
   agentio slack send --profile alerts "incident opened"
 ```
-

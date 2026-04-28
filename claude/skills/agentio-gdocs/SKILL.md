@@ -86,4 +86,3 @@ Query syntax: name contains '...', name = '...', 'me' in owners,
 modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.
 Combine with 'and'/'or'.
 ```
-

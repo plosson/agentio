@@ -156,4 +156,3 @@ Examples:
   # refresh the cache for a specific OAuth profile
   agentio gchat directory refresh --profile alice@example.com
 ```
-
