@@ -707,9 +707,14 @@ If any gmail command is reported as missing, that command was not migrated in st
 
 - [ ] **Step 7: Regenerate the gmail SKILL.md**
 
-Run: `bun run dev skill gmail > claude/skills/agentio-gmail/SKILL.md`
+If you must use `bun run dev`, append `2>/dev/null` to suppress its script-trace from contaminating stdout.
+
+Run: `bun run src/index.ts skill gmail > claude/skills/agentio-gmail/SKILL.md`
 
 - [ ] **Step 8: Inspect the regenerated file**
+
+Run: `head -1 claude/skills/agentio-gmail/SKILL.md`
+Expected: prints `---` (the frontmatter fence). If anything else appears (e.g. a `$ bun run ...` script-trace), the redirection captured Bun's wrapper output — re-run step 7 using `bun run src/index.ts` directly or append `2>/dev/null`.
 
 Run: `head -40 claude/skills/agentio-gmail/SKILL.md`
 Expected: frontmatter, then `# Gmail via agentio`, then `## agentio gmail list`, options, and the examples block in a fenced code block.
@@ -772,10 +777,13 @@ For each task above, perform the same eleven steps as Task 4 with the service na
 
 ```bash
 mkdir -p claude/skills/agentio-<service>
-bun run dev skill <service> > claude/skills/agentio-<service>/SKILL.md
+bun run src/index.ts skill <service> > claude/skills/agentio-<service>/SKILL.md
+head -1 claude/skills/agentio-<service>/SKILL.md   # MUST print ---
 ```
 
-Or simply run `bun run dev skill --all` after the per-service work is done to write all files at once. (You can run that as a final verification step in Task 31.)
+Or simply run `bun run src/index.ts skill --all` after the per-service work is done to write all files at once. (You can run that as a final verification step in Task 31.)
+
+**Important — never redirect `bun run dev` output to a file**: the `bun run dev` wrapper prints `$ bun run src/index.ts ...` to stdout when stderr is a TTY, contaminating the captured file with a bogus first line. Use `bun run src/index.ts skill ...` directly when redirecting. If you must use `bun run dev`, append `2>/dev/null` to suppress the wrapper's script-trace. After every regeneration, run `head -1 <file>` and confirm it prints `---`.
 
 **For `daemon` and `schedule`**: these have multi-level subcommands (e.g. `agentio daemon profile add` is excluded by the `profile` filter, but `agentio schedule history <id>` is a real leaf). The `EXEMPT_PENDING` enumeration from Task 3 already captured these correctly — just remove them from the set as you migrate.
 
@@ -809,8 +817,10 @@ Expected: PASS — both tests green with an empty allowlist.
 
 - [ ] **Step 3: Run `agentio skill --all` and confirm no diff**
 
-Run: `bun run dev skill --all && git status claude/skills/`
+Run: `bun run src/index.ts skill --all && git status claude/skills/`
 Expected: no changes shown — every SKILL.md was already up-to-date from per-service commits.
+
+After it completes, spot-check that no SKILL.md picked up a script-trace: `for f in claude/skills/agentio-*/SKILL.md; do head -1 "$f" | grep -q '^---$' || echo "BAD: $f"; done` should print nothing.
 
 If any file shows as modified, the corresponding service task did not regenerate the file after its last edit. Inspect the diff and decide whether to amend (acceptable: a missed regeneration; not acceptable: a flag added in code but no example for it).
 
