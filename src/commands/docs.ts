@@ -1,58 +1,5 @@
 import { Command } from 'commander';
-
-interface CommandInfo {
-  fullPath: string;
-  description: string;
-  arguments: string[];
-  options: Array<{ flags: string; description: string; defaultValue?: string }>;
-}
-
-function collectCommands(cmd: Command, parentPath: string = ''): CommandInfo[] {
-  const results: CommandInfo[] = [];
-  const help = cmd.createHelp();
-
-  // Get visible subcommands (filters out help command)
-  const subcommands = help.visibleCommands(cmd).filter((c) => c.name() !== 'help');
-
-  for (const subcmd of subcommands) {
-    const fullPath = parentPath ? `${parentPath} ${subcmd.name()}` : subcmd.name();
-
-    // Get arguments
-    const args = help.visibleArguments(subcmd).map((arg) => {
-      const argName = arg.variadic ? `${arg.name()}...` : arg.name();
-      return arg.required ? `<${argName}>` : `[${argName}]`;
-    });
-
-    // Get options (filter out help)
-    const options = help
-      .visibleOptions(subcmd)
-      .filter((opt) => !opt.long?.includes('help'))
-      .map((opt) => {
-        const flags = opt.flags;
-        const desc = opt.description;
-        const defaultVal = opt.defaultValue;
-        return { flags, description: desc, defaultValue: defaultVal };
-      });
-
-    const description = subcmd.description() || '';
-
-    // Only add if it's a leaf command or has its own action
-    const childCommands = help.visibleCommands(subcmd).filter((c) => c.name() !== 'help');
-    if (childCommands.length === 0 || options.length > 0 || args.length > 0) {
-      results.push({
-        fullPath,
-        description,
-        arguments: args,
-        options,
-      });
-    }
-
-    // Recurse into subcommands
-    results.push(...collectCommands(subcmd, fullPath));
-  }
-
-  return results;
-}
+import { collectCommands, type CommandInfo } from '../utils/command-tree';
 
 function formatOption(opt: { flags: string; description: string; defaultValue?: string }): string {
   let line = opt.flags;
