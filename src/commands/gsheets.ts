@@ -21,6 +21,7 @@ import {
 } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type {
   GSheetsCredentials,
   GSheetsFormatOptions,
@@ -118,169 +119,185 @@ function parseRawFormat(json?: string): Record<string, unknown> | undefined {
 export function registerGSheetsCommands(program: Command): void {
   const gsheets = program.command('gsheets').description('Google Sheets operations');
 
-  gsheets
-    .command('list')
-    .description('List recent spreadsheets')
-    .option('--profile <name>', 'Profile name')
-    .option('--limit <n>', 'Number of spreadsheets', '10')
-    .option('--query <query>', 'Drive search query filter')
-    .addHelpText(
-      'after',
-      `
-Query Syntax Examples:
+  addExamples(
+    gsheets
+      .command('list')
+      .description('List recent spreadsheets')
+      .option('--profile <name>', 'Profile name')
+      .option('--limit <n>', 'Number of spreadsheets', '10')
+      .option('--query <query>', 'Drive search query filter')
+      .action(async (options) => {
+        try {
+          const { client } = await getGSheetsClient(options.profile);
+          const spreadsheets = await client.list({
+            limit: parseInt(options.limit, 10),
+            query: options.query,
+          });
+          printGSheetsList(spreadsheets);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
 
-  Name search:
-    --query "name contains 'budget'"      Spreadsheets with "budget" in name
-    --query "name = 'Q1 Report'"          Exact name match
+  # 10 most recently modified spreadsheets
+  agentio gsheets list
 
-  Ownership:
-    --query "'me' in owners"              Spreadsheets you own
-    --query "'user@example.com' in owners"
+  # spreadsheets you own
+  agentio gsheets list --query "'me' in owners" --limit 50
 
-  Date filters:
-    --query "modifiedTime > '2024-01-01'" Modified after date
-    --query "createdTime > '2024-01-01'"  Created after date
+  # search by name fragment
+  agentio gsheets list --query "name contains 'budget'"
 
-  Combined:
-    --query "name contains 'sales' and modifiedTime > '2024-01-01'"
-`
-    )
-    .action(async (options) => {
-      try {
-        const { client } = await getGSheetsClient(options.profile);
-        const spreadsheets = await client.list({
-          limit: parseInt(options.limit, 10),
-          query: options.query,
-        });
-        printGSheetsList(spreadsheets);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # recently modified
+  agentio gsheets list --query "modifiedTime > '2024-01-01'"
 
-  gsheets
-    .command('get')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
-    .description('Get values from a range')
-    .option('--profile <name>', 'Profile name')
-    .option('--dimension <dim>', 'Major dimension: ROWS or COLUMNS')
-    .option('--render <opt>', 'Value render: FORMATTED_VALUE, UNFORMATTED_VALUE, or FORMULA')
-    .action(async (spreadsheetId: string, range: string, options) => {
-      try {
-        const { client } = await getGSheetsClient(options.profile);
-        const result = await client.get(spreadsheetId, range, {
-          majorDimension: options.dimension,
-          valueRenderOption: options.render,
-        });
-        printGSheetsValues(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+Query syntax: name contains '...', name = '...', 'me' in owners,
+modifiedTime > 'YYYY-MM-DD'. Combine with 'and'/'or'.`,
+  );
 
-  gsheets
-    .command('update')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B2)')
-    .argument('[values...]', 'Values (comma-separated rows, pipe-separated cells)')
-    .description('Update values in a range')
-    .option('--profile <name>', 'Profile name')
-    .option('--values-json <json>', 'Values as JSON 2D array')
-    .option('--input <opt>', 'Value input option: RAW or USER_ENTERED', 'USER_ENTERED')
-    .addHelpText(
-      'after',
-      `
-Value Formats:
+  addExamples(
+    gsheets
+      .command('get')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
+      .description('Get values from a range')
+      .option('--profile <name>', 'Profile name')
+      .option('--dimension <dim>', 'Major dimension: ROWS or COLUMNS')
+      .option('--render <opt>', 'Value render: FORMATTED_VALUE, UNFORMATTED_VALUE, or FORMULA')
+      .action(async (spreadsheetId: string, range: string, options) => {
+        try {
+          const { client } = await getGSheetsClient(options.profile);
+          const result = await client.get(spreadsheetId, range, {
+            majorDimension: options.dimension,
+            valueRenderOption: options.render,
+          });
+          printGSheetsValues(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
 
-  Simple format (comma = row separator, pipe = cell separator):
-    agentio gsheets update <id> Sheet1!A1:B2 "a|b,c|d"
-    Results in:
-      A1=a  B1=b
-      A2=c  B2=d
+  # read a 2x3 block on Sheet1
+  agentio gsheets get 1A2bCdEf... "Sheet1!A1:C2"
 
-  JSON format:
-    agentio gsheets update <id> Sheet1!A1:B2 --values-json '[["a","b"],["c","d"]]'
+  # entire column B
+  agentio gsheets get 1A2bCdEf... "Sheet1!B:B"
 
-Input Options:
-  RAW          - Values are stored exactly as entered (no parsing)
-  USER_ENTERED - Values are parsed as if typed in the UI (formulas, dates, etc.)
-`
-    )
-    .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
-      try {
-        const values = parseValues(valueArgs, options.valuesJson);
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'update values');
-        const result = await client.update(spreadsheetId, range, values, {
-          valueInputOption: options.input,
-        });
-        printGSheetsUpdateResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # show formulas instead of computed values
+  agentio gsheets get 1A2bCdEf... "Sheet1!A1:D10" --render FORMULA
 
-  gsheets
-    .command('append')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A:C)')
-    .argument('[values...]', 'Values (comma-separated rows, pipe-separated cells)')
-    .description('Append values to a range')
-    .option('--profile <name>', 'Profile name')
-    .option('--values-json <json>', 'Values as JSON 2D array')
-    .option('--input <opt>', 'Value input option: RAW or USER_ENTERED', 'USER_ENTERED')
-    .option('--insert <opt>', 'Insert data option: OVERWRITE or INSERT_ROWS')
-    .addHelpText(
-      'after',
-      `
-Value Formats:
+  # major dimension: COLUMNS (transposes orientation)
+  agentio gsheets get 1A2bCdEf... "Sheet1!A1:C10" --dimension COLUMNS`,
+  );
 
-  Simple format (comma = row separator, pipe = cell separator):
-    agentio gsheets append <id> Sheet1!A:C "a|b|c,d|e|f"
-    Appends two rows to columns A, B, C
+  addExamples(
+    gsheets
+      .command('update')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B2)')
+      .argument('[values...]', 'Values (comma-separated rows, pipe-separated cells)')
+      .description('Update values in a range')
+      .option('--profile <name>', 'Profile name')
+      .option('--values-json <json>', 'Values as JSON 2D array')
+      .option('--input <opt>', 'Value input option: RAW or USER_ENTERED', 'USER_ENTERED')
+      .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
+        try {
+          const values = parseValues(valueArgs, options.valuesJson);
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'update values');
+          const result = await client.update(spreadsheetId, range, values, {
+            valueInputOption: options.input,
+          });
+          printGSheetsUpdateResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
 
-  JSON format:
-    agentio gsheets append <id> Sheet1!A:C --values-json '[["a","b","c"],["d","e","f"]]'
+  # set a 2x2 block via simple format (',' = new row, '|' = new cell)
+  agentio gsheets update 1A2bCdEf... "Sheet1!A1:B2" "a|b,c|d"
 
-Insert Options:
-  OVERWRITE   - New data overwrites existing data in the areas it is written
-  INSERT_ROWS - Rows are inserted for the new data
-`
-    )
-    .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
-      try {
-        const values = parseValues(valueArgs, options.valuesJson);
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'append values');
-        const result = await client.append(spreadsheetId, range, values, {
-          valueInputOption: options.input,
-          insertDataOption: options.insert,
-        });
-        printGSheetsAppendResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # same write via JSON
+  agentio gsheets update 1A2bCdEf... "Sheet1!A1:B2" --values-json '[["a","b"],["c","d"]]'
 
-  gsheets
-    .command('clear')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
-    .description('Clear values in a range')
-    .option('--profile <name>', 'Profile name')
-    .action(async (spreadsheetId: string, range: string, options) => {
-      try {
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'clear values');
-        const result = await client.clear(spreadsheetId, range);
-        printGSheetsClearResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # store raw text without formula parsing
+  agentio gsheets update 1A2bCdEf... "Sheet1!A1" "=SUM(B:B)" --input RAW
 
-  gsheets
+  # write a formula that gets evaluated
+  agentio gsheets update 1A2bCdEf... "Sheet1!A1" "=SUM(B:B)" --input USER_ENTERED
+
+Input options: RAW (stored as-is), USER_ENTERED (parsed like typed in UI).`,
+  );
+
+  addExamples(
+    gsheets
+      .command('append')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A:C)')
+      .argument('[values...]', 'Values (comma-separated rows, pipe-separated cells)')
+      .description('Append values to a range')
+      .option('--profile <name>', 'Profile name')
+      .option('--values-json <json>', 'Values as JSON 2D array')
+      .option('--input <opt>', 'Value input option: RAW or USER_ENTERED', 'USER_ENTERED')
+      .option('--insert <opt>', 'Insert data option: OVERWRITE or INSERT_ROWS')
+      .action(async (spreadsheetId: string, range: string, valueArgs: string[], options) => {
+        try {
+          const values = parseValues(valueArgs, options.valuesJson);
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'append values');
+          const result = await client.append(spreadsheetId, range, values, {
+            valueInputOption: options.input,
+            insertDataOption: options.insert,
+          });
+          printGSheetsAppendResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # append two rows to columns A-C
+  agentio gsheets append 1A2bCdEf... "Sheet1!A:C" "alice|10|us,bob|7|fr"
+
+  # append via JSON
+  agentio gsheets append 1A2bCdEf... "Sheet1!A:C" --values-json '[["a","b","c"],["d","e","f"]]'
+
+  # insert new rows instead of overwriting blanks below the table
+  agentio gsheets append 1A2bCdEf... "Sheet1!A:C" "x|y|z" --insert INSERT_ROWS
+
+Insert: OVERWRITE writes into existing cells, INSERT_ROWS shifts rows down.`,
+  );
+
+  addExamples(
+    gsheets
+      .command('clear')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
+      .description('Clear values in a range')
+      .option('--profile <name>', 'Profile name')
+      .action(async (spreadsheetId: string, range: string, options) => {
+        try {
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'clear values');
+          const result = await client.clear(spreadsheetId, range);
+          printGSheetsClearResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # clear a small block
+  agentio gsheets clear 1A2bCdEf... "Sheet1!A1:D10"
+
+  # clear an entire sheet
+  agentio gsheets clear 1A2bCdEf... "Sheet1!A1:Z1000"`,
+  );
+
+  const formatCmd = gsheets
     .command('format')
     .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
     .argument('<range>', 'Range in A1 notation (e.g., Sheet1!A1:B10)')
@@ -301,26 +318,6 @@ Insert Options:
     .option('--merge', 'Merge the range into a single cell')
     .option('--clear-format', 'Clear existing formatting on the range first')
     .option('--raw <json>', 'Raw CellFormat JSON merged into the request')
-    .addHelpText(
-      'after',
-      `
-Examples:
-  # Bold header row with colored background
-  agentio gsheets format <id> Sheet1!A1:D1 --bold --background "#4285f4" --text-color "#ffffff"
-
-  # Currency column
-  agentio gsheets format <id> Sheet1!C2:C100 --number-format "$#,##0.00"
-
-  # Outer border around a table
-  agentio gsheets format <id> Sheet1!A1:D10 --border outer
-
-  # Reset formatting on a range
-  agentio gsheets format <id> Sheet1!A1:Z1000 --clear-format
-
-  # Merge title cells
-  agentio gsheets format <id> Sheet1!A1:D1 --merge --align center --bold
-`
-    )
     .action(async (spreadsheetId: string, range: string, options) => {
       try {
         const { client, profile } = await getGSheetsClient(options.profile);
@@ -351,69 +348,70 @@ Examples:
       }
     });
 
-  gsheets
-    .command('resize')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<range>', 'Columns (Sheet1!A:C) or rows (Sheet1!1:10)')
-    .description('Resize columns or rows (explicit pixel size or auto-fit)')
-    .option('--profile <name>', 'Profile name')
-    .option('--size <pixels>', 'Pixel size', (v) => parseInt(v, 10))
-    .option('--auto', 'Auto-fit to content')
-    .addHelpText(
-      'after',
-      `
-Examples:
-  # Set columns A-C to 200px wide
-  agentio gsheets resize <id> Sheet1!A:C --size 200
+  addExamples(
+    formatCmd,
+    `Examples:
 
-  # Auto-fit the first row to content
-  agentio gsheets resize <id> Sheet1!1:1 --auto
+  # bold header row with colored background and white text
+  agentio gsheets format 1A2bCdEf... "Sheet1!A1:D1" --bold --background "#4285f4" --text-color "#ffffff"
 
-  # Resize a single column
-  agentio gsheets resize <id> Sheet1!B --size 150
+  # currency formatting on a column
+  agentio gsheets format 1A2bCdEf... "Sheet1!C2:C100" --number-format "$#,##0.00"
 
-Notes:
-  - Range must be columns-only (A:C) or rows-only (1:10), not both.
-  - --size and --auto are mutually exclusive.
-`
-    )
-    .action(async (spreadsheetId: string, range: string, options) => {
-      try {
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'resize range');
-        const result = await client.resize(spreadsheetId, range, {
-          pixelSize: options.size,
-          auto: options.auto,
-        });
-        printGSheetsResizeResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # outer border around a table
+  agentio gsheets format 1A2bCdEf... "Sheet1!A1:D10" --border outer
 
-  gsheets
+  # merge title cells with centered bold text
+  agentio gsheets format 1A2bCdEf... "Sheet1!A1:D1" --merge --align center --bold
+
+  # reset formatting on a range
+  agentio gsheets format 1A2bCdEf... "Sheet1!A1:Z1000" --clear-format`,
+  );
+
+  addExamples(
+    gsheets
+      .command('resize')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<range>', 'Columns (Sheet1!A:C) or rows (Sheet1!1:10)')
+      .description('Resize columns or rows (explicit pixel size or auto-fit)')
+      .option('--profile <name>', 'Profile name')
+      .option('--size <pixels>', 'Pixel size', (v) => parseInt(v, 10))
+      .option('--auto', 'Auto-fit to content')
+      .action(async (spreadsheetId: string, range: string, options) => {
+        try {
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'resize range');
+          const result = await client.resize(spreadsheetId, range, {
+            pixelSize: options.size,
+            auto: options.auto,
+          });
+          printGSheetsResizeResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # set columns A-C to 200px wide
+  agentio gsheets resize 1A2bCdEf... "Sheet1!A:C" --size 200
+
+  # auto-fit the header row to content
+  agentio gsheets resize 1A2bCdEf... "Sheet1!1:1" --auto
+
+  # resize a single column
+  agentio gsheets resize 1A2bCdEf... "Sheet1!B:B" --size 150
+
+Range must be columns-only (A:C) or rows-only (1:10).
+--size and --auto are mutually exclusive.`,
+  );
+
+  const batchCmd = gsheets
     .command('batch')
     .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
     .description('Execute raw spreadsheets.batchUpdate requests (escape hatch)')
     .option('--profile <name>', 'Profile name')
     .option('--requests-json <json>', 'Inline JSON array of batchUpdate requests')
     .option('--file <path>', 'Path to a JSON file containing the requests array')
-    .addHelpText(
-      'after',
-      `
-Accepts an array of Google Sheets batchUpdate Request objects. Reference:
-  https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request
-
-Examples:
-  # Freeze the first row
-  agentio gsheets batch <id> --requests-json '[
-    {"updateSheetProperties":{"properties":{"sheetId":0,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}
-  ]'
-
-  # From a file
-  agentio gsheets batch <id> --file ./requests.json
-`
-    )
     .action(async (spreadsheetId: string, options) => {
       try {
         if (!options.requestsJson && !options.file) {
@@ -443,79 +441,105 @@ Examples:
       }
     });
 
-  gsheets
-    .command('metadata')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .description('Get spreadsheet metadata')
-    .option('--profile <name>', 'Profile name')
-    .action(async (spreadsheetId: string, options) => {
-      try {
-        const { client } = await getGSheetsClient(options.profile);
-        const metadata = await client.metadata(spreadsheetId);
-        printGSheetsMetadata(metadata);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    batchCmd,
+    `Examples:
 
-  gsheets
-    .command('create')
-    .argument('<title>', 'Spreadsheet title')
-    .description('Create a new spreadsheet')
-    .option('--profile <name>', 'Profile name')
-    .option('--sheets <names>', 'Comma-separated sheet names to create')
-    .action(async (title: string, options) => {
-      try {
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'create spreadsheet');
-        const sheetNames = options.sheets ? options.sheets.split(',').map((n: string) => n.trim()) : undefined;
-        const result = await client.create(title, sheetNames);
-        printGSheetsCreated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # freeze the first row (inline JSON)
+  agentio gsheets batch 1A2bCdEf... --requests-json '[{"updateSheetProperties":{"properties":{"sheetId":0,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]'
 
-  gsheets
-    .command('copy')
-    .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
-    .argument('<title>', 'New spreadsheet title')
-    .description('Copy a spreadsheet')
-    .option('--profile <name>', 'Profile name')
-    .option('--parent <folder-id>', 'Destination folder ID')
-    .action(async (spreadsheetId: string, title: string, options) => {
-      try {
-        const { client, profile } = await getGSheetsClient(options.profile);
-        await enforceWriteAccess('gsheets', profile, 'copy spreadsheet');
-        const result = await client.copy(spreadsheetId, title, options.parent);
-        printGSheetsCreated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # from a file
+  agentio gsheets batch 1A2bCdEf... --file ./requests.json
 
-  gsheets
+Accepts an array of Sheets API Request objects. See:
+https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request`,
+  );
+
+  addExamples(
+    gsheets
+      .command('metadata')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .description('Get spreadsheet metadata')
+      .option('--profile <name>', 'Profile name')
+      .action(async (spreadsheetId: string, options) => {
+        try {
+          const { client } = await getGSheetsClient(options.profile);
+          const metadata = await client.metadata(spreadsheetId);
+          printGSheetsMetadata(metadata);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # title, sheets, sheetIds, locale, etc.
+  agentio gsheets metadata 1A2bCdEf...
+
+  # accept a full URL
+  agentio gsheets metadata https://docs.google.com/spreadsheets/d/1A2bCdEf.../edit`,
+  );
+
+  addExamples(
+    gsheets
+      .command('create')
+      .argument('<title>', 'Spreadsheet title')
+      .description('Create a new spreadsheet')
+      .option('--profile <name>', 'Profile name')
+      .option('--sheets <names>', 'Comma-separated sheet names to create')
+      .action(async (title: string, options) => {
+        try {
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'create spreadsheet');
+          const sheetNames = options.sheets ? options.sheets.split(',').map((n: string) => n.trim()) : undefined;
+          const result = await client.create(title, sheetNames);
+          printGSheetsCreated(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # blank spreadsheet with default Sheet1
+  agentio gsheets create "Q4 Plan"
+
+  # multi-sheet workbook
+  agentio gsheets create "Budget 2024" --sheets "Income,Expenses,Summary"`,
+  );
+
+  addExamples(
+    gsheets
+      .command('copy')
+      .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
+      .argument('<title>', 'New spreadsheet title')
+      .description('Copy a spreadsheet')
+      .option('--profile <name>', 'Profile name')
+      .option('--parent <folder-id>', 'Destination folder ID')
+      .action(async (spreadsheetId: string, title: string, options) => {
+        try {
+          const { client, profile } = await getGSheetsClient(options.profile);
+          await enforceWriteAccess('gsheets', profile, 'copy spreadsheet');
+          const result = await client.copy(spreadsheetId, title, options.parent);
+          printGSheetsCreated(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # duplicate to My Drive root
+  agentio gsheets copy 1A2bCdEf... "Q4 Plan (copy)"
+
+  # duplicate into a specific folder
+  agentio gsheets copy 1A2bCdEf... "Q4 Plan (copy)" --parent 1FoLdErIdAbCd...`,
+  );
+
+  const exportCmd = gsheets
     .command('export')
     .argument('<spreadsheet-id-or-url>', 'Spreadsheet ID or URL')
     .description('Export a spreadsheet to a file')
     .option('--profile <name>', 'Profile name')
     .requiredOption('--output <path>', 'Output file path')
     .option('--format <fmt>', 'Export format: xlsx, pdf, csv, ods, tsv', 'xlsx')
-    .addHelpText(
-      'after',
-      `
-Export Formats:
-  xlsx - Microsoft Excel (default)
-  pdf  - PDF document
-  csv  - Comma-separated values (first sheet only)
-  ods  - OpenDocument Spreadsheet
-  tsv  - Tab-separated values (first sheet only)
-
-Examples:
-  agentio gsheets export <id> --output report.xlsx
-  agentio gsheets export <id> --output data.csv --format csv
-`
-    )
     .action(async (spreadsheetId: string, options) => {
       try {
         const { client } = await getGSheetsClient(options.profile);
@@ -534,6 +558,22 @@ Examples:
         handleError(error);
       }
     });
+
+  addExamples(
+    exportCmd,
+    `Examples:
+
+  # default xlsx export
+  agentio gsheets export 1A2bCdEf... --output report.xlsx
+
+  # CSV (first sheet only)
+  agentio gsheets export 1A2bCdEf... --output data.csv --format csv
+
+  # PDF
+  agentio gsheets export 1A2bCdEf... --output report.pdf --format pdf
+
+Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.`,
+  );
 
   // Profile management
   const profile = createProfileCommands<GSheetsCredentials>(gsheets, {
