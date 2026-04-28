@@ -8,6 +8,7 @@ import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { getDaemonClient, isDaemonAvailable } from '../daemon/client';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import {
   printInboxMessageList,
   printInboxMessage,
@@ -30,47 +31,62 @@ export function registerTelegramCommands(program: Command): void {
     .command('telegram')
     .description('Telegram operations');
 
-  telegram
-    .command('send')
-    .description('Send a message to the channel')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--parse-mode <mode>', 'Message format: html or markdown')
-    .option('--silent', 'Send without notification')
-    .argument('[message]', 'Message text (or pipe via stdin)')
-    .action(async (message: string | undefined, options) => {
-      try {
-        let text = message;
+  addExamples(
+    telegram
+      .command('send')
+      .description('Send a message to the channel')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--parse-mode <mode>', 'Message format: html or markdown')
+      .option('--silent', 'Send without notification')
+      .argument('[message]', 'Message text (or pipe via stdin)')
+      .action(async (message: string | undefined, options) => {
+        try {
+          let text = message;
 
-        if (!text) {
-          text = await readStdin() || undefined;
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+
+          if (!text) {
+            throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          }
+
+          const sendOptions: TelegramSendOptions = {};
+          if (options.parseMode) {
+            const mode = options.parseMode.toLowerCase();
+            if (mode === 'html') sendOptions.parse_mode = 'HTML';
+            else if (mode === 'markdown') sendOptions.parse_mode = 'MarkdownV2';
+            else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
+          }
+          if (options.silent) {
+            sendOptions.disable_notification = true;
+          }
+
+          const { client, profile } = await getTelegramClient(options.profile);
+          await enforceWriteAccess('telegram', profile, 'send message');
+          const result = await client.sendMessage(text, sendOptions);
+
+          console.log('Message sent');
+          console.log(`ID: ${result.message_id}`);
+          console.log(`Chat: ${result.chat.title || result.chat.id}`);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
-        }
+  # plain-text message to the channel
+  agentio telegram send "Deploy completed"
 
-        const sendOptions: TelegramSendOptions = {};
-        if (options.parseMode) {
-          const mode = options.parseMode.toLowerCase();
-          if (mode === 'html') sendOptions.parse_mode = 'HTML';
-          else if (mode === 'markdown') sendOptions.parse_mode = 'MarkdownV2';
-          else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
-        }
-        if (options.silent) {
-          sendOptions.disable_notification = true;
-        }
+  # body from stdin (good for piping)
+  echo "Build green" | agentio telegram send
 
-        const { client, profile } = await getTelegramClient(options.profile);
-        await enforceWriteAccess('telegram', profile, 'send message');
-        const result = await client.sendMessage(text, sendOptions);
+  # HTML formatting
+  agentio telegram send "<b>Alert</b>: disk 90% full" --parse-mode html
 
-        console.log('Message sent');
-        console.log(`ID: ${result.message_id}`);
-        console.log(`Chat: ${result.chat.title || result.chat.id}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # silent notification (no device ping)
+  agentio telegram send "Nightly job done" --silent`,
+  );
 
   // Profile management
   const profile = createProfileCommands<TelegramCredentials>(telegram, {
@@ -95,205 +111,277 @@ export function registerTelegramCommands(program: Command): void {
   // Inbox subcommands (requires daemon)
   const inbox = telegram.command('inbox').description('Inbox operations (requires daemon)');
 
-  inbox
-    .command('pull')
-    .description('Get pending messages from inbox')
-    .option('--profile <name>', 'Profile name')
-    .option('--limit <n>', 'Maximum messages to retrieve', '50')
-    .option('--status <status>', 'Filter by status: pending or done', 'pending')
-    .action(async (options) => {
-      try {
-        const profileResult = await resolveProfile('telegram', options.profile);
-        if (profileResult.profile === null) {
-          if (profileResult.error === 'none') {
-            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+  addExamples(
+    inbox
+      .command('pull')
+      .description('Get pending messages from inbox')
+      .option('--profile <name>', 'Profile name')
+      .option('--limit <n>', 'Maximum messages to retrieve', '50')
+      .option('--status <status>', 'Filter by status: pending or done', 'pending')
+      .action(async (options) => {
+        try {
+          const profileResult = await resolveProfile('telegram', options.profile);
+          if (profileResult.profile === null) {
+            if (profileResult.error === 'none') {
+              throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+            }
+            throw multipleProfilesError('telegram', profileResult.names);
           }
-          throw multipleProfilesError('telegram', profileResult.names);
+
+          const client = await getDaemonClient();
+          const messages = await client.inboxPull({
+            service: 'telegram',
+            profile: profileResult.profile,
+            limit: parseInt(options.limit, 10),
+            status: options.status as 'pending' | 'done',
+          });
+          printInboxMessageList(messages);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        const client = await getDaemonClient();
-        const messages = await client.inboxPull({
-          service: 'telegram',
-          profile: profileResult.profile,
-          limit: parseInt(options.limit, 10),
-          status: options.status as 'pending' | 'done',
-        });
-        printInboxMessageList(messages);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # newest pending messages (default limit 50)
+  agentio telegram inbox pull
 
-  inbox
-    .command('get')
-    .description('Get a specific inbox message')
-    .argument('<id>', 'Message ID')
-    .action(async (id: string) => {
-      try {
-        const client = await getDaemonClient();
-        const message = await client.inboxGet(id);
-        if (!message) {
-          throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+  # only the 10 most recent pending
+  agentio telegram inbox pull --limit 10
+
+  # already-acknowledged messages (audit trail)
+  agentio telegram inbox pull --status done --limit 20`,
+  );
+
+  addExamples(
+    inbox
+      .command('get')
+      .description('Get a specific inbox message')
+      .argument('<id>', 'Message ID')
+      .action(async (id: string) => {
+        try {
+          const client = await getDaemonClient();
+          const message = await client.inboxGet(id);
+          if (!message) {
+            throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+          }
+          printInboxMessage(message);
+        } catch (error) {
+          handleError(error);
         }
-        printInboxMessage(message);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  inbox
-    .command('ack')
-    .description('Mark a message as done')
-    .argument('<id>', 'Message ID')
-    .action(async (id: string) => {
-      try {
-        const client = await getDaemonClient();
-        const success = await client.inboxAck(id);
-        printInboxAckResult(success, id);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # full message (text, sender, chat id) by inbox ID
+  agentio telegram inbox get tg_inbox_01HXYZABC123`,
+  );
 
-  inbox
-    .command('reply')
-    .description('Reply to an inbox message')
-    .argument('<id>', 'Message ID to reply to')
-    .argument('[message]', 'Reply text (or pipe via stdin)')
-    .action(async (id: string, message: string | undefined) => {
-      try {
-        let text = message;
-        if (!text) {
-          text = await readStdin() || undefined;
+  addExamples(
+    inbox
+      .command('ack')
+      .description('Mark a message as done')
+      .argument('<id>', 'Message ID')
+      .action(async (id: string) => {
+        try {
+          const client = await getDaemonClient();
+          const success = await client.inboxAck(id);
+          printInboxAckResult(success, id);
+        } catch (error) {
+          handleError(error);
         }
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
-        }
+      }),
+    `Examples:
 
-        const client = await getDaemonClient();
-        // Get the inbox message to determine the profile for read-only check
-        const inboxMessage = await client.inboxGet(id);
-        if (inboxMessage) {
-          await enforceWriteAccess('telegram', inboxMessage.profile, 'reply to message');
-        }
-        const result = await client.inboxReply(id, text);
-        printInboxReplyResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # mark a message as handled (removes from default 'pending' pulls)
+  agentio telegram inbox ack tg_inbox_01HXYZABC123`,
+  );
 
-  inbox
-    .command('stats')
-    .description('Get inbox statistics')
-    .option('--profile <name>', 'Profile name')
-    .action(async (options) => {
-      try {
-        const profileResult = await resolveProfile('telegram', options.profile);
-        const client = await getDaemonClient();
-        const stats = await client.inboxStats({
-          service: 'telegram',
-          profile: profileResult.profile ?? undefined,
-        });
-        printInboxStats(stats);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    inbox
+      .command('reply')
+      .description('Reply to an inbox message')
+      .argument('<id>', 'Message ID to reply to')
+      .argument('[message]', 'Reply text (or pipe via stdin)')
+      .action(async (id: string, message: string | undefined) => {
+        try {
+          let text = message;
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+          if (!text) {
+            throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          }
+
+          const client = await getDaemonClient();
+          // Get the inbox message to determine the profile for read-only check
+          const inboxMessage = await client.inboxGet(id);
+          if (inboxMessage) {
+            await enforceWriteAccess('telegram', inboxMessage.profile, 'reply to message');
+          }
+          const result = await client.inboxReply(id, text);
+          printInboxReplyResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # reply inline as an argument
+  agentio telegram inbox reply tg_inbox_01HXYZABC123 "On it, thanks!"
+
+  # reply via stdin (good for multi-line / piped output)
+  echo "Done — see PR #42" | agentio telegram inbox reply tg_inbox_01HXYZABC123`,
+  );
+
+  addExamples(
+    inbox
+      .command('stats')
+      .description('Get inbox statistics')
+      .option('--profile <name>', 'Profile name')
+      .action(async (options) => {
+        try {
+          const profileResult = await resolveProfile('telegram', options.profile);
+          const client = await getDaemonClient();
+          const stats = await client.inboxStats({
+            service: 'telegram',
+            profile: profileResult.profile ?? undefined,
+          });
+          printInboxStats(stats);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # pending vs done counts across all telegram profiles
+  agentio telegram inbox stats
+
+  # scoped to one bot profile
+  agentio telegram inbox stats --profile my_announce_bot`,
+  );
 
   // Outbox subcommands (requires daemon)
   const outbox = telegram.command('outbox').description('Outbox operations (requires daemon)');
 
-  outbox
-    .command('send')
-    .description('Queue a message for sending')
-    .option('--profile <name>', 'Profile name')
-    .option('--to <chat-id>', 'Destination chat ID (required)')
-    .option('--parse-mode <mode>', 'Message format: html or markdown')
-    .argument('[message]', 'Message text (or pipe via stdin)')
-    .action(async (message: string | undefined, options) => {
-      try {
-        const profileResult = await resolveProfile('telegram', options.profile);
-        if (profileResult.profile === null) {
-          if (profileResult.error === 'none') {
-            throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+  addExamples(
+    outbox
+      .command('send')
+      .description('Queue a message for sending')
+      .option('--profile <name>', 'Profile name')
+      .option('--to <chat-id>', 'Destination chat ID (required)')
+      .option('--parse-mode <mode>', 'Message format: html or markdown')
+      .argument('[message]', 'Message text (or pipe via stdin)')
+      .action(async (message: string | undefined, options) => {
+        try {
+          const profileResult = await resolveProfile('telegram', options.profile);
+          if (profileResult.profile === null) {
+            if (profileResult.error === 'none') {
+              throw new CliError('PROFILE_NOT_FOUND', 'No Telegram profiles configured', 'Run: agentio telegram profile add');
+            }
+            throw multipleProfilesError('telegram', profileResult.names);
           }
-          throw multipleProfilesError('telegram', profileResult.names);
-        }
 
-        if (!options.to) {
-          throw new CliError('INVALID_PARAMS', 'Destination chat ID is required. Use --to <chat-id>');
-        }
+          if (!options.to) {
+            throw new CliError('INVALID_PARAMS', 'Destination chat ID is required. Use --to <chat-id>');
+          }
 
-        let text = message;
-        if (!text) {
-          text = await readStdin() || undefined;
-        }
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
-        }
+          let text = message;
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+          if (!text) {
+            throw new CliError('INVALID_PARAMS', 'Message is required. Provide as argument or pipe via stdin.');
+          }
 
-        const metadata: Record<string, unknown> = {};
-        if (options.parseMode) {
-          const mode = options.parseMode.toLowerCase();
-          if (mode === 'html') metadata.parse_mode = 'HTML';
-          else if (mode === 'markdown') metadata.parse_mode = 'MarkdownV2';
-          else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
+          const metadata: Record<string, unknown> = {};
+          if (options.parseMode) {
+            const mode = options.parseMode.toLowerCase();
+            if (mode === 'html') metadata.parse_mode = 'HTML';
+            else if (mode === 'markdown') metadata.parse_mode = 'MarkdownV2';
+            else throw new CliError('INVALID_PARAMS', 'parse-mode must be "html" or "markdown"');
+          }
+
+          await enforceWriteAccess('telegram', profileResult.profile, 'send message');
+          const client = await getDaemonClient();
+          const result = await client.outboxSend({
+            service: 'telegram',
+            profile: profileResult.profile,
+            conversationId: options.to,
+            content: text,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+          });
+          printOutboxSendResult(result);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        await enforceWriteAccess('telegram', profileResult.profile, 'send message');
-        const client = await getDaemonClient();
-        const result = await client.outboxSend({
-          service: 'telegram',
-          profile: profileResult.profile,
-          conversationId: options.to,
-          content: text,
-          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-        });
-        printOutboxSendResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # queue a message to a private chat (positive numeric chat id)
+  agentio telegram outbox send --to 123456789 "Reminder: standup at 10am"
 
-  outbox
-    .command('status')
-    .description('Check send status of a message')
-    .argument('<id>', 'Outbox message ID')
-    .action(async (id: string) => {
-      try {
-        const client = await getDaemonClient();
-        const message = await client.outboxStatus(id);
-        if (!message) {
-          throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+  # queue to a channel/supergroup (chat ids start with -100)
+  agentio telegram outbox send --to -1001234567890 "Deploy started"
+
+  # HTML formatting + body via stdin
+  cat report.html | agentio telegram outbox send --to 123456789 --parse-mode html`,
+  );
+
+  addExamples(
+    outbox
+      .command('status')
+      .description('Check send status of a message')
+      .argument('<id>', 'Outbox message ID')
+      .action(async (id: string) => {
+        try {
+          const client = await getDaemonClient();
+          const message = await client.outboxStatus(id);
+          if (!message) {
+            throw new CliError('NOT_FOUND', `Message not found: ${id}`);
+          }
+          printOutboxMessage(message);
+        } catch (error) {
+          handleError(error);
         }
-        printOutboxMessage(message);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  outbox
-    .command('list')
-    .description('List outbox messages')
-    .option('--profile <name>', 'Profile name')
-    .option('--status <status>', 'Filter by status: pending, sending, sent, or failed')
-    .option('--limit <n>', 'Maximum messages to retrieve', '50')
-    .action(async (options) => {
-      try {
-        const profileResult = await resolveProfile('telegram', options.profile);
-        const client = await getDaemonClient();
-        const messages = await client.outboxList({
-          service: 'telegram',
-          profile: profileResult.profile ?? undefined,
-          status: options.status as 'pending' | 'sending' | 'sent' | 'failed' | undefined,
-          limit: parseInt(options.limit, 10),
-        });
-        printOutboxMessageList(messages);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # check whether a queued message is pending/sending/sent/failed
+  agentio telegram outbox status tg_outbox_01HXYZABC123`,
+  );
+
+  addExamples(
+    outbox
+      .command('list')
+      .description('List outbox messages')
+      .option('--profile <name>', 'Profile name')
+      .option('--status <status>', 'Filter by status: pending, sending, sent, or failed')
+      .option('--limit <n>', 'Maximum messages to retrieve', '50')
+      .action(async (options) => {
+        try {
+          const profileResult = await resolveProfile('telegram', options.profile);
+          const client = await getDaemonClient();
+          const messages = await client.outboxList({
+            service: 'telegram',
+            profile: profileResult.profile ?? undefined,
+            status: options.status as 'pending' | 'sending' | 'sent' | 'failed' | undefined,
+            limit: parseInt(options.limit, 10),
+          });
+          printOutboxMessageList(messages);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # most recent outbox entries (default limit 50)
+  agentio telegram outbox list
+
+  # only failed sends — useful when debugging
+  agentio telegram outbox list --status failed
+
+  # last 10 successfully delivered messages on a specific bot
+  agentio telegram outbox list --profile my_announce_bot --status sent --limit 10`,
+  );
 }
 
 export async function telegramProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
