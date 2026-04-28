@@ -11,48 +11,78 @@ export interface ScheduledJob {
   filePath: string;
   config: FrontmatterConfig;
   nextRun: Date;
+  /** True when scan was run with allHosts and this job's host pin doesn't match currentHost. */
+  offHost?: boolean;
+}
+
+export interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
+export interface ScanResult {
+  jobs: ScheduledJob[];
+  skipped: SkippedFile[];
+}
+
+export interface ScanOptions {
+  /** Include jobs whose host pin doesn't match currentHost (marked offHost=true). */
+  allHosts?: boolean;
 }
 
 /**
  * Scan all watched folders, parse each `.run.md`, and build ScheduledJobs
- * for schedules that are enabled and match the current host.
- * Parse errors are silently skipped (caller logs).
+ * for schedules that are enabled and (unless allHosts) match the current host.
+ * Returns skipped files (e.g. missing required host) so callers can surface them.
  */
 export function scanWatchedFolders(
   folders: WatchedFolder[],
   currentHost: string,
   now: Date,
-): ScheduledJob[] {
-  const out: ScheduledJob[] = [];
+  opts: ScanOptions = {},
+): ScanResult {
+  const jobs: ScheduledJob[] = [];
+  const skipped: SkippedFile[] = [];
   for (const f of folders) {
-    if (f.host && f.host !== currentHost) continue;
+    if (!opts.allHosts && f.host && f.host !== currentHost) continue;
     let files;
     try { files = walkRunFiles(f.path); } catch { continue; }
     for (const file of files) {
       let raw: string;
-      try { raw = readFileSync(file.path, 'utf-8'); } catch { continue; }
-      let parsed;
-      try { parsed = parseFrontmatter(raw); } catch { continue; }
-      let cfg: FrontmatterConfig;
-      try { cfg = mergeConfig({}, parsed.config); } catch { continue; }
-      if (!cfg.enabled) continue;
-      if (!cfg.host) {
-        console.warn(`[scheduler] skipping ${file.path}: missing required \`host\` field`);
+      try { raw = readFileSync(file.path, 'utf-8'); } catch (e) {
+        skipped.push({ path: file.path, reason: `read failed: ${(e as Error).message}` });
         continue;
       }
-      if (cfg.host !== currentHost) continue;
+      let parsed;
+      try { parsed = parseFrontmatter(raw); } catch (e) {
+        skipped.push({ path: file.path, reason: `frontmatter parse failed: ${(e as Error).message}` });
+        continue;
+      }
+      let cfg: FrontmatterConfig;
+      try { cfg = mergeConfig({}, parsed.config); } catch (e) {
+        skipped.push({ path: file.path, reason: (e as Error).message });
+        continue;
+      }
+      if (!cfg.enabled) continue;
+      if (!cfg.host) {
+        skipped.push({ path: file.path, reason: 'missing required `host:` field' });
+        continue;
+      }
+      const offHost = cfg.host !== currentHost;
+      if (offHost && !opts.allHosts) continue;
       const next = nextRuns(cfg.schedule, 1, now)[0];
-      if (!next) continue;  // manual schedules
-      out.push({
+      if (!next) continue;
+      jobs.push({
         folder: f.path,
         id: file.id,
         filePath: file.path,
         config: cfg,
         nextRun: next,
+        ...(offHost ? { offHost: true } : {}),
       });
     }
   }
-  return out;
+  return { jobs, skipped };
 }
 
 /** Return jobs whose nextRun <= now. */

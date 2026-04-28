@@ -1,27 +1,24 @@
 import { Command } from 'commander';
-import { execFileSync } from 'child_process';
-import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { homedir } from 'os';
-import { join, resolve } from 'path';
-import plist from 'plist';
+import { resolve } from 'path';
 import { CliError, handleError } from '../utils/errors';
 import {
   mergeConfig,
   parseFrontmatter,
 } from '../services/schedule/frontmatter';
 import { describeSchedule } from '../services/schedule/describe';
-import { walkRunFiles } from '../services/schedule/walker';
+import { walkRunFiles, type RunFile } from '../services/schedule/walker';
 import { runSchedule } from '../services/schedule/runner';
 import { nextRuns } from '../services/schedule/schedule-calculator';
-import { listRuns } from '../services/schedule/runs';
+import { listRuns, type RunEntry } from '../services/schedule/runs';
 import { getCurrentHost, hostMatches } from '../services/schedule/host';
 import { scanWatchedFolders } from '../daemon/scheduler-core';
 import type { SchedulerJobView } from '../daemon/scheduler';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { addWatchedFolder, removeWatchedFolder } from './schedule-watch';
 import { abbrHome } from '../utils/output';
-import type { Config } from '../types/config';
+import type { Config, WatchedFolder } from '../types/config';
 
 function getDaemonEndpoint(config: Config): { apiKey?: string; port: number } {
   return {
@@ -30,11 +27,96 @@ function getDaemonEndpoint(config: Config): { apiKey?: string; port: number } {
   };
 }
 
+function formatLocal(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
-function renderJobs(jobs: Array<{
-  folder: string; id: string; schedule: string;
-  enabled: boolean; nextRun: string; isRunning?: boolean;
-}>, filterFolder?: string): void {
+function relativeFromNow(d: Date, now: Date = new Date()): string {
+  const diffMs = d.getTime() - now.getTime();
+  const past = diffMs < 0;
+  const abs = Math.abs(diffMs);
+  const s = Math.floor(abs / 1000);
+  if (s < 60) return past ? `${s}s ago` : `in ${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return past ? `${m}m ago` : `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return past ? `${h}h ago` : `in ${h}h`;
+  const days = Math.floor(h / 24);
+  return past ? `${days}d ago` : `in ${days}d`;
+}
+
+function formatDuration(ms: number | undefined): string {
+  if (ms === undefined) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m${s}s`;
+}
+
+function parseLogFilename(file: string): Date | null {
+  const m = file.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})\.(\d{3})Z\.log$/);
+  if (!m) return null;
+  const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function watchedFolders(config: Config): WatchedFolder[] {
+  return config.daemon?.scheduler?.watchedFolders ?? [];
+}
+
+function safeWalk(folder: string): RunFile[] {
+  try { return walkRunFiles(folder); } catch { return []; }
+}
+
+interface ResolvedJob { folder: string; file: RunFile; }
+
+/**
+ * Resolve a job id to its watched folder + matched file. CWD plays no role.
+ * - explicit `--folder` wins (must contain a matching .run.md).
+ * - else: scan all watched folders. 0 → error; 1 → use it; >1 → require --folder.
+ */
+function resolveJob(config: Config, id: string, explicitFolder?: string): ResolvedJob {
+  if (explicitFolder) {
+    const folder = resolve(explicitFolder);
+    const file = safeWalk(folder).find((f) => f.id === id);
+    if (!file) throw new CliError('NOT_FOUND', `No .run.md file with id "${id}" under ${folder}`);
+    return { folder, file };
+  }
+  const folders = watchedFolders(config);
+  if (folders.length === 0) {
+    throw new CliError(
+      'NOT_FOUND',
+      'No watched folders configured.',
+      'Add one with: agentio schedule add <folder>',
+    );
+  }
+  const matches: ResolvedJob[] = [];
+  for (const f of folders) {
+    const file = safeWalk(f.path).find((rf) => rf.id === id);
+    if (file) matches.push({ folder: f.path, file });
+  }
+  if (matches.length === 0) {
+    const list = folders.map((f) => `  ${abbrHome(f.path)}`).join('\n');
+    throw new CliError(
+      'NOT_FOUND',
+      `No .run.md file with id "${id}" in any watched folder.\n\nWatched folders:\n${list}`,
+    );
+  }
+  if (matches.length > 1) {
+    const candidates = matches.map((m) => `  ${abbrHome(m.folder)}`).join('\n');
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Multiple watched folders contain "${id}.run.md":\n${candidates}`,
+      'Use --folder <path> to disambiguate',
+    );
+  }
+  return matches[0];
+}
+
+function renderJobs(jobs: SchedulerJobView[], filterFolder?: string): void {
   const filtered = filterFolder
     ? jobs.filter((j) => j.folder === resolve(filterFolder))
     : jobs;
@@ -43,15 +125,44 @@ function renderJobs(jobs: Array<{
     console.log('Add one with: agentio schedule add <folder>');
     return;
   }
+  const now = new Date();
+  const rows = filtered.map((r) => {
+    const d = new Date(r.nextRun);
+    const next = isNaN(d.getTime()) ? r.nextRun : `${formatLocal(d)} (${relativeFromNow(d, now)})`;
+    return { ...r, nextDisplay: next };
+  });
   const widths = {
-    id: Math.max('ID'.length, ...filtered.map((r) => r.id.length)),
-    folder: Math.max('FOLDER'.length, ...filtered.map((r) => abbrHome(r.folder).length)),
-    sched: Math.max('SCHEDULE'.length, ...filtered.map((r) => r.schedule.length)),
+    id: Math.max('ID'.length, ...rows.map((r) => r.id.length)),
+    folder: Math.max('FOLDER'.length, ...rows.map((r) => abbrHome(r.folder).length)),
+    sched: Math.max('SCHEDULE'.length, ...rows.map((r) => r.schedule.length)),
   };
   console.log(`${'ID'.padEnd(widths.id)}  ${'FOLDER'.padEnd(widths.folder)}  ${'SCHEDULE'.padEnd(widths.sched)}  NEXT`);
-  for (const r of filtered) {
-    const run = r.isRunning ? ' [running]' : '';
-    console.log(`${r.id.padEnd(widths.id)}  ${abbrHome(r.folder).padEnd(widths.folder)}  ${r.schedule.padEnd(widths.sched)}  ${r.nextRun}${run}`);
+  for (const r of rows) {
+    const tags: string[] = [];
+    if (r.isRunning) tags.push('running');
+    if (r.offHost && r.hostPin) tags.push(`pinned to ${r.hostPin}`);
+    const suffix = tags.length ? `  [${tags.join(', ')}]` : '';
+    console.log(`${r.id.padEnd(widths.id)}  ${abbrHome(r.folder).padEnd(widths.folder)}  ${r.schedule.padEnd(widths.sched)}  ${r.nextDisplay}${suffix}`);
+  }
+}
+
+async function fetchSchedulerList(
+  config: Config,
+  allHosts: boolean,
+): Promise<SchedulerJobView[] | null> {
+  const { apiKey, port } = getDaemonEndpoint(config);
+  if (!apiKey) return null;
+  try {
+    const url = `http://127.0.0.1:${port}/scheduler/list${allHosts ? '?all=1' : ''}`;
+    const res = await fetch(url, {
+      headers: { 'X-API-Key': apiKey },
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    const { jobs } = await res.json() as { jobs: SchedulerJobView[] };
+    return jobs;
+  } catch {
+    return null;
   }
 }
 
@@ -104,7 +215,7 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  const printWatchedFolders = (folders: { path: string; host?: string }[]): void => {
+  const printWatchedFolders = (folders: WatchedFolder[]): void => {
     if (folders.length === 0) {
       console.log('No folders watched.');
       console.log('Add one with: agentio schedule add <folder>');
@@ -120,45 +231,44 @@ export function registerScheduleCommands(program: Command): void {
   schedule.command('list').description('List watched folders and scheduled tasks')
     .option('--folder <path>', 'Filter schedules to one folder')
     .option('--folders', 'Show watched folders only (no schedules)')
-    .action(async (opts: { folder?: string; folders?: boolean }) => {
+    .option('--all-hosts', 'Include schedules pinned to other hosts')
+    .action(async (opts: { folder?: string; folders?: boolean; allHosts?: boolean }) => {
       try {
         const config = await loadConfig();
-        const folders = config.daemon?.scheduler?.watchedFolders ?? [];
+        const folders = watchedFolders(config);
 
         printWatchedFolders(folders);
 
         if (opts.folders || folders.length === 0) return;
 
-        const { apiKey, port } = getDaemonEndpoint(config);
-
         console.log('');
         console.log('Schedules:');
 
-        if (apiKey) {
-          try {
-            const res = await fetch(`http://127.0.0.1:${port}/scheduler/list`, {
-              headers: { 'X-API-Key': apiKey },
-              signal: AbortSignal.timeout(1500),
-            });
-            if (res.ok) {
-              const { jobs } = await res.json() as { jobs: SchedulerJobView[] };
-              renderJobs(jobs, opts.folder);
-              return;
-            }
-          } catch { /* fall through to FS mode */ }
+        const fromDaemon = await fetchSchedulerList(config, !!opts.allHosts);
+        if (fromDaemon) {
+          renderJobs(fromDaemon, opts.folder);
+          return;
         }
 
         const now = new Date();
         const host = getCurrentHost();
-        const jobs = scanWatchedFolders(folders, host, now).map((j) => ({
+        const { jobs, skipped } = scanWatchedFolders(folders, host, now, { allHosts: !!opts.allHosts });
+        const rows: SchedulerJobView[] = jobs.map((j) => ({
           folder: j.folder,
           id: j.id,
           schedule: describeSchedule(j.config.schedule),
           enabled: j.config.enabled,
           nextRun: j.nextRun.toISOString(),
           isRunning: false,
+          ...(j.config.host ? { hostPin: j.config.host } : {}),
+          ...(j.offHost ? { offHost: true } : {}),
         }));
-        renderJobs(jobs, opts.folder);
+        renderJobs(rows, opts.folder);
+        if (skipped.length > 0) {
+          console.log('');
+          console.log(`Skipped ${skipped.length} file(s):`);
+          for (const s of skipped) console.log(`  ${abbrHome(s.path)} — ${s.reason}`);
+        }
         console.log('\n(daemon not running — showing filesystem view)');
       } catch (e) {
         handleError(e);
@@ -167,19 +277,16 @@ export function registerScheduleCommands(program: Command): void {
 
   schedule.command('show').description('Show a schedule and next run times')
     .argument('<id>', 'Schedule id')
-    .option('--folder <path>', 'Folder (default: CWD)')
+    .option('--folder <path>', 'Restrict resolution to this folder')
     .action(async (id: string, opts: { folder?: string }) => {
       try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-        const matches = walkRunFiles(folder).filter((f) => f.id === id);
-        if (matches.length !== 1) {
-          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`);
-        }
-        const raw = await readFile(matches[0].path, 'utf-8');
+        const config = await loadConfig();
+        const { file } = resolveJob(config, id, opts.folder);
+        const raw = await readFile(file.path, 'utf-8');
         const parsed = parseFrontmatter(raw);
         const cfg = mergeConfig({}, parsed.config);
         console.log(`id:            ${id}`);
-        console.log(`file:          ${matches[0].path}`);
+        console.log(`file:          ${file.path}`);
         console.log(`schedule:      ${describeSchedule(cfg.schedule)}`);
         console.log(`model:         ${cfg.model}`);
         console.log(`permissionMode:${cfg.permissionMode}`);
@@ -191,8 +298,9 @@ export function registerScheduleCommands(program: Command): void {
           console.log(`host:          ${cfg.host} (${hostState})`);
         }
         console.log('next 5 runs:');
+        const showNow = new Date();
         for (const d of nextRuns(cfg.schedule, 5)) {
-          console.log(`  ${d.toISOString()}`);
+          console.log(`  ${formatLocal(d)} (${relativeFromNow(d, showNow)})`);
         }
       } catch (e) {
         handleError(e);
@@ -201,15 +309,14 @@ export function registerScheduleCommands(program: Command): void {
 
   schedule.command('run').description('Run a schedule immediately')
     .argument('<id>', 'Schedule id')
-    .option('--folder <path>', 'Folder (default: CWD)')
+    .option('--folder <path>', 'Restrict resolution to this folder')
     .option('-q, --quiet', 'Suppress streaming child output to stdout/stderr (used when invoked by the daemon)')
     .action(async (id: string, opts: { folder?: string; quiet?: boolean }) => {
       try {
-        const folder = opts.folder ? resolve(opts.folder) : process.cwd();
         const config = await loadConfig();
+        const { folder, file } = resolveJob(config, id, opts.folder);
         const { apiKey, port } = getDaemonEndpoint(config);
 
-        // Try daemon delegation
         if (apiKey) {
           try {
             const res = await fetch(`http://127.0.0.1:${port}/scheduler/run`, {
@@ -221,7 +328,7 @@ export function registerScheduleCommands(program: Command): void {
             if (res.ok) {
               const result = await res.json() as { started: boolean; reason?: string };
               if (result.started) {
-                console.log(`Run queued via daemon. Tail logs in ${folder}/.agentio/runs/${id}/`);
+                console.log(`Run queued via daemon. Tail logs in ${abbrHome(folder)}/.agentio/runs/${id}/`);
                 return;
               }
               console.error(`Daemon refused: ${result.reason}`);
@@ -230,12 +337,7 @@ export function registerScheduleCommands(program: Command): void {
           } catch { /* daemon not up — fall through */ }
         }
 
-        // Local fallback
-        const matches = walkRunFiles(folder).filter((f) => f.id === id);
-        if (matches.length !== 1) {
-          throw new CliError('NOT_FOUND', `No unique .run.md file for id "${id}" under ${folder}`);
-        }
-        const raw = await readFile(matches[0].path, 'utf-8');
+        const raw = await readFile(file.path, 'utf-8');
         const parsed = parseFrontmatter(raw);
         const cfg = mergeConfig({}, parsed.config);
         const { exitCode, logPath } = await runSchedule({
@@ -248,24 +350,99 @@ export function registerScheduleCommands(program: Command): void {
       }
     });
 
-  const historyAction = async (id: string, opts: { folder?: string }) => {
-    try {
-      const folder = opts.folder ? resolve(opts.folder) : process.cwd();
-      const runs = listRuns(folder, id);
-      if (runs.length === 0) { console.log(`No runs recorded for "${id}".`); return; }
-      for (const r of runs) {
-        const dur = r.durationMs !== undefined ? `${r.durationMs}ms` : '-';
-        console.log(`${r.file}  status=${r.status ?? '?'}  exit=${r.exitCode ?? '?'}  duration=${dur}  session=${r.sessionId ?? '-'}`);
-      }
-    } catch (e) {
-      handleError(e);
-    }
-  };
+  interface AggregatedRun {
+    id: string;
+    folder: string;
+    last: RunEntry;
+  }
 
-  schedule.command('history').description('List past runs for a schedule')
-    .argument('<id>', 'Schedule id')
-    .option('--folder <path>', 'Folder (default: CWD)')
-    .action(historyAction);
+  /** Collect last runs across all watched folders, sorted most-recent first. */
+  function collectAllLastRuns(folders: WatchedFolder[]): AggregatedRun[] {
+    const out: AggregatedRun[] = [];
+    for (const f of folders) {
+      for (const file of safeWalk(f.path)) {
+        const runs = listRuns(f.path, file.id);
+        if (runs.length === 0) continue;
+        out.push({ id: file.id, folder: f.path, last: runs[0] });
+      }
+    }
+    out.sort((a, b) => {
+      const at = entryStart(a.last)?.getTime() ?? 0;
+      const bt = entryStart(b.last)?.getTime() ?? 0;
+      return bt - at;
+    });
+    return out;
+  }
+
+  function entryStart(r: RunEntry): Date | null {
+    if (r.startedAt) {
+      const d = new Date(r.startedAt);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return parseLogFilename(r.file);
+  }
+
+  function renderRunRow(when: string, status: string | undefined, exitCode: number | undefined, durationMs: number | undefined, session: string | undefined): string {
+    return `${when}  status=${status ?? '?'}  exit=${exitCode ?? '?'}  duration=${formatDuration(durationMs)}  session=${session ?? '-'}`;
+  }
+
+  schedule.command('history').description('List past runs (no id: last run of every job; with id: all runs of that job)')
+    .argument('[id]', 'Schedule id (optional)')
+    .option('--folder <path>', 'Restrict to one folder')
+    .action(async (id: string | undefined, opts: { folder?: string }) => {
+      try {
+        const config = await loadConfig();
+        const now = new Date();
+
+        if (!id) {
+          // List last run of every job across watched folders.
+          const folders = opts.folder
+            ? [{ path: resolve(opts.folder), addedAt: 0 } as WatchedFolder]
+            : watchedFolders(config);
+          if (folders.length === 0) {
+            console.log('No watched folders configured.');
+            console.log('Add one with: agentio schedule add <folder>');
+            return;
+          }
+          const rows = collectAllLastRuns(folders);
+          if (rows.length === 0) {
+            console.log('No runs recorded yet.');
+            return;
+          }
+          const widths = {
+            id: Math.max('JOB-ID'.length, ...rows.map((r) => r.id.length)),
+            folder: Math.max('FOLDER'.length, ...rows.map((r) => abbrHome(r.folder).length)),
+          };
+          console.log(`${'JOB-ID'.padEnd(widths.id)}  ${'FOLDER'.padEnd(widths.folder)}  LAST RUN`);
+          for (const r of rows) {
+            const start = entryStart(r.last);
+            const when = start
+              ? `${formatLocal(start)} (${relativeFromNow(start, now)})`
+              : r.last.file;
+            const tail = `  status=${r.last.status ?? '?'}  exit=${r.last.exitCode ?? '?'}  duration=${formatDuration(r.last.durationMs)}`;
+            console.log(`${r.id.padEnd(widths.id)}  ${abbrHome(r.folder).padEnd(widths.folder)}  ${when}${tail}`);
+          }
+          return;
+        }
+
+        // Single-job mode.
+        const { folder } = resolveJob(config, id, opts.folder);
+        const runs = listRuns(folder, id);
+        if (runs.length === 0) {
+          console.log(`No runs recorded for "${id}" in ${abbrHome(folder)}.`);
+          return;
+        }
+        for (const r of runs) {
+          const start = entryStart(r);
+          const when = start
+            ? `${formatLocal(start)} (${relativeFromNow(start, now)})`
+            : r.file;
+          console.log(renderRunRow(when, r.status, r.exitCode, r.durationMs, r.sessionId));
+        }
+      } catch (e) {
+        handleError(e);
+      }
+    });
 
   schedule.command('remove')
     .description('Stop watching a folder')
@@ -274,7 +451,7 @@ export function registerScheduleCommands(program: Command): void {
       try {
         const absPath = resolve(folder);
         const config = await loadConfig();
-        const before = config.daemon?.scheduler?.watchedFolders ?? [];
+        const before = watchedFolders(config);
         const wasWatched = before.some((f) => f.path === absPath);
 
         if (!wasWatched) {
@@ -297,56 +474,6 @@ export function registerScheduleCommands(program: Command): void {
         }
 
         console.log(`Unwatched ${abbrHome(absPath)}.`);
-      } catch (e) {
-        handleError(e);
-      }
-    });
-
-  schedule.command('migrate', { hidden: true }).description('Remove legacy per-schedule launchd plists and add their folders to the daemon watch list')
-    .action(async () => {
-      try {
-        if (process.platform !== 'darwin') {
-          console.log('`schedule migrate` only applies on macOS.');
-          return;
-        }
-        const dir = join(homedir(), 'Library', 'LaunchAgents');
-        if (!existsSync(dir)) {
-          console.log('Nothing to migrate.');
-          return;
-        }
-        const entries = readdirSync(dir)
-          .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
-        if (entries.length === 0) {
-          console.log('Nothing to migrate.');
-          return;
-        }
-        const folders = new Set<string>();
-        for (const file of entries) {
-          const full = join(dir, file);
-          try {
-            const raw = readFileSync(full, 'utf-8');
-            const parsed = plist.parse(raw) as Record<string, unknown>;
-            const args = parsed.ProgramArguments as string[] | undefined;
-            if (args) {
-              const fi = args.indexOf('--folder');
-              if (fi !== -1 && args[fi + 1]) folders.add(args[fi + 1]);
-            }
-            execFileSync('/bin/launchctl', ['unload', full], { stdio: 'ignore' });
-            unlinkSync(full);
-          } catch { /* continue */ }
-        }
-
-        let config = await loadConfig();
-        const host = getCurrentHost();
-        for (const f of folders) {
-          config = addWatchedFolder(config, f, host, Date.now());
-        }
-        await saveConfig(config);
-
-        console.log(`Migrated ${entries.length} schedule(s) across ${folders.size} folder(s).`);
-        console.log('Folders added to watch list:');
-        for (const f of folders) console.log(`  ${abbrHome(f)}`);
-        console.log('\nIf the daemon is not installed yet, run: agentio daemon install');
       } catch (e) {
         handleError(e);
       }

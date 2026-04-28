@@ -753,7 +753,8 @@ async function handleRequest(request: Request): Promise<Response> {
     if (path === '/scheduler/list') {
       if (!verifyAuth(request)) return new Response('Unauthorized', { status: 401 });
       const { listSchedulerJobs } = await import('./scheduler');
-      const jobs = await listSchedulerJobs();
+      const allHosts = url.searchParams.get('all') === '1';
+      const jobs = await listSchedulerJobs({ allHosts });
       return Response.json({ jobs });
     }
     if (path.startsWith('/media/')) {

@@ -9,6 +9,8 @@ import plist from 'plist';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { startDaemon, getDaemonConfig, LOG_FILE } from '../daemon/daemon';
+import { isDaemonAvailable } from '../daemon/client';
+import { setTimeout as sleep } from 'timers/promises';
 import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/store';
 import { isInteractive } from '../utils/interactive';
 import { buildDaemonPlist } from '../daemon/daemon-plist';
@@ -174,6 +176,15 @@ function daemonStartDarwin(): void {
   }
 }
 
+async function waitForDaemonReady(timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isDaemonAvailable()) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
 function daemonStopDarwin(): void {
   const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
   const stop = spawnSync({
@@ -219,9 +230,16 @@ export function registerDaemonCommands(
             console.log(`Generated API key: ${apiKey}`);
           }
           installDaemonDarwin();
-          console.log('Installed and running via launchd.');
           console.log(`Plist:  ${DAEMON_PLIST_PATH}`);
           console.log(`Logs:   ${DAEMON_LOG_PATH}`);
+          const ready = await waitForDaemonReady();
+          if (ready) {
+            console.log('Daemon running.');
+          } else {
+            console.log('Daemon installed but did not respond within 5s.');
+            console.log('Check status with: agentio daemon status');
+            console.log('Check logs with:   agentio daemon logs');
+          }
           return;
         }
         if (process.platform === 'linux') {

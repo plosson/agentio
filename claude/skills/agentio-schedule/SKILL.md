@@ -67,24 +67,20 @@ Setting `enabled: false` pauses without deleting. `sessionMode: resume` continue
 
 ```bash
 agentio schedule list                # all watched folders + their schedules
+agentio schedule list --all-hosts    # also show schedules pinned to other machines
 agentio schedule show <id>           # one schedule's frontmatter + next 5 run times
 agentio schedule run <id>            # fire now (ignores host pinning — manual runs work anywhere)
-agentio schedule history <id>        # past runs and their exit codes
+agentio schedule history             # last run of every job across watched folders
+agentio schedule history <id>        # all runs of one schedule
 ```
+
+The id-based commands (`show`, `run`, `history <id>`) resolve `<id>` by scanning watched folders — the current working directory is irrelevant. Use `--folder <path>` only to disambiguate when the same id exists in multiple watched folders.
 
 Logs land in `<folder>/.agentio/runs/<id>/<ISO>.log`.
 
-## Migration from older agentio versions
-
-If you have legacy `me.agentio.schedule.*.plist` files in `~/Library/LaunchAgents/` from older versions:
-
-```bash
-agentio schedule migrate    # one-shot: removes legacy plists, watches their folders
-```
-
 ## How firing works
 
-- The daemon ticks every 60 seconds (configurable via `config.daemon.scheduler.tickIntervalSec`).
+- The daemon watches each registered folder via `fs.watch` and re-ticks within ~500ms of any `.run.md` change. A 60-second timer (configurable via `config.daemon.scheduler.tickIntervalSec`) provides the safety net.
 - On each tick, it walks every watched folder, parses every `.run.md`, computes the most recent boundary (`prevRun`), and fires any schedule whose `lastRunAt` is older than that boundary (or absent — first run).
 - Schedules naturally catch up if the daemon was off when a fire was due (one catch-up per missed boundary).
 - A schedule already running is skipped on the next tick (no overlapping same-id runs).

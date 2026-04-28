@@ -25,7 +25,7 @@ describe('scanWatchedFolders', () => {
     write('foo.run.md',
       '---\nschedule:\n  type: interval\n  intervalMinutes: 30\nenabled: true\nhost: my-host\n---\nbody\n');
     const folders: WatchedFolder[] = [{ path: root, addedAt: 0 }];
-    const jobs = scanWatchedFolders(folders, 'my-host', new Date('2026-04-24T10:00:00Z'));
+    const { jobs } = scanWatchedFolders(folders, 'my-host', new Date('2026-04-24T10:00:00Z'));
     expect(jobs.length).toBe(1);
     expect(jobs[0].id).toBe('foo');
     expect(jobs[0].folder).toBe(root);
@@ -37,15 +37,17 @@ describe('scanWatchedFolders', () => {
       '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\nenabled: true\n---\n');
     // Note: no host field
     const folders: WatchedFolder[] = [{ path: root, addedAt: 0 }];
-    const jobs = scanWatchedFolders(folders, 'me', new Date());
+    const { jobs, skipped } = scanWatchedFolders(folders, 'me', new Date());
     expect(jobs.length).toBe(0);
+    expect(skipped.length).toBe(1);
+    expect(skipped[0].reason).toContain('host');
   });
 
   test('skips folders pinned to other hosts', () => {
     write('x.run.md',
       '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\n---\n');
     const folders: WatchedFolder[] = [{ path: root, host: 'other-host', addedAt: 0 }];
-    const jobs = scanWatchedFolders(folders, 'my-host', new Date());
+    const { jobs } = scanWatchedFolders(folders, 'my-host', new Date());
     expect(jobs.length).toBe(0);
   });
 
@@ -53,15 +55,25 @@ describe('scanWatchedFolders', () => {
     write('x.run.md',
       '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\nhost: elsewhere\n---\n');
     const folders: WatchedFolder[] = [{ path: root, addedAt: 0 }];
-    const jobs = scanWatchedFolders(folders, 'me', new Date());
+    const { jobs } = scanWatchedFolders(folders, 'me', new Date());
     expect(jobs.length).toBe(0);
+  });
+
+  test('allHosts includes off-host jobs marked offHost=true', () => {
+    write('x.run.md',
+      '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\nhost: elsewhere\n---\n');
+    const folders: WatchedFolder[] = [{ path: root, addedAt: 0 }];
+    const { jobs } = scanWatchedFolders(folders, 'me', new Date(), { allHosts: true });
+    expect(jobs.length).toBe(1);
+    expect(jobs[0].offHost).toBe(true);
+    expect(jobs[0].config.host).toBe('elsewhere');
   });
 
   test('skips disabled schedules', () => {
     write('x.run.md',
       '---\nschedule:\n  type: daily\n  hour: 9\n  minute: 0\nenabled: false\n---\n');
     const folders: WatchedFolder[] = [{ path: root, addedAt: 0 }];
-    const jobs = scanWatchedFolders(folders, 'me', new Date());
+    const { jobs } = scanWatchedFolders(folders, 'me', new Date());
     expect(jobs.length).toBe(0);
   });
 });
