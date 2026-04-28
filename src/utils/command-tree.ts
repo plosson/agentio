@@ -10,6 +10,14 @@ export interface CommandInfo {
 
 const EXAMPLES = new WeakMap<Command, string>();
 
+/**
+ * Records `text` for `cmd` in the side-table AND patches `cmd.helpInformation`
+ * so `--help` appends the block. Returns `cmd` for chaining.
+ *
+ * Caveat: if the same command also has a prior `cmd.addHelpText('after', ...)`
+ * call, `--help` will render two trailing blocks. Delete any prior
+ * `addHelpText('after', ...)` before adopting `addExamples` on a command.
+ */
 export function addExamples(cmd: Command, text: string): Command {
   const isFirstRegistration = !EXAMPLES.has(cmd);
   EXAMPLES.set(cmd, text);
