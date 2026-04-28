@@ -13,13 +13,14 @@ const EXAMPLES = new WeakMap<Command, string>();
 export function addExamples(cmd: Command, text: string): Command {
   const isFirstRegistration = !EXAMPLES.has(cmd);
   EXAMPLES.set(cmd, text);
-  // Register with Commander so it appears in interactive `--help` output.
-  cmd.addHelpText('after', '\n' + text);
 
-  // Commander's `addHelpText` only emits during `outputHelp`, not via
-  // `helpInformation()`. Patch `helpInformation` once so the example text is
-  // appended to the returned string too — the gate test and `agentio skill`
-  // both rely on inspecting `helpInformation`/the side-table.
+  // Patch `helpInformation` once so the example text is appended to the
+  // returned string. `outputHelp()` (used by `--help`) calls
+  // `helpInformation()` internally, so this single mechanism covers both
+  // interactive `--help` output and direct `helpInformation` inspection
+  // (used by the gate test and `agentio skill`). Calling
+  // `cmd.addHelpText('after', ...)` in addition would cause `--help` to
+  // render the EXAMPLES block twice.
   if (isFirstRegistration) {
     const original = cmd.helpInformation.bind(cmd);
     cmd.helpInformation = function patchedHelpInformation(
