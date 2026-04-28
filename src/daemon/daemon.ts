@@ -310,16 +310,12 @@ export async function startDaemon(): Promise<void> {
     // Start scheduler
     const schedulerConfig = daemonConfig.scheduler;
     const folders = schedulerConfig?.watchedFolders ?? [];
-    if (folders.length > 0) {
-      const tickMs = (schedulerConfig?.tickIntervalSec ?? 60) * 1000;
-      await startScheduler({
-        watchedFolders: folders,
-        tickIntervalMs: tickMs,
-      });
-      console.log(`[scheduler] watching ${folders.length} folder(s), tick=${tickMs}ms`);
-    } else {
-      console.log('[scheduler] no watched folders');
-    }
+    const tickMs = (schedulerConfig?.tickIntervalSec ?? 60) * 1000;
+    await startScheduler({
+      watchedFolders: folders,
+      tickIntervalMs: tickMs,
+    });
+    console.log(`[scheduler] watching ${folders.length} folder(s), tick=${tickMs}ms`);
 
     console.log('Daemon ready');
 

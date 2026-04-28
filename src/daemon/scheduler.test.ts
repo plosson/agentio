@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { EventEmitter } from 'events';
-import { startScheduler, stopScheduler, runOneJob } from './scheduler';
+import { startScheduler, stopScheduler, runOneJob, reloadScheduler, listSchedulerJobs } from './scheduler';
 
 function fakeChild(autoClose = true) {
   const c = new EventEmitter() as any;
@@ -155,6 +155,36 @@ describe('scheduler', () => {
 
     await new Promise((r) => setTimeout(r, 200));
     expect(spawns.length).toBe(0);
+  });
+
+  test('reload picks up folders added after startup with empty initial list', async () => {
+    writeFileSync(join(root, 'x.run.md'),
+      '---\nschedule:\n  type: interval\n  intervalMinutes: 1\nenabled: true\nhost: h1\n---\nbody\n');
+
+    const spawns: number[] = [];
+    const spawner = () => { spawns.push(1); return fakeChild(); };
+
+    await startScheduler({
+      watchedFolders: [],
+      currentHost: 'h1',
+      tickIntervalMs: 60_000,
+      spawner,
+      claudePath: '/bin/true',
+      now: () => new Date(),
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(spawns.length).toBe(0);
+    expect(await listSchedulerJobs()).toEqual([]);
+
+    await reloadScheduler([{ path: root, addedAt: 0 }]);
+
+    const deadline = Date.now() + 3000;
+    while (spawns.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(spawns.length).toBe(1);
+    expect((await listSchedulerJobs()).map((j) => j.id)).toEqual(['x']);
   });
 
   test('runOneJob bypasses host pinning for manual runs', async () => {
