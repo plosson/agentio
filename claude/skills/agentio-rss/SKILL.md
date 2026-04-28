@@ -1,60 +1,65 @@
 ---
 name: agentio-rss
-description: Use when reading RSS/Atom feeds - list articles, get article content, or get feed info from any blog URL. Auto-discovers feed URLs from blog home pages.
+description: Use when reading RSS feeds via the agentio CLI.
 ---
 
-# RSS Feed Operations with agentio
+# Rss via agentio
 
-Use `agentio rss` commands to read RSS/Atom feeds. Just provide a blog URL - the feed will be auto-discovered.
+Auto-generated from `agentio skill rss`. Do not edit by hand.
 
-## List Articles
+## agentio rss articles <url>
 
-```bash
-agentio rss articles <url> [--limit N] [--since YYYY-MM-DD]
-```
+List articles from a blog
 
 Options:
+
 - `--limit <n>`: Number of articles (default: 20)
-- `--since <date>`: Only articles after this date
+- `--since <date>`: Only articles after this date (YYYY-MM-DD)
 
+```
 Examples:
-```bash
-agentio rss articles https://simonwillison.net --limit 5
-agentio rss articles https://steipete.me --since 2025-01-01
+
+  # 20 most recent articles (feed auto-discovered from blog URL)
+  agentio rss articles https://simonwillison.net
+
+  # cap to 5 articles
+  agentio rss articles https://simonwillison.net --limit 5
+
+  # only articles since a date
+  agentio rss articles https://steipete.me --since 2026-01-01
+
+  # direct feed URL also works
+  agentio rss articles https://example.com/feed.xml --limit 10
 ```
 
-## Get Article Content
+## agentio rss get <url> <article-id>
 
-```bash
-agentio rss get <url> <article-id>
+Get a specific article
+
+```
+Examples:
+
+  # fetch full content by article URL (most common — copy from 'rss articles' output)
+  agentio rss get https://blog.fsck.com https://blog.fsck.com/2025/12/27/streamlinear/
+
+  # by GUID (also shown in the articles list)
+  agentio rss get https://simonwillison.net "tag:simonwillison.net,2024:/blog/2024/jan/12/article"
 ```
 
-The article-id can be the article URL or GUID from the articles list.
+## agentio rss info <url>
 
-Example:
-```bash
-agentio rss get https://blog.fsck.com https://blog.fsck.com/2025/12/27/streamlinear/
+Get feed information
+
+```
+Examples:
+
+  # title, description, discovered feed URL, article count
+  agentio rss info https://kau.sh
+
+  # also accepts a direct feed URL
+  agentio rss info https://example.com/atom.xml
+
+Auto-discovery looks for HTML <link rel="alternate"> tags first, then falls
+back to common paths: /feed, /feed.xml, /rss.xml, /atom.xml, /index.xml.
 ```
 
-## Get Feed Info
-
-```bash
-agentio rss info <url>
-```
-
-Shows feed title, description, discovered feed URL, and article count.
-
-Example:
-```bash
-agentio rss info https://kau.sh
-```
-
-## Feed Auto-Discovery
-
-The URL can be:
-- A blog home page (e.g., `https://simonwillison.net`)
-- A direct feed URL (e.g., `https://example.com/feed.xml`)
-
-Auto-discovery checks:
-1. HTML `<link rel="alternate">` tags
-2. Common paths: `/feed`, `/feed.xml`, `/rss.xml`, `/atom.xml`, `/index.xml`
