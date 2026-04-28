@@ -31,6 +31,7 @@ import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
 import { registerServerCommands } from './commands/server';
 import { registerSetupCommand } from './commands/setup';
+import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { vaultExists } from './vault/vault';
@@ -87,6 +88,7 @@ registerReauthCommand(program);
 registerScheduleCommands(program);
 registerServerCommands(program);
 registerSetupCommand(program);
+registerSkillCommand(program);
 registerStatusCommand(program);
 registerUpdateCommand(program);
 
