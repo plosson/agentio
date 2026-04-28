@@ -8,6 +8,7 @@ import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import {
   printJiraProjectList,
   printJiraIssueList,
@@ -88,126 +89,185 @@ export function registerJiraCommands(program: Command): void {
     .description('JIRA operations');
 
   // List projects
-  jira
-    .command('projects')
-    .description('List JIRA projects')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <number>', 'Maximum number of projects', '50')
-    .action(async (options) => {
-      try {
-        const { client } = await getJiraClient(options.profile);
-        const projects = await client.listProjects({
-          maxResults: parseInt(options.limit, 10),
-        });
-        printJiraProjectList(projects);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    jira
+      .command('projects')
+      .description('List JIRA projects')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <number>', 'Maximum number of projects', '50')
+      .action(async (options) => {
+        try {
+          const { client } = await getJiraClient(options.profile);
+          const projects = await client.listProjects({
+            maxResults: parseInt(options.limit, 10),
+          });
+          printJiraProjectList(projects);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # all visible projects (default limit 50)
+  agentio jira projects
+
+  # cap the result count
+  agentio jira projects --limit 10`,
+  );
 
   // Search issues
-  jira
-    .command('search')
-    .description('Search JIRA issues')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--jql <query>', 'JQL query')
-    .option('--project <key>', 'Project key')
-    .option('--status <status>', 'Issue status')
-    .option('--assignee <name>', 'Assignee name')
-    .option('--limit <number>', 'Maximum number of issues', '50')
-    .action(async (options) => {
-      try {
-        const { client } = await getJiraClient(options.profile);
-        const issues = await client.searchIssues({
-          jql: options.jql,
-          project: options.project,
-          status: options.status,
-          assignee: options.assignee,
-          maxResults: parseInt(options.limit, 10),
-        });
-        printJiraIssueList(issues);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    jira
+      .command('search')
+      .description('Search JIRA issues')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--jql <query>', 'JQL query')
+      .option('--project <key>', 'Project key')
+      .option('--status <status>', 'Issue status')
+      .option('--assignee <name>', 'Assignee name')
+      .option('--limit <number>', 'Maximum number of issues', '50')
+      .action(async (options) => {
+        try {
+          const { client } = await getJiraClient(options.profile);
+          const issues = await client.searchIssues({
+            jql: options.jql,
+            project: options.project,
+            status: options.status,
+            assignee: options.assignee,
+            maxResults: parseInt(options.limit, 10),
+          });
+          printJiraIssueList(issues);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # everything assigned to you across all projects
+  agentio jira search --jql "assignee = currentUser() AND resolution = Unresolved"
+
+  # bugs created in the last week in one project
+  agentio jira search --jql "project = PROJ AND issuetype = Bug AND created >= -7d"
+
+  # convenience flags (combined with AND)
+  agentio jira search --project PROJ --status "In Progress" --assignee alice
+
+  # high-priority items updated today, capped to 10
+  agentio jira search --jql "priority = High AND updated >= -1d" --limit 10
+
+JQL syntax: project = KEY, assignee = currentUser(), status = "In Progress",
+created >= -7d, updated >= -1d, priority = High, labels = bug, resolution = Unresolved.
+Combine with AND / OR / NOT. Quote multi-word values.`,
+  );
 
   // Get issue details
-  jira
-    .command('get')
-    .description('Get JIRA issue details')
-    .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (issueKey: string, options) => {
-      try {
-        const { client } = await getJiraClient(options.profile);
-        const issue = await client.getIssue(issueKey);
-        printJiraIssue(issue);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    jira
+      .command('get')
+      .description('Get JIRA issue details')
+      .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (issueKey: string, options) => {
+        try {
+          const { client } = await getJiraClient(options.profile);
+          const issue = await client.getIssue(issueKey);
+          printJiraIssue(issue);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # full issue (summary, status, description, comments)
+  agentio jira get PROJ-123`,
+  );
 
   // Add comment
-  jira
-    .command('comment')
-    .description('Add a comment to an issue')
-    .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .argument('[body]', 'Comment body (or pipe via stdin)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (issueKey: string, body: string | undefined, options) => {
-      try {
-        let text = body;
+  addExamples(
+    jira
+      .command('comment')
+      .description('Add a comment to an issue')
+      .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
+      .argument('[body]', 'Comment body (or pipe via stdin)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (issueKey: string, body: string | undefined, options) => {
+        try {
+          let text = body;
 
-        if (!text) {
-          text = await readStdin() || undefined;
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+
+          if (!text) {
+            throw new CliError('INVALID_PARAMS', 'Comment body is required. Provide as argument or pipe via stdin.');
+          }
+
+          const { client, profile } = await getJiraClient(options.profile);
+          await enforceWriteAccess('jira', profile, 'add comment');
+          const result = await client.addComment(issueKey, text);
+          printJiraCommentResult(result);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        if (!text) {
-          throw new CliError('INVALID_PARAMS', 'Comment body is required. Provide as argument or pipe via stdin.');
-        }
+  # short comment as an argument
+  agentio jira comment PROJ-123 "Reproduced on staging."
 
-        const { client, profile } = await getJiraClient(options.profile);
-        await enforceWriteAccess('jira', profile, 'add comment');
-        const result = await client.addComment(issueKey, text);
-        printJiraCommentResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # multi-line comment via stdin
+  cat investigation.md | agentio jira comment PROJ-123`,
+  );
 
   // List transitions
-  jira
-    .command('transitions')
-    .description('List available transitions for an issue')
-    .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (issueKey: string, options) => {
-      try {
-        const { client } = await getJiraClient(options.profile);
-        const transitions = await client.getTransitions(issueKey);
-        printJiraTransitions(issueKey, transitions);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    jira
+      .command('transitions')
+      .description('List available transitions for an issue')
+      .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (issueKey: string, options) => {
+        try {
+          const { client } = await getJiraClient(options.profile);
+          const transitions = await client.getTransitions(issueKey);
+          printJiraTransitions(issueKey, transitions);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # see transition ids before calling 'jira transition'
+  agentio jira transitions PROJ-123`,
+  );
 
   // Transition issue (change status)
-  jira
-    .command('transition')
-    .description('Transition an issue to a new status')
-    .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-    .argument('<transition-id>', 'Transition ID (use "transitions" command to see available)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (issueKey: string, transitionId: string, options) => {
-      try {
-        const { client, profile } = await getJiraClient(options.profile);
-        await enforceWriteAccess('jira', profile, 'transition issue');
-        const result = await client.transitionIssue(issueKey, transitionId);
-        printJiraTransitionResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    jira
+      .command('transition')
+      .description('Transition an issue to a new status')
+      .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
+      .argument('<transition-id>', 'Transition ID (use "transitions" command to see available)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (issueKey: string, transitionId: string, options) => {
+        try {
+          const { client, profile } = await getJiraClient(options.profile);
+          await enforceWriteAccess('jira', profile, 'transition issue');
+          const result = await client.transitionIssue(issueKey, transitionId);
+          printJiraTransitionResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # move PROJ-123 to the status whose transition id is 31
+  agentio jira transition PROJ-123 31
+
+  # discover the id first, then run the transition
+  agentio jira transitions PROJ-123
+  agentio jira transition PROJ-123 41`,
+  );
 
   // Profile management
   const profile = createProfileCommands<JiraCredentials>(jira, {
