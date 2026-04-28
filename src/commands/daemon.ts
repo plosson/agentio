@@ -15,6 +15,7 @@ import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/
 import { isInteractive } from '../utils/interactive';
 import { buildDaemonPlist } from '../daemon/daemon-plist';
 import { DAEMON_PLIST_FILE } from '../daemon/labels';
+import { addExamples } from '../utils/command-tree';
 import type { Config } from '../types/config';
 
 const SERVICE_NAME = 'agentio-daemon';
@@ -215,7 +216,7 @@ export function registerDaemonCommands(
   }
 
   // Install command - creates systemd service (Linux) or LaunchAgent (macOS)
-  daemon
+  const installCmd = daemon
     .command('install')
     .description('Install daemon as a system service (launchd on macOS, systemd on Linux)')
     .action(async () => {
@@ -333,8 +334,22 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    installCmd,
+    `Examples:
+
+  # install and auto-start (macOS LaunchAgent or Linux systemd unit)
+  agentio daemon install
+
+  # Linux systemd install needs sudo
+  sudo agentio daemon install
+
+  # check it's running afterward
+  agentio daemon status`,
+  );
+
   // Start command - either via systemd or direct
-  daemon
+  const startCmd = daemon
     .command('start')
     .description('Start the daemon')
     .option('--foreground', 'Run in foreground (used by systemd)')
@@ -371,8 +386,19 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    startCmd,
+    `Examples:
+
+  # start the installed daemon (launchd / systemd) or run in foreground if not installed
+  agentio daemon start
+
+  # run in the foreground (used by systemd; useful for dev / debugging)
+  agentio daemon start --foreground`,
+  );
+
   // Stop command
-  daemon
+  const stopCmd = daemon
     .command('stop')
     .description('Stop the daemon')
     .action(async () => {
@@ -404,8 +430,19 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    stopCmd,
+    `Examples:
+
+  # stop the running daemon
+  agentio daemon stop
+
+  # stop, then start fresh (or use \`agentio daemon restart\`)
+  agentio daemon stop && agentio daemon start`,
+  );
+
   // Restart command
-  daemon
+  const restartCmd = daemon
     .command('restart')
     .description('Restart the daemon')
     .action(async () => {
@@ -438,8 +475,16 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    restartCmd,
+    `Examples:
+
+  # restart the daemon (e.g. after editing config or installing a new version)
+  agentio daemon restart`,
+  );
+
   // Status command
-  daemon
+  const statusCmd = daemon
     .command('status')
     .description('Show daemon status')
     .action(async () => {
@@ -499,8 +544,16 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    statusCmd,
+    `Examples:
+
+  # show daemon state and which adapters (whatsapp/telegram) are connected
+  agentio daemon status`,
+  );
+
   // Logs command
-  daemon
+  const logsCmd = daemon
     .command('logs')
     .description('View daemon logs')
     .option('-f, --follow', 'Follow log output')
@@ -554,8 +607,22 @@ export function registerDaemonCommands(
       }
     });
 
+  addExamples(
+    logsCmd,
+    `Examples:
+
+  # last 50 log lines
+  agentio daemon logs
+
+  # last 200 log lines
+  agentio daemon logs --lines 200
+
+  # tail logs continuously (Ctrl-C to stop)
+  agentio daemon logs --follow`,
+  );
+
   // Uninstall command
-  daemon
+  const uninstallCmd = daemon
     .command('uninstall')
     .description('Remove daemon system service (launchd on macOS, systemd on Linux)')
     .action(async () => {
@@ -606,6 +673,17 @@ export function registerDaemonCommands(
         handleError(error);
       }
     });
+
+  addExamples(
+    uninstallCmd,
+    `Examples:
+
+  # remove the LaunchAgent / systemd unit (config in ~/.config/agentio is preserved)
+  agentio daemon uninstall
+
+  # Linux systemd uninstall needs sudo
+  sudo agentio daemon uninstall`,
+  );
 
   // Profile subcommands
   const profile = daemon.command('profile').description('Manage daemon connection');
@@ -711,7 +789,7 @@ export function registerDaemonCommands(
     });
 
   // Teleport command
-  daemon
+  const teleportCmd = daemon
     .command('teleport')
     .description('Transfer auth state to a remote daemon')
     .argument('<url>', 'Remote daemon URL (e.g., https://my-daemon.example.com)')
@@ -783,4 +861,15 @@ export function registerDaemonCommands(
         handleError(error);
       }
     });
+
+  addExamples(
+    teleportCmd,
+    `Examples:
+
+  # transfer all adapter auth state (e.g. WhatsApp pairing) to a remote daemon
+  agentio daemon teleport https://my-daemon.example.com
+
+  # only teleport WhatsApp; pass api key inline (default: prompt)
+  agentio daemon teleport https://my-daemon.example.com --service whatsapp --api-key gw_xxx`,
+  );
 }
