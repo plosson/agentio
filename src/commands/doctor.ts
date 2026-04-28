@@ -10,6 +10,7 @@ import { readPointer } from '../vault/pointer';
 import { isDaemonInstalled } from '../utils/daemon-ensure';
 import { isDaemonAvailable } from '../daemon/client';
 import { abbrHome } from '../utils/output';
+import { addExamples } from '../utils/command-tree';
 
 export interface Check {
   name: string;
@@ -117,7 +118,7 @@ function checkWatchedFolders(cfg: Config | null): Check | null {
 }
 
 export function registerDoctorCommand(program: Command): void {
-  program
+  const doctorCmd = program
     .command('doctor')
     .description('Diagnose vault, daemon, profiles, and watched folders')
     .action(async () => {
@@ -141,4 +142,12 @@ export function registerDoctorCommand(program: Command): void {
         handleError(e);
       }
     });
+
+  addExamples(
+    doctorCmd,
+    `Examples:
+
+  # run all health checks (vault, daemon, profiles, watched folders, legacy plists)
+  agentio doctor`,
+  );
 }

@@ -9,6 +9,7 @@ import { readStdin, prompt } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { enforceWriteAccess } from '../utils/read-only';
 import { isProfileReadOnly } from '../config/config-manager';
+import { addExamples } from '../utils/command-tree';
 import type { SqlCredentials } from '../types/sql';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
@@ -33,13 +34,14 @@ export function registerSqlCommands(program: Command): void {
     .command('sql')
     .description('SQL database operations');
 
-  sql
-    .command('query')
-    .description('Execute a SQL query')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Maximum rows to return', '100')
-    .argument('[query]', 'SQL query (or pipe via stdin)')
-    .action(async (query: string | undefined, options) => {
+  addExamples(
+    sql
+      .command('query')
+      .description('Execute a SQL query')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Maximum rows to return', '100')
+      .argument('[query]', 'SQL query (or pipe via stdin)')
+      .action(async (query: string | undefined, options) => {
       let client: SqlClient | undefined;
       try {
         const queryText = query || await readStdin();
@@ -73,7 +75,21 @@ export function registerSqlCommands(program: Command): void {
       } finally {
         client?.close();
       }
-    });
+    }),
+    `Examples:
+
+  # one-shot SELECT against the default profile
+  agentio sql query "SELECT id, email FROM users LIMIT 10"
+
+  # cap rows for an exploratory query
+  agentio sql query "SELECT * FROM events" --limit 25
+
+  # pipe a multi-line query via stdin
+  cat report.sql | agentio sql query
+
+  # run against a specific profile
+  agentio sql query --profile prod "SELECT count(*) FROM orders"`,
+  );
 
   // Profile management
   const profile = createProfileCommands<SqlCredentials>(sql, {

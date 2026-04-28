@@ -1,83 +1,127 @@
 ---
 name: agentio-jira
-description: Use when interacting with JIRA - list projects, search issues, get issue details, add comments, or transition issues. Requires agentio CLI with a configured JIRA profile.
+description: Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.
 ---
 
-# JIRA Operations with agentio
+# Jira via agentio
 
-Use `agentio jira` commands to interact with JIRA. Multiple profiles can be configured - the default profile is used unless you specify `--profile <name>`.
+Auto-generated from `agentio skill jira`. Do not edit by hand.
 
-## List Projects
+## agentio jira projects
 
-```bash
-agentio jira projects [--limit N]
-```
+List JIRA projects
 
 Options:
-- `--limit <n>`: Maximum number of projects (default: 50)
 
-## Search Issues
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--limit <number>`: Maximum number of projects (default: 50)
 
-```bash
-agentio jira search [options]
 ```
+Examples:
+
+  # all visible projects (default limit 50)
+  agentio jira projects
+
+  # cap the result count
+  agentio jira projects --limit 10
+```
+
+## agentio jira search
+
+Search JIRA issues
 
 Options:
-- `--jql <query>`: JQL query for advanced search
-- `--project <key>`: Filter by project key
-- `--status <status>`: Filter by status
-- `--assignee <name>`: Filter by assignee
-- `--limit <n>`: Maximum number of issues (default: 50)
 
-JQL examples:
-- `project = PROJ` - Issues in project
-- `assignee = currentUser()` - Assigned to you
-- `status = "In Progress"` - By status
-- `created >= -7d` - Created in last 7 days
-- `updated >= -1d` - Updated in last day
-- `priority = High` - By priority
-- `labels = bug` - By label
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--jql <query>`: JQL query
+- `--project <key>`: Project key
+- `--status <status>`: Issue status
+- `--assignee <name>`: Assignee name
+- `--limit <number>`: Maximum number of issues (default: 50)
 
-Combine: `project = PROJ AND status = "To Do" AND assignee = currentUser()`
+```
+Examples:
 
-## Get Issue Details
+  # everything assigned to you across all projects
+  agentio jira search --jql "assignee = currentUser() AND resolution = Unresolved"
 
-```bash
-agentio jira get <issue-key>
+  # bugs created in the last week in one project
+  agentio jira search --jql "project = PROJ AND issuetype = Bug AND created >= -7d"
+
+  # convenience flags (combined with AND)
+  agentio jira search --project PROJ --status "In Progress" --assignee alice
+
+  # high-priority items updated today, capped to 10
+  agentio jira search --jql "priority = High AND updated >= -1d" --limit 10
+
+JQL syntax: project = KEY, assignee = currentUser(), status = "In Progress",
+created >= -7d, updated >= -1d, priority = High, labels = bug, resolution = Unresolved.
+Combine with AND / OR / NOT. Quote multi-word values.
 ```
 
-Example:
-```bash
-agentio jira get PROJ-123
+## agentio jira get <issue-key>
+
+Get JIRA issue details
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # full issue (summary, status, description, comments)
+  agentio jira get PROJ-123
 ```
 
-## Add a Comment
+## agentio jira comment <issue-key> [body]
 
-```bash
-agentio jira comment <issue-key> [body]
+Add a comment to an issue
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # short comment as an argument
+  agentio jira comment PROJ-123 "Reproduced on staging."
+
+  # multi-line comment via stdin
+  cat investigation.md | agentio jira comment PROJ-123
 ```
 
-Or pipe via stdin:
-```bash
-echo "Comment text" | agentio jira comment PROJ-123
+## agentio jira transitions <issue-key>
+
+List available transitions for an issue
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # see transition ids before calling 'jira transition'
+  agentio jira transitions PROJ-123
 ```
 
-## List Transitions
+## agentio jira transition <issue-key> <transition-id>
 
-```bash
-agentio jira transitions <issue-key>
+Transition an issue to a new status
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
 ```
+Examples:
 
-Shows available status transitions for an issue with their IDs.
+  # move PROJ-123 to the status whose transition id is 31
+  agentio jira transition PROJ-123 31
 
-## Transition Issue
-
-```bash
-agentio jira transition <issue-key> <transition-id>
-```
-
-First list transitions to get the ID, then transition:
-```bash
-agentio jira transitions PROJ-123
-agentio jira transition PROJ-123 31
+  # discover the id first, then run the transition
+  agentio jira transitions PROJ-123
+  agentio jira transition PROJ-123 41
 ```

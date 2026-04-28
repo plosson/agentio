@@ -12,6 +12,7 @@ import {
   type SiteioRunner,
 } from '../server/siteio-runner';
 import { handleError, CliError } from '../utils/errors';
+import { addExamples } from '../utils/command-tree';
 import type { Config, TeleportAppRecord } from '../types/config';
 
 /**
@@ -980,7 +981,7 @@ async function defaultDetectGitOriginUrl(): Promise<string | null> {
  * types `agentio mcp teleport <name>` rather than `agentio teleport`.
  */
 export function registerTeleportCommand(parent: Command): void {
-  parent
+  const teleport = parent
     .command('teleport')
     .description(
       'Deploy the agentio HTTP MCP server to a siteio-managed remote in one command'
@@ -1056,4 +1057,24 @@ export function registerTeleportCommand(parent: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    teleport,
+    `Examples:
+
+  # first deploy: pick an app name (becomes the subdomain on your siteio host)
+  agentio mcp teleport mcp
+
+  # subsequent deploys: name is remembered — rebuild in place, preserves API key + clients
+  agentio mcp teleport
+
+  # push only the latest local config (added profiles, refreshed creds) without rebuilding
+  agentio mcp teleport --sync
+
+  # deploy unreleased code from a branch (siteio clones the repo and builds from it)
+  agentio mcp teleport mcp --git-branch feat/my-branch
+
+  # inspect the generated Dockerfile without calling siteio
+  agentio mcp teleport mcp --dockerfile-only`,
+  );
 }

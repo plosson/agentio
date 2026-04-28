@@ -9,6 +9,7 @@ import { CliError, handleError } from '../utils/errors';
 import { readStdin, prompt } from '../utils/stdin';
 import { printSlackSendResult } from '../utils/output';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type { SlackCredentials, SlackWebhookCredentials } from '../types/slack';
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
@@ -21,13 +22,14 @@ export function registerSlackCommands(program: Command): void {
     .command('slack')
     .description('Slack operations');
 
-  slack
-    .command('send')
-    .description('Send a message to Slack')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--json [file]', 'Send Block Kit message from JSON file (or stdin if no file specified)')
-    .argument('[message]', 'Message text (or pipe via stdin)')
-    .action(async (message: string | undefined, options) => {
+  addExamples(
+    slack
+      .command('send')
+      .description('Send a message to Slack')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--json [file]', 'Send Block Kit message from JSON file (or stdin if no file specified)')
+      .argument('[message]', 'Message text (or pipe via stdin)')
+      .action(async (message: string | undefined, options) => {
       try {
         let text: string | undefined = message;
         let payload: Record<string, unknown> | undefined;
@@ -101,7 +103,21 @@ export function registerSlackCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
+
+  # send a quick text message to the default profile
+  agentio slack send "deploy finished"
+
+  # pipe message body via stdin
+  echo "build failed: see logs" | agentio slack send
+
+  # send a Block Kit payload from a JSON file
+  agentio slack send --json ./alert.json
+
+  # send to a specific profile
+  agentio slack send --profile alerts "incident opened"`,
+  );
 
   // Profile management
   const profile = createProfileCommands<SlackCredentials>(slack, {

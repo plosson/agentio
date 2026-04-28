@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
+import { addExamples } from '../utils/command-tree';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -253,7 +254,7 @@ async function updateBinary(downloadUrl: string, targetPath: string): Promise<vo
 }
 
 export function registerUpdateCommand(program: Command): void {
-  program
+  const updateCmd = program
     .command('update')
     .description('Update agentio to the latest version')
     .option('--check', 'Only check for updates, don\'t install')
@@ -332,4 +333,21 @@ export function registerUpdateCommand(program: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    updateCmd,
+    `Examples:
+
+  # check for a newer release and install it (asks for confirmation)
+  agentio update
+
+  # only check (no download)
+  agentio update --check
+
+  # non-interactive update (skip confirmation; useful in scripts)
+  agentio update --yes
+
+  # reinstall the same version (e.g. recover a corrupted binary)
+  agentio update --force --yes`,
+  );
 }

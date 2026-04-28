@@ -19,6 +19,7 @@ import {
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 
 async function getGTasksClient(profileName?: string): Promise<{ client: GTasksClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gtasks', profileName);
@@ -38,100 +39,146 @@ export function registerGTasksCommands(program: Command): void {
     .description('Manage task lists');
 
   // List task lists (default subcommand)
-  lists
-    .command('list', { isDefault: true })
-    .description('List all task lists')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Max results', '100')
-    .action(async (options) => {
-      try {
-        const { client } = await getGTasksClient(options.profile);
-        const result = await client.listTaskLists(parseInt(options.limit, 10));
-        printGTasksList(result.taskLists, result.nextPageToken);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    lists
+      .command('list', { isDefault: true })
+      .description('List all task lists')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Max results', '100')
+      .action(async (options) => {
+        try {
+          const { client } = await getGTasksClient(options.profile);
+          const result = await client.listTaskLists(parseInt(options.limit, 10));
+          printGTasksList(result.taskLists, result.nextPageToken);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # show all your task lists with IDs
+  agentio gtasks lists list
+
+  # cap at a smaller number
+  agentio gtasks lists list --limit 10`,
+  );
 
   // Create task list
-  lists
-    .command('create <title>')
-    .description('Create a new task list')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (title: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'create task list');
-        const taskList = await client.createTaskList(title);
-        printGTaskListCreated(taskList);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    lists
+      .command('create <title>')
+      .description('Create a new task list')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (title: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'create task list');
+          const taskList = await client.createTaskList(title);
+          printGTaskListCreated(taskList);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # create a new top-level task list
+  agentio gtasks lists create "Groceries"
+
+  # title with spaces (quote it)
+  agentio gtasks lists create "Q4 Roadmap"`,
+  );
 
   // Delete task list
-  lists
-    .command('delete <tasklist-id>')
-    .description('Delete a task list')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'delete task list');
-        await client.deleteTaskList(tasklistId);
-        printGTaskListDeleted(tasklistId);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    lists
+      .command('delete <tasklist-id>')
+      .description('Delete a task list')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'delete task list');
+          await client.deleteTaskList(tasklistId);
+          printGTaskListDeleted(tasklistId);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # delete a list (irreversible — deletes all its tasks)
+  agentio gtasks lists delete MTIzNDU2Nzg5MA`,
+  );
 
   // === Task Commands ===
 
   // List tasks in a task list
-  gtasks
-    .command('list <tasklist-id>')
-    .description('List tasks in a task list')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Max results', '20')
-    .option('--show-completed', 'Include completed tasks', true)
-    .option('--no-show-completed', 'Exclude completed tasks')
-    .option('--show-hidden', 'Include hidden tasks')
-    .option('--due-min <datetime>', 'Filter: due date minimum (RFC3339)')
-    .option('--due-max <datetime>', 'Filter: due date maximum (RFC3339)')
-    .action(async (tasklistId: string, options) => {
-      try {
-        const { client } = await getGTasksClient(options.profile);
-        const result = await client.listTasks({
-          tasklistId,
-          maxResults: parseInt(options.limit, 10),
-          showCompleted: options.showCompleted,
-          showHidden: options.showHidden,
-          dueMin: options.dueMin,
-          dueMax: options.dueMax,
-        });
-        printGTasks(result.tasks, result.nextPageToken);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('list <tasklist-id>')
+      .description('List tasks in a task list')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Max results', '20')
+      .option('--show-completed', 'Include completed tasks', true)
+      .option('--no-show-completed', 'Exclude completed tasks')
+      .option('--show-hidden', 'Include hidden tasks')
+      .option('--due-min <datetime>', 'Filter: due date minimum (RFC3339)')
+      .option('--due-max <datetime>', 'Filter: due date maximum (RFC3339)')
+      .action(async (tasklistId: string, options) => {
+        try {
+          const { client } = await getGTasksClient(options.profile);
+          const result = await client.listTasks({
+            tasklistId,
+            maxResults: parseInt(options.limit, 10),
+            showCompleted: options.showCompleted,
+            showHidden: options.showHidden,
+            dueMin: options.dueMin,
+            dueMax: options.dueMax,
+          });
+          printGTasks(result.tasks, result.nextPageToken);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # tasks in a list (default: includes completed)
+  agentio gtasks list MTIzNDU2Nzg5MA
+
+  # only outstanding work
+  agentio gtasks list MTIzNDU2Nzg5MA --no-show-completed
+
+  # tasks due this week
+  agentio gtasks list MTIzNDU2Nzg5MA \\
+    --due-min 2024-04-15T00:00:00Z --due-max 2024-04-22T00:00:00Z
+
+  # include hidden (cleared completed) tasks too
+  agentio gtasks list MTIzNDU2Nzg5MA --show-hidden`,
+  );
 
   // Get a specific task
-  gtasks
-    .command('get <tasklist-id> <task-id>')
-    .description('Get a specific task')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, taskId: string, options) => {
-      try {
-        const { client } = await getGTasksClient(options.profile);
-        const task = await client.getTask(tasklistId, taskId);
-        printGTask(task);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('get <tasklist-id> <task-id>')
+      .description('Get a specific task')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, taskId: string, options) => {
+        try {
+          const { client } = await getGTasksClient(options.profile);
+          const task = await client.getTask(tasklistId, taskId);
+          printGTask(task);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # full task details (notes, due, status, parent)
+  agentio gtasks get MTIzNDU2Nzg5MA NjU0MzIxMA`,
+  );
 
   // Add a new task
-  gtasks
+  const addCmd = gtasks
     .command('add <tasklist-id>')
     .description('Add a new task')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
@@ -164,8 +211,25 @@ export function registerGTasksCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    addCmd,
+    `Examples:
+
+  # simple task
+  agentio gtasks add MTIzNDU2Nzg5MA --title "Buy milk"
+
+  # task with notes (piped from stdin) and a due date
+  echo "2 cartons, organic" | agentio gtasks add MTIzNDU2Nzg5MA --title "Buy milk" --due 2024-04-20
+
+  # subtask of an existing task
+  agentio gtasks add MTIzNDU2Nzg5MA --title "Section 1" --parent NjU0MzIxMA
+
+  # control ordering: place new task right after another
+  agentio gtasks add MTIzNDU2Nzg5MA --title "Step 2" --previous NjU0MzIxMA`,
+  );
+
   // Update a task
-  gtasks
+  const updateCmd = gtasks
     .command('update <tasklist-id> <task-id>')
     .description('Update an existing task')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
@@ -201,78 +265,121 @@ export function registerGTasksCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    updateCmd,
+    `Examples:
+
+  # rename a task
+  agentio gtasks update MTIzNDU2Nzg5MA NjU0MzIxMA --title "Buy oat milk"
+
+  # change due date
+  agentio gtasks update MTIzNDU2Nzg5MA NjU0MzIxMA --due 2024-04-22
+
+  # replace notes from stdin
+  cat new-notes.txt | agentio gtasks update MTIzNDU2Nzg5MA NjU0MzIxMA
+
+  # mark complete via status
+  agentio gtasks update MTIzNDU2Nzg5MA NjU0MzIxMA --status completed`,
+  );
+
   // Mark task as done
-  gtasks
-    .command('done <tasklist-id> <task-id>')
-    .alias('complete')
-    .description('Mark a task as completed')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, taskId: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'complete task');
-        const task = await client.completeTask(tasklistId, taskId);
-        console.log(`Task completed: ${task.title}`);
-        console.log(`ID: ${task.id}`);
-        console.log(`Status: ${task.status}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('done <tasklist-id> <task-id>')
+      .alias('complete')
+      .description('Mark a task as completed')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, taskId: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'complete task');
+          const task = await client.completeTask(tasklistId, taskId);
+          console.log(`Task completed: ${task.title}`);
+          console.log(`ID: ${task.id}`);
+          console.log(`Status: ${task.status}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # mark a task complete
+  agentio gtasks done MTIzNDU2Nzg5MA NjU0MzIxMA`,
+  );
 
   // Mark task as not done
-  gtasks
-    .command('undo <tasklist-id> <task-id>')
-    .alias('uncomplete')
-    .description('Mark a task as needs action (not completed)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, taskId: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'uncomplete task');
-        const task = await client.uncompleteTask(tasklistId, taskId);
-        console.log(`Task uncompleted: ${task.title}`);
-        console.log(`ID: ${task.id}`);
-        console.log(`Status: ${task.status}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('undo <tasklist-id> <task-id>')
+      .alias('uncomplete')
+      .description('Mark a task as needs action (not completed)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, taskId: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'uncomplete task');
+          const task = await client.uncompleteTask(tasklistId, taskId);
+          console.log(`Task uncompleted: ${task.title}`);
+          console.log(`ID: ${task.id}`);
+          console.log(`Status: ${task.status}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # revert a task back to needs-action
+  agentio gtasks undo MTIzNDU2Nzg5MA NjU0MzIxMA`,
+  );
 
   // Delete a task
-  gtasks
-    .command('delete <tasklist-id> <task-id>')
-    .description('Delete a task')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, taskId: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'delete task');
-        await client.deleteTask(tasklistId, taskId);
-        printGTaskDeleted(tasklistId, taskId);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('delete <tasklist-id> <task-id>')
+      .description('Delete a task')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, taskId: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'delete task');
+          await client.deleteTask(tasklistId, taskId);
+          printGTaskDeleted(tasklistId, taskId);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # remove a task entirely (irreversible)
+  agentio gtasks delete MTIzNDU2Nzg5MA NjU0MzIxMA`,
+  );
 
   // Clear completed tasks
-  gtasks
-    .command('clear <tasklist-id>')
-    .description('Clear all completed tasks from a task list')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (tasklistId: string, options) => {
-      try {
-        const { client, profile } = await getGTasksClient(options.profile);
-        await enforceWriteAccess('gtasks', profile, 'clear tasks');
-        await client.clearCompleted(tasklistId);
-        printGTasksCleared(tasklistId);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gtasks
+      .command('clear <tasklist-id>')
+      .description('Clear all completed tasks from a task list')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (tasklistId: string, options) => {
+        try {
+          const { client, profile } = await getGTasksClient(options.profile);
+          await enforceWriteAccess('gtasks', profile, 'clear tasks');
+          await client.clearCompleted(tasklistId);
+          printGTasksCleared(tasklistId);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # hide all completed tasks from the list
+  agentio gtasks clear MTIzNDU2Nzg5MA
+
+Cleared tasks remain accessible via 'gtasks list --show-hidden'.`,
+  );
 
   // Move a task
-  gtasks
+  const moveCmd = gtasks
     .command('move <tasklist-id> <task-id>')
     .description('Move a task (change parent or position)')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
@@ -293,6 +400,22 @@ export function registerGTasksCommands(program: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    moveCmd,
+    `Examples:
+
+  # nest a task under another (make it a subtask)
+  agentio gtasks move MTIzNDU2Nzg5MA NjU0MzIxMA --parent ABCD1234EFGH
+
+  # reorder: place after a specific sibling
+  agentio gtasks move MTIzNDU2Nzg5MA NjU0MzIxMA --previous ABCD1234EFGH
+
+  # promote subtask + reorder in one call
+  agentio gtasks move MTIzNDU2Nzg5MA NjU0MzIxMA --parent NEWP4R3NTID --previous ABCD1234EFGH
+
+At least one of --parent or --previous is required.`,
+  );
 
   // Profile management
   const profile = createProfileCommands<{ email?: string }>(gtasks, {

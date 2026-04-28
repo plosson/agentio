@@ -5,6 +5,7 @@ import { spawnSync } from 'bun';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
 import { startServer } from '../server/daemon';
+import { addExamples } from '../utils/command-tree';
 import type { Config } from '../types/config';
 import type { ServerToken } from '../types/server';
 
@@ -107,7 +108,7 @@ export function registerServerCommands(program: Command): void {
     .description('HTTP MCP server daemon management');
 
   // install — systemd integration
-  server
+  const installCmd = server
     .command('install')
     .description('Install agentio server as a systemd service')
     .action(async () => {
@@ -197,8 +198,19 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    installCmd,
+    `Examples:
+
+  # install the agentio HTTP MCP server as a systemd unit (Linux only)
+  sudo agentio server install
+
+  # check it's running afterward
+  agentio server status`,
+  );
+
   // start — foreground or via systemd
-  server
+  const startCmd = server
     .command('start')
     .description('Start the agentio HTTP MCP server')
     .option('--foreground', 'Run in foreground (used by systemd or for dev)')
@@ -240,8 +252,25 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    startCmd,
+    `Examples:
+
+  # start the installed systemd service (or run in foreground if not installed)
+  agentio server start
+
+  # run the server directly in the foreground (used by systemd; useful for dev)
+  agentio server start --foreground
+
+  # foreground on a specific port and host
+  agentio server start --foreground --port 8080 --host 127.0.0.1
+
+  # one-shot run with an override API key (does not persist)
+  agentio server start --foreground --api-key srv_xxx`,
+  );
+
   // stop
-  server
+  const stopCmd = server
     .command('stop')
     .description('Stop the agentio server (systemd only)')
     .action(async () => {
@@ -265,8 +294,16 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    stopCmd,
+    `Examples:
+
+  # stop the systemd-managed agentio server
+  sudo agentio server stop`,
+  );
+
   // restart
-  server
+  const restartCmd = server
     .command('restart')
     .description('Restart the agentio server (systemd only)')
     .action(async () => {
@@ -293,8 +330,16 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    restartCmd,
+    `Examples:
+
+  # restart the systemd-managed agentio server (e.g. after editing config)
+  sudo agentio server restart`,
+  );
+
   // status
-  server
+  const statusCmd = server
     .command('status')
     .description('Show agentio server status')
     .action(async () => {
@@ -334,8 +379,16 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    statusCmd,
+    `Examples:
+
+  # show whether the server is running and the (truncated) API key
+  agentio server status`,
+  );
+
   // logs
-  server
+  const logsCmd = server
     .command('logs')
     .description('View agentio server logs (systemd / journalctl)')
     .option('-f, --follow', 'Follow log output')
@@ -375,12 +428,26 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    logsCmd,
+    `Examples:
+
+  # last 50 log lines (systemd / journalctl)
+  agentio server logs
+
+  # last 200 log lines
+  agentio server logs --lines 200
+
+  # follow logs continuously (Ctrl-C to stop)
+  agentio server logs --follow`,
+  );
+
   // tokens — manage issued OAuth bearer tokens
   const tokens = server
     .command('tokens')
     .description('Manage issued OAuth bearer tokens');
 
-  tokens
+  const tokensListCmd = tokens
     .command('list')
     .description('List all issued bearer tokens')
     .action(async () => {
@@ -407,7 +474,15 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
-  tokens
+  addExamples(
+    tokensListCmd,
+    `Examples:
+
+  # list every issued bearer (shows id prefix, client, scope, issued/expires)
+  agentio server tokens list`,
+  );
+
+  const tokensRevokeCmd = tokens
     .command('revoke')
     .description(
       'Revoke a token by its 12-character prefix or full opaque value'
@@ -455,7 +530,18 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
-  tokens
+  addExamples(
+    tokensRevokeCmd,
+    `Examples:
+
+  # revoke by 12-char prefix (from \`tokens list\`)
+  agentio server tokens revoke abc123def456
+
+  # revoke by full opaque token value
+  agentio server tokens revoke <full-token>`,
+  );
+
+  const tokensClearCmd = tokens
     .command('clear')
     .description('Revoke ALL issued tokens (forces every client to re-auth)')
     .action(async () => {
@@ -478,8 +564,16 @@ export function registerServerCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    tokensClearCmd,
+    `Examples:
+
+  # revoke every issued bearer (every client must re-authorize)
+  agentio server tokens clear`,
+  );
+
   // uninstall
-  server
+  const uninstallCmd = server
     .command('uninstall')
     .description('Remove agentio-server systemd service')
     .action(async () => {
@@ -511,4 +605,12 @@ export function registerServerCommands(program: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    uninstallCmd,
+    `Examples:
+
+  # remove the systemd unit (config in ~/.config/agentio is preserved)
+  sudo agentio server uninstall`,
+  );
 }

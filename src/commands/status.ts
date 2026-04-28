@@ -33,6 +33,7 @@ import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
 import type { WhatsAppCredentials } from '../types/whatsapp';
 import { isDaemonAvailable, getDaemonClient } from '../daemon/client';
+import { addExamples } from '../utils/command-tree';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -309,7 +310,7 @@ export async function getProfileStatuses(options?: { test?: boolean }): Promise<
 }
 
 export function registerStatusCommand(program: Command): void {
-  program
+  const statusCmd = program
     .command('status')
     .description('Show configured profiles and credential status')
     .option('--no-test', 'Skip credential testing')
@@ -395,4 +396,18 @@ export function registerStatusCommand(program: Command): void {
         process.exit(1);
       }
     });
+
+  addExamples(
+    statusCmd,
+    `Examples:
+
+  # show every configured profile and test its credentials
+  agentio status
+
+  # show profiles without making test API calls (fast; no network)
+  agentio status --no-test
+
+  # JSON output (good for piping to jq or another agent)
+  agentio status --json`,
+  );
 }

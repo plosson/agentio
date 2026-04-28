@@ -1,72 +1,158 @@
 ---
 name: agentio-gchat
-description: Use when interacting with Google Chat - send messages, list messages, or get message details. Requires agentio CLI with a configured Google Chat profile (webhook or OAuth).
+description: Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.
 ---
 
-# Google Chat Operations with agentio
+# Gchat via agentio
 
-Use `agentio gchat` commands to interact with Google Chat. Multiple profiles can be configured - the default profile is used unless you specify `--profile <name>`.
+Auto-generated from `agentio skill gchat`. Do not edit by hand.
 
-Profiles can be either:
-- **Webhook**: Send-only, simple setup
-- **OAuth**: Full access (send, list, get messages)
+## agentio gchat send [message]
 
-## Send a Message
-
-```bash
-agentio gchat send <message> [options]
-```
-
-Or pipe via stdin:
-```bash
-echo "Message content" | agentio gchat send
-```
+Send a message to Google Chat
 
 Options:
-- `--profile <name>`: Use specific profile
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
 - `--space <id>`: Space ID (required for OAuth profiles)
-- `--thread <id>`: Thread ID to reply to (optional)
-- `--json [file]`: Send rich message from JSON file (or stdin)
+- `--thread <id>`: Thread ID (optional)
+- `--json [file]`: Send rich message from JSON file (or stdin if no file specified)
+- `--attachment <path>`: File to attach (repeatable, OAuth profiles only) (default: )
 
-## List Messages (OAuth only)
-
-```bash
-agentio gchat list --space <id> [--limit N]
 ```
+Examples:
+
+  # webhook profile: short text, no --space needed
+  agentio gchat send "Deployment complete"
+
+  # OAuth profile: send to a specific space
+  agentio gchat send "Status update" --space spaces/AAAA1234
+
+  # reply within an existing thread
+  agentio gchat send "Following up" --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+
+  # rich card via JSON file (OAuth or webhook)
+  agentio gchat send --json ./card.json --space spaces/AAAA1234
+
+  # JSON via stdin (good for inline cards)
+  echo '{"text":"Build status","cards":[{"header":{"title":"CI"}}]}' | \
+    agentio gchat send --json --space spaces/AAAA1234
+```
+
+## agentio gchat list
+
+List messages from a Google Chat space (OAuth profiles only)
 
 Options:
-- `--space <id>`: Space ID (required)
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--space <id>`: Space ID
 - `--limit <n>`: Number of messages (default: 10)
+- `--thread <id>`: Filter by thread ID
+- `--since <date>`: Only messages after this date (YYYY-MM-DD)
 
-## Get a Message (OAuth only)
+```
+Examples:
 
-```bash
-agentio gchat get <message-id> --space <id>
+  # 10 most recent messages in a space (OAuth only)
+  agentio gchat list --space spaces/AAAA1234
+
+  # last 50 messages
+  agentio gchat list --space spaces/AAAA1234 --limit 50
+
+  # only messages in a specific thread
+  agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+
+  # messages since a given date
+  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01
 ```
 
-## Examples
+## agentio gchat get <message-id>
 
-Simple message (webhook):
-```bash
-agentio gchat send "Deployment complete"
+Get a message from a Google Chat space (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--space <id>`: Space ID
+
+```
+Examples:
+
+  # fetch one message by id from a space (OAuth only)
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234
 ```
 
-Message to specific space (OAuth):
-```bash
-agentio gchat send "Status update" --space spaces/AAAA1234
+## agentio gchat spaces
+
+List available Google Chat spaces (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--filter <text>`: Filter spaces by name (case-insensitive)
+
+```
+Examples:
+
+  # all spaces this OAuth profile can see
+  agentio gchat spaces
+
+  # filter by display name (case-insensitive substring)
+  agentio gchat spaces --filter eng
 ```
 
-Rich message with JSON:
-```bash
-agentio gchat send --json message.json
+## agentio gchat members
+
+List members of a Google Chat space (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--space <id-or-name>`: Space ID or display name
+
+```
+Examples:
+
+  # members by space id
+  agentio gchat members --space spaces/AAAA1234
+
+  # members by space display name (resolved against the space list)
+  agentio gchat members --space "Engineering"
 ```
 
-Or via stdin:
-```bash
-cat <<EOF | agentio gchat send --json
-{
-  "text": "Build status",
-  "cards": [{"header": {"title": "CI/CD"}}]
-}
-EOF
+## agentio gchat user <user-id>
+
+Get full user info from the People API (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # by raw numeric id
+  agentio gchat user 123456789
+
+  # by full users/<id> form (as it appears in 'gchat members' output)
+  agentio gchat user users/123456789
+```
+
+## agentio gchat directory refresh
+
+Force refresh the cached workspace directory (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # rebuild the local user-id -> name/email cache (OAuth only)
+  agentio gchat directory refresh
+
+  # refresh the cache for a specific OAuth profile
+  agentio gchat directory refresh --profile alice@example.com
 ```

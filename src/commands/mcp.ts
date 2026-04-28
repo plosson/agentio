@@ -11,6 +11,7 @@ import {
   type ServiceProfilePair,
 } from '../mcp/server';
 import { registerTeleportCommand } from './teleport';
+import { addExamples } from '../utils/command-tree';
 
 const MCP_JSON = '.mcp.json';
 
@@ -100,51 +101,75 @@ export function registerMcpCommands(program: Command): void {
     .description('MCP server operations');
 
   // serve subcommand
-  mcp
-    .command('serve')
-    .description('Start stdio MCP server exposing CLI commands as tools')
-    .argument('<pairs...>', 'Service:profile pairs (e.g., gmail:work slack:team rss)')
-    .action(async (pairArgs: string[]) => {
-      try {
-        const pairs = parseServiceProfiles(pairArgs);
-        await startMcpServer(pairs);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    mcp
+      .command('serve')
+      .description('Start stdio MCP server exposing CLI commands as tools')
+      .argument('<pairs...>', 'Service:profile pairs (e.g., gmail:work slack:team rss)')
+      .action(async (pairArgs: string[]) => {
+        try {
+          const pairs = parseServiceProfiles(pairArgs);
+          await startMcpServer(pairs);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # expose a single profile as MCP tools (stdio transport)
+  agentio mcp serve gmail:work
+
+  # expose multiple services / profiles in one server
+  agentio mcp serve gmail:work slack:team rss
+
+  # use the default profile (omit \`:profile\`)
+  agentio mcp serve rss`,
+  );
 
   // install subcommand
-  mcp
-    .command('install')
-    .description('Install MCP server config into .mcp.json')
-    .argument('[pairs...]', 'Service:profile pairs (interactive if omitted)')
-    .action(async (pairArgs: string[]) => {
-      try {
-        let pairs: ServiceProfilePair[];
+  addExamples(
+    mcp
+      .command('install')
+      .description('Install MCP server config into .mcp.json')
+      .argument('[pairs...]', 'Service:profile pairs (interactive if omitted)')
+      .action(async (pairArgs: string[]) => {
+        try {
+          let pairs: ServiceProfilePair[];
 
-        if (pairArgs && pairArgs.length > 0) {
-          pairs = parseServiceProfiles(pairArgs);
-        } else {
-          pairs = await interactiveInstall();
+          if (pairArgs && pairArgs.length > 0) {
+            pairs = parseServiceProfiles(pairArgs);
+          } else {
+            pairs = await interactiveInstall();
+          }
+
+          if (pairs.length === 0) {
+            console.log('No services selected.');
+            return;
+          }
+
+          const filePath = await writeMcpJson(process.cwd(), pairs);
+
+          const serveArgs = pairs
+            .map((p) => (p.profile ? `${p.service}:${p.profile}` : p.service))
+            .join(' ');
+
+          console.log(`Wrote ${filePath}`);
+          console.log(`\nMCP server command: agentio mcp serve ${serveArgs}`);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        if (pairs.length === 0) {
-          console.log('No services selected.');
-          return;
-        }
+  # interactive picker over your configured profiles
+  agentio mcp install
 
-        const filePath = await writeMcpJson(process.cwd(), pairs);
+  # write .mcp.json non-interactively for specific pairs
+  agentio mcp install gmail:work slack:team
 
-        const serveArgs = pairs
-          .map((p) => (p.profile ? `${p.service}:${p.profile}` : p.service))
-          .join(' ');
-
-        console.log(`Wrote ${filePath}`);
-        console.log(`\nMCP server command: agentio mcp serve ${serveArgs}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # default profile for one service
+  agentio mcp install rss`,
+  );
 
   // teleport subcommand — `agentio mcp teleport <name>`. Lives here
   // (not at the top level) so all MCP-related commands are grouped.

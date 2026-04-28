@@ -10,6 +10,7 @@ import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEve
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 
 async function getGCalClient(profileName?: string): Promise<{ client: GCalClient; profile: string }> {
   const { tokens, profile } = await getValidTokens('gcal', profileName);
@@ -56,72 +57,108 @@ export function registerGCalCommands(program: Command): void {
     .description('Google Calendar operations');
 
   // List calendars
-  gcal
-    .command('calendars')
-    .description('List available calendars')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Max results', '100')
-    .action(async (options) => {
-      try {
-        const { client } = await getGCalClient(options.profile);
-        const calendars = await client.listCalendars(parseInt(options.limit, 10));
-        printGCalCalendarList(calendars);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gcal
+      .command('calendars')
+      .description('List available calendars')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Max results', '100')
+      .action(async (options) => {
+        try {
+          const { client } = await getGCalClient(options.profile);
+          const calendars = await client.listCalendars(parseInt(options.limit, 10));
+          printGCalCalendarList(calendars);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # all calendars you have access to
+  agentio gcal calendars
+
+  # cap the result count
+  agentio gcal calendars --limit 25`,
+  );
 
   // List events
-  gcal
-    .command('events')
-    .alias('list')
-    .description('List events from a calendar')
-    .argument('[calendar-id]', 'Calendar ID (default: primary)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Max results', '10')
-    .option('--from <datetime>', 'Start time (RFC3339 or YYYY-MM-DD)')
-    .option('--to <datetime>', 'End time (RFC3339 or YYYY-MM-DD)')
-    .option('--today', 'Show today\'s events only')
-    .option('--tomorrow', 'Show tomorrow\'s events only')
-    .option('--days <n>', 'Show events for next N days')
-    .option('--query <q>', 'Free text search query')
-    .action(async (calendarId: string | undefined, options) => {
-      try {
-        const { client } = await getGCalClient(options.profile);
-        const { timeMin, timeMax } = parseTimeRange(options);
-        const result = await client.listEvents({
-          calendarId: calendarId || 'primary',
-          maxResults: parseInt(options.limit, 10),
-          timeMin,
-          timeMax,
-          query: options.query,
-        });
-        printGCalEventList(result.events, result.nextPageToken);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gcal
+      .command('events')
+      .alias('list')
+      .description('List events from a calendar')
+      .argument('[calendar-id]', 'Calendar ID (default: primary)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Max results', '10')
+      .option('--from <datetime>', 'Start time (RFC3339 or YYYY-MM-DD)')
+      .option('--to <datetime>', 'End time (RFC3339 or YYYY-MM-DD)')
+      .option('--today', 'Show today\'s events only')
+      .option('--tomorrow', 'Show tomorrow\'s events only')
+      .option('--days <n>', 'Show events for next N days')
+      .option('--query <q>', 'Free text search query')
+      .action(async (calendarId: string | undefined, options) => {
+        try {
+          const { client } = await getGCalClient(options.profile);
+          const { timeMin, timeMax } = parseTimeRange(options);
+          const result = await client.listEvents({
+            calendarId: calendarId || 'primary',
+            maxResults: parseInt(options.limit, 10),
+            timeMin,
+            timeMax,
+            query: options.query,
+          });
+          printGCalEventList(result.events, result.nextPageToken);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # next 10 events on primary calendar
+  agentio gcal events
+
+  # today's events only
+  agentio gcal events --today
+
+  # next 7 days, more results
+  agentio gcal events --days 7 --limit 50
+
+  # specific calendar, free-text filter
+  agentio gcal events team@example.com --query "standup"
+
+  # explicit date range
+  agentio gcal events --from 2024-04-01 --to 2024-04-30`,
+  );
 
   // Get event
-  gcal
-    .command('get')
-    .alias('event')
-    .description('Get a single event')
-    .argument('<calendar-id>', 'Calendar ID')
-    .argument('<event-id>', 'Event ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (calendarId: string, eventId: string, options) => {
-      try {
-        const { client } = await getGCalClient(options.profile);
-        const event = await client.getEvent(calendarId, eventId);
-        printGCalEvent(event);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gcal
+      .command('get')
+      .alias('event')
+      .description('Get a single event')
+      .argument('<calendar-id>', 'Calendar ID')
+      .argument('<event-id>', 'Event ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (calendarId: string, eventId: string, options) => {
+        try {
+          const { client } = await getGCalClient(options.profile);
+          const event = await client.getEvent(calendarId, eventId);
+          printGCalEvent(event);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # event on primary calendar
+  agentio gcal get primary abc123def456
+
+  # event on a shared calendar
+  agentio gcal get team@example.com abc123def456`,
+  );
 
   // Create event
-  gcal
+  const createCmd = gcal
     .command('create')
     .description('Create a new event')
     .argument('[calendar-id]', 'Calendar ID (default: primary)')
@@ -181,8 +218,28 @@ export function registerGCalCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    createCmd,
+    `Examples:
+
+  # 1-hour timed meeting on primary calendar
+  agentio gcal create --summary "Sync" --from 2024-04-15T14:00:00-07:00 --to 2024-04-15T15:00:00-07:00
+
+  # all-day event with location and attendees
+  agentio gcal create --summary "Offsite" --from 2024-05-10 --to 2024-05-11 --all-day \\
+    --location "Lake Tahoe" --attendee alice@example.com --attendee bob@example.com
+
+  # weekly recurring 30-min standup with a Meet link and a 10-min popup reminder
+  agentio gcal create --summary "Standup" --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T09:30:00-07:00 \\
+    --rrule "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" --reminder popup:10 --with-meet
+
+  # private event on a specific calendar, no notifications
+  agentio gcal create team@example.com --summary "1:1" --from 2024-04-15T10:00:00-07:00 \\
+    --to 2024-04-15T10:30:00-07:00 --visibility private --send-updates none`,
+  );
+
   // Update event
-  gcal
+  const updateCmd = gcal
     .command('update')
     .description('Update an existing event')
     .argument('<calendar-id>', 'Calendar ID')
@@ -236,27 +293,54 @@ export function registerGCalCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    updateCmd,
+    `Examples:
+
+  # rename an event
+  agentio gcal update primary abc123def456 --summary "Renamed sync"
+
+  # reschedule
+  agentio gcal update primary abc123def456 \\
+    --from 2024-04-15T15:00:00-07:00 --to 2024-04-15T16:00:00-07:00
+
+  # add an attendee without dropping existing ones (silent)
+  agentio gcal update primary abc123def456 --add-attendee carol@example.com --send-updates none
+
+  # mark as free time
+  agentio gcal update primary abc123def456 --show-as free`,
+  );
+
   // Delete event
-  gcal
-    .command('delete')
-    .description('Delete an event')
-    .argument('<calendar-id>', 'Calendar ID')
-    .argument('<event-id>', 'Event ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--send-updates <mode>', 'Send notifications: all, externalOnly, none', 'all')
-    .action(async (calendarId: string, eventId: string, options) => {
-      try {
-        const { client, profile } = await getGCalClient(options.profile);
-        await enforceWriteAccess('gcal', profile, 'delete event');
-        await client.deleteEvent(calendarId, eventId, options.sendUpdates);
-        printGCalEventDeleted(calendarId, eventId);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    gcal
+      .command('delete')
+      .description('Delete an event')
+      .argument('<calendar-id>', 'Calendar ID')
+      .argument('<event-id>', 'Event ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--send-updates <mode>', 'Send notifications: all, externalOnly, none', 'all')
+      .action(async (calendarId: string, eventId: string, options) => {
+        try {
+          const { client, profile } = await getGCalClient(options.profile);
+          await enforceWriteAccess('gcal', profile, 'delete event');
+          await client.deleteEvent(calendarId, eventId, options.sendUpdates);
+          printGCalEventDeleted(calendarId, eventId);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # delete and notify all attendees
+  agentio gcal delete primary abc123def456
+
+  # delete silently (no email)
+  agentio gcal delete primary abc123def456 --send-updates none`,
+  );
 
   // Search events
-  gcal
+  const searchCmd = gcal
     .command('search')
     .description('Search events')
     .argument('<query>', 'Search query')
@@ -288,8 +372,23 @@ export function registerGCalCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    searchCmd,
+    `Examples:
+
+  # search primary calendar (default range: -30d to +90d)
+  agentio gcal search "standup"
+
+  # search a specific calendar with a custom range
+  agentio gcal search "interview" --calendar team@example.com \\
+    --from 2024-04-01T00:00:00Z --to 2024-05-01T00:00:00Z
+
+  # broaden the result count
+  agentio gcal search "1:1" --limit 100`,
+  );
+
   // Respond to event
-  gcal
+  const respondCmd = gcal
     .command('respond')
     .description('Respond to an event invitation')
     .argument('<calendar-id>', 'Calendar ID')
@@ -320,32 +419,56 @@ export function registerGCalCommands(program: Command): void {
       }
     });
 
-  // Free/busy query
-  gcal
-    .command('freebusy')
-    .description('Get free/busy information')
-    .argument('<calendar-ids>', 'Comma-separated calendar IDs')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--from <datetime>', 'Start time (RFC3339)')
-    .requiredOption('--to <datetime>', 'End time (RFC3339)')
-    .action(async (calendarIds: string, options) => {
-      try {
-        const ids = calendarIds.split(',').map((id) => id.trim()).filter(Boolean);
-        if (ids.length === 0) {
-          throw new CliError('INVALID_PARAMS', 'At least one calendar ID is required');
-        }
+  addExamples(
+    respondCmd,
+    `Examples:
 
-        const { client } = await getGCalClient(options.profile);
-        const result = await client.freeBusy({
-          calendarIds: ids,
-          timeMin: options.from,
-          timeMax: options.to,
-        });
-        printGCalFreeBusy(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # accept an invitation
+  agentio gcal respond primary abc123def456 --status accepted
+
+  # decline with a comment
+  agentio gcal respond primary abc123def456 --status declined --comment "Out of office"
+
+  # tentative
+  agentio gcal respond primary abc123def456 --status tentative`,
+  );
+
+  // Free/busy query
+  addExamples(
+    gcal
+      .command('freebusy')
+      .description('Get free/busy information')
+      .argument('<calendar-ids>', 'Comma-separated calendar IDs')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--from <datetime>', 'Start time (RFC3339)')
+      .requiredOption('--to <datetime>', 'End time (RFC3339)')
+      .action(async (calendarIds: string, options) => {
+        try {
+          const ids = calendarIds.split(',').map((id) => id.trim()).filter(Boolean);
+          if (ids.length === 0) {
+            throw new CliError('INVALID_PARAMS', 'At least one calendar ID is required');
+          }
+
+          const { client } = await getGCalClient(options.profile);
+          const result = await client.freeBusy({
+            calendarIds: ids,
+            timeMin: options.from,
+            timeMax: options.to,
+          });
+          printGCalFreeBusy(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # your own busy slots over a day
+  agentio gcal freebusy primary --from 2024-04-15T00:00:00Z --to 2024-04-16T00:00:00Z
+
+  # find a meeting slot across two attendees
+  agentio gcal freebusy alice@example.com,bob@example.com \\
+    --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00`,
+  );
 
   // Profile management
   const profile = createProfileCommands<{ email?: string }>(gcal, {

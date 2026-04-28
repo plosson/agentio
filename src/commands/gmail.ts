@@ -11,6 +11,7 @@ import { printMessageList, printMessage, printSendResult, printDraftResult, prin
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type { GmailAttachment, GmailSendOptions } from '../types/gmail';
 
 function addComposeOptions(cmd: Command): Command {
@@ -162,320 +163,445 @@ export function registerGmailCommands(program: Command): void {
     .command('gmail')
     .description('Gmail operations');
 
-  gmail
-    .command('list')
-    .description('List messages')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Number of messages', '10')
-    .option('--query <query>', 'Gmail search query (see "gmail search --help" for syntax)')
-    .option('--label <label>', 'Filter by label (repeatable)', (val, acc: string[]) => [...acc, val], [])
-    .action(async (options) => {
-      try {
-        const { client } = await getGmailClient(options.profile);
-        const result = await client.list({
-          limit: parseInt(options.limit, 10),
-          query: options.query,
-          labels: options.label.length ? options.label : undefined,
-        });
-        printMessageList(result.messages, result.total);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  gmail
-    .command('get')
-    .argument('<message-id>', 'Message ID')
-    .description('Get a message')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--format <format>', 'Body format: text, html, or raw', 'text')
-    .option('--body-only', 'Output only the message body')
-    .action(async (messageId: string, options) => {
-      try {
-        const { client } = await getGmailClient(options.profile);
-        const result = await client.get(messageId, options.format);
-        if (options.bodyOnly) {
-          raw(result.body);
-        } else {
-          printMessage(result);
+  addExamples(
+    gmail
+      .command('list')
+      .description('List messages')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Number of messages', '10')
+      .option('--query <query>', 'Gmail search query (see "gmail search --help" for syntax)')
+      .option('--label <label>', 'Filter by label (repeatable)', (val, acc: string[]) => [...acc, val], [])
+      .action(async (options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const result = await client.list({
+            limit: parseInt(options.limit, 10),
+            query: options.query,
+            labels: options.label.length ? options.label : undefined,
+          });
+          printMessageList(result.messages, result.total);
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  gmail
-    .command('search')
-    .description('Search messages using Gmail query syntax')
-    .requiredOption('--query <query>', 'Search query')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Max results', '10')
-    .addHelpText('after', `
-Query Syntax Examples:
+  # 10 most recent messages
+  agentio gmail list
 
-  Keywords:
-    --query "meeting agenda"          Messages containing both words
-    --query "exact phrase"            Messages with exact phrase
+  # 25 most recent in the inbox
+  agentio gmail list --limit 25 --label INBOX
 
-  From/To:
-    --query "from:john@example.com"   Messages from specific sender
-    --query "to:me"                   Messages sent to you
-    --query "from:john to:jane"       Combine sender and recipient
-    --query "cc:team@example.com"     Messages where someone was CC'd
+  # unread messages from the last week
+  agentio gmail list --query "is:unread newer_than:7d"
 
-  Date Ranges:
-    --query "after:2024/01/01"        Messages after date (YYYY/MM/DD)
-    --query "before:2024/12/31"       Messages before date
-    --query "after:2024/01/01 before:2024/06/30"   Date range
-    --query "newer_than:7d"           Last 7 days (d=days, m=months, y=years)
-    --query "older_than:1m"           Older than 1 month
+  # use a specific profile
+  agentio gmail list --profile alice@example.com`,
+  );
 
-  Labels:
-    --query "label:inbox"             Messages in inbox
-    --query "label:important"         Important messages
-    --query "label:work"              Custom label (use exact label name)
-    --query "-label:spam"             Exclude spam (- negates)
-
-  Status:
-    --query "is:unread"               Unread messages
-    --query "is:starred"              Starred messages
-    --query "is:important"            Marked as important
-    --query "has:attachment"          Messages with attachments
-
-  Subject:
-    --query "subject:invoice"         Search in subject only
-
-  Combined:
-    --query "from:boss@work.com is:unread newer_than:7d"
-    --query "has:attachment from:client after:2024/01/01"
-`)
-    .action(async (options) => {
-      try {
-        const { client } = await getGmailClient(options.profile);
-        const result = await client.search(options.query, parseInt(options.limit, 10));
-        printMessageList(result.messages, result.total);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  addComposeOptions(gmail.command('send').description('Send an email'))
-    .action(async (options) => {
-      try {
-        const sendOptions = await parseSendOptions(options);
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'send email');
-        const result = await client.send(sendOptions);
-        printSendResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  addComposeOptions(gmail.command('draft').description('Create an email draft'))
-    .action(async (options) => {
-      try {
-        const sendOptions = await parseSendOptions(options);
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'create draft');
-        const result = await client.draft(sendOptions);
-        printDraftResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  gmail
-    .command('archive')
-    .argument('<message-id...>', 'Message ID(s)')
-    .description('Archive one or more messages')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (messageIds: string[], options) => {
-      try {
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'archive email');
-        for (const messageId of messageIds) {
-          await client.archive(messageId);
-          printArchived(messageId);
+  addExamples(
+    gmail
+      .command('get')
+      .argument('<message-id>', 'Message ID')
+      .description('Get a message')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Body format: text, html, or raw', 'text')
+      .option('--body-only', 'Output only the message body')
+      .action(async (messageId: string, options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const result = await client.get(messageId, options.format);
+          if (options.bodyOnly) {
+            raw(result.body);
+          } else {
+            printMessage(result);
+          }
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  gmail
-    .command('mark')
-    .argument('<message-id...>', 'Message ID(s)')
-    .description('Mark one or more messages as read or unread')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--read', 'Mark as read')
-    .option('--unread', 'Mark as unread')
-    .action(async (messageIds: string[], options) => {
-      try {
-        if (!options.read && !options.unread) {
-          throw new CliError('INVALID_PARAMS', 'Specify --read or --unread');
-        }
-        if (options.read && options.unread) {
-          throw new CliError('INVALID_PARAMS', 'Cannot specify both --read and --unread');
-        }
+  # full message with headers
+  agentio gmail get 18c4f1a2b3d
 
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'mark email');
-        for (const messageId of messageIds) {
-          await client.mark(messageId, options.read);
-          printMarked(messageId, options.read);
+  # plain-text body only (good for piping to a file)
+  agentio gmail get 18c4f1a2b3d --body-only > message.txt
+
+  # raw HTML body
+  agentio gmail get 18c4f1a2b3d --format html --body-only`,
+  );
+
+  addExamples(
+    gmail
+      .command('search')
+      .description('Search messages using Gmail query syntax')
+      .requiredOption('--query <query>', 'Search query')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Max results', '10')
+      .action(async (options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const result = await client.search(options.query, parseInt(options.limit, 10));
+          printMessageList(result.messages, result.total);
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
+
+  # unread mail from a specific sender in the last week
+  agentio gmail search --query "from:alice@example.com is:unread newer_than:7d"
+
+  # messages with attachments after a date
+  agentio gmail search --query "has:attachment after:2024/01/01" --limit 25
+
+  # subject keyword in inbox, excluding spam
+  agentio gmail search --query "subject:invoice label:inbox -label:spam"
+
+  # exact phrase across all mail
+  agentio gmail search --query '"quarterly report"'
+
+Query syntax: from:, to:, cc:, subject:, label:, is:unread|starred|important,
+has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.
+Combine with spaces (AND), OR, or - to negate.`,
+  );
+
+  addExamples(
+    addComposeOptions(gmail.command('send').description('Send an email'))
+      .action(async (options) => {
+        try {
+          const sendOptions = await parseSendOptions(options);
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'send email');
+          const result = await client.send(sendOptions);
+          printSendResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # plain-text email
+  agentio gmail send --to alice@example.com --subject "Hello" --body "Hi Alice!"
+
+  # body from stdin (great for piping)
+  echo "Sent via pipe" | agentio gmail send --to alice@example.com --subject "Note"
+
+  # reply within an existing thread (to/subject derived from thread)
+  agentio gmail send --reply-to 18c4f1a2b3d --body "Thanks!"
+
+  # HTML body with an attachment and an inline image
+  agentio gmail send --to alice@example.com --cc bob@example.com \\
+    --subject "Report" --html \\
+    --body '<p>See chart:</p><img src="cid:chart1">' \\
+    --attachment ./report.pdf --inline chart1:./chart.png`,
+  );
+
+  addExamples(
+    addComposeOptions(gmail.command('draft').description('Create an email draft'))
+      .action(async (options) => {
+        try {
+          const sendOptions = await parseSendOptions(options);
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'create draft');
+          const result = await client.draft(sendOptions);
+          printDraftResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # save a draft for later editing in Gmail
+  agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # draft a reply within an existing thread
+  agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
+
+  # draft with attachment, body from stdin
+  cat message.txt | agentio gmail draft --to alice@example.com \\
+    --subject "Notes" --attachment ./notes.pdf`,
+  );
+
+  addExamples(
+    gmail
+      .command('archive')
+      .argument('<message-id...>', 'Message ID(s)')
+      .description('Archive one or more messages')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (messageIds: string[], options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'archive email');
+          for (const messageId of messageIds) {
+            await client.archive(messageId);
+            printArchived(messageId);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # archive one message
+  agentio gmail archive 18c4f1a2b3d
+
+  # archive several at once
+  agentio gmail archive 18c4f1a2b3d 18c4f1a2b3e 18c4f1a2b3f`,
+  );
+
+  addExamples(
+    gmail
+      .command('mark')
+      .argument('<message-id...>', 'Message ID(s)')
+      .description('Mark one or more messages as read or unread')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--read', 'Mark as read')
+      .option('--unread', 'Mark as unread')
+      .action(async (messageIds: string[], options) => {
+        try {
+          if (!options.read && !options.unread) {
+            throw new CliError('INVALID_PARAMS', 'Specify --read or --unread');
+          }
+          if (options.read && options.unread) {
+            throw new CliError('INVALID_PARAMS', 'Cannot specify both --read and --unread');
+          }
+
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'mark email');
+          for (const messageId of messageIds) {
+            await client.mark(messageId, options.read);
+            printMarked(messageId, options.read);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # mark one message as read
+  agentio gmail mark 18c4f1a2b3d --read
+
+  # mark several back to unread
+  agentio gmail mark 18c4f1a2b3d 18c4f1a2b3e --unread`,
+  );
 
   const labels = gmail
     .command('labels')
     .description('Manage Gmail labels');
 
-  labels
-    .command('list')
-    .description('List all labels')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (options) => {
-      try {
-        const { client } = await getGmailClient(options.profile);
-        const result = await client.listLabels();
-        printLabelList(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  labels
-    .command('create')
-    .argument('<name>', 'Label name (use "/" for nesting, e.g. "auto/receipts")')
-    .description('Create a new label')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (name: string, options) => {
-      try {
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'create label');
-        const result = await client.createLabel(name);
-        printLabelCreated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  labels
-    .command('delete')
-    .argument('<name-or-id>', 'Label name or ID')
-    .description('Delete a user label')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (nameOrId: string, options) => {
-      try {
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'delete label');
-        const result = await client.deleteLabel(nameOrId);
-        printLabelDeleted(result.name, result.id);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  labels
-    .command('rename')
-    .argument('<old>', 'Existing label name or ID')
-    .argument('<new>', 'New label name')
-    .description('Rename a user label')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (oldName: string, newName: string, options) => {
-      try {
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'rename label');
-        const result = await client.renameLabel(oldName, newName);
-        printLabelRenamed(oldName, result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  gmail
-    .command('label')
-    .argument('<id...>', 'Message ID(s) (or thread ID(s) with --thread)')
-    .description('Apply and/or remove labels on messages or threads')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--apply <name>', 'Label to apply (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
-    .option('--remove <name>', 'Label to remove (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
-    .option('--thread', 'Treat IDs as thread IDs')
-    .action(async (ids: string[], options) => {
-      try {
-        const apply = options.apply as string[];
-        const remove = options.remove as string[];
-        if (!apply.length && !remove.length) {
-          throw new CliError('INVALID_PARAMS', 'Specify at least one --apply or --remove');
+  addExamples(
+    labels
+      .command('list')
+      .description('List all labels')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const result = await client.listLabels();
+          printLabelList(result);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        const { client, profile } = await getGmailClient(options.profile);
-        await enforceWriteAccess('gmail', profile, 'modify labels');
+  # list every label (system + user)
+  agentio gmail labels list
 
-        const [addLabelIds, removeLabelIds] = await Promise.all([
-          client.resolveLabelIds(apply),
-          client.resolveLabelIds(remove),
-        ]);
+  # list labels for a specific profile
+  agentio gmail labels list --profile alice@example.com`,
+  );
 
-        const isThread = options.thread === true;
-        for (const id of ids) {
-          await client.modifyLabels(id, addLabelIds, removeLabelIds, isThread);
-          printLabelModified(id, isThread, apply, remove);
+  addExamples(
+    labels
+      .command('create')
+      .argument('<name>', 'Label name (use "/" for nesting, e.g. "auto/receipts")')
+      .description('Create a new label')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (name: string, options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'create label');
+          const result = await client.createLabel(name);
+          printLabelCreated(result);
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  gmail
-    .command('attachment')
-    .argument('<message-id>', 'Message ID')
-    .description('Download attachments from a message')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--name <filename>', 'Download specific attachment by filename (downloads all if not specified)')
-    .option('--output <dir>', 'Output directory', '.')
-    .action(async (messageId: string, options) => {
-      try {
-        const { client } = await getGmailClient(options.profile);
-        const outputDir = options.output;
+  # create a top-level label
+  agentio gmail labels create receipts
 
-        // Download all attachments
-        const results = await client.getAllAttachments(messageId);
+  # create a nested label (use "/" for hierarchy)
+  agentio gmail labels create auto/receipts
 
-        if (results.length === 0) {
-          console.log('No attachments found');
-          return;
+  # nested two levels deep
+  agentio gmail labels create work/clients/acme`,
+  );
+
+  addExamples(
+    labels
+      .command('delete')
+      .argument('<name-or-id>', 'Label name or ID')
+      .description('Delete a user label')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (nameOrId: string, options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'delete label');
+          const result = await client.deleteLabel(nameOrId);
+          printLabelDeleted(result.name, result.id);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        // Filter by filename if specified
-        const toDownload = options.name
-          ? results.filter(({ attachment }) => attachment.filename === options.name)
-          : results;
+  # delete a user label by name
+  agentio gmail labels delete receipts
 
-        if (toDownload.length === 0) {
-          throw new CliError('NOT_FOUND', `Attachment not found: ${options.name}`);
+  # delete a nested label
+  agentio gmail labels delete auto/receipts
+
+  # delete by label ID
+  agentio gmail labels delete Label_1234567890`,
+  );
+
+  addExamples(
+    labels
+      .command('rename')
+      .argument('<old>', 'Existing label name or ID')
+      .argument('<new>', 'New label name')
+      .description('Rename a user label')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (oldName: string, newName: string, options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'rename label');
+          const result = await client.renameLabel(oldName, newName);
+          printLabelRenamed(oldName, result);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        if (toDownload.length > 1) {
-          console.log(`Downloading ${toDownload.length} attachment(s)...\n`);
+  # rename a label
+  agentio gmail labels rename receipts invoices
+
+  # move a label into a nested hierarchy
+  agentio gmail labels rename receipts auto/receipts`,
+  );
+
+  addExamples(
+    gmail
+      .command('label')
+      .argument('<id...>', 'Message ID(s) (or thread ID(s) with --thread)')
+      .description('Apply and/or remove labels on messages or threads')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--apply <name>', 'Label to apply (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+      .option('--remove <name>', 'Label to remove (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+      .option('--thread', 'Treat IDs as thread IDs')
+      .action(async (ids: string[], options) => {
+        try {
+          const apply = options.apply as string[];
+          const remove = options.remove as string[];
+          if (!apply.length && !remove.length) {
+            throw new CliError('INVALID_PARAMS', 'Specify at least one --apply or --remove');
+          }
+
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'modify labels');
+
+          const [addLabelIds, removeLabelIds] = await Promise.all([
+            client.resolveLabelIds(apply),
+            client.resolveLabelIds(remove),
+          ]);
+
+          const isThread = options.thread === true;
+          for (const id of ids) {
+            await client.modifyLabels(id, addLabelIds, removeLabelIds, isThread);
+            printLabelModified(id, isThread, apply, remove);
+          }
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        for (const { data, attachment } of toDownload) {
-          const outputPath = join(outputDir, attachment.filename);
-          await Bun.write(outputPath, data);
-          printAttachmentDownloaded(attachment.filename, outputPath, data.length);
-          if (toDownload.length > 1) console.log('');
+  # apply a label to one message
+  agentio gmail label 18c4f1a2b3d --apply receipts
+
+  # remove a label from several messages
+  agentio gmail label 18c4f1a2b3d 18c4f1a2b3e --remove INBOX
+
+  # archive (remove INBOX) and apply a label in one call
+  agentio gmail label 18c4f1a2b3d --apply auto/receipts --remove INBOX
+
+  # apply multiple labels to a thread
+  agentio gmail label 18c4f1a2b3d --thread --apply important --apply work`,
+  );
+
+  addExamples(
+    gmail
+      .command('attachment')
+      .argument('<message-id>', 'Message ID')
+      .description('Download attachments from a message')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--name <filename>', 'Download specific attachment by filename (downloads all if not specified)')
+      .option('--output <dir>', 'Output directory', '.')
+      .action(async (messageId: string, options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const outputDir = options.output;
+
+          // Download all attachments
+          const results = await client.getAllAttachments(messageId);
+
+          if (results.length === 0) {
+            console.log('No attachments found');
+            return;
+          }
+
+          // Filter by filename if specified
+          const toDownload = options.name
+            ? results.filter(({ attachment }) => attachment.filename === options.name)
+            : results;
+
+          if (toDownload.length === 0) {
+            throw new CliError('NOT_FOUND', `Attachment not found: ${options.name}`);
+          }
+
+          if (toDownload.length > 1) {
+            console.log(`Downloading ${toDownload.length} attachment(s)...\n`);
+          }
+
+          for (const { data, attachment } of toDownload) {
+            const outputPath = join(outputDir, attachment.filename);
+            await Bun.write(outputPath, data);
+            printAttachmentDownloaded(attachment.filename, outputPath, data.length);
+            if (toDownload.length > 1) console.log('');
+          }
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  gmail
+  # download every attachment to the current directory
+  agentio gmail attachment 18c4f1a2b3d
+
+  # download all attachments to a specific folder
+  agentio gmail attachment 18c4f1a2b3d --output ./downloads
+
+  # download just one attachment by filename
+  agentio gmail attachment 18c4f1a2b3d --name invoice.pdf --output ./downloads`,
+  );
+
+  const exportCmd = gmail
     .command('export')
     .argument('<message-id>', 'Message ID')
     .description('Export a message as PDF')
@@ -559,6 +685,19 @@ ${emailHeader}
         handleError(error);
       }
     });
+
+  addExamples(
+    exportCmd,
+    `Examples:
+
+  # export to default message.pdf in CWD
+  agentio gmail export 18c4f1a2b3d
+
+  # export to a specific path
+  agentio gmail export 18c4f1a2b3d --output ./archive/invoice.pdf
+
+Requires Chrome, Chromium, or Microsoft Edge installed locally.`,
+  );
 
   // Profile management
   const profile = createProfileCommands<{ email?: string }>(gmail, {

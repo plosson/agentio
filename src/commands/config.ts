@@ -9,6 +9,7 @@ import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
 import { encryptVault, decryptVault } from '../vault/crypto';
+import { addExamples } from '../utils/command-tree';
 import type { Config, ServiceName, ProfileValue } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
@@ -56,7 +57,7 @@ export function registerConfigCommands(program: Command): void {
     .command('config')
     .description('Configuration management');
 
-  config
+  const exportCmd = config
     .command('export')
     .description('Export configuration and credentials (as environment variables by default, or to a file)')
     .option('--key <key>', 'Encryption key (64 hex characters). If not provided, a random key will be generated')
@@ -188,7 +189,24 @@ export function registerConfigCommands(program: Command): void {
       }
     });
 
-  config
+  addExamples(
+    exportCmd,
+    `Examples:
+
+  # interactive picker, prints AGENTIO_KEY=… and AGENTIO_CONFIG=… to stdout
+  agentio config export
+
+  # export every profile non-interactively (good in scripts / CI)
+  agentio config export --all
+
+  # write the encrypted blob to a file; only AGENTIO_KEY goes to stdout
+  agentio config export --all --file ./agentio.enc
+
+  # bring your own encryption key (64 hex chars)
+  agentio config export --all --key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
+  );
+
+  const importCmd = config
     .command('import')
     .description('Import configuration and credentials from an encrypted file or environment variables')
     .argument('[file]', 'Path to the encrypted configuration file (optional if AGENTIO_CONFIG env var is set)')
@@ -330,6 +348,20 @@ export function registerConfigCommands(program: Command): void {
       }
     });
 
+  addExamples(
+    importCmd,
+    `Examples:
+
+  # import from a file (key passed inline)
+  agentio config import ./agentio.enc --key 0123…cdef
+
+  # import from AGENTIO_CONFIG env var, key from AGENTIO_KEY env var
+  AGENTIO_KEY=… AGENTIO_CONFIG=… agentio config import
+
+  # merge into existing config (only adds missing profiles/credentials)
+  agentio config import ./agentio.enc --key 0123…cdef --merge`,
+  );
+
   // Environment variable management
   const env = config
     .command('env')
@@ -351,38 +383,53 @@ export function registerConfigCommands(program: Command): void {
       }
     });
 
-  env
-    .command('set')
-    .description('Set an environment variable')
-    .argument('<key>', 'Variable name')
-    .argument('<value>', 'Variable value')
-    .action(async (key, value) => {
-      try {
-        await setEnv(key, value);
-        console.log(`Set ${key}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  env
-    .command('unset')
-    .description('Remove an environment variable')
-    .argument('<key>', 'Variable name')
-    .action(async (key) => {
-      try {
-        const removed = await unsetEnv(key);
-        if (removed) {
-          console.log(`Removed ${key}`);
-        } else {
-          throw new CliError('NOT_FOUND', `Variable not found: ${key}`);
+  addExamples(
+    env
+      .command('set')
+      .description('Set an environment variable')
+      .argument('<key>', 'Variable name')
+      .argument('<value>', 'Variable value')
+      .action(async (key, value) => {
+        try {
+          await setEnv(key, value);
+          console.log(`Set ${key}`);
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  config
+  # set a variable that downstream services / hooks can read
+  agentio config env set OPENAI_API_KEY sk-...
+
+  # values can contain spaces if quoted
+  agentio config env set GREETING "hello world"`,
+  );
+
+  addExamples(
+    env
+      .command('unset')
+      .description('Remove an environment variable')
+      .argument('<key>', 'Variable name')
+      .action(async (key) => {
+        try {
+          const removed = await unsetEnv(key);
+          if (removed) {
+            console.log(`Removed ${key}`);
+          } else {
+            throw new CliError('NOT_FOUND', `Variable not found: ${key}`);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # remove a previously-set variable
+  agentio config env unset OPENAI_API_KEY`,
+  );
+
+  const clearCmd = config
     .command('clear')
     .description('Clear all configuration and credentials')
     .option('--force', 'Skip confirmation prompt')
@@ -409,4 +456,15 @@ export function registerConfigCommands(program: Command): void {
         handleError(error);
       }
     });
+
+  addExamples(
+    clearCmd,
+    `Examples:
+
+  # interactive: deletes all profiles and credentials after confirmation
+  agentio config clear
+
+  # non-interactive (CI / scripted reset)
+  agentio config clear --force`,
+  );
 }

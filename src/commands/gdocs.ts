@@ -11,6 +11,7 @@ import { printGDocsList, printGDocCreated, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type { GDocsCredentials } from '../types/gdocs';
 
 const getGDocsClient = createClientGetter<GDocsCredentials, GDocsClient>({
@@ -23,110 +24,134 @@ export function registerGDocsCommands(program: Command): void {
     .command('gdocs')
     .description('Google Docs operations');
 
-  gdocs
-    .command('get')
-    .argument('<doc-id-or-url>', 'Document ID or URL')
-    .description('Export a document')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--format <format>', 'Export format: markdown or docx', 'markdown')
-    .option('--output <file>', 'Output file path (required for docx, optional for markdown)')
-    .action(async (docIdOrUrl: string, options) => {
-      try {
-        const { client } = await getGDocsClient(options.profile);
-        const format = options.format.toLowerCase();
+  addExamples(
+    gdocs
+      .command('get')
+      .argument('<doc-id-or-url>', 'Document ID or URL')
+      .description('Export a document')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Export format: markdown or docx', 'markdown')
+      .option('--output <file>', 'Output file path (required for docx, optional for markdown)')
+      .action(async (docIdOrUrl: string, options) => {
+        try {
+          const { client } = await getGDocsClient(options.profile);
+          const format = options.format.toLowerCase();
 
-        if (format !== 'markdown' && format !== 'docx') {
-          throw new CliError('INVALID_PARAMS', `Unknown format: ${format}`, 'Use --format markdown or --format docx');
+          if (format !== 'markdown' && format !== 'docx') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${format}`, 'Use --format markdown or --format docx');
+          }
+
+          if (format === 'docx' && !options.output) {
+            throw new CliError('INVALID_PARAMS', 'Output file required for docx format', 'Use --output <file.docx>');
+          }
+
+          const content = format === 'docx'
+            ? await client.getAsDocx(docIdOrUrl)
+            : await client.getAsMarkdown(docIdOrUrl);
+
+          if (options.output) {
+            await writeFile(options.output, content);
+            console.log(`Exported to ${options.output}`);
+          } else {
+            raw(content as string);
+          }
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        if (format === 'docx' && !options.output) {
-          throw new CliError('INVALID_PARAMS', 'Output file required for docx format', 'Use --output <file.docx>');
+  # print a document as markdown to stdout
+  agentio gdocs get 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # accept a full Google Docs URL
+  agentio gdocs get https://docs.google.com/document/d/1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit
+
+  # save markdown to a file
+  agentio gdocs get 1A2bCdEf... --output report.md
+
+  # export to .docx (requires --output)
+  agentio gdocs get 1A2bCdEf... --format docx --output report.docx`,
+  );
+
+  addExamples(
+    gdocs
+      .command('create')
+      .description('Create a new document from Markdown')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--title <title>', 'Document title')
+      .option('--content <text>', 'Markdown content (or pipe via stdin)')
+      .option('--folder <folder-id>', 'Folder ID to create the document in')
+      .action(async (options) => {
+        try {
+          let content = options.content;
+
+          if (!content) {
+            content = await readStdin();
+          }
+
+          if (!content) {
+            throw new CliError('INVALID_PARAMS', 'No content provided', 'Provide --content or pipe markdown via stdin');
+          }
+
+          const { client, profile } = await getGDocsClient(options.profile);
+          await enforceWriteAccess('gdocs', profile, 'create document');
+          const result = await client.create(options.title, content, options.folder);
+
+          printGDocCreated(result);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        const content = format === 'docx'
-          ? await client.getAsDocx(docIdOrUrl)
-          : await client.getAsMarkdown(docIdOrUrl);
+  # create a doc with inline markdown content
+  agentio gdocs create --title "Meeting Notes" --content "# Agenda\\n- Topic 1\\n- Topic 2"
 
-        if (options.output) {
-          await writeFile(options.output, content);
-          console.log(`Exported to ${options.output}`);
-        } else {
-          raw(content as string);
+  # create a doc with body piped from a file
+  cat draft.md | agentio gdocs create --title "Q4 Plan"
+
+  # create inside a specific Drive folder
+  agentio gdocs create --title "Spec" --content "# Spec" --folder 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
+  );
+
+  addExamples(
+    gdocs
+      .command('list')
+      .description('List recent documents')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <n>', 'Number of documents', '10')
+      .option('--query <query>', 'Drive search query filter')
+      .action(async (options) => {
+        try {
+          const { client } = await getGDocsClient(options.profile);
+          const docs = await client.list({
+            limit: parseInt(options.limit, 10),
+            query: options.query,
+          });
+          printGDocsList(docs);
+        } catch (error) {
+          handleError(error);
         }
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
 
-  gdocs
-    .command('create')
-    .description('Create a new document from Markdown')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--title <title>', 'Document title')
-    .option('--content <text>', 'Markdown content (or pipe via stdin)')
-    .option('--folder <folder-id>', 'Folder ID to create the document in')
-    .action(async (options) => {
-      try {
-        let content = options.content;
+  # 10 most recently modified docs
+  agentio gdocs list
 
-        if (!content) {
-          content = await readStdin();
-        }
+  # docs you own, more results
+  agentio gdocs list --limit 50 --query "'me' in owners"
 
-        if (!content) {
-          throw new CliError('INVALID_PARAMS', 'No content provided', 'Provide --content or pipe markdown via stdin');
-        }
+  # search by name fragment
+  agentio gdocs list --query "name contains 'report'"
 
-        const { client, profile } = await getGDocsClient(options.profile);
-        await enforceWriteAccess('gdocs', profile, 'create document');
-        const result = await client.create(options.title, content, options.folder);
+  # recently modified docs since a date
+  agentio gdocs list --query "modifiedTime > '2024-01-01'"
 
-        printGDocCreated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  gdocs
-    .command('list')
-    .description('List recent documents')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <n>', 'Number of documents', '10')
-    .option('--query <query>', 'Drive search query filter')
-    .addHelpText('after', `
-Query Syntax Examples:
-
-  Name search:
-    --query "name contains 'project'"     Documents with "project" in name
-    --query "name = 'Meeting Notes'"      Exact name match
-
-  Ownership:
-    --query "'me' in owners"              Documents you own
-    --query "'user@example.com' in owners"  Documents owned by specific user
-
-  Date filters:
-    --query "modifiedTime > '2024-01-01'"   Modified after date
-    --query "createdTime > '2024-01-01'"    Created after date
-
-  Starred/Trashed:
-    --query "starred = true"              Starred documents
-    --query "trashed = false"             Not in trash (default)
-
-  Combined:
-    --query "name contains 'report' and modifiedTime > '2024-01-01'"
-`)
-    .action(async (options) => {
-      try {
-        const { client } = await getGDocsClient(options.profile);
-        const docs = await client.list({
-          limit: parseInt(options.limit, 10),
-          query: options.query,
-        });
-        printGDocsList(docs);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+Query syntax: name contains '...', name = '...', 'me' in owners,
+modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.
+Combine with 'and'/'or'.`,
+  );
 
   // Profile management
   const profile = createProfileCommands<GDocsCredentials>(gdocs, {

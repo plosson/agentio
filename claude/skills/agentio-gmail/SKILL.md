@@ -1,153 +1,342 @@
 ---
 name: agentio-gmail
-description: Use when interacting with Gmail - list, read, search, send (with attachments/inline images), draft, reply (via --reply-to), archive, mark, manage labels (list/create/delete/rename, apply/remove on messages or threads), download attachments, or export to PDF. Requires agentio CLI with a configured Gmail profile.
+description: Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.
 ---
 
-# Gmail Operations with agentio
+# Gmail via agentio
 
-Use `agentio gmail` commands to interact with Gmail. Multiple profiles can be configured - the default profile is used unless you specify `--profile <name>`.
+Auto-generated from `agentio skill gmail`. Do not edit by hand.
 
-## List Messages
+## agentio gmail list
 
-```bash
-agentio gmail list [--limit N] [--query QUERY] [--label LABEL]
-```
+List messages
 
 Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
 - `--limit <n>`: Number of messages (default: 10)
-- `--query <query>`: Gmail search query
-- `--label <label>`: Filter by label (repeatable)
+- `--query <query>`: Gmail search query (see "gmail search --help" for syntax)
+- `--label <label>`: Filter by label (repeatable) (default: )
 
-## Get a Message
+```
+Examples:
 
-```bash
-agentio gmail get <message-id> [--format text|html|raw] [--body-only]
+  # 10 most recent messages
+  agentio gmail list
+
+  # 25 most recent in the inbox
+  agentio gmail list --limit 25 --label INBOX
+
+  # unread messages from the last week
+  agentio gmail list --query "is:unread newer_than:7d"
+
+  # use a specific profile
+  agentio gmail list --profile alice@example.com
 ```
 
+## agentio gmail get <message-id>
+
+Get a message
+
 Options:
-- `--format`: Body format - `text` (default), `html`, or `raw`
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--format <format>`: Body format: text, html, or raw (default: text)
 - `--body-only`: Output only the message body
 
-## Search Messages
+```
+Examples:
 
-```bash
-agentio gmail search --query <query> [--limit N]
+  # full message with headers
+  agentio gmail get 18c4f1a2b3d
+
+  # plain-text body only (good for piping to a file)
+  agentio gmail get 18c4f1a2b3d --body-only > message.txt
+
+  # raw HTML body
+  agentio gmail get 18c4f1a2b3d --format html --body-only
 ```
 
-Query syntax:
-- `from:john@example.com` - From specific sender
-- `to:me` - Sent to you
-- `after:2024/01/01` / `before:2024/12/31` - Date filters
-- `newer_than:7d` / `older_than:1m` - Relative dates (d/m/y)
-- `label:inbox` - In specific label
-- `is:unread` / `is:starred` - Status filters
-- `has:attachment` - With attachments
-- `subject:invoice` - Search subject
+## agentio gmail search
 
-Combine: `from:boss@work.com is:unread newer_than:7d`
-
-## Send an Email
-
-```bash
-agentio gmail send --to <email> --subject <subject> [--body <body>] [options]
-```
+Search messages using Gmail query syntax
 
 Options:
-- `--to <email>`: Recipient (repeatable, required unless --reply-to)
-- `--cc <email>`: CC recipient (repeatable)
-- `--bcc <email>`: BCC recipient (repeatable)
+
+- `--query <query>`: Search query
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--limit <n>`: Max results (default: 10)
+
+```
+Examples:
+
+  # unread mail from a specific sender in the last week
+  agentio gmail search --query "from:alice@example.com is:unread newer_than:7d"
+
+  # messages with attachments after a date
+  agentio gmail search --query "has:attachment after:2024/01/01" --limit 25
+
+  # subject keyword in inbox, excluding spam
+  agentio gmail search --query "subject:invoice label:inbox -label:spam"
+
+  # exact phrase across all mail
+  agentio gmail search --query '"quarterly report"'
+
+Query syntax: from:, to:, cc:, subject:, label:, is:unread|starred|important,
+has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.
+Combine with spaces (AND), OR, or - to negate.
+```
+
+## agentio gmail send
+
+Send an email
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--to <email>`: Recipient (repeatable, required unless --reply-to) (default: )
+- `--cc <email>`: CC recipient (repeatable) (default: )
+- `--bcc <email>`: BCC recipient (repeatable) (default: )
 - `--subject <subject>`: Email subject (required unless --reply-to)
 - `--body <body>`: Email body (or pipe via stdin)
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
-- `--attachment <path>`: File to attach (repeatable)
-- `--inline <cid:path>`: Inline image (repeatable). Supports PNG, JPG, GIF only (not SVG)
+- `--attachment <path>`: File to attach (repeatable) (default: )
+- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG) (default: )
 
-### Replying to a Thread
+```
+Examples:
 
-```bash
-agentio gmail send --reply-to <thread-id> --body "Thanks!"
+  # plain-text email
+  agentio gmail send --to alice@example.com --subject "Hello" --body "Hi Alice!"
+
+  # body from stdin (great for piping)
+  echo "Sent via pipe" | agentio gmail send --to alice@example.com --subject "Note"
+
+  # reply within an existing thread (to/subject derived from thread)
+  agentio gmail send --reply-to 18c4f1a2b3d --body "Thanks!"
+
+  # HTML body with an attachment and an inline image
+  agentio gmail send --to alice@example.com --cc bob@example.com \
+    --subject "Report" --html \
+    --body '<p>See chart:</p><img src="cid:chart1">' \
+    --attachment ./report.pdf --inline chart1:./chart.png
 ```
 
-When using `--reply-to`, the recipient and subject are derived from the thread. You can override them with explicit `--to`/`--subject`.
+## agentio gmail draft
 
-### Inline Images
-
-To embed images directly in HTML emails, use `--inline` with a content ID and file path:
-
-```bash
-agentio gmail send \
-  --to user@example.com \
-  --subject "Report" \
-  --html \
-  --body '<p>See chart:</p><img src="cid:chart1">' \
-  --inline chart1:./chart.png
-```
-
-Reference inline images in HTML using `src="cid:<contentId>"`.
-
-## Create a Draft
-
-```bash
-agentio gmail draft --to <email> --subject <subject> [--body <body>] [options]
-```
-
-Takes the same options as `send`. Supports `--reply-to` for draft replies:
-
-```bash
-agentio gmail draft --reply-to <thread-id> --body "Draft reply"
-```
-
-## Archive a Message
-
-```bash
-agentio gmail archive <message-id>
-```
-
-## Mark as Read/Unread
-
-```bash
-agentio gmail mark <message-id> --read
-agentio gmail mark <message-id> --unread
-```
-
-## Manage Labels
-
-```bash
-agentio gmail labels list
-agentio gmail labels create <name>            # Use "/" for nesting, e.g. "auto/receipts"
-agentio gmail labels delete <name-or-id>      # User labels only (system labels refused)
-agentio gmail labels rename <old> <new>
-```
-
-## Apply / Remove Labels
-
-```bash
-agentio gmail label <id...> [--apply <name>]... [--remove <name>]... [--thread]
-```
-
-- `--apply` and `--remove` are repeatable and can be combined in one call.
-- IDs are message IDs by default; pass `--thread` to operate on threads instead.
-- Labels can be referenced by name or ID. System labels (`INBOX`, `STARRED`, `UNREAD`, `IMPORTANT`, ...) work too — e.g. `--remove INBOX` archives, `--apply STARRED` stars.
-- Idempotent: applying a label that's already present (or removing one that isn't) is a successful no-op.
-
-## Download Attachments
-
-```bash
-agentio gmail attachment <message-id> [--name <filename>] [--output <dir>]
-```
+Create an email draft
 
 Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--to <email>`: Recipient (repeatable, required unless --reply-to) (default: )
+- `--cc <email>`: CC recipient (repeatable) (default: )
+- `--bcc <email>`: BCC recipient (repeatable) (default: )
+- `--subject <subject>`: Email subject (required unless --reply-to)
+- `--body <body>`: Email body (or pipe via stdin)
+- `--html`: Treat body as HTML
+- `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
+- `--attachment <path>`: File to attach (repeatable) (default: )
+- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG) (default: )
+
+```
+Examples:
+
+  # save a draft for later editing in Gmail
+  agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # draft a reply within an existing thread
+  agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
+
+  # draft with attachment, body from stdin
+  cat message.txt | agentio gmail draft --to alice@example.com \
+    --subject "Notes" --attachment ./notes.pdf
+```
+
+## agentio gmail archive <message-id...>
+
+Archive one or more messages
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # archive one message
+  agentio gmail archive 18c4f1a2b3d
+
+  # archive several at once
+  agentio gmail archive 18c4f1a2b3d 18c4f1a2b3e 18c4f1a2b3f
+```
+
+## agentio gmail mark <message-id...>
+
+Mark one or more messages as read or unread
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--read`: Mark as read
+- `--unread`: Mark as unread
+
+```
+Examples:
+
+  # mark one message as read
+  agentio gmail mark 18c4f1a2b3d --read
+
+  # mark several back to unread
+  agentio gmail mark 18c4f1a2b3d 18c4f1a2b3e --unread
+```
+
+## agentio gmail labels list
+
+List all labels
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # list every label (system + user)
+  agentio gmail labels list
+
+  # list labels for a specific profile
+  agentio gmail labels list --profile alice@example.com
+```
+
+## agentio gmail labels create <name>
+
+Create a new label
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # create a top-level label
+  agentio gmail labels create receipts
+
+  # create a nested label (use "/" for hierarchy)
+  agentio gmail labels create auto/receipts
+
+  # nested two levels deep
+  agentio gmail labels create work/clients/acme
+```
+
+## agentio gmail labels delete <name-or-id>
+
+Delete a user label
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # delete a user label by name
+  agentio gmail labels delete receipts
+
+  # delete a nested label
+  agentio gmail labels delete auto/receipts
+
+  # delete by label ID
+  agentio gmail labels delete Label_1234567890
+```
+
+## agentio gmail labels rename <old> <new>
+
+Rename a user label
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # rename a label
+  agentio gmail labels rename receipts invoices
+
+  # move a label into a nested hierarchy
+  agentio gmail labels rename receipts auto/receipts
+```
+
+## agentio gmail label <id...>
+
+Apply and/or remove labels on messages or threads
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--apply <name>`: Label to apply (name or ID, repeatable) (default: )
+- `--remove <name>`: Label to remove (name or ID, repeatable) (default: )
+- `--thread`: Treat IDs as thread IDs
+
+```
+Examples:
+
+  # apply a label to one message
+  agentio gmail label 18c4f1a2b3d --apply receipts
+
+  # remove a label from several messages
+  agentio gmail label 18c4f1a2b3d 18c4f1a2b3e --remove INBOX
+
+  # archive (remove INBOX) and apply a label in one call
+  agentio gmail label 18c4f1a2b3d --apply auto/receipts --remove INBOX
+
+  # apply multiple labels to a thread
+  agentio gmail label 18c4f1a2b3d --thread --apply important --apply work
+```
+
+## agentio gmail attachment <message-id>
+
+Download attachments from a message
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
 - `--name <filename>`: Download specific attachment by filename (downloads all if not specified)
-- `--output <dir>`: Output directory (default: current directory)
+- `--output <dir>`: Output directory (default: .)
 
-## Export Message as PDF
+```
+Examples:
 
-```bash
-agentio gmail export <message-id> [--output <path>]
+  # download every attachment to the current directory
+  agentio gmail attachment 18c4f1a2b3d
+
+  # download all attachments to a specific folder
+  agentio gmail attachment 18c4f1a2b3d --output ./downloads
+
+  # download just one attachment by filename
+  agentio gmail attachment 18c4f1a2b3d --name invoice.pdf --output ./downloads
 ```
 
-Options:
-- `--output <path>`: Output file path (default: `message.pdf`)
+## agentio gmail export <message-id>
 
-Requires Chrome, Chromium, or Edge browser installed.
+Export a message as PDF
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--output <path>`: Output file path (default: message.pdf)
+
+```
+Examples:
+
+  # export to default message.pdf in CWD
+  agentio gmail export 18c4f1a2b3d
+
+  # export to a specific path
+  agentio gmail export 18c4f1a2b3d --output ./archive/invoice.pdf
+
+Requires Chrome, Chromium, or Microsoft Edge installed locally.
+```

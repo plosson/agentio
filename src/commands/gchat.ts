@@ -13,6 +13,7 @@ import { readStdin, prompt } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from '../utils/output';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from '../types/gchat';
 
 const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
@@ -25,7 +26,7 @@ export function registerGChatCommands(program: Command): void {
     .command('gchat')
     .description('Google Chat operations');
 
-  gchat
+  const sendCmd = gchat
     .command('send')
     .description('Send a message to Google Chat')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
@@ -123,120 +124,198 @@ export function registerGChatCommands(program: Command): void {
       }
     });
 
-  gchat
-    .command('list')
-    .description('List messages from a Google Chat space (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--space <id>', 'Space ID')
-    .option('--limit <n>', 'Number of messages', '10')
-    .option('--thread <id>', 'Filter by thread ID')
-    .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
-    .action(async (options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        const messages = await client.list({
-          spaceId: options.space,
-          limit: parseInt(options.limit, 10),
-          threadId: options.thread,
-          since: options.since ? new Date(options.since) : undefined,
-        });
+  addExamples(
+    sendCmd,
+    `Examples:
 
-        printGChatMessageList(messages);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # webhook profile: short text, no --space needed
+  agentio gchat send "Deployment complete"
 
-  gchat
-    .command('get')
-    .argument('<message-id>', 'Message ID')
-    .description('Get a message from a Google Chat space (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--space <id>', 'Space ID')
-    .action(async (messageId: string, options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        const message = await client.get({
-          spaceId: options.space,
-          messageId: messageId,
-        });
+  # OAuth profile: send to a specific space
+  agentio gchat send "Status update" --space spaces/AAAA1234
 
-        printGChatMessage(message);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # reply within an existing thread
+  agentio gchat send "Following up" --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
 
-  gchat
-    .command('spaces')
-    .description('List available Google Chat spaces (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
-    .action(async (options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        let spaces = await client.listSpaces();
+  # rich card via JSON file (OAuth or webhook)
+  agentio gchat send --json ./card.json --space spaces/AAAA1234
 
-        if (options.filter) {
-          const filterLower = options.filter.toLowerCase();
-          spaces = spaces.filter(s => s.displayName.toLowerCase().includes(filterLower));
+  # JSON via stdin (good for inline cards)
+  echo '{"text":"Build status","cards":[{"header":{"title":"CI"}}]}' | \\
+    agentio gchat send --json --space spaces/AAAA1234`,
+  );
+
+  addExamples(
+    gchat
+      .command('list')
+      .description('List messages from a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id>', 'Space ID')
+      .option('--limit <n>', 'Number of messages', '10')
+      .option('--thread <id>', 'Filter by thread ID')
+      .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const messages = await client.list({
+            spaceId: options.space,
+            limit: parseInt(options.limit, 10),
+            threadId: options.thread,
+            since: options.since ? new Date(options.since) : undefined,
+          });
+
+          printGChatMessageList(messages);
+        } catch (error) {
+          handleError(error);
         }
+      }),
+    `Examples:
 
-        printGChatSpaceList(spaces);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # 10 most recent messages in a space (OAuth only)
+  agentio gchat list --space spaces/AAAA1234
 
-  gchat
-    .command('members')
-    .description('List members of a Google Chat space (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .requiredOption('--space <id-or-name>', 'Space ID or display name')
-    .action(async (options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        const members = await client.listMembers(options.space);
-        printGChatMemberList(members);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # last 50 messages
+  agentio gchat list --space spaces/AAAA1234 --limit 50
 
-  gchat
-    .command('user')
-    .argument('<user-id>', 'User ID (e.g. "123456789" or "users/123456789")')
-    .description('Get full user info from the People API (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (userId: string, options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        const user = await client.getUser(userId);
-        printGChatUser(user);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  # only messages in a specific thread
+  agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+
+  # messages since a given date
+  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01`,
+  );
+
+  addExamples(
+    gchat
+      .command('get')
+      .argument('<message-id>', 'Message ID')
+      .description('Get a message from a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id>', 'Space ID')
+      .action(async (messageId: string, options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const message = await client.get({
+            spaceId: options.space,
+            messageId: messageId,
+          });
+
+          printGChatMessage(message);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # fetch one message by id from a space (OAuth only)
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234`,
+  );
+
+  addExamples(
+    gchat
+      .command('spaces')
+      .description('List available Google Chat spaces (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          let spaces = await client.listSpaces();
+
+          if (options.filter) {
+            const filterLower = options.filter.toLowerCase();
+            spaces = spaces.filter(s => s.displayName.toLowerCase().includes(filterLower));
+          }
+
+          printGChatSpaceList(spaces);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # all spaces this OAuth profile can see
+  agentio gchat spaces
+
+  # filter by display name (case-insensitive substring)
+  agentio gchat spaces --filter eng`,
+  );
+
+  addExamples(
+    gchat
+      .command('members')
+      .description('List members of a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id-or-name>', 'Space ID or display name')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const members = await client.listMembers(options.space);
+          printGChatMemberList(members);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # members by space id
+  agentio gchat members --space spaces/AAAA1234
+
+  # members by space display name (resolved against the space list)
+  agentio gchat members --space "Engineering"`,
+  );
+
+  addExamples(
+    gchat
+      .command('user')
+      .argument('<user-id>', 'User ID (e.g. "123456789" or "users/123456789")')
+      .description('Get full user info from the People API (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (userId: string, options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const user = await client.getUser(userId);
+          printGChatUser(user);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # by raw numeric id
+  agentio gchat user 123456789
+
+  # by full users/<id> form (as it appears in 'gchat members' output)
+  agentio gchat user users/123456789`,
+  );
 
   const directory = gchat
     .command('directory')
     .description('Manage the cached workspace directory used to resolve user IDs');
 
-  directory
-    .command('refresh')
-    .description('Force refresh the cached workspace directory (OAuth profiles only)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (options) => {
-      try {
-        const { client } = await getGChatClient(options.profile);
-        const result = await client.refreshDirectory();
-        console.log(`Refreshed: ${result.size} users`);
-        console.log(`Path: ${result.path}`);
-        console.log(`Fetched at: ${result.fetchedAt}`);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    directory
+      .command('refresh')
+      .description('Force refresh the cached workspace directory (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const result = await client.refreshDirectory();
+          console.log(`Refreshed: ${result.size} users`);
+          console.log(`Path: ${result.path}`);
+          console.log(`Fetched at: ${result.fetchedAt}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # rebuild the local user-id -> name/email cache (OAuth only)
+  agentio gchat directory refresh
+
+  # refresh the cache for a specific OAuth profile
+  agentio gchat directory refresh --profile alice@example.com`,
+  );
 
   // Profile management
   const profile = createProfileCommands<GChatCredentials>(gchat, {
