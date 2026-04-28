@@ -23,6 +23,7 @@ import {
   printWhatsAppGroupLeft,
   printWhatsAppParticipantsResult,
 } from '../utils/output';
+import { addExamples } from '../utils/command-tree';
 import type { WhatsAppCredentials } from '../types/whatsapp';
 import qrcode from 'qrcode-terminal';
 
@@ -161,14 +162,15 @@ export function registerWhatsAppCommands(program: Command): void {
   // Inbox subcommands (requires daemon)
   const inbox = whatsapp.command('inbox').description('Inbox operations (requires daemon)');
 
-  inbox
-    .command('pull')
-    .description('Get pending messages from inbox')
-    .option('--profile <name>', 'Profile name')
-    .option('--limit <n>', 'Maximum messages to retrieve', '50')
-    .option('--status <status>', 'Filter by status: pending or done', 'pending')
-    .option('--conversation <id>', 'Filter by conversation/group (name or JID)')
-    .action(async (options) => {
+  addExamples(
+    inbox
+      .command('pull')
+      .description('Get pending messages from inbox')
+      .option('--profile <name>', 'Profile name')
+      .option('--limit <n>', 'Maximum messages to retrieve', '50')
+      .option('--status <status>', 'Filter by status: pending or done', 'pending')
+      .option('--conversation <id>', 'Filter by conversation/group (name or JID)')
+      .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -201,13 +203,28 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  inbox
-    .command('get')
-    .description('Get a specific inbox message')
-    .argument('<id>', 'Message ID')
-    .action(async (id: string) => {
+  # pending messages on the default profile
+  agentio whatsapp inbox pull
+
+  # last 100 already-acked messages
+  agentio whatsapp inbox pull --status done --limit 100
+
+  # pending messages from one group, by name
+  agentio whatsapp inbox pull --conversation "Family Chat"
+
+  # pending messages from one direct chat, by phone JID
+  agentio whatsapp inbox pull --conversation 15551234567@s.whatsapp.net`,
+  );
+
+  addExamples(
+    inbox
+      .command('get')
+      .description('Get a specific inbox message')
+      .argument('<id>', 'Message ID')
+      .action(async (id: string) => {
       try {
         const client = await getDaemonClient();
         const message = await client.inboxGet(id);
@@ -218,13 +235,19 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  inbox
-    .command('ack')
-    .description('Mark a message as done')
-    .argument('<id>', 'Message ID')
-    .action(async (id: string) => {
+  # fetch one inbox message in full
+  agentio whatsapp inbox get wa_abc123`,
+  );
+
+  addExamples(
+    inbox
+      .command('ack')
+      .description('Mark a message as done')
+      .argument('<id>', 'Message ID')
+      .action(async (id: string) => {
       try {
         const client = await getDaemonClient();
         const success = await client.inboxAck(id);
@@ -232,14 +255,20 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  inbox
-    .command('reply')
-    .description('Reply to an inbox message')
-    .argument('<id>', 'Message ID to reply to')
-    .argument('[message]', 'Reply text (or pipe via stdin)')
-    .action(async (id: string, message: string | undefined) => {
+  # mark a message as done so it stops appearing in pending pulls
+  agentio whatsapp inbox ack wa_abc123`,
+  );
+
+  addExamples(
+    inbox
+      .command('reply')
+      .description('Reply to an inbox message')
+      .argument('<id>', 'Message ID to reply to')
+      .argument('[message]', 'Reply text (or pipe via stdin)')
+      .action(async (id: string, message: string | undefined) => {
       try {
         let text = message;
         if (!text) {
@@ -260,13 +289,22 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  inbox
-    .command('stats')
-    .description('Get inbox statistics')
-    .option('--profile <name>', 'Profile name')
-    .action(async (options) => {
+  # quick text reply to an incoming message
+  agentio whatsapp inbox reply wa_abc123 "on my way"
+
+  # pipe a longer reply via stdin
+  cat draft.txt | agentio whatsapp inbox reply wa_abc123`,
+  );
+
+  addExamples(
+    inbox
+      .command('stats')
+      .description('Get inbox statistics')
+      .option('--profile <name>', 'Profile name')
+      .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         const client = await getDaemonClient();
@@ -278,21 +316,30 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
+
+  # totals across all whatsapp profiles
+  agentio whatsapp inbox stats
+
+  # totals for a single profile
+  agentio whatsapp inbox stats --profile personal`,
+  );
 
   // Outbox subcommands (requires daemon)
   const outbox = whatsapp.command('outbox').description('Outbox operations (requires daemon)');
 
-  outbox
-    .command('send')
-    .description('Queue a message for sending')
-    .option('--profile <name>', 'Profile name')
-    .option('--to <phone>', 'Destination phone number (with country code, e.g., +1234567890)')
-    .option('--group <name>', 'Destination group (name or JID)')
-    .option('--attachment <path>', 'Path to file attachment (image, video, audio, or document)')
-    .option('--type <type>', 'Media type: image, video, audio, document (auto-detected if not specified)')
-    .argument('[message]', 'Message text or caption (or pipe via stdin)')
-    .action(async (message: string | undefined, options) => {
+  addExamples(
+    outbox
+      .command('send')
+      .description('Queue a message for sending')
+      .option('--profile <name>', 'Profile name')
+      .option('--to <phone>', 'Destination phone number (with country code, e.g., +1234567890)')
+      .option('--group <name>', 'Destination group (name or JID)')
+      .option('--attachment <path>', 'Path to file attachment (image, video, audio, or document)')
+      .option('--type <type>', 'Media type: image, video, audio, document (auto-detected if not specified)')
+      .argument('[message]', 'Message text or caption (or pipe via stdin)')
+      .action(async (message: string | undefined, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -366,13 +413,31 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  outbox
-    .command('status')
-    .description('Check send status of a message')
-    .argument('<id>', 'Outbox message ID')
-    .action(async (id: string) => {
+  # text message to a phone number
+  agentio whatsapp outbox send --to +15551234567 "running late, 10 min"
+
+  # text message to a group by name
+  agentio whatsapp outbox send --group "Family Chat" "dinner at 7?"
+
+  # send a photo with caption
+  agentio whatsapp outbox send --to +15551234567 --attachment ./photo.jpg "from the trail"
+
+  # send a document (PDF) auto-detected
+  agentio whatsapp outbox send --group "Project Team" --attachment ./report.pdf
+
+  # pipe message body via stdin
+  echo "build complete" | agentio whatsapp outbox send --to +15551234567`,
+  );
+
+  addExamples(
+    outbox
+      .command('status')
+      .description('Check send status of a message')
+      .argument('<id>', 'Outbox message ID')
+      .action(async (id: string) => {
       try {
         const client = await getDaemonClient();
         const message = await client.outboxStatus(id);
@@ -383,15 +448,21 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  outbox
-    .command('list')
-    .description('List outbox messages')
-    .option('--profile <name>', 'Profile name')
-    .option('--status <status>', 'Filter by status: pending, sending, sent, or failed')
-    .option('--limit <n>', 'Maximum messages to retrieve', '50')
-    .action(async (options) => {
+  # check delivery state of a queued message
+  agentio whatsapp outbox status ob_abc123`,
+  );
+
+  addExamples(
+    outbox
+      .command('list')
+      .description('List outbox messages')
+      .option('--profile <name>', 'Profile name')
+      .option('--status <status>', 'Filter by status: pending, sending, sent, or failed')
+      .option('--limit <n>', 'Maximum messages to retrieve', '50')
+      .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         const client = await getDaemonClient();
@@ -405,16 +476,28 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
+
+  # last 50 outbox messages across all profiles
+  agentio whatsapp outbox list
+
+  # only failed messages
+  agentio whatsapp outbox list --status failed
+
+  # in-flight messages on a single profile
+  agentio whatsapp outbox list --profile personal --status sending --limit 100`,
+  );
 
   // Group subcommands
   const group = whatsapp.command('group').description('Group management (requires daemon)');
 
-  group
-    .command('list')
-    .description('List all groups')
-    .option('--profile <name>', 'Profile name')
-    .action(async (options) => {
+  addExamples(
+    group
+      .command('list')
+      .description('List all groups')
+      .option('--profile <name>', 'Profile name')
+      .action(async (options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -430,14 +513,23 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('get')
-    .description('Get group details')
-    .argument('<id>', 'Group ID or name')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, options) => {
+  # all groups visible to the default profile
+  agentio whatsapp group list
+
+  # groups on a named profile
+  agentio whatsapp group list --profile personal`,
+  );
+
+  addExamples(
+    group
+      .command('get')
+      .description('Get group details')
+      .argument('<id>', 'Group ID or name')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -464,16 +556,25 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('create')
-    .description('Create a new group')
-    .argument('<name>', 'Group name')
-    .option('--profile <name>', 'Profile name')
-    .option('--participants <phones...>', 'Participant phone numbers')
-    .option('--picture <path>', 'Path to group profile picture')
-    .action(async (name: string, options) => {
+  # look up a group by name (fuzzy match)
+  agentio whatsapp group get "Family Chat"
+
+  # look up by JID
+  agentio whatsapp group get 120363123456789012@g.us`,
+  );
+
+  addExamples(
+    group
+      .command('create')
+      .description('Create a new group')
+      .argument('<name>', 'Group name')
+      .option('--profile <name>', 'Profile name')
+      .option('--participants <phones...>', 'Participant phone numbers')
+      .option('--picture <path>', 'Path to group profile picture')
+      .action(async (name: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -499,17 +600,28 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('update')
-    .description('Update group info')
-    .argument('<id>', 'Group ID or name')
-    .option('--profile <name>', 'Profile name')
-    .option('--name <name>', 'New group name')
-    .option('--description <text>', 'New group description')
-    .option('--picture <path>', 'Path to new group profile picture')
-    .action(async (id: string, options) => {
+  # create a group with two participants
+  agentio whatsapp group create "Project Team" --participants +15551234567 +15557654321
+
+  # create a group with a profile picture
+  agentio whatsapp group create "Book Club" \\
+    --participants +15551234567 +15557654321 \\
+    --picture ./logo.png`,
+  );
+
+  addExamples(
+    group
+      .command('update')
+      .description('Update group info')
+      .argument('<id>', 'Group ID or name')
+      .option('--profile <name>', 'Profile name')
+      .option('--name <name>', 'New group name')
+      .option('--description <text>', 'New group description')
+      .option('--picture <path>', 'Path to new group profile picture')
+      .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -545,15 +657,27 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('add')
-    .description('Add participants to group')
-    .argument('<id>', 'Group ID or name')
-    .argument('<phones...>', 'Phone numbers to add')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, phones: string[], options) => {
+  # rename a group
+  agentio whatsapp group update "Old Name" --name "New Name"
+
+  # change description
+  agentio whatsapp group update "Project Team" --description "Q2 planning"
+
+  # change profile picture
+  agentio whatsapp group update "Book Club" --picture ./new-logo.png`,
+  );
+
+  addExamples(
+    group
+      .command('add')
+      .description('Add participants to group')
+      .argument('<id>', 'Group ID or name')
+      .argument('<phones...>', 'Phone numbers to add')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -590,15 +714,24 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('remove')
-    .description('Remove participants from group')
-    .argument('<id>', 'Group ID or name')
-    .argument('<phones...>', 'Phone numbers to remove')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, phones: string[], options) => {
+  # add one participant by group name
+  agentio whatsapp group add "Project Team" +15551234567
+
+  # add several participants at once
+  agentio whatsapp group add "Project Team" +15551234567 +15557654321`,
+  );
+
+  addExamples(
+    group
+      .command('remove')
+      .description('Remove participants from group')
+      .argument('<id>', 'Group ID or name')
+      .argument('<phones...>', 'Phone numbers to remove')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -635,15 +768,24 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('promote')
-    .description('Promote participants to admin')
-    .argument('<id>', 'Group ID or name')
-    .argument('<phones...>', 'Phone numbers to promote')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, phones: string[], options) => {
+  # remove one participant
+  agentio whatsapp group remove "Project Team" +15551234567
+
+  # remove several at once
+  agentio whatsapp group remove "Project Team" +15551234567 +15557654321`,
+  );
+
+  addExamples(
+    group
+      .command('promote')
+      .description('Promote participants to admin')
+      .argument('<id>', 'Group ID or name')
+      .argument('<phones...>', 'Phone numbers to promote')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -680,15 +822,24 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('demote')
-    .description('Demote admins to regular participants')
-    .argument('<id>', 'Group ID or name')
-    .argument('<phones...>', 'Phone numbers to demote')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, phones: string[], options) => {
+  # promote one participant to admin
+  agentio whatsapp group promote "Project Team" +15551234567
+
+  # promote several at once
+  agentio whatsapp group promote "Project Team" +15551234567 +15557654321`,
+  );
+
+  addExamples(
+    group
+      .command('demote')
+      .description('Demote admins to regular participants')
+      .argument('<id>', 'Group ID or name')
+      .argument('<phones...>', 'Phone numbers to demote')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, phones: string[], options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -725,14 +876,23 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('leave')
-    .description('Leave a group')
-    .argument('<id>', 'Group ID or name')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, options) => {
+  # demote one admin
+  agentio whatsapp group demote "Project Team" +15551234567
+
+  # demote several at once
+  agentio whatsapp group demote "Project Team" +15551234567 +15557654321`,
+  );
+
+  addExamples(
+    group
+      .command('leave')
+      .description('Leave a group')
+      .argument('<id>', 'Group ID or name')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -767,14 +927,23 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('invite')
-    .description('Get group invite link')
-    .argument('<id>', 'Group ID or name')
-    .option('--profile <name>', 'Profile name')
-    .action(async (id: string, options) => {
+  # leave a group by name (asks for confirmation)
+  agentio whatsapp group leave "Old Project"
+
+  # leave by JID
+  agentio whatsapp group leave 120363123456789012@g.us`,
+  );
+
+  addExamples(
+    group
+      .command('invite')
+      .description('Get group invite link')
+      .argument('<id>', 'Group ID or name')
+      .option('--profile <name>', 'Profile name')
+      .action(async (id: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -801,14 +970,20 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
 
-  group
-    .command('join')
-    .description('Join group via invite code or link')
-    .argument('<code>', 'Invite code or full link (https://chat.whatsapp.com/...)')
-    .option('--profile <name>', 'Profile name')
-    .action(async (code: string, options) => {
+  # get the share link for a group (admin only)
+  agentio whatsapp group invite "Project Team"`,
+  );
+
+  addExamples(
+    group
+      .command('join')
+      .description('Join group via invite code or link')
+      .argument('<code>', 'Invite code or full link (https://chat.whatsapp.com/...)')
+      .option('--profile <name>', 'Profile name')
+      .action(async (code: string, options) => {
       try {
         const profileResult = await resolveProfile('whatsapp', options.profile);
         if (profileResult.profile === null) {
@@ -825,7 +1000,15 @@ export function registerWhatsAppCommands(program: Command): void {
       } catch (error) {
         handleError(error);
       }
-    });
+    }),
+    `Examples:
+
+  # join via the invite code (last segment of the URL)
+  agentio whatsapp group join AbCdEf1234567890
+
+  # join via the full invite URL
+  agentio whatsapp group join https://chat.whatsapp.com/AbCdEf1234567890`,
+  );
 }
 
 export async function whatsappProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
