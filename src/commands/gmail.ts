@@ -7,12 +7,12 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
 import { addExamples } from '../utils/command-tree';
-import type { GmailAttachment, GmailSendOptions } from '../types/gmail';
+import type { GmailAttachment, GmailSendOptions, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 
 function addComposeOptions(cmd: Command): Command {
   return cmd
@@ -170,6 +170,11 @@ function parseChunkOpts(options: Record<string, unknown>): { chunkSize: number; 
   const maxRetries = Math.max(parseInt((options.maxRetries as string) ?? '5', 10) || 0, 0);
   const dryRun = options.dryRun === true;
   return { chunkSize, maxRetries, dryRun };
+}
+
+async function buildLabelNamesById(client: GmailClient): Promise<Map<string, string>> {
+  const labels = await client.listLabels();
+  return new Map(labels.map((l) => [l.id, l.name]));
 }
 
 export function registerGmailCommands(program: Command): void {
@@ -557,6 +562,60 @@ Combine with spaces (AND), OR, or - to negate.`,
 
   # move a label into a nested hierarchy
   agentio gmail labels rename receipts auto/receipts`,
+  );
+
+  const filters = gmail
+    .command('filters')
+    .description('Manage Gmail filters');
+
+  addExamples(
+    filters
+      .command('list')
+      .description('List all filters')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const [filterList, labelNamesById] = await Promise.all([
+            client.listFilters(),
+            buildLabelNamesById(client),
+          ]);
+          printFilterList(filterList, labelNamesById);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list every filter
+  agentio gmail filters list
+
+  # list filters for a specific profile
+  agentio gmail filters list --profile alice@example.com`,
+  );
+
+  addExamples(
+    filters
+      .command('get')
+      .argument('<id>', 'Filter ID')
+      .description('Get a filter')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (id: string, options) => {
+        try {
+          const { client } = await getGmailClient(options.profile);
+          const [filter, labelNamesById] = await Promise.all([
+            client.getFilter(id),
+            buildLabelNamesById(client),
+          ]);
+          printFilter(filter, labelNamesById);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # show full filter details
+  agentio gmail filters get ANe1BmgABCDEF1234567890`,
   );
 
   addExamples(
