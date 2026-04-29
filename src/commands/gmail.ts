@@ -731,6 +731,42 @@ Combine with spaces (AND), OR, or - to negate.`,
   );
 
   addExamples(
+    filters
+      .command('delete')
+      .argument('<id...>', 'Filter ID(s)')
+      .description('Delete one or more filters')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (ids: string[], options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'delete filter');
+
+          let failures = 0;
+          for (const id of ids) {
+            try {
+              await client.deleteFilter(id);
+              printFilterDeleted(id);
+            } catch (error) {
+              failures++;
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`Failed to delete filter ${id}: ${message}`);
+            }
+          }
+          if (failures > 0) process.exit(5);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # delete one filter
+  agentio gmail filters delete ANe1BmgABCDEF1234567890
+
+  # delete several at once
+  agentio gmail filters delete ANe1Bmg... ANe1Bmh... ANe1Bmi...`,
+  );
+
+  addExamples(
     gmail
       .command('label')
       .argument('[id...]', 'Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin')
