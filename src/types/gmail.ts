@@ -16,7 +16,10 @@ export interface GmailListOptions {
   limit?: number;
   query?: string;
   labels?: string[];
+  metadata?: boolean;
 }
+
+export const GMAIL_LIST_HARD_CAP = 10_000;
 
 export interface GmailAttachment {
   filename: string;

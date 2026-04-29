@@ -2,8 +2,32 @@ import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
 import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo, GmailLabel } from '../../types/gmail';
+import { GMAIL_LIST_HARD_CAP } from '../../types/gmail';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
+import { chunk, retryWithBackoff } from '../../utils/batch';
+
+export interface BatchModifyOptions {
+  chunkSize?: number;
+  maxRetries?: number;
+  onProgress?: (info: BatchProgress) => void;
+}
+
+export interface BatchProgress {
+  chunkIndex: number;
+  totalChunks: number;
+  ids: number;
+  durationMs: number;
+  status: 'ok' | 'failed';
+  error?: string;
+}
+
+export interface BatchModifyResult {
+  totalIds: number;
+  ok: number;
+  failed: { ids: string[]; reason: string }[];
+  chunks: number;
+}
 
 // RFC 2047 encode a header value if it contains non-ASCII characters
 function encodeHeaderValue(value: string): string {
@@ -162,6 +186,8 @@ export class GmailClient implements ServiceClient {
 
   async list(options: GmailListOptions = {}): Promise<{ messages: GmailMessage[]; total: number }> {
     const { limit = 10, query, labels } = options;
+    const cappedLimit = Math.min(Math.max(limit, 0), GMAIL_LIST_HARD_CAP);
+    const includeMetadata = options.metadata ?? cappedLimit <= 100;
 
     let q = query || '';
     if (labels?.length) {
@@ -169,29 +195,62 @@ export class GmailClient implements ServiceClient {
     }
 
     try {
-      const response = await this.gmail.users.messages.list({
-        userId: 'me',
-        maxResults: Math.min(limit, 100),
-        q: q.trim() || undefined,
-      });
+      const ids: { id: string; threadId: string }[] = [];
+      let totalEstimate = 0;
+      let pageToken: string | undefined;
 
-      const messageIds = response.data.messages || [];
-      const messages: GmailMessage[] = [];
-
-      for (const { id } of messageIds) {
-        if (!id) continue;
-        const msg = await this.gmail.users.messages.get({
+      while (ids.length < cappedLimit) {
+        const remaining = cappedLimit - ids.length;
+        const response = await this.gmail.users.messages.list({
           userId: 'me',
-          id,
-          format: 'metadata',
-          metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date'],
+          maxResults: Math.min(remaining, 500),
+          q: q.trim() || undefined,
+          pageToken,
         });
-        messages.push(this.parseMessage(msg.data));
+
+        if (!totalEstimate) {
+          totalEstimate = response.data.resultSizeEstimate || 0;
+        }
+        for (const m of response.data.messages || []) {
+          if (m.id && m.threadId) {
+            ids.push({ id: m.id, threadId: m.threadId });
+            if (ids.length >= cappedLimit) break;
+          }
+        }
+        pageToken = response.data.nextPageToken || undefined;
+        if (!pageToken) break;
+      }
+
+      const messages: GmailMessage[] = [];
+      if (includeMetadata) {
+        for (const { id } of ids) {
+          const msg = await this.gmail.users.messages.get({
+            userId: 'me',
+            id,
+            format: 'metadata',
+            metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date'],
+          });
+          messages.push(this.parseMessage(msg.data));
+        }
+      } else {
+        for (const { id, threadId } of ids) {
+          messages.push({
+            id,
+            threadId,
+            subject: '',
+            from: '',
+            to: [],
+            cc: [],
+            date: '',
+            snippet: '',
+            labels: [],
+          });
+        }
       }
 
       return {
         messages,
-        total: response.data.resultSizeEstimate || messages.length,
+        total: totalEstimate || messages.length,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -708,6 +767,103 @@ export class GmailClient implements ServiceClient {
       const message = error instanceof Error ? error.message : String(error);
       throw new CliError('API_ERROR', `Failed to modify labels: ${message}`);
     }
+  }
+
+  async expandThreadsToMessages(
+    threadIds: string[],
+    options: { concurrency?: number; maxRetries?: number } = {},
+  ): Promise<string[]> {
+    const concurrency = Math.max(1, options.concurrency ?? 8);
+    const maxRetries = options.maxRetries ?? 5;
+    const messageIds: string[] = [];
+    let cursor = 0;
+
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= threadIds.length) return;
+        const id = threadIds[idx];
+        try {
+          const response = await retryWithBackoff(
+            () =>
+              this.gmail.users.threads.get({
+                userId: 'me',
+                id,
+                format: 'minimal',
+              }),
+            { maxRetries },
+          );
+          for (const m of response.data.messages || []) {
+            if (m.id) messageIds.push(m.id);
+          }
+        } catch (error) {
+          if (this.isNotFoundError(error)) continue;
+          const message = error instanceof Error ? error.message : String(error);
+          throw new CliError('API_ERROR', `Failed to expand thread ${id}: ${message}`);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, threadIds.length) }, worker));
+    return messageIds;
+  }
+
+  async batchModify(
+    ids: string[],
+    addLabelIds: string[],
+    removeLabelIds: string[],
+    options: BatchModifyOptions = {},
+  ): Promise<BatchModifyResult> {
+    const chunkSize = Math.min(Math.max(options.chunkSize ?? 1000, 1), 1000);
+    const maxRetries = options.maxRetries ?? 5;
+
+    if (ids.length === 0 || (addLabelIds.length === 0 && removeLabelIds.length === 0)) {
+      return { totalIds: ids.length, ok: 0, failed: [], chunks: 0 };
+    }
+
+    const chunks = chunk(ids, chunkSize);
+    let ok = 0;
+    const failed: { ids: string[]; reason: string }[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const batch = chunks[i];
+      const started = Date.now();
+      try {
+        await retryWithBackoff(
+          () =>
+            this.gmail.users.messages.batchModify({
+              userId: 'me',
+              requestBody: {
+                ids: batch,
+                ...(addLabelIds.length ? { addLabelIds } : {}),
+                ...(removeLabelIds.length ? { removeLabelIds } : {}),
+              },
+            }),
+          { maxRetries },
+        );
+        ok += batch.length;
+        options.onProgress?.({
+          chunkIndex: i + 1,
+          totalChunks: chunks.length,
+          ids: batch.length,
+          durationMs: Date.now() - started,
+          status: 'ok',
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        failed.push({ ids: batch, reason });
+        options.onProgress?.({
+          chunkIndex: i + 1,
+          totalChunks: chunks.length,
+          ids: batch.length,
+          durationMs: Date.now() - started,
+          status: 'failed',
+          error: reason,
+        });
+      }
+    }
+
+    return { totalIds: ids.length, ok, failed, chunks: chunks.length };
   }
 
   private isNotFoundError(error: unknown): boolean {

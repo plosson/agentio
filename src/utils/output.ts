@@ -32,10 +32,10 @@ export function printMessageList(messages: GmailMessage[], total: number): void 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     console.log(`[${i + 1}] ${msg.id} | thread:${msg.threadId}`);
-    console.log(`    From: ${msg.from}`);
+    if (msg.from) console.log(`    From: ${msg.from}`);
     if (msg.to.length) console.log(`    To: ${msg.to.join(', ')}`);
-    console.log(`    Date: ${msg.date}`);
-    console.log(`    Subject: ${msg.subject}`);
+    if (msg.date) console.log(`    Date: ${msg.date}`);
+    if (msg.subject) console.log(`    Subject: ${msg.subject}`);
     if (msg.labels.length) console.log(`    Labels: ${msg.labels.join(', ')}`);
     if (msg.snippet) console.log(`    > ${msg.snippet}`);
     console.log('');
@@ -156,6 +156,51 @@ export function printLabelModified(
   if (applied.length) parts.push(`applied [${applied.join(', ')}]`);
   if (removed.length) parts.push(`removed [${removed.join(', ')}]`);
   console.log(`${target} ${id}: ${parts.join('; ')}`);
+}
+
+export function printBatchProgress(action: string, p: {
+  chunkIndex: number;
+  totalChunks: number;
+  ids: number;
+  durationMs: number;
+  status: 'ok' | 'failed';
+  error?: string;
+}): void {
+  const tag = `[${action}] chunk ${p.chunkIndex}/${p.totalChunks} (${p.ids} ids)`;
+  if (p.status === 'ok') {
+    console.error(`${tag} ok in ${p.durationMs}ms`);
+  } else {
+    console.error(`${tag} FAILED in ${p.durationMs}ms: ${p.error ?? 'unknown'}`);
+  }
+}
+
+export function printBatchSummary(
+  action: string,
+  result: { totalIds: number; ok: number; failed: { ids: string[]; reason: string }[]; chunks: number },
+): void {
+  console.log(`${action}: ${result.ok}/${result.totalIds} succeeded across ${result.chunks} chunk(s)`);
+  if (result.failed.length) {
+    console.log(`Failed chunks: ${result.failed.length}`);
+    for (const f of result.failed) {
+      const range = f.ids.length > 4
+        ? `${f.ids[0]}..${f.ids[f.ids.length - 1]} (${f.ids.length} ids)`
+        : f.ids.join(', ');
+      console.log(`  - ${range}: ${f.reason}`);
+    }
+  }
+}
+
+export function printBatchDryRun(
+  action: string,
+  plan: { totalIds: number; chunkSize: number; chunks: number; addLabels: string[]; removeLabels: string[] },
+): void {
+  console.log(`[dry-run] ${action}`);
+  console.log(`  ids: ${plan.totalIds}`);
+  console.log(`  chunk size: ${plan.chunkSize}`);
+  console.log(`  chunks: ${plan.chunks}`);
+  if (plan.addLabels.length) console.log(`  add labels: ${plan.addLabels.join(', ')}`);
+  if (plan.removeLabels.length) console.log(`  remove labels: ${plan.removeLabels.join(', ')}`);
+  console.log(`  no API calls made`);
 }
 
 // Google Chat specific formatters

@@ -65,7 +65,8 @@ Options:
 
 - `--query <query>`: Search query
 - `--profile <name>`: Profile name (optional if only one profile exists)
-- `--limit <n>`: Max results (default: 10)
+- `--limit <n>`: Max results (capped at 10000; >100 returns IDs only without per-message metadata) (default: 10)
+- `--ids-only`: Print one message ID per line (pipe-friendly into archive/label)
 
 ```
 Examples:
@@ -81,6 +82,10 @@ Examples:
 
   # exact phrase across all mail
   agentio gmail search --query '"quarterly report"'
+
+  # bulk pipe: archive everything matching a query
+  agentio gmail search --query "from:noreply@example.com older_than:6m" --limit 5000 --ids-only \
+    | agentio gmail archive
 
 Query syntax: from:, to:, cc:, subject:, label:, is:unread|starred|important,
 has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.
@@ -154,13 +159,16 @@ Examples:
     --subject "Notes" --attachment ./notes.pdf
 ```
 
-## agentio gmail archive <message-id...>
+## agentio gmail archive [message-id...]
 
-Archive one or more messages
+Archive one or more messages (bulk-safe via batchModify)
 
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
+- `--chunk-size <n>`: IDs per batchModify call (max 1000) (default: 1000)
+- `--max-retries <n>`: Retries per chunk on 429/5xx (default: 5)
+- `--dry-run`: Print chunk plan without calling the API
 
 ```
 Examples:
@@ -170,6 +178,13 @@ Examples:
 
   # archive several at once
   agentio gmail archive 18c4f1a2b3d 18c4f1a2b3e 18c4f1a2b3f
+
+  # archive thousands by piping IDs from search (uses messages.batchModify, 1000/call)
+  agentio gmail search --query "from:noreply@example.com older_than:1y" --limit 5000 --ids-only \
+    | agentio gmail archive
+
+  # preview the chunk plan without calling the API
+  echo "id1 id2 id3" | agentio gmail archive --dry-run
 ```
 
 ## agentio gmail mark <message-id...>
@@ -270,16 +285,19 @@ Examples:
   agentio gmail labels rename receipts auto/receipts
 ```
 
-## agentio gmail label <id...>
+## agentio gmail label [id...]
 
-Apply and/or remove labels on messages or threads
+Apply and/or remove labels on messages or threads (bulk-safe via batchModify)
 
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--apply <name>`: Label to apply (name or ID, repeatable) (default: )
 - `--remove <name>`: Label to remove (name or ID, repeatable) (default: )
-- `--thread`: Treat IDs as thread IDs
+- `--thread`: Treat IDs as thread IDs (expands to messages for batching)
+- `--chunk-size <n>`: IDs per batchModify call (max 1000) (default: 1000)
+- `--max-retries <n>`: Retries per chunk on 429/5xx (default: 5)
+- `--dry-run`: Print chunk plan without calling the API
 
 ```
 Examples:
@@ -295,6 +313,13 @@ Examples:
 
   # apply multiple labels to a thread
   agentio gmail label 18c4f1a2b3d --thread --apply important --apply work
+
+  # bulk: pipe IDs from search and label them
+  agentio gmail search --query "subject:invoice older_than:1y" --limit 5000 --ids-only \
+    | agentio gmail label --apply Archive/Invoices --remove INBOX
+
+  # preview the chunk plan without calling the API
+  echo "id1 id2 id3" | agentio gmail label --apply receipts --dry-run
 ```
 
 ## agentio gmail attachment <message-id>
@@ -340,3 +365,4 @@ Examples:
 
 Requires Chrome, Chromium, or Microsoft Edge installed locally.
 ```
+

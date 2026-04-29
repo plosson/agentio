@@ -7,7 +7,7 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -158,6 +158,20 @@ async function getGmailClient(profileName?: string): Promise<{ client: GmailClie
   return { client: new GmailClient(auth), profile };
 }
 
+async function collectIds(positional: string[]): Promise<string[]> {
+  if (positional.length > 0) return positional;
+  const stdin = await readStdin();
+  if (!stdin) return [];
+  return stdin.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function parseChunkOpts(options: Record<string, unknown>): { chunkSize: number; maxRetries: number; dryRun: boolean } {
+  const chunkSize = Math.min(Math.max(parseInt((options.chunkSize as string) ?? '1000', 10) || 1000, 1), 1000);
+  const maxRetries = Math.max(parseInt((options.maxRetries as string) ?? '5', 10) || 0, 0);
+  const dryRun = options.dryRun === true;
+  return { chunkSize, maxRetries, dryRun };
+}
+
 export function registerGmailCommands(program: Command): void {
   const gmail = program
     .command('gmail')
@@ -238,12 +252,19 @@ export function registerGmailCommands(program: Command): void {
       .description('Search messages using Gmail query syntax')
       .requiredOption('--query <query>', 'Search query')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .option('--limit <n>', 'Max results', '10')
+      .option('--limit <n>', 'Max results (capped at 10000; >100 returns IDs only without per-message metadata)', '10')
+      .option('--ids-only', 'Print one message ID per line (pipe-friendly into archive/label)')
       .action(async (options) => {
         try {
           const { client } = await getGmailClient(options.profile);
           const result = await client.search(options.query, parseInt(options.limit, 10));
-          printMessageList(result.messages, result.total);
+          if (options.idsOnly) {
+            for (const msg of result.messages) {
+              console.log(msg.id);
+            }
+          } else {
+            printMessageList(result.messages, result.total);
+          }
         } catch (error) {
           handleError(error);
         }
@@ -261,6 +282,10 @@ export function registerGmailCommands(program: Command): void {
 
   # exact phrase across all mail
   agentio gmail search --query '"quarterly report"'
+
+  # bulk pipe: archive everything matching a query
+  agentio gmail search --query "from:noreply@example.com older_than:6m" --limit 5000 --ids-only \\
+    | agentio gmail archive
 
 Query syntax: from:, to:, cc:, subject:, label:, is:unread|starred|important,
 has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.
@@ -327,17 +352,48 @@ Combine with spaces (AND), OR, or - to negate.`,
   addExamples(
     gmail
       .command('archive')
-      .argument('<message-id...>', 'Message ID(s)')
-      .description('Archive one or more messages')
+      .argument('[message-id...]', 'Message ID(s) (or pipe one-per-line via stdin)')
+      .description('Archive one or more messages (bulk-safe via batchModify)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--chunk-size <n>', 'IDs per batchModify call (max 1000)', '1000')
+      .option('--max-retries <n>', 'Retries per chunk on 429/5xx', '5')
+      .option('--dry-run', 'Print chunk plan without calling the API')
       .action(async (messageIds: string[], options) => {
         try {
+          const ids = await collectIds(messageIds);
+          if (ids.length === 0) {
+            throw new CliError('INVALID_PARAMS', 'No message IDs provided', 'Pass IDs as args or pipe via stdin');
+          }
+          const { chunkSize, maxRetries, dryRun } = parseChunkOpts(options);
+          const totalChunks = Math.ceil(ids.length / chunkSize);
+
+          if (dryRun) {
+            printBatchDryRun('archive', {
+              totalIds: ids.length,
+              chunkSize,
+              chunks: totalChunks,
+              addLabels: [],
+              removeLabels: ['INBOX'],
+            });
+            return;
+          }
+
           const { client, profile } = await getGmailClient(options.profile);
           await enforceWriteAccess('gmail', profile, 'archive email');
-          for (const messageId of messageIds) {
-            await client.archive(messageId);
-            printArchived(messageId);
+
+          if (ids.length === 1) {
+            await client.archive(ids[0]);
+            printArchived(ids[0]);
+            return;
           }
+
+          const result = await client.batchModify(ids, [], ['INBOX'], {
+            chunkSize,
+            maxRetries,
+            onProgress: (p) => printBatchProgress('archive', p),
+          });
+          printBatchSummary('archive', result);
+          if (result.failed.length) process.exit(5);
         } catch (error) {
           handleError(error);
         }
@@ -348,7 +404,14 @@ Combine with spaces (AND), OR, or - to negate.`,
   agentio gmail archive 18c4f1a2b3d
 
   # archive several at once
-  agentio gmail archive 18c4f1a2b3d 18c4f1a2b3e 18c4f1a2b3f`,
+  agentio gmail archive 18c4f1a2b3d 18c4f1a2b3e 18c4f1a2b3f
+
+  # archive thousands by piping IDs from search (uses messages.batchModify, 1000/call)
+  agentio gmail search --query "from:noreply@example.com older_than:1y" --limit 5000 --ids-only \\
+    | agentio gmail archive
+
+  # preview the chunk plan without calling the API
+  echo "id1 id2 id3" | agentio gmail archive --dry-run`,
   );
 
   addExamples(
@@ -499,18 +562,44 @@ Combine with spaces (AND), OR, or - to negate.`,
   addExamples(
     gmail
       .command('label')
-      .argument('<id...>', 'Message ID(s) (or thread ID(s) with --thread)')
-      .description('Apply and/or remove labels on messages or threads')
+      .argument('[id...]', 'Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin')
+      .description('Apply and/or remove labels on messages or threads (bulk-safe via batchModify)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
       .option('--apply <name>', 'Label to apply (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
       .option('--remove <name>', 'Label to remove (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
-      .option('--thread', 'Treat IDs as thread IDs')
+      .option('--thread', 'Treat IDs as thread IDs (expands to messages for batching)')
+      .option('--chunk-size <n>', 'IDs per batchModify call (max 1000)', '1000')
+      .option('--max-retries <n>', 'Retries per chunk on 429/5xx', '5')
+      .option('--dry-run', 'Print chunk plan without calling the API')
       .action(async (ids: string[], options) => {
         try {
           const apply = options.apply as string[];
           const remove = options.remove as string[];
           if (!apply.length && !remove.length) {
             throw new CliError('INVALID_PARAMS', 'Specify at least one --apply or --remove');
+          }
+
+          const inputIds = await collectIds(ids);
+          if (inputIds.length === 0) {
+            throw new CliError('INVALID_PARAMS', 'No IDs provided', 'Pass IDs as args or pipe via stdin');
+          }
+
+          const isThread = options.thread === true;
+          const { chunkSize, maxRetries, dryRun } = parseChunkOpts(options);
+
+          if (dryRun) {
+            if (isThread) {
+              console.error(`would expand ${inputIds.length} thread(s) to messages; chunk count below assumes 1 message/thread`);
+            }
+            const estimated = inputIds.length;
+            printBatchDryRun('label', {
+              totalIds: estimated,
+              chunkSize,
+              chunks: Math.max(1, Math.ceil(estimated / chunkSize)),
+              addLabels: apply,
+              removeLabels: remove,
+            });
+            return;
           }
 
           const { client, profile } = await getGmailClient(options.profile);
@@ -521,11 +610,38 @@ Combine with spaces (AND), OR, or - to negate.`,
             client.resolveLabelIds(remove),
           ]);
 
-          const isThread = options.thread === true;
-          for (const id of ids) {
-            await client.modifyLabels(id, addLabelIds, removeLabelIds, isThread);
-            printLabelModified(id, isThread, apply, remove);
+          if (inputIds.length === 1 && !isThread) {
+            await client.modifyLabels(inputIds[0], addLabelIds, removeLabelIds, false);
+            printLabelModified(inputIds[0], false, apply, remove);
+            return;
           }
+
+          const messageIds = isThread
+            ? await client.expandThreadsToMessages(inputIds, { maxRetries })
+            : inputIds;
+
+          if (isThread) {
+            console.error(`expanded ${inputIds.length} thread(s) to ${messageIds.length} message(s)`);
+          }
+
+          if (messageIds.length === 0) {
+            console.log('label: 0 message(s) to modify');
+            return;
+          }
+
+          if (messageIds.length === 1) {
+            await client.modifyLabels(messageIds[0], addLabelIds, removeLabelIds, false);
+            printLabelModified(messageIds[0], false, apply, remove);
+            return;
+          }
+
+          const result = await client.batchModify(messageIds, addLabelIds, removeLabelIds, {
+            chunkSize,
+            maxRetries,
+            onProgress: (p) => printBatchProgress('label', p),
+          });
+          printBatchSummary('label', result);
+          if (result.failed.length) process.exit(5);
         } catch (error) {
           handleError(error);
         }
@@ -542,7 +658,14 @@ Combine with spaces (AND), OR, or - to negate.`,
   agentio gmail label 18c4f1a2b3d --apply auto/receipts --remove INBOX
 
   # apply multiple labels to a thread
-  agentio gmail label 18c4f1a2b3d --thread --apply important --apply work`,
+  agentio gmail label 18c4f1a2b3d --thread --apply important --apply work
+
+  # bulk: pipe IDs from search and label them
+  agentio gmail search --query "subject:invoice older_than:1y" --limit 5000 --ids-only \\
+    | agentio gmail label --apply Archive/Invoices --remove INBOX
+
+  # preview the chunk plan without calling the API
+  echo "id1 id2 id3" | agentio gmail label --apply receipts --dry-run`,
   );
 
   addExamples(
