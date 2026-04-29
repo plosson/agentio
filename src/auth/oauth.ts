@@ -4,11 +4,12 @@ import { findAvailablePort, startOAuthCallbackServer, launchBrowser } from './oa
 import type { OAuthTokens } from '../types/tokens';
 
 const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',  // search & read emails
-  'https://www.googleapis.com/auth/gmail.send',      // send emails
-  'https://www.googleapis.com/auth/gmail.compose',   // create/update drafts
-  'https://www.googleapis.com/auth/gmail.modify',    // archive, mark read/unread, label CRUD, modify labels on messages/threads
-  'https://www.googleapis.com/auth/userinfo.email',  // get email for profile naming
+  'https://www.googleapis.com/auth/gmail.readonly',       // search & read emails
+  'https://www.googleapis.com/auth/gmail.send',           // send emails
+  'https://www.googleapis.com/auth/gmail.compose',        // create/update drafts
+  'https://www.googleapis.com/auth/gmail.modify',         // archive, mark read/unread, label CRUD, modify labels on messages/threads
+  'https://www.googleapis.com/auth/gmail.settings.basic', // create/delete filters
+  'https://www.googleapis.com/auth/userinfo.email',       // get email for profile naming
 ];
 
 const GCHAT_SCOPES = [
