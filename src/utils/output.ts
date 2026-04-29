@@ -1,5 +1,5 @@
 import { homedir } from 'os';
-import type { GmailMessage, GmailAttachmentInfo, GmailLabel } from '../types/gmail';
+import type { GmailMessage, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult } from '../types/gdrive';
@@ -1240,4 +1240,88 @@ export function printWhatsAppParticipantsResult(
   for (const r of results) {
     console.log(`  ${r.participant}: ${r.status}`);
   }
+}
+
+function resolveLabelNames(ids: string[] | undefined, labelNamesById: Map<string, string>): string[] {
+  if (!ids?.length) return [];
+  return ids.map((id) => labelNamesById.get(id) ?? id);
+}
+
+function summarizeFilterCriteria(c: GmailFilterCriteria): string {
+  const parts: string[] = [];
+  if (c.from) parts.push(`from:${c.from}`);
+  if (c.to) parts.push(`to:${c.to}`);
+  if (c.subject) parts.push(`subject:${c.subject}`);
+  if (c.query) parts.push(`query:${c.query}`);
+  if (c.negatedQuery) parts.push(`-query:${c.negatedQuery}`);
+  if (c.hasAttachment) parts.push('has:attachment');
+  if (c.excludeChats) parts.push('exclude:chats');
+  if (typeof c.size === 'number' && c.sizeComparison) {
+    parts.push(`size:${c.sizeComparison}:${c.size}`);
+  }
+  return parts.length ? parts.join(' ') : '(no criteria)';
+}
+
+function summarizeFilterAction(a: GmailFilterAction, labelNamesById: Map<string, string>): string {
+  const parts: string[] = [];
+  for (const name of resolveLabelNames(a.addLabelIds, labelNamesById)) parts.push(`+${name}`);
+  for (const name of resolveLabelNames(a.removeLabelIds, labelNamesById)) parts.push(`-${name}`);
+  if (a.forward) parts.push(`forward:${a.forward}`);
+  return parts.length ? parts.join(' ') : '(no action)';
+}
+
+export function printFilterList(filters: GmailFilter[], labelNamesById: Map<string, string>): void {
+  if (filters.length === 0) {
+    console.log('No filters found');
+    return;
+  }
+  const idWidth = Math.max(2, ...filters.map((f) => f.id.length));
+  for (const filter of filters) {
+    const criteria = summarizeFilterCriteria(filter.criteria);
+    const action = summarizeFilterAction(filter.action, labelNamesById);
+    console.log(`${filter.id.padEnd(idWidth)}  ${criteria}  ->  ${action}`);
+  }
+  console.log(`\n${filters.length} filter(s)`);
+}
+
+export function printFilter(filter: GmailFilter, labelNamesById: Map<string, string>): void {
+  console.log(`ID:       ${filter.id}`);
+
+  const c = filter.criteria;
+  const criteriaLines: string[] = [];
+  if (c.from) criteriaLines.push(`  From:           ${c.from}`);
+  if (c.to) criteriaLines.push(`  To:             ${c.to}`);
+  if (c.subject) criteriaLines.push(`  Subject:        ${c.subject}`);
+  if (c.query) criteriaLines.push(`  Query:          ${c.query}`);
+  if (c.negatedQuery) criteriaLines.push(`  Negated query:  ${c.negatedQuery}`);
+  if (c.hasAttachment) criteriaLines.push(`  Has attachment: yes`);
+  if (c.excludeChats) criteriaLines.push(`  Exclude chats:  yes`);
+  if (typeof c.size === 'number' && c.sizeComparison) {
+    criteriaLines.push(`  Size:           ${c.sizeComparison} ${c.size} bytes`);
+  }
+  if (criteriaLines.length) {
+    console.log('Criteria:');
+    for (const line of criteriaLines) console.log(line);
+  }
+
+  const a = filter.action;
+  const actionLines: string[] = [];
+  const apply = resolveLabelNames(a.addLabelIds, labelNamesById);
+  const remove = resolveLabelNames(a.removeLabelIds, labelNamesById);
+  if (apply.length) actionLines.push(`  Apply labels:   ${apply.join(', ')}`);
+  if (remove.length) actionLines.push(`  Remove labels:  ${remove.join(', ')}`);
+  if (a.forward) actionLines.push(`  Forward:        ${a.forward}`);
+  if (actionLines.length) {
+    console.log('Action:');
+    for (const line of actionLines) console.log(line);
+  }
+}
+
+export function printFilterCreated(filter: GmailFilter, labelNamesById: Map<string, string>): void {
+  console.log(`Created filter: ${filter.id}`);
+  console.log(`  ${summarizeFilterCriteria(filter.criteria)}  ->  ${summarizeFilterAction(filter.action, labelNamesById)}`);
+}
+
+export function printFilterDeleted(id: string): void {
+  console.log(`Deleted filter: ${id}`);
 }

@@ -53,3 +53,32 @@ export interface GmailSendOptions {
   attachments?: GmailAttachment[];
   replyTo?: string; // Thread ID to reply to
 }
+
+export interface GmailFilterCriteria {
+  from?: string;
+  to?: string;
+  subject?: string;
+  query?: string;
+  negatedQuery?: string;
+  hasAttachment?: boolean;
+  excludeChats?: boolean;
+  size?: number;
+  sizeComparison?: 'larger' | 'smaller';
+}
+
+export interface GmailFilterAction {
+  addLabelIds?: string[];
+  removeLabelIds?: string[];
+  forward?: string;
+}
+
+export interface GmailFilter {
+  id: string;
+  criteria: GmailFilterCriteria;
+  action: GmailFilterAction;
+}
+
+export interface GmailFilterCreateOptions {
+  criteria: GmailFilterCriteria;
+  action: GmailFilterAction;
+}

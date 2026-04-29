@@ -1,7 +1,7 @@
 import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo, GmailLabel } from '../../types/gmail';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction, GmailFilterCreateOptions } from '../../types/gmail';
 import { GMAIL_LIST_HARD_CAP } from '../../types/gmail';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError } from '../../utils/errors';
@@ -864,6 +864,81 @@ export class GmailClient implements ServiceClient {
     }
 
     return { totalIds: ids.length, ok, failed, chunks: chunks.length };
+  }
+
+  private mapFilter(filter: gmail_v1.Schema$Filter): GmailFilter {
+    const rawCriteria = filter.criteria || {};
+    const criteria: GmailFilterCriteria = {};
+    if (rawCriteria.from) criteria.from = rawCriteria.from;
+    if (rawCriteria.to) criteria.to = rawCriteria.to;
+    if (rawCriteria.subject) criteria.subject = rawCriteria.subject;
+    if (rawCriteria.query) criteria.query = rawCriteria.query;
+    if (rawCriteria.negatedQuery) criteria.negatedQuery = rawCriteria.negatedQuery;
+    if (rawCriteria.hasAttachment) criteria.hasAttachment = true;
+    if (rawCriteria.excludeChats) criteria.excludeChats = true;
+    if (typeof rawCriteria.size === 'number') criteria.size = rawCriteria.size;
+    if (rawCriteria.sizeComparison === 'larger' || rawCriteria.sizeComparison === 'smaller') {
+      criteria.sizeComparison = rawCriteria.sizeComparison;
+    }
+
+    const rawAction = filter.action || {};
+    const action: GmailFilterAction = {};
+    if (rawAction.addLabelIds?.length) action.addLabelIds = rawAction.addLabelIds;
+    if (rawAction.removeLabelIds?.length) action.removeLabelIds = rawAction.removeLabelIds;
+    if (rawAction.forward) action.forward = rawAction.forward;
+
+    return { id: filter.id!, criteria, action };
+  }
+
+  async listFilters(): Promise<GmailFilter[]> {
+    try {
+      const response = await this.gmail.users.settings.filters.list({ userId: 'me' });
+      return (response.data.filter || []).map((f) => this.mapFilter(f));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
+    }
+  }
+
+  async getFilter(id: string): Promise<GmailFilter> {
+    try {
+      const response = await this.gmail.users.settings.filters.get({ userId: 'me', id });
+      return this.mapFilter(response.data);
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        throw new CliError('NOT_FOUND', `Filter not found: ${id}`);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Gmail API error: ${message}`);
+    }
+  }
+
+  async createFilter(options: GmailFilterCreateOptions): Promise<GmailFilter> {
+    try {
+      const response = await this.gmail.users.settings.filters.create({
+        userId: 'me',
+        requestBody: {
+          criteria: options.criteria,
+          action: options.action,
+        },
+      });
+      return this.mapFilter(response.data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to create filter: ${message}`);
+    }
+  }
+
+  async deleteFilter(id: string): Promise<void> {
+    try {
+      await this.gmail.users.settings.filters.delete({ userId: 'me', id });
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        throw new CliError('NOT_FOUND', `Filter not found: ${id}`);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Failed to delete filter: ${message}`);
+    }
   }
 
   private isNotFoundError(error: unknown): boolean {
