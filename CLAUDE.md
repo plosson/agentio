@@ -141,6 +141,10 @@ agentio gmail labels list
 agentio gmail labels create <name>            # "/" nests in the Gmail UI
 agentio gmail labels delete <name-or-id>      # user labels only
 agentio gmail labels rename <old> <new>
+agentio gmail filters list
+agentio gmail filters get <id>
+agentio gmail filters create [--from <email>] [--to <email>] [--subject <text>] [--query <q>] [--negated-query <q>] [--has-attachment] [--exclude-chats] [--size <bytes> --size-comparison larger|smaller] [--apply <label>]... [--remove <label>]... [--forward <email>]
+agentio gmail filters delete <id...>
 agentio gmail label <id...> [--apply <name>]... [--remove <name>]... [--thread]
 agentio gmail attachment <message-id> [--output <dir>]
 agentio gmail export <message-id> [--output <path>]  # Export as PDF

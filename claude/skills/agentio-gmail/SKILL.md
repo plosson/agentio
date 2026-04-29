@@ -285,6 +285,95 @@ Examples:
   agentio gmail labels rename receipts auto/receipts
 ```
 
+## agentio gmail filters list
+
+List all Gmail filters
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # list every filter
+  agentio gmail filters list
+
+  # list filters for a specific profile
+  agentio gmail filters list --profile alice@example.com
+```
+
+## agentio gmail filters get <id>
+
+Get a single filter by ID
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # show full filter details
+  agentio gmail filters get ANe1BmgABCDEF1234567890
+```
+
+## agentio gmail filters create
+
+Create a Gmail filter. At least one criterion AND at least one action are required. Filters trigger on incoming mail server-side; they do not retroactively process the existing inbox.
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--from <email>`: Match sender
+- `--to <email>`: Match recipient
+- `--subject <text>`: Match subject text
+- `--query <q>`: Gmail search query (same syntax as "gmail search")
+- `--negated-query <q>`: Gmail search query that must NOT match
+- `--has-attachment`: Match only messages with attachments
+- `--exclude-chats`: Exclude chat messages
+- `--size <bytes>`: Match by message size (paired with --size-comparison)
+- `--size-comparison <cmp>`: Size comparison, `larger` or `smaller` (paired with --size)
+- `--apply <label>`: Label to apply (name or ID, repeatable)
+- `--remove <label>`: Label to remove (name or ID, repeatable)
+- `--forward <email>`: Forward to a verified forwarding address (must already be verified in Gmail settings)
+
+```
+Examples:
+
+  # apply a label to mail from a sender
+  agentio gmail filters create --from noreply@example.com --apply Receipts
+
+  # archive newsletters automatically
+  agentio gmail filters create --from news@example.com --remove INBOX
+
+  # complex criteria + multiple actions
+  agentio gmail filters create \
+    --query "has:attachment subject:invoice" \
+    --apply Auto/Invoices --remove INBOX
+
+  # size-based filter (5MB or larger)
+  agentio gmail filters create --size 5000000 --size-comparison larger --apply Large
+```
+
+## agentio gmail filters delete <id...>
+
+Delete one or more filters. Each ID is deleted individually; failures on one ID do not abort the rest. Exits with code 5 if any deletion failed.
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # delete one filter
+  agentio gmail filters delete ANe1BmgABCDEF1234567890
+
+  # delete several at once
+  agentio gmail filters delete ANe1Bmg... ANe1Bmh... ANe1Bmi...
+```
+
 ## agentio gmail label [id...]
 
 Apply and/or remove labels on messages or threads (bulk-safe via batchModify)
