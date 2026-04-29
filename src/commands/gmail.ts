@@ -177,6 +177,47 @@ async function buildLabelNamesById(client: GmailClient): Promise<Map<string, str
   return new Map(labels.map((l) => [l.id, l.name]));
 }
 
+function parseFilterCriteriaFromOptions(options: Record<string, unknown>): GmailFilterCriteria {
+  const criteria: GmailFilterCriteria = {};
+
+  const from = options.from as string | undefined;
+  const to = options.to as string | undefined;
+  const subject = options.subject as string | undefined;
+  const query = options.query as string | undefined;
+  const negatedQuery = options.negatedQuery as string | undefined;
+  const hasAttachment = options.hasAttachment === true;
+  const excludeChats = options.excludeChats === true;
+  const sizeRaw = options.size as string | undefined;
+  const sizeComparison = options.sizeComparison as string | undefined;
+
+  if (from) criteria.from = from;
+  if (to) criteria.to = to;
+  if (subject) criteria.subject = subject;
+  if (query) criteria.query = query;
+  if (negatedQuery) criteria.negatedQuery = negatedQuery;
+  if (hasAttachment) criteria.hasAttachment = true;
+  if (excludeChats) criteria.excludeChats = true;
+
+  const sizeProvided = sizeRaw !== undefined;
+  const cmpProvided = sizeComparison !== undefined;
+  if (sizeProvided !== cmpProvided) {
+    throw new CliError('INVALID_PARAMS', '--size and --size-comparison must be set together');
+  }
+  if (sizeProvided && cmpProvided) {
+    if (sizeComparison !== 'larger' && sizeComparison !== 'smaller') {
+      throw new CliError('INVALID_PARAMS', '--size-comparison must be "larger" or "smaller"');
+    }
+    const sizeNum = parseInt(sizeRaw!, 10);
+    if (!Number.isFinite(sizeNum) || sizeNum < 0) {
+      throw new CliError('INVALID_PARAMS', '--size must be a non-negative integer (bytes)');
+    }
+    criteria.size = sizeNum;
+    criteria.sizeComparison = sizeComparison;
+  }
+
+  return criteria;
+}
+
 export function registerGmailCommands(program: Command): void {
   const gmail = program
     .command('gmail')
@@ -616,6 +657,77 @@ Combine with spaces (AND), OR, or - to negate.`,
 
   # show full filter details
   agentio gmail filters get ANe1BmgABCDEF1234567890`,
+  );
+
+  addExamples(
+    filters
+      .command('create')
+      .description('Create a Gmail filter')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--from <email>', 'Match sender')
+      .option('--to <email>', 'Match recipient')
+      .option('--subject <text>', 'Match subject text')
+      .option('--query <q>', 'Gmail search query (same syntax as "gmail search")')
+      .option('--negated-query <q>', 'Gmail search query that must NOT match')
+      .option('--has-attachment', 'Match only messages with attachments')
+      .option('--exclude-chats', 'Exclude chat messages')
+      .option('--size <bytes>', 'Match by message size (paired with --size-comparison)')
+      .option('--size-comparison <cmp>', 'Size comparison: larger|smaller (paired with --size)')
+      .option('--apply <label>', 'Label to apply (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+      .option('--remove <label>', 'Label to remove (name or ID, repeatable)', (val: string, acc: string[]) => [...acc, val], [])
+      .option('--forward <email>', 'Forward to a verified forwarding address')
+      .action(async (options) => {
+        try {
+          const criteria = parseFilterCriteriaFromOptions(options);
+          if (Object.keys(criteria).length === 0) {
+            throw new CliError('INVALID_PARAMS', 'At least one criterion is required', 'Use --from, --to, --subject, --query, --negated-query, --has-attachment, --exclude-chats, or --size');
+          }
+
+          const apply = options.apply as string[];
+          const remove = options.remove as string[];
+          const forward = options.forward as string | undefined;
+          if (!apply.length && !remove.length && !forward) {
+            throw new CliError('INVALID_PARAMS', 'At least one action is required', 'Use --apply, --remove, or --forward');
+          }
+
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'create filter');
+
+          const [addLabelIds, removeLabelIds] = await Promise.all([
+            client.resolveLabelIds(apply),
+            client.resolveLabelIds(remove),
+          ]);
+
+          const action: GmailFilterAction = {};
+          if (addLabelIds.length) action.addLabelIds = addLabelIds;
+          if (removeLabelIds.length) action.removeLabelIds = removeLabelIds;
+          if (forward) action.forward = forward;
+
+          const filter = await client.createFilter({ criteria, action });
+          const labelNamesById = await buildLabelNamesById(client);
+          printFilterCreated(filter, labelNamesById);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # apply a label to mail from a sender
+  agentio gmail filters create --from noreply@example.com --apply Receipts
+
+  # archive newsletters automatically
+  agentio gmail filters create --from news@example.com --remove INBOX
+
+  # complex criteria + multiple actions
+  agentio gmail filters create \\
+    --query "has:attachment subject:invoice" \\
+    --apply Auto/Invoices --remove INBOX
+
+  # forward all mail from a sender (forwarding address must be verified in Gmail settings)
+  agentio gmail filters create --from boss@example.com --forward archive@me.com
+
+  # size-based filter (5MB or larger)
+  agentio gmail filters create --size 5000000 --size-comparison larger --apply Large`,
   );
 
   addExamples(
