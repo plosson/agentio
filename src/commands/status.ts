@@ -3,6 +3,7 @@ import { listProfiles, listEnv, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials, setCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
+import { refreshConfluenceToken } from '../auth/confluence-oauth';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -11,6 +12,7 @@ import { GCalClient } from '../services/gcal/client';
 import { GTasksClient } from '../services/gtasks/client';
 import { GitHubClient } from '../services/github/client';
 import { JiraClient } from '../services/jira/client';
+import { ConfluenceClient } from '../services/confluence/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
@@ -22,6 +24,7 @@ import type { OAuthTokens } from '../types/tokens';
 import type { TelegramCredentials } from '../types/telegram';
 import type { GitHubCredentials } from '../types/github';
 import type { JiraCredentials } from '../types/jira';
+import type { ConfluenceCredentials } from '../types/confluence';
 import type { GDocsCredentials } from '../types/gdocs';
 import type { GDriveCredentials } from '../types/gdrive';
 import type { GCalCredentials } from '../types/gcal';
@@ -163,6 +166,61 @@ async function createServiceClient(
 
           // Retry validation with refreshed credentials
           const refreshedClient = new JiraClient(refreshedCreds);
+          return refreshedClient.validate();
+        },
+      };
+    }
+
+    case 'confluence': {
+      let creds = credentials as ConfluenceCredentials;
+
+      const tryRefresh = async (): Promise<ConfluenceCredentials | null> => {
+        try {
+          const refreshed = await refreshConfluenceToken(creds.refreshToken);
+          const newCreds = {
+            ...creds,
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            expiryDate: Date.now() + refreshed.expiresIn * 1000,
+          };
+          await setCredentials('confluence', profileName, newCreds);
+          return newCreds;
+        } catch {
+          return null;
+        }
+      };
+
+      const bufferTime = 5 * 60 * 1000;
+      if (creds.expiryDate && Date.now() + bufferTime >= creds.expiryDate) {
+        const refreshedCreds = await tryRefresh();
+        if (!refreshedCreds) {
+          return {
+            validate: async () => ({
+              valid: false,
+              error: 'refresh token expired, re-authenticate',
+            }),
+          };
+        }
+        creds = refreshedCreds;
+      }
+
+      const client = new ConfluenceClient(creds);
+      return {
+        validate: async () => {
+          const result = await client.validate();
+          if (result.valid) {
+            return result;
+          }
+
+          const refreshedCreds = await tryRefresh();
+          if (!refreshedCreds) {
+            return {
+              valid: false,
+              error: 'refresh token expired, re-authenticate',
+            };
+          }
+
+          const refreshedClient = new ConfluenceClient(refreshedCreds);
           return refreshedClient.validate();
         },
       };

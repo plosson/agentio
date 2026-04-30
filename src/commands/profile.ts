@@ -14,6 +14,7 @@ import { gchatProfileAdd } from './gchat';
 import { gsheetsProfileAdd } from './gsheets';
 import { githubProfileAdd } from './github';
 import { jiraProfileAdd } from './jira';
+import { confluenceProfileAdd } from './confluence';
 import { slackProfileAdd } from './slack';
 import { telegramProfileAdd } from './telegram';
 import { discourseProfileAdd } from './discourse';
@@ -71,6 +72,7 @@ const ADD_HANDLERS: Record<ServiceName, (opts: AddOpts) => Promise<void>> = {
   gsheets: gsheetsProfileAdd,
   github: githubProfileAdd,
   jira: jiraProfileAdd,
+  confluence: confluenceProfileAdd,
   slack: slackProfileAdd,
   telegram: telegramProfileAdd,
   whatsapp: whatsappProfileAdd,
