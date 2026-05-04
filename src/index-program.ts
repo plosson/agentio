@@ -11,6 +11,7 @@ import { registerGDriveCommands } from './commands/gdrive';
 import { registerGitHubCommands } from './commands/github';
 import { registerGmailCommands } from './commands/gmail';
 import { registerGSheetsCommands } from './commands/gsheets';
+import { registerGSlidesCommands } from './commands/gslides';
 import { registerGTasksCommands } from './commands/gtasks';
 import { registerJiraCommands } from './commands/jira';
 import { registerRssCommands } from './commands/rss';
@@ -69,6 +70,7 @@ export function createProgram(): Command {
   registerGitHubCommands(program);
   registerGmailCommands(program);
   registerGSheetsCommands(program);
+  registerGSlidesCommands(program);
   registerGTasksCommands(program);
   registerJiraCommands(program);
   registerRssCommands(program);
