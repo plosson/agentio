@@ -53,6 +53,7 @@
     "@googleapis/drive": "^20.0.1",
     "@googleapis/gmail": "^16.1.1",
     "@googleapis/sheets": "^13.0.1",
+    "@googleapis/slides": "^5.0.1",
     "@googleapis/tasks": "^12.0.0",
     "@inquirer/prompts": "^8.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

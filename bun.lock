@@ -10,6 +10,7 @@
         "@googleapis/drive": "^20.0.1",
         "@googleapis/gmail": "^16.1.1",
         "@googleapis/sheets": "^13.0.1",
+        "@googleapis/slides": "^5.0.1",
         "@googleapis/tasks": "^12.0.0",
         "@inquirer/prompts": "^8.2.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
@@ -51,6 +52,8 @@
     "@googleapis/gmail": ["@googleapis/gmail@16.1.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-XFMMJvhpEoKzwBOHYrcbBu/jHS+8Aer5YmbMUsrZeJgXAbTD6K7K6+/1RJczXIqDoBzVDdECm4WtjAcvEHPLVg=="],
 
     "@googleapis/sheets": ["@googleapis/sheets@13.0.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-XTYObncN5Rqexc0uITZIN9OWTEyE/ZR2S6c7wAniqHe2oGXW9gcHR9f9hQwPMHFUTHjH7Jkj8SLdt0O0u37y2A=="],
+
+    "@googleapis/slides": ["@googleapis/slides@5.0.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-1fGN7Yew0K2IRYQkKWCuSspgudfBII+fWI0BWNHllMr1Yh9t5at9mFYpeQ+57L0hyWiLN3FxX6ksMxbVWjebpg=="],
 
     "@googleapis/tasks": ["@googleapis/tasks@12.0.0", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-EndmR+vuX7BlKrRKsRPUERfdvA6aO1ui4ds+31l2Kl9F9gKefkljjP0ax3gytZAqXvWYXzPvukWXA7AQJo4IUA=="],
 
