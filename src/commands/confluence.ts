@@ -12,6 +12,7 @@ import { CliError, handleError, multipleProfilesError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { enforceWriteAccess } from '../utils/read-only';
+import { addExamples } from '../utils/command-tree';
 import {
   printConfluenceSpaceList,
   printConfluencePageList,
@@ -103,219 +104,306 @@ export function registerConfluenceCommands(program: Command): void {
   const confluence = program.command('confluence').description('Confluence operations');
 
   // List spaces
-  confluence
-    .command('spaces')
-    .description('List Confluence spaces')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--limit <number>', 'Maximum number of spaces', '50')
-    .option('--type <type>', 'Filter by type (global|personal|collaboration|knowledge_base)')
-    .action(async (options) => {
-      try {
-        const { client } = await getConfluenceClient(options.profile);
-        const spaces = await client.listSpaces({
-          limit: parseInt(options.limit, 10),
-          type: options.type,
-        });
-        printConfluenceSpaceList(spaces);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    confluence
+      .command('spaces')
+      .description('List Confluence spaces')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--limit <number>', 'Maximum number of spaces', '50')
+      .option('--type <type>', 'Filter by type (global|personal|collaboration|knowledge_base)')
+      .action(async (options) => {
+        try {
+          const { client } = await getConfluenceClient(options.profile);
+          const spaces = await client.listSpaces({
+            limit: parseInt(options.limit, 10),
+            type: options.type,
+          });
+          printConfluenceSpaceList(spaces);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list all spaces
+  agentio confluence spaces
+
+  # only global spaces
+  agentio confluence spaces --type global
+
+  # with a limit
+  agentio confluence spaces --limit 10`,
+  );
 
   // List pages
-  confluence
-    .command('pages')
-    .description('List Confluence pages')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--space <key>', 'Filter by space key')
-    .option('--space-id <id>', 'Filter by space id')
-    .option('--parent <id>', 'Filter by parent page id')
-    .option('--limit <number>', 'Maximum number of pages', '25')
-    .action(async (options) => {
-      try {
-        const { client } = await getConfluenceClient(options.profile);
-        const pages = await client.listPages({
-          spaceKey: options.space,
-          spaceId: options.spaceId,
-          parentId: options.parent,
-          limit: parseInt(options.limit, 10),
-        });
-        printConfluencePageList(pages);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    confluence
+      .command('pages')
+      .description('List Confluence pages')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--space <key>', 'Filter by space key')
+      .option('--space-id <id>', 'Filter by space id')
+      .option('--parent <id>', 'Filter by parent page id')
+      .option('--limit <number>', 'Maximum number of pages', '25')
+      .action(async (options) => {
+        try {
+          const { client } = await getConfluenceClient(options.profile);
+          const pages = await client.listPages({
+            spaceKey: options.space,
+            spaceId: options.spaceId,
+            parentId: options.parent,
+            limit: parseInt(options.limit, 10),
+          });
+          printConfluencePageList(pages);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # pages in a space
+  agentio confluence pages --space ENG
+
+  # child pages of a parent
+  agentio confluence pages --parent 123456
+
+  # more results
+  agentio confluence pages --space ENG --limit 50`,
+  );
 
   // Get page
-  confluence
-    .command('get')
-    .description('Get a Confluence page (with body)')
-    .argument('<page-id>', 'Page ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--format <format>', 'Body format (storage|atlas_doc_format|view)', 'storage')
-    .action(async (pageId: string, options) => {
-      try {
-        const format = options.format as 'storage' | 'atlas_doc_format' | 'view';
-        if (!['storage', 'atlas_doc_format', 'view'].includes(format)) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            `Invalid format "${options.format}". Use storage, atlas_doc_format, or view.`
-          );
+  addExamples(
+    confluence
+      .command('get')
+      .description('Get a Confluence page (with body)')
+      .argument('<page-id>', 'Page ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Body format (storage|atlas_doc_format|view)', 'storage')
+      .action(async (pageId: string, options) => {
+        try {
+          const format = options.format as 'storage' | 'atlas_doc_format' | 'view';
+          if (!['storage', 'atlas_doc_format', 'view'].includes(format)) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              `Invalid format "${options.format}". Use storage, atlas_doc_format, or view.`
+            );
+          }
+          const { client } = await getConfluenceClient(options.profile);
+          const page = await client.getPage(pageId, format);
+          printConfluencePage(page);
+        } catch (error) {
+          handleError(error);
         }
-        const { client } = await getConfluenceClient(options.profile);
-        const page = await client.getPage(pageId, format);
-        printConfluencePage(page);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+      }),
+    `Examples:
+
+  # get a page (storage format)
+  agentio confluence get 123456
+
+  # get in view format (rendered HTML)
+  agentio confluence get 123456 --format view
+
+  # get as Atlas document format
+  agentio confluence get 123456 --format atlas_doc_format`,
+  );
 
   // Search
-  confluence
-    .command('search')
-    .description('Search Confluence content using CQL')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--cql <query>', 'Raw CQL query')
-    .option('--space <key>', 'Filter by space key')
-    .option('--type <type>', 'Filter by type (page|blogpost|comment|attachment)')
-    .option('--text <text>', 'Free-text search')
-    .option('--limit <number>', 'Maximum number of results', '25')
-    .action(async (options) => {
-      try {
-        const { client } = await getConfluenceClient(options.profile);
-        const results = await client.search({
-          cql: options.cql,
-          spaceKey: options.space,
-          type: options.type,
-          text: options.text,
-          limit: parseInt(options.limit, 10),
-        });
-        printConfluenceSearchResults(results);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    confluence
+      .command('search')
+      .description('Search Confluence content using CQL')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--cql <query>', 'Raw CQL query')
+      .option('--space <key>', 'Filter by space key')
+      .option('--type <type>', 'Filter by type (page|blogpost|comment|attachment)')
+      .option('--text <text>', 'Free-text search')
+      .option('--limit <number>', 'Maximum number of results', '25')
+      .action(async (options) => {
+        try {
+          const { client } = await getConfluenceClient(options.profile);
+          const results = await client.search({
+            cql: options.cql,
+            spaceKey: options.space,
+            type: options.type,
+            text: options.text,
+            limit: parseInt(options.limit, 10),
+          });
+          printConfluenceSearchResults(results);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # free-text search
+  agentio confluence search --text "deployment guide"
+
+  # raw CQL query
+  agentio confluence search --cql "space = ENG AND type = page AND title ~ 'API'"
+
+  # pages in a space matching text
+  agentio confluence search --space ENG --type page --text "onboarding"`,
+  );
 
   // Create page
-  confluence
-    .command('create')
-    .description('Create a Confluence page')
-    .requiredOption('--title <title>', 'Page title')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--space <key>', 'Space key (or use --space-id)')
-    .option('--space-id <id>', 'Space id (or use --space)')
-    .option('--parent <id>', 'Parent page id')
-    .option('--content <text>', 'Page body (or pipe via stdin)')
-    .action(async (options) => {
-      try {
-        if (!options.space && !options.spaceId) {
-          throw new CliError('INVALID_PARAMS', '--space or --space-id is required');
-        }
+  addExamples(
+    confluence
+      .command('create')
+      .description('Create a Confluence page')
+      .requiredOption('--title <title>', 'Page title')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--space <key>', 'Space key (or use --space-id)')
+      .option('--space-id <id>', 'Space id (or use --space)')
+      .option('--parent <id>', 'Parent page id')
+      .option('--content <text>', 'Page body (or pipe via stdin)')
+      .action(async (options) => {
+        try {
+          if (!options.space && !options.spaceId) {
+            throw new CliError('INVALID_PARAMS', '--space or --space-id is required');
+          }
 
-        let body = options.content as string | undefined;
-        if (!body) {
-          body = (await readStdin()) || undefined;
-        }
-        if (!body) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            'Page body is required. Use --content or pipe via stdin.'
-          );
-        }
+          let body = options.content as string | undefined;
+          if (!body) {
+            body = (await readStdin()) || undefined;
+          }
+          if (!body) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Page body is required. Use --content or pipe via stdin.'
+            );
+          }
 
-        const { client, profile } = await getConfluenceClient(options.profile);
-        await enforceWriteAccess('confluence', profile, 'create page');
-        const result = await client.createPage({
-          spaceKey: options.space,
-          spaceId: options.spaceId,
-          title: options.title,
-          parentId: options.parent,
-          body,
-        });
-        printConfluencePageCreated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          const { client, profile } = await getConfluenceClient(options.profile);
+          await enforceWriteAccess('confluence', profile, 'create page');
+          const result = await client.createPage({
+            spaceKey: options.space,
+            spaceId: options.spaceId,
+            title: options.title,
+            parentId: options.parent,
+            body,
+          });
+          printConfluencePageCreated(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # create a page in a space with inline content
+  agentio confluence create --title "My Page" --space ENG --content "<p>Hello world</p>"
+
+  # create with body piped from a file
+  cat page.html | agentio confluence create --title "My Page" --space ENG
+
+  # create as child of another page
+  agentio confluence create --title "Sub Page" --space ENG --parent 123456 --content "<p>Content</p>"`,
+  );
 
   // Update page
-  confluence
-    .command('update')
-    .description('Update a Confluence page (replaces body)')
-    .argument('<page-id>', 'Page ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--title <title>', 'New page title (defaults to current title)')
-    .option('--content <text>', 'Page body (or pipe via stdin)')
-    .action(async (pageId: string, options) => {
-      try {
-        let body = options.content as string | undefined;
-        if (!body) {
-          body = (await readStdin()) || undefined;
-        }
-        if (!body) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            'Page body is required. Use --content or pipe via stdin.'
-          );
-        }
+  addExamples(
+    confluence
+      .command('update')
+      .description('Update a Confluence page (replaces body)')
+      .argument('<page-id>', 'Page ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--title <title>', 'New page title (defaults to current title)')
+      .option('--content <text>', 'Page body (or pipe via stdin)')
+      .action(async (pageId: string, options) => {
+        try {
+          let body = options.content as string | undefined;
+          if (!body) {
+            body = (await readStdin()) || undefined;
+          }
+          if (!body) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Page body is required. Use --content or pipe via stdin.'
+            );
+          }
 
-        const { client, profile } = await getConfluenceClient(options.profile);
-        await enforceWriteAccess('confluence', profile, 'update page');
-        const result = await client.updatePage({
-          pageId,
-          title: options.title,
-          body,
-        });
-        printConfluencePageUpdated(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          const { client, profile } = await getConfluenceClient(options.profile);
+          await enforceWriteAccess('confluence', profile, 'update page');
+          const result = await client.updatePage({
+            pageId,
+            title: options.title,
+            body,
+          });
+          printConfluencePageUpdated(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # update page body inline
+  agentio confluence update 123456 --content "<p>Updated content</p>"
+
+  # update with body piped from a file
+  cat updated.html | agentio confluence update 123456
+
+  # update title and body
+  agentio confluence update 123456 --title "New Title" --content "<p>New content</p>"`,
+  );
 
   // List comments
-  confluence
-    .command('comments')
-    .description('List footer comments on a page')
-    .argument('<page-id>', 'Page ID')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (pageId: string, options) => {
-      try {
-        const { client } = await getConfluenceClient(options.profile);
-        const comments = await client.listComments(pageId);
-        printConfluenceCommentList(comments);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addExamples(
+    confluence
+      .command('comments')
+      .description('List footer comments on a page')
+      .argument('<page-id>', 'Page ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (pageId: string, options) => {
+        try {
+          const { client } = await getConfluenceClient(options.profile);
+          const comments = await client.listComments(pageId);
+          printConfluenceCommentList(comments);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list all footer comments on a page
+  agentio confluence comments 123456`,
+  );
 
   // Add comment
-  confluence
-    .command('comment')
-    .description('Add a footer comment to a page')
-    .argument('<page-id>', 'Page ID')
-    .argument('[body]', 'Comment body (or pipe via stdin)')
-    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .action(async (pageId: string, body: string | undefined, options) => {
-      try {
-        let text = body;
-        if (!text) {
-          text = (await readStdin()) || undefined;
-        }
-        if (!text) {
-          throw new CliError(
-            'INVALID_PARAMS',
-            'Comment body is required. Provide as argument or pipe via stdin.'
-          );
-        }
+  addExamples(
+    confluence
+      .command('comment')
+      .description('Add a footer comment to a page')
+      .argument('<page-id>', 'Page ID')
+      .argument('[body]', 'Comment body (or pipe via stdin)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (pageId: string, body: string | undefined, options) => {
+        try {
+          let text = body;
+          if (!text) {
+            text = (await readStdin()) || undefined;
+          }
+          if (!text) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Comment body is required. Provide as argument or pipe via stdin.'
+            );
+          }
 
-        const { client, profile } = await getConfluenceClient(options.profile);
-        await enforceWriteAccess('confluence', profile, 'add comment');
-        const result = await client.addComment(pageId, text);
-        printConfluenceCommentResult(result);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+          const { client, profile } = await getConfluenceClient(options.profile);
+          await enforceWriteAccess('confluence', profile, 'add comment');
+          const result = await client.addComment(pageId, text);
+          printConfluenceCommentResult(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # add an inline comment
+  agentio confluence comment 123456 "Looks good to me!"
+
+  # pipe comment body from stdin
+  echo "LGTM" | agentio confluence comment 123456`,
+  );
 
   // Profile management
   const profile = createProfileCommands<ConfluenceCredentials>(confluence, {
