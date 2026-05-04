@@ -1,4 +1,5 @@
-import { readFile, writeFile, stat } from 'fs/promises';
+import { writeFile, stat } from 'fs/promises';
+import { createReadStream } from 'fs';
 import { basename } from 'path';
 import { drive, type drive_v3 } from '@googleapis/drive';
 import { OAuth2Client } from 'google-auth-library';
@@ -305,7 +306,6 @@ export class GDriveClient implements ServiceClient {
     try {
       const { extname } = await import('path');
       const fileStats = await stat(filePath);
-      const content = await readFile(filePath);
       const fileName = name || basename(filePath);
       const ext = extname(filePath).toLowerCase();
 
@@ -341,7 +341,7 @@ export class GDriveClient implements ServiceClient {
         requestBody: fileMetadata,
         media: {
           mimeType: sourceMimeType,
-          body: content,
+          body: createReadStream(filePath),
         },
         fields: 'id,name,mimeType,size,webViewLink',
       });

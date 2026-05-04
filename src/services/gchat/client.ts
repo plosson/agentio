@@ -1,6 +1,7 @@
 import { chat as gchat, type chat_v1 } from '@googleapis/chat';
 import { OAuth2Client } from 'google-auth-library';
-import { readFile } from 'fs/promises';
+import { stat } from 'fs/promises';
+import { createReadStream } from 'fs';
 import { basename, extname } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
@@ -282,9 +283,8 @@ export class GChatClient implements ServiceClient {
     filePath: string,
     chat: ReturnType<typeof gchat>
   ): Promise<chat_v1.Schema$AttachmentDataRef> {
-    let content: Buffer;
     try {
-      content = await readFile(filePath);
+      await stat(filePath);
     } catch (err) {
       throw new CliError(
         'INVALID_PARAMS',
@@ -301,7 +301,7 @@ export class GChatClient implements ServiceClient {
       const response = await chat.media.upload({
         parent: `spaces/${spaceId}`,
         requestBody: { filename },
-        media: { mimeType, body: content },
+        media: { mimeType, body: createReadStream(filePath) },
       });
 
       const ref = response.data.attachmentDataRef;
