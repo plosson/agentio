@@ -12,6 +12,7 @@ import { gcalProfileAdd } from './gcal';
 import { gtasksProfileAdd } from './gtasks';
 import { gchatProfileAdd } from './gchat';
 import { gsheetsProfileAdd } from './gsheets';
+import { gslidesProfileAdd } from './gslides';
 import { githubProfileAdd } from './github';
 import { jiraProfileAdd } from './jira';
 import { confluenceProfileAdd } from './confluence';
@@ -70,6 +71,7 @@ const ADD_HANDLERS: Record<ServiceName, (opts: AddOpts) => Promise<void>> = {
   gtasks: gtasksProfileAdd,
   gchat: gchatProfileAdd,
   gsheets: gsheetsProfileAdd,
+  gslides: gslidesProfileAdd,
   github: githubProfileAdd,
   jira: jiraProfileAdd,
   confluence: confluenceProfileAdd,
