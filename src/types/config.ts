@@ -84,6 +84,7 @@ export interface Config {
     gtasks?: ProfileValue[];
     gchat?: ProfileValue[];
     gsheets?: ProfileValue[];
+    gslides?: ProfileValue[];
     github?: ProfileValue[];
     jira?: ProfileValue[];
     confluence?: ProfileValue[];
@@ -100,9 +101,9 @@ export interface Config {
   teleport?: TeleportConfig;
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'whatsapp' | 'discourse' | 'sql';
 
 export const ALL_SERVICES: readonly ServiceName[] = [
-  'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets',
+  'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides',
   'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql',
 ];

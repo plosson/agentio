@@ -55,7 +55,14 @@ const GSHEETS_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',     // get email for profile naming
 ];
 
-const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets', string[]> = {
+const GSLIDES_SCOPES = [
+  'https://www.googleapis.com/auth/presentations',    // read/write presentations
+  'https://www.googleapis.com/auth/drive.file',       // create/access files created by this app
+  'https://www.googleapis.com/auth/drive.readonly',   // list, export, copy existing files
+  'https://www.googleapis.com/auth/userinfo.email',   // get email for profile naming
+];
+
+const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides', string[]> = {
   gmail: GMAIL_SCOPES,
   gchat: GCHAT_SCOPES,
   gdocs: GDOCS_SCOPES,
@@ -64,9 +71,10 @@ const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-f
   gcal: GCAL_SCOPES,
   gtasks: GTASKS_SCOPES,
   gsheets: GSHEETS_SCOPES,
+  gslides: GSLIDES_SCOPES,
 };
 
-export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets';
+export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides';
 
 export async function performOAuthFlow(
   service: OAuthService
