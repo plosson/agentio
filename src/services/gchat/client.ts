@@ -144,6 +144,103 @@ export class GChatClient implements ServiceClient {
     return this.listSpacesViaOAuth();
   }
 
+  async findDirectMessage(emailOrUserId: string): Promise<GChatSpace> {
+    this.ensureOAuth('Finding direct message');
+    const { auth } = this.getOAuthChatApi();
+
+    // Refresh the directory once up front so both resolution (email -> userId)
+    // and enrichment (userId -> displayName) hit the same warm cache.
+    const directory = this.getDirectory();
+    if (directory) {
+      try {
+        await directory.ensureFresh(auth);
+      } catch {
+        // Best-effort; resolveUserResourceName will surface a clear error if needed
+      }
+    }
+
+    const userResourceName = await this.resolveUserResourceName(emailOrUserId, auth);
+
+    const token = await auth.getAccessToken();
+    if (!token.token) {
+      throw new CliError('AUTH_FAILED', 'Failed to obtain access token');
+    }
+
+    const url = `https://chat.googleapis.com/v1/spaces:findDirectMessage?name=${encodeURIComponent(userResourceName)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token.token}` } });
+
+    if (res.status === 404) {
+      throw new CliError(
+        'NOT_FOUND',
+        `No direct message space exists with ${emailOrUserId}`,
+        'Open the chat once in Google Chat to create the DM space'
+      );
+    }
+    if (!res.ok) {
+      throw new CliError(
+        httpStatusToErrorCode(res.status),
+        `findDirectMessage failed: ${res.status} ${await res.text()}`,
+        'Check that the OAuth scope includes chat.spaces.readonly'
+      );
+    }
+
+    const data = await res.json() as Record<string, any>;
+
+    // Enrich displayName from the directory when the API leaves it blank (1:1 DMs)
+    let displayName: string | undefined = typeof data.displayName === 'string' ? data.displayName : undefined;
+    if (!displayName) {
+      const directory = this.getDirectory();
+      if (directory) {
+        const entry = directory.lookup(userResourceName);
+        if (entry?.displayName) displayName = entry.displayName;
+      }
+    }
+
+    return {
+      name: typeof data.name === 'string' ? data.name : '',
+      displayName: displayName || 'Unnamed',
+      type: 'DM',
+      description: undefined,
+    };
+  }
+
+  private async resolveUserResourceName(input: string, auth: OAuth2Client): Promise<string> {
+    if (input.startsWith('users/')) return input;
+    if (/^\d+$/.test(input)) return `users/${input}`;
+    if (!input.includes('@')) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Cannot resolve "${input}" to a user`,
+        'Provide an email address, numeric user ID, or users/<id> resource name'
+      );
+    }
+    const directory = this.getDirectory();
+    if (!directory) {
+      throw new CliError(
+        'CONFIG_ERROR',
+        'Directory cache requires an OAuth profile with an email'
+      );
+    }
+    try {
+      await directory.ensureFresh(auth);
+    } catch (err) {
+      throw new CliError(
+        'API_ERROR',
+        `Failed to refresh workspace directory: ${err instanceof Error ? err.message : String(err)}`,
+        'Check OAuth scope and network connectivity'
+      );
+    }
+    const found = directory.lookupByEmail(input);
+    if (!found) {
+      throw new CliError(
+        'NOT_FOUND',
+        `Email not found in workspace directory: ${input}`,
+        'Run "agentio gchat directory refresh" if the user was added recently'
+      );
+    }
+    return found.userId;
+  }
+
   async listMembers(spaceIdOrName: string): Promise<GChatMember[]> {
     this.ensureOAuth('Listing members');
     const spaceId = await this.resolveSpaceId(spaceIdOrName);
@@ -438,10 +535,14 @@ export class GChatClient implements ServiceClient {
 
         const spaces = response.data.spaces || [];
         for (const space of spaces) {
+          // Prefer spaceType (current API) over type (legacy). Some DMs come back
+          // with type="ROOM" but spaceType="DIRECT_MESSAGE".
+          const spaceType = (space as { spaceType?: string }).spaceType;
+          const isDm = spaceType === 'DIRECT_MESSAGE' || spaceType === 'GROUP_CHAT' || space.type === 'DM';
           allSpaces.push({
             name: space.name || '',
             displayName: space.displayName || 'Unnamed',
-            type: (space.type as 'ROOM' | 'DM') || 'ROOM',
+            type: isDm ? 'DM' : 'ROOM',
             description: space.spaceDetails?.description || undefined,
           });
         }

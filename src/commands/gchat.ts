@@ -216,9 +216,17 @@ export function registerGChatCommands(program: Command): void {
       .description('List available Google Chat spaces (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
       .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
+      .option('--with <user>', 'Resolve the 1:1 DM space with a user (email, numeric id, or users/<id>)')
       .action(async (options) => {
         try {
           const { client } = await getGChatClient(options.profile);
+
+          if (options.with) {
+            const space = await client.findDirectMessage(options.with);
+            printGChatSpaceList([space]);
+            return;
+          }
+
           let spaces = await client.listSpaces();
 
           if (options.filter) {
@@ -237,7 +245,10 @@ export function registerGChatCommands(program: Command): void {
   agentio gchat spaces
 
   # filter by display name (case-insensitive substring)
-  agentio gchat spaces --filter eng`,
+  agentio gchat spaces --filter eng
+
+  # resolve the 1:1 DM space with a workspace user (1 API call, instant)
+  agentio gchat spaces --with pmontesel@hex-rays.com`,
   );
 
   addExamples(

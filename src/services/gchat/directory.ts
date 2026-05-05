@@ -44,6 +44,15 @@ export class GChatDirectory {
     return this.data?.users[userId];
   }
 
+  lookupByEmail(email: string): { userId: string; entry: DirectoryEntry } | undefined {
+    if (!this.data) return undefined;
+    const target = email.toLowerCase();
+    for (const [userId, entry] of Object.entries(this.data.users)) {
+      if (entry.email?.toLowerCase() === target) return { userId, entry };
+    }
+    return undefined;
+  }
+
   size(): number {
     return this.data ? Object.keys(this.data.users).length : 0;
   }
