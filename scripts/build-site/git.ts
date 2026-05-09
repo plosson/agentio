@@ -1,5 +1,3 @@
-import { $ } from 'bun';
-
 export interface VersionTag {
   name: string;
   date: string;
@@ -11,8 +9,24 @@ export interface Commit {
   body: string;
 }
 
+async function git(args: string[]): Promise<string> {
+  const proc = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  if (proc.exitCode !== 0) {
+    const err = await new Response(proc.stderr).text();
+    throw new Error(`git ${args.join(' ')} failed: ${err}`);
+  }
+  return out;
+}
+
 export async function listVersionTags(): Promise<VersionTag[]> {
-  const out = await $`git for-each-ref --sort=-creatordate --format=%(refname:short)|%(creatordate:iso-strict) refs/tags`.text();
+  const out = await git([
+    'for-each-ref',
+    '--sort=-creatordate',
+    '--format=%(refname:short)|%(creatordate:iso-strict)',
+    'refs/tags',
+  ]);
   return out
     .split('\n')
     .map((l) => l.trim())
@@ -36,12 +50,11 @@ function parseLog(out: string): Commit[] {
 }
 
 export async function listCommitsBetween(from: string, to: string): Promise<Commit[]> {
-  const range = `${from}..${to}`;
-  const out = await $`git log ${range} --format=%h%x09%s%x09%b%x1e`.text();
+  const out = await git(['log', `${from}..${to}`, '--format=%h%x09%s%x09%b%x1e']);
   return parseLog(out);
 }
 
 export async function listCommitsUpTo(ref: string): Promise<Commit[]> {
-  const out = await $`git log ${ref} --format=%h%x09%s%x09%b%x1e`.text();
+  const out = await git(['log', ref, '--format=%h%x09%s%x09%b%x1e']);
   return parseLog(out);
 }
