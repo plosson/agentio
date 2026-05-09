@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}">
+    <meta name="theme-color" content="#151518">
+
+    <meta property="og:title" content="{{title}}">
+    <meta property="og:description" content="{{description}}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://agentio.me{{path}}">
+    <meta property="og:site_name" content="agentio">
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="/" class="nav-brand">
+          <img src="/logo.png" alt="" width="20" height="20">
+          agentio
+        </a>
+        <div class="nav-right">
+          <details class="nav-services">
+            <summary class="nav-link">Services ▾</summary>
+            <div class="nav-services-menu">
+              {{nav_services}}
+            </div>
+          </details>
+          <a href="/changelog/" class="nav-link">Changelog</a>
+          <a href="https://github.com/plosson/agentio" class="nav-link">GitHub ↗</a>
+          <a href="#install" class="cta">curl … | sh</a>
+        </div>
+      </div>
+    </nav>
+    <main>
+      {{slot}}
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <div>© agentio · MIT</div>
+        <div class="footer-links">
+          <a href="https://github.com/plosson/agentio">GitHub</a>
+          <a href="/changelog/">Changelog</a>
+          <a href="/privacy/">Privacy</a>
+          <a href="/terms/">Terms</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
