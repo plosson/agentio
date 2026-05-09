@@ -62,7 +62,13 @@ const GSLIDES_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',   // get email for profile naming
 ];
 
-const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides', string[]> = {
+const GSCRIPT_SCOPES = [
+  'https://www.googleapis.com/auth/script.projects',  // create/read/update Apps Script projects
+  'https://www.googleapis.com/auth/drive',            // list scripts by container, delete scripts
+  'https://www.googleapis.com/auth/userinfo.email',   // get email for profile naming
+];
+
+const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides' | 'gscript', string[]> = {
   gmail: GMAIL_SCOPES,
   gchat: GCHAT_SCOPES,
   gdocs: GDOCS_SCOPES,
@@ -72,9 +78,10 @@ const SCOPES: Record<'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-f
   gtasks: GTASKS_SCOPES,
   gsheets: GSHEETS_SCOPES,
   gslides: GSLIDES_SCOPES,
+  gscript: GSCRIPT_SCOPES,
 };
 
-export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides';
+export type OAuthService = 'gmail' | 'gchat' | 'gdocs' | 'gdrive-readonly' | 'gdrive-full' | 'gcal' | 'gtasks' | 'gsheets' | 'gslides' | 'gscript';
 
 export async function performOAuthFlow(
   service: OAuthService
