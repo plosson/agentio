@@ -178,6 +178,24 @@ async function main(): Promise<void> {
     slot: changelogBody,
   });
 
+  const privacyBody = await Bun.file(`${SRC}/privacy.html`).text();
+  await writePage(DIST, 'privacy/index.html', layout, {
+    title: 'Privacy · agentio',
+    description: 'Privacy policy for agentio.',
+    path: '/privacy/',
+    nav_services: navServicesHtml,
+    slot: privacyBody,
+  });
+
+  const termsBody = await Bun.file(`${SRC}/terms.html`).text();
+  await writePage(DIST, 'terms/index.html', layout, {
+    title: 'Terms · agentio',
+    description: 'Terms of service for agentio.',
+    path: '/terms/',
+    nav_services: navServicesHtml,
+    slot: termsBody,
+  });
+
   await Bun.write(`${DIST}/styles.css`, styles);
 
   if (existsSync(PUBLIC)) {

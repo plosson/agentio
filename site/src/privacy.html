@@ -1,0 +1,48 @@
+<section class="section section-narrow">
+  <h1>Privacy</h1>
+  <p class="tagline">Last updated: 2026-05-09</p>
+
+  <h2>Overview</h2>
+  <p>agentio is a command-line tool that lets you interact with services like Gmail, Slack, JIRA, WhatsApp, and others. This page explains how it handles your data.</p>
+
+  <h2>What agentio accesses</h2>
+  <p>When you authorize agentio with each service, the tool may access:</p>
+  <ul>
+    <li>Messages, posts, files, and other content from the services you connect — to search, read, send, or otherwise act on them at your direction.</li>
+    <li>Account metadata required by each service's API (email address, channel IDs, etc.).</li>
+  </ul>
+
+  <h2>What agentio stores</h2>
+  <p>All data is stored locally on your device only:</p>
+  <ul>
+    <li><code>~/.config/agentio/vault.enc</code> — encrypted credentials (AES-256-GCM)</li>
+    <li><code>~/.config/agentio/vault.passphrase</code> — local passphrase (mode 0600)</li>
+    <li><code>~/.config/agentio/daemon.db</code> — daemon message store (only when you run the daemon)</li>
+  </ul>
+
+  <p>agentio does <strong>not</strong>:</p>
+  <ul>
+    <li>Transmit your data to any external servers operated by the project.</li>
+    <li>Share your data with third parties.</li>
+    <li>Collect analytics or telemetry.</li>
+  </ul>
+
+  <h2>Data security</h2>
+  <ul>
+    <li>Credentials are encrypted at rest with AES-256-GCM.</li>
+    <li>By default, the encryption key is bound to the host (hostname + username); you can override with <code>AGENTIO_PASSPHRASE</code>.</li>
+    <li>API calls go directly between your device and the service provider.</li>
+  </ul>
+
+  <h2>Your rights</h2>
+  <ul>
+    <li>Revoke access at the service provider (Google, Slack, GitHub, …) at any time.</li>
+    <li>Delete <code>~/.config/agentio/</code> to remove all local state.</li>
+  </ul>
+
+  <h2>Open source</h2>
+  <p>agentio is MIT-licensed. Source: <a href="https://github.com/plosson/agentio">github.com/plosson/agentio</a>.</p>
+
+  <h2>Contact</h2>
+  <p>Open an issue at <a href="https://github.com/plosson/agentio/issues">github.com/plosson/agentio/issues</a>.</p>
+</section>
