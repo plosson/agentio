@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { writePage } from './build-site/render';
 import { loadServices } from './build-site/services';
 import { renderMarkdown } from './build-site/markdown';
+import { renderCommandsHtml } from './build-site/commands';
+import { SERVICE_SLUGS } from './build-site/register-all';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const SRC = `${REPO_ROOT}site/src`;
@@ -21,6 +23,15 @@ async function main(): Promise<void> {
 
   const services = await loadServices(`${SRC}/services`);
   console.log(`build-site: loaded ${services.length} services`);
+
+  const presentSlugs = new Set(services.map((s) => s.meta.slug));
+  const missing = SERVICE_SLUGS.filter((slug) => !presentSlugs.has(slug));
+  if (missing.length > 0) {
+    throw new Error(
+      `build-site: missing intro stub(s) for service(s): ${missing.join(', ')}.\n` +
+      `Create site/src/services/<slug>.md for each.`
+    );
+  }
 
   const navServicesHtml = services
     .map((s) => `<a href="/services/${s.meta.slug}/">${s.meta.name}</a>`)
@@ -42,7 +53,7 @@ async function main(): Promise<void> {
       .replaceAll('{{name}}', svc.meta.name)
       .replaceAll('{{tagline}}', svc.meta.tagline)
       .replaceAll('{{intro_html}}', introHtml)
-      .replaceAll('{{commands_html}}', '<p class="dim">Generated in next task.</p>')
+      .replaceAll('{{commands_html}}', renderCommandsHtml(svc.meta.slug))
       .replaceAll('{{mcp_html}}', '<p class="dim">Generated in next task.</p>')
       .replaceAll('{{related_html}}', '<p class="dim">Generated in next task.</p>');
 
