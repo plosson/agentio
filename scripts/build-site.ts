@@ -6,6 +6,9 @@ import { renderMarkdown } from './build-site/markdown';
 import { renderCommandsHtml } from './build-site/commands';
 import { renderMcpToolsHtml } from './build-site/mcp-tools';
 import { SERVICE_SLUGS } from './build-site/register-all';
+import { listVersionTags, listCommitsBetween, listCommitsUpTo } from './build-site/git';
+import { groupReleases } from './build-site/changelog';
+import { renderRelease } from './build-site/changelog-render';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const SRC = `${REPO_ROOT}site/src`;
@@ -66,6 +69,30 @@ async function main(): Promise<void> {
       slot: body,
     });
   }
+
+  const tags = await listVersionTags();
+  const releases: string[] = [];
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i];
+    const prev = tags[i + 1];
+    const commits = prev
+      ? await listCommitsBetween(prev.name, tag.name)
+      : await listCommitsUpTo(tag.name);
+    const groups = groupReleases(commits);
+    releases.push(renderRelease(tag, groups));
+  }
+  console.log(`build-site: rendered ${releases.length} releases`);
+
+  const changelogTemplate = await Bun.file(`${SRC}/changelog.html`).text();
+  const changelogBody = changelogTemplate.replaceAll('{{releases_html}}', releases.join('\n'));
+
+  await writePage(DIST, 'changelog/index.html', layout, {
+    title: 'Changelog · agentio',
+    description: 'Release history for agentio.',
+    path: '/changelog/',
+    nav_services: navServicesHtml,
+    slot: changelogBody,
+  });
 
   await Bun.write(`${DIST}/styles.css`, styles);
 
