@@ -12,6 +12,7 @@ import { registerGitHubCommands } from './commands/github';
 import { registerGmailCommands } from './commands/gmail';
 import { registerGSheetsCommands } from './commands/gsheets';
 import { registerGSlidesCommands } from './commands/gslides';
+import { registerGScriptCommands } from './commands/gscript';
 import { registerGTasksCommands } from './commands/gtasks';
 import { registerJiraCommands } from './commands/jira';
 import { registerRssCommands } from './commands/rss';
@@ -71,6 +72,7 @@ export function createProgram(): Command {
   registerGmailCommands(program);
   registerGSheetsCommands(program);
   registerGSlidesCommands(program);
+  registerGScriptCommands(program);
   registerGTasksCommands(program);
   registerJiraCommands(program);
   registerRssCommands(program);
@@ -118,7 +120,7 @@ export function createProgram(): Command {
 
   // Services
   [
-    'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets',
+    'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
     'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
   ].forEach((n) => setGroup(n, 'Services'));
 

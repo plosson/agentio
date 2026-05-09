@@ -18,6 +18,7 @@ import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
 import { GSheetsClient } from '../services/gsheets/client';
 import { GSlidesClient } from '../services/gslides/client';
+import { GScriptClient } from '../services/gscript/client';
 import { SqlClient } from '../services/sql/client';
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
@@ -33,6 +34,7 @@ import type { GTasksCredentials } from '../types/gtasks';
 import type { GChatCredentials } from '../types/gchat';
 import type { GSheetsCredentials } from '../types/gsheets';
 import type { GSlidesCredentials } from '../types/gslides';
+import type { GScriptCredentials } from '../types/gscript';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
@@ -82,6 +84,11 @@ async function createServiceClient(
     case 'gslides': {
       const creds = credentials as GSlidesCredentials;
       return new GSlidesClient(creds);
+    }
+
+    case 'gscript': {
+      const creds = credentials as GScriptCredentials;
+      return new GScriptClient(creds);
     }
 
     case 'gcal': {
