@@ -52,6 +52,7 @@
     "@googleapis/chat": "^44.6.0",
     "@googleapis/drive": "^20.0.1",
     "@googleapis/gmail": "^16.1.1",
+    "@googleapis/script": "^11.0.1",
     "@googleapis/sheets": "^13.0.1",
     "@googleapis/slides": "^5.0.1",
     "@googleapis/tasks": "^12.0.0",

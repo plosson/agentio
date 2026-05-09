@@ -9,6 +9,7 @@
         "@googleapis/chat": "^44.6.0",
         "@googleapis/drive": "^20.0.1",
         "@googleapis/gmail": "^16.1.1",
+        "@googleapis/script": "^11.0.1",
         "@googleapis/sheets": "^13.0.1",
         "@googleapis/slides": "^5.0.1",
         "@googleapis/tasks": "^12.0.0",
@@ -50,6 +51,8 @@
     "@googleapis/drive": ["@googleapis/drive@20.0.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-uqjr22NqAA7G/NuMGVvYQo/MRWGYdGo/2HD3H2L1EGhsaCyWpKGBsTe4K0L3QQMUgteEnn916O843Ifyduvihw=="],
 
     "@googleapis/gmail": ["@googleapis/gmail@16.1.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-XFMMJvhpEoKzwBOHYrcbBu/jHS+8Aer5YmbMUsrZeJgXAbTD6K7K6+/1RJczXIqDoBzVDdECm4WtjAcvEHPLVg=="],
+
+    "@googleapis/script": ["@googleapis/script@11.0.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-wSc42XTxxK6sigfaPxjaZUG1SWVdDNxYtk4sYgzyimViIGyAl/KEV3FeiXUFxHdQ32+vnsN9KtZWHEDaP+D3dw=="],
 
     "@googleapis/sheets": ["@googleapis/sheets@13.0.1", "", { "dependencies": { "googleapis-common": "^8.0.0" } }, "sha512-XTYObncN5Rqexc0uITZIN9OWTEyE/ZR2S6c7wAniqHe2oGXW9gcHR9f9hQwPMHFUTHjH7Jkj8SLdt0O0u37y2A=="],
 
