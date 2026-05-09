@@ -4,6 +4,7 @@ import { writePage } from './build-site/render';
 import { loadServices } from './build-site/services';
 import { renderMarkdown } from './build-site/markdown';
 import { renderCommandsHtml } from './build-site/commands';
+import { renderMcpToolsHtml } from './build-site/mcp-tools';
 import { SERVICE_SLUGS } from './build-site/register-all';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
       .replaceAll('{{tagline}}', svc.meta.tagline)
       .replaceAll('{{intro_html}}', introHtml)
       .replaceAll('{{commands_html}}', renderCommandsHtml(svc.meta.slug))
-      .replaceAll('{{mcp_html}}', '<p class="dim">Generated in next task.</p>')
+      .replaceAll('{{mcp_html}}', renderMcpToolsHtml(svc.meta.slug))
       .replaceAll('{{related_html}}', '<p class="dim">Generated in next task.</p>');
 
     await writePage(DIST, `services/${svc.meta.slug}/index.html`, layout, {
