@@ -287,7 +287,7 @@ Examples:
 
 ## agentio gmail filters list
 
-List all Gmail filters
+List all filters
 
 Options:
 
@@ -305,7 +305,7 @@ Examples:
 
 ## agentio gmail filters get <id>
 
-Get a single filter by ID
+Get a filter
 
 Options:
 
@@ -320,7 +320,7 @@ Examples:
 
 ## agentio gmail filters create
 
-Create a Gmail filter. At least one criterion AND at least one action are required. Filters trigger on incoming mail server-side; they do not retroactively process the existing inbox.
+Create a Gmail filter
 
 Options:
 
@@ -333,10 +333,10 @@ Options:
 - `--has-attachment`: Match only messages with attachments
 - `--exclude-chats`: Exclude chat messages
 - `--size <bytes>`: Match by message size (paired with --size-comparison)
-- `--size-comparison <cmp>`: Size comparison, `larger` or `smaller` (paired with --size)
-- `--apply <label>`: Label to apply (name or ID, repeatable)
-- `--remove <label>`: Label to remove (name or ID, repeatable)
-- `--forward <email>`: Forward to a verified forwarding address (must already be verified in Gmail settings)
+- `--size-comparison <cmp>`: Size comparison: larger|smaller (paired with --size)
+- `--apply <label>`: Label to apply (name or ID, repeatable) (default: )
+- `--remove <label>`: Label to remove (name or ID, repeatable) (default: )
+- `--forward <email>`: Forward to a verified forwarding address
 
 ```
 Examples:
@@ -352,13 +352,16 @@ Examples:
     --query "has:attachment subject:invoice" \
     --apply Auto/Invoices --remove INBOX
 
+  # forward all mail from a sender (forwarding address must be verified in Gmail settings)
+  agentio gmail filters create --from boss@example.com --forward archive@me.com
+
   # size-based filter (5MB or larger)
   agentio gmail filters create --size 5000000 --size-comparison larger --apply Large
 ```
 
 ## agentio gmail filters delete <id...>
 
-Delete one or more filters. Each ID is deleted individually; failures on one ID do not abort the rest. Exits with code 5 if any deletion failed.
+Delete one or more filters
 
 Options:
 
@@ -454,4 +457,3 @@ Examples:
 
 Requires Chrome, Chromium, or Microsoft Edge installed locally.
 ```
-

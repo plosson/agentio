@@ -91,6 +91,7 @@ Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--filter <text>`: Filter spaces by name (case-insensitive)
+- `--with <user>`: Resolve the 1:1 DM space with a user (email, numeric id, or users/<id>)
 
 ```
 Examples:
@@ -100,6 +101,9 @@ Examples:
 
   # filter by display name (case-insensitive substring)
   agentio gchat spaces --filter eng
+
+  # resolve the 1:1 DM space with a workspace user (1 API call, instant)
+  agentio gchat spaces --with pmontesel@hex-rays.com
 ```
 
 ## agentio gchat members
