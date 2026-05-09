@@ -68,20 +68,72 @@ async function main(): Promise<void> {
   </a>
 `).join('');
 
+  const terminalFrames = [
+    {
+      cmd: 'agentio gmail list --limit 5 --query "is:unread"',
+      output: [
+        'id          from                subject',
+        '────────────────────────────────────────',
+        '198a3f      alice@stripe.com    Re: invoice question',
+        '198a40      ops@github.com      [Action] CI failed',
+        '198a41      newsletter@…        Weekly digest',
+      ],
+    },
+    {
+      cmd: 'agentio whatsapp inbox pull',
+      output: [
+        '5 messages from 3 conversations',
+        '────────────────────────────────',
+        'wa-1  Bob (mobile)        "see you at 6?"',
+        'wa-2  Family group        [photo]',
+        'wa-3  Alice               "did you read the doc?"',
+      ],
+    },
+    {
+      cmd: 'agentio mcp serve gmail:work slack:team',
+      output: [
+        'gmail:work — 28 tools',
+        'slack:team — 3 tools',
+        'Listening on stdio…',
+      ],
+    },
+    {
+      cmd: 'agentio schedule list',
+      output: [
+        'id              folder                  next run',
+        '─────────────────────────────────────────────────',
+        'daily-summary   ~/agents/                09:00 (in 3h)',
+        'weekly-report   ~/agents/reports/        Mon 09:00',
+      ],
+    },
+  ];
+
   const terminalHtml = `
 <section class="section">
   <div class="term">
     <div class="term-bar">
       <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
     </div>
-    <pre class="term-body" id="hero-term"><span class="prompt">$</span> agentio gmail list --limit 5 --query "is:unread"
-<span class="dim">id          from                subject</span>
-<span class="dim">────────────────────────────────────────</span>
-198a3f      alice@stripe.com    Re: invoice question
-198a40      ops@github.com      [Action] CI failed
-198a41      newsletter@…        Weekly digest
-</pre>
+    <pre class="term-body" id="hero-term"></pre>
   </div>
+  <script type="module">
+    const frames = ${JSON.stringify(terminalFrames)};
+    const el = document.getElementById('hero-term');
+    if (el) {
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const render = (f) => {
+        const lines = ['<span class="prompt">$</span> ' + f.cmd, ...f.output.map(l => '<span class="dim">' + l + '</span>')];
+        el.innerHTML = lines.join('\\n');
+      };
+      if (reduce) {
+        render(frames[0]);
+      } else {
+        let i = 0;
+        const tick = () => { render(frames[i % frames.length]); i++; setTimeout(tick, 4000); };
+        tick();
+      }
+    }
+  </script>
 </section>`;
 
   await writePage(DIST, 'index.html', layout, {
