@@ -57,12 +57,41 @@ async function main(): Promise<void> {
   }
   console.log(`build-site: rendered ${releases.length} releases`);
 
+  const servicesGridHtml = services.map((s) => `
+  <a class="card service-tile" href="/services/${s.meta.slug}/">
+    <div class="service-tile-head">
+      <span class="service-tile-icon">${s.meta.icon}</span>
+      <span class="service-tile-name">${s.meta.name}</span>
+      <span class="auth-badge">${s.meta.auth}</span>
+    </div>
+    <p>${s.meta.tagline}</p>
+  </a>
+`).join('');
+
+  const terminalHtml = `
+<section class="section">
+  <div class="term">
+    <div class="term-bar">
+      <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+    </div>
+    <pre class="term-body" id="hero-term"><span class="prompt">$</span> agentio gmail list --limit 5 --query "is:unread"
+<span class="dim">id          from                subject</span>
+<span class="dim">────────────────────────────────────────</span>
+198a3f      alice@stripe.com    Re: invoice question
+198a40      ops@github.com      [Action] CI failed
+198a41      newsletter@…        Weekly digest
+</pre>
+  </div>
+</section>`;
+
   await writePage(DIST, 'index.html', layout, {
     title: 'agentio — CLI for LLM agent workflows',
     description: 'Run LLM agents against Gmail, Slack, JIRA, WhatsApp, and 14 more. MCP server, daemon, encrypted vault, GitHub Actions ready.',
     path: '/',
     nav_services: navServicesHtml,
-    slot: indexBody,
+    slot: indexBody
+      .replaceAll('{{services_grid}}', servicesGridHtml)
+      .replaceAll('{{terminal_html}}', terminalHtml),
   });
 
   for (const svc of services) {

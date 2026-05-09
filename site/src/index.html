@@ -1,8 +1,96 @@
 <section class="hero">
-  <h1>agentio</h1>
-  <p class="tagline">A CLI for LLM agent workflows. Real services, encrypted vault, MCP, daemon, schedule.</p>
+  <h1>The CLI for LLM agents</h1>
+  <p class="tagline">Run agentic workflows against Gmail, Slack, JIRA, WhatsApp, and 14 more — over MCP, in GitHub Actions, or as a daemon. One binary, encrypted vault, no third-party servers.</p>
   <div class="hero-ctas">
     <a href="#install" class="cta">curl -LsSf https://agentio.me/install | sh</a>
     <a href="https://github.com/plosson/agentio" class="cta cta-ghost">View on GitHub</a>
   </div>
+</section>
+
+{{terminal_html}}
+
+<section class="section">
+  <div class="eyebrow">Why agentio</div>
+  <h2>Built for agents, not humans</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Output shaped for LLMs</h3>
+      <p>Every command emits structured, parseable output. JSON when you need it; predictable text otherwise.</p>
+    </div>
+    <div class="card">
+      <h3>Encrypted vault, multi-profile</h3>
+      <p>Credentials are AES-256-GCM-encrypted in <code>~/.config/agentio/vault.enc</code>. One binary, many identities per service.</p>
+    </div>
+    <div class="card">
+      <h3>MCP + CLI + Actions</h3>
+      <p>Same binary serves a stdio MCP server to Claude Code, an HTTP MCP server with OAuth, and runs unchanged inside GitHub Actions.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="eyebrow">Services</div>
+  <h2>Connect once, automate everywhere</h2>
+  <div class="grid">
+    {{services_grid}}
+  </div>
+</section>
+
+<section class="section">
+  <div class="eyebrow">MCP integration</div>
+  <h2>Drop into Claude Code</h2>
+  <p>One command writes a <code>.mcp.json</code> that exposes your selected services as MCP tools. Stdio for local clients; HTTP with OAuth for hosted ones.</p>
+  <pre><code>$ agentio mcp install gmail:work slack:team rss
+Wrote .mcp.json
+
+MCP server command: agentio mcp serve gmail:work slack:team rss</code></pre>
+  <p>For remote deploys: <code>agentio mcp teleport &lt;name&gt;</code> ships an HTTP MCP server to a siteio-managed remote with OAuth, in one command.</p>
+</section>
+
+<section class="section">
+  <div class="eyebrow">GitHub Actions</div>
+  <h2>Schedule agents in CI</h2>
+  <pre><code>name: daily-summary
+on:
+  schedule: [{ cron: '0 9 * * *' }]
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: oven-sh/setup-bun@v2
+      - run: bun add -g agentio
+      - env:
+          AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+          AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
+        run: |
+          agentio gmail list --query "is:unread" --limit 20 \
+            | claude -p "summarize these in 3 bullets" \
+            | agentio slack send --channel team-updates</code></pre>
+  <p><code>agentio github install &lt;owner/repo&gt;</code> installs the two secrets above for you.</p>
+</section>
+
+<section class="section">
+  <div class="eyebrow">Daemon &amp; scheduler</div>
+  <h2>Real-time, when you need it</h2>
+  <p>For services that need a persistent connection (WhatsApp, Telegram inbox) or scheduled runs (folder-watched <code>.run.md</code> files), <code>agentio daemon start</code> runs a single background process. Schedules are host-pinned so Dropbox-synced folders never double-fire.</p>
+</section>
+
+<section class="section" id="install">
+  <div class="eyebrow">Install</div>
+  <h2>One line</h2>
+  <p><strong>macOS / Linux</strong></p>
+  <pre><code>curl -LsSf https://agentio.me/install | sh</code></pre>
+  <p><strong>Windows</strong></p>
+  <pre><code>iwr -useb https://agentio.me/install.ps1 | iex</code></pre>
+  <p>Update later with <code>agentio update</code>.</p>
+</section>
+
+<section class="section section-narrow faq">
+  <div class="eyebrow">FAQ</div>
+  <h2>Common questions</h2>
+  <details><summary>Is agentio free?</summary><p>Yes — MIT-licensed, self-hosted. No accounts, no telemetry.</p></details>
+  <details><summary>Where are my credentials stored?</summary><p>In an encrypted vault at <code>~/.config/agentio/vault.enc</code>, AES-256-GCM. The passphrase is machine-bound by default; you can supply one via <code>AGENTIO_PASSPHRASE</code>.</p></details>
+  <details><summary>Do I need the daemon?</summary><p>Only for WhatsApp, the Telegram inbox, scheduled <code>.run.md</code> runs, and the HTTP MCP server. Everything else runs as a one-shot CLI invocation.</p></details>
+  <details><summary>Can I use it without an LLM?</summary><p>Yes. It's a regular CLI — pipe its output into anything.</p></details>
+  <details><summary>How is this different from Zapier?</summary><p>You own the credentials and the workflow definitions. Runs in your CI or on your machine; no third-party servers in the path.</p></details>
 </section>
