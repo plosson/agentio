@@ -7,8 +7,9 @@ import { renderCommandsHtml } from './build-site/commands';
 import { renderMcpToolsHtml } from './build-site/mcp-tools';
 import { SERVICE_SLUGS } from './build-site/register-all';
 import { listVersionTags, listCommitsBetween, listCommitsUpTo } from './build-site/git';
-import { groupReleases } from './build-site/changelog';
+import { groupReleases, type ParsedEntry } from './build-site/changelog';
 import { renderRelease } from './build-site/changelog-render';
+import { renderRelatedHtml } from './build-site/related';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const SRC = `${REPO_ROOT}site/src`;
@@ -41,6 +42,21 @@ async function main(): Promise<void> {
     .map((s) => `<a href="/services/${s.meta.slug}/">${s.meta.name}</a>`)
     .join('');
 
+  const tags = await listVersionTags();
+  const allEntries: ParsedEntry[] = [];
+  const releases: string[] = [];
+  for (let i = 0; i < tags.length; i++) {
+    const tag = tags[i];
+    const prev = tags[i + 1];
+    const commits = prev
+      ? await listCommitsBetween(prev.name, tag.name)
+      : await listCommitsUpTo(tag.name);
+    const groups = groupReleases(commits);
+    allEntries.push(...groups.features, ...groups.fixes);
+    releases.push(renderRelease(tag, groups));
+  }
+  console.log(`build-site: rendered ${releases.length} releases`);
+
   await writePage(DIST, 'index.html', layout, {
     title: 'agentio — CLI for LLM agent workflows',
     description: 'Run LLM agents against Gmail, Slack, JIRA, WhatsApp, and 14 more. MCP server, daemon, encrypted vault, GitHub Actions ready.',
@@ -59,7 +75,7 @@ async function main(): Promise<void> {
       .replaceAll('{{intro_html}}', introHtml)
       .replaceAll('{{commands_html}}', renderCommandsHtml(svc.meta.slug))
       .replaceAll('{{mcp_html}}', renderMcpToolsHtml(svc.meta.slug))
-      .replaceAll('{{related_html}}', '<p class="dim">Generated in next task.</p>');
+      .replaceAll('{{related_html}}', renderRelatedHtml(svc.meta.slug, allEntries));
 
     await writePage(DIST, `services/${svc.meta.slug}/index.html`, layout, {
       title: `${svc.meta.name} · agentio`,
@@ -69,19 +85,6 @@ async function main(): Promise<void> {
       slot: body,
     });
   }
-
-  const tags = await listVersionTags();
-  const releases: string[] = [];
-  for (let i = 0; i < tags.length; i++) {
-    const tag = tags[i];
-    const prev = tags[i + 1];
-    const commits = prev
-      ? await listCommitsBetween(prev.name, tag.name)
-      : await listCommitsUpTo(tag.name);
-    const groups = groupReleases(commits);
-    releases.push(renderRelease(tag, groups));
-  }
-  console.log(`build-site: rendered ${releases.length} releases`);
 
   const changelogTemplate = await Bun.file(`${SRC}/changelog.html`).text();
   const changelogBody = changelogTemplate.replaceAll('{{releases_html}}', releases.join('\n'));
