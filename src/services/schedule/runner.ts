@@ -103,8 +103,18 @@ export async function runSchedule(opts: RunScheduleOpts): Promise<RunResult> {
     pending.push(appendFile(logPath, chunk.toString('utf-8')));
   });
 
-  const exitCode: number = await new Promise((resolve) => {
+  const exitCode: number = await new Promise<number>((resolve) => {
     child.on('close', (code) => resolve(code ?? 1));
+    child.on('exit', () => {
+      // When grandchildren inherit the pipe FDs and outlive the direct child,
+      // the write-end of the pipe stays open and 'close' never fires.
+      // Give the event loop 1 s to drain any remaining buffered output,
+      // then forcibly destroy the streams so 'close' fires.
+      setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }, 1_000);
+    });
   });
   await Promise.all(pending);
 
