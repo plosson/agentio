@@ -167,13 +167,17 @@ function uninstallDaemonDarwin(): void {
 
 function daemonStartDarwin(): void {
   const uid = spawnSync({ cmd: ['id', '-u'], stdout: 'pipe' }).stdout.toString().trim();
-  // Try kickstart (modern), fall back to load.
+  // Try kickstart (modern). Falls back to bootstrap when the service was previously
+  // booted out (e.g. after `daemon stop`) and is no longer registered with launchd.
   const kick = spawnSync({
     cmd: ['launchctl', 'kickstart', '-k', `gui/${uid}/${DAEMON_PLIST_FILE.replace('.plist', '')}`],
     stdout: 'pipe', stderr: 'pipe',
   });
   if (kick.exitCode !== 0) {
-    spawnSync({ cmd: ['launchctl', 'load', DAEMON_PLIST_PATH], stdout: 'pipe', stderr: 'pipe' });
+    spawnSync({
+      cmd: ['launchctl', 'bootstrap', `gui/${uid}`, DAEMON_PLIST_PATH],
+      stdout: 'pipe', stderr: 'pipe',
+    });
   }
 }
 
@@ -452,7 +456,9 @@ export function registerDaemonCommands(
             console.log('Daemon LaunchAgent not installed');
             return;
           }
-          daemonStopDarwin();
+          // kickstart -k kills the running instance and starts a fresh one atomically.
+          // Do NOT call daemonStopDarwin() first — bootout unregisters the service,
+          // after which kickstart has nothing to target.
           daemonStartDarwin();
           console.log('Daemon restarted');
           return;
