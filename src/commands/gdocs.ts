@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { writeFile } from 'fs/promises';
+import { writeFile, readFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
 import { setProfile, getProfile } from '../config/config-manager';
@@ -7,7 +7,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDocsClient } from '../services/gdocs/client';
-import { printGDocsList, printGDocCreated, raw } from '../utils/output';
+import { printGDocsList, printGDocCreated, printGDocsBatchResult, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -151,6 +151,56 @@ export function registerGDocsCommands(program: Command): void {
 Query syntax: name contains '...', name = '...', 'me' in owners,
 modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.
 Combine with 'and'/'or'.`,
+  );
+
+  const batchCmd = gdocs
+    .command('batch')
+    .argument('<doc-id-or-url>', 'Document ID or URL')
+    .description('Execute raw documents.batchUpdate requests (escape hatch)')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .option('--requests-json <json>', 'Inline JSON array of batchUpdate requests')
+    .option('--file <path>', 'Path to a JSON file containing the requests array')
+    .action(async (docIdOrUrl: string, options) => {
+      try {
+        if (!options.requestsJson && !options.file) {
+          throw new CliError('INVALID_PARAMS', 'Provide --requests-json or --file');
+        }
+        if (options.requestsJson && options.file) {
+          throw new CliError('INVALID_PARAMS', '--requests-json and --file are mutually exclusive');
+        }
+
+        const source = options.requestsJson ?? (await readFile(options.file, 'utf8'));
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(source);
+        } catch (err) {
+          throw new CliError('INVALID_PARAMS', `Invalid JSON: ${err instanceof Error ? err.message : err}`);
+        }
+        if (!Array.isArray(parsed)) {
+          throw new CliError('INVALID_PARAMS', 'Input must be a JSON array of Request objects');
+        }
+
+        const { client, profile } = await getGDocsClient(options.profile);
+        await enforceWriteAccess('gdocs', profile, 'execute batch update');
+        const result = await client.batch(docIdOrUrl, parsed as Parameters<typeof client.batch>[1]);
+        printGDocsBatchResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  addExamples(
+    batchCmd,
+    `Examples:
+
+  # apply bold to a range of text (start/end offsets from the document body)
+  agentio gdocs batch 1A2bCdEf... --requests-json '[{"updateTextStyle":{"range":{"startIndex":1,"endIndex":10},"textStyle":{"bold":true},"fields":"bold"}}]'
+
+  # load requests from a file
+  agentio gdocs batch 1A2bCdEf... --file ./requests.json
+
+Accepts an array of Docs API Request objects. See:
+https://developers.google.com/docs/api/reference/rest/v1/documents/request`,
   );
 
   // Profile management

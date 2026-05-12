@@ -26,3 +26,8 @@ export interface GDocsCreateResult {
   title: string;
   webViewLink: string;
 }
+
+export interface GDocsBatchResult {
+  replies: number;
+  documentId: string;
+}

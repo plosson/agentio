@@ -1,19 +1,22 @@
 import { Readable } from 'stream';
 import { drive, type drive_v3 } from '@googleapis/drive';
+import { docs, type docs_v1 } from '@googleapis/docs';
 import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
-import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult } from '../../types/gdocs';
+import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult, GDocsBatchResult } from '../../types/gdocs';
 
 export class GDocsClient implements ServiceClient {
   private credentials: GDocsCredentials;
   private drive: drive_v3.Drive;
+  private docsApi: docs_v1.Docs;
 
   constructor(credentials: GDocsCredentials) {
     this.credentials = credentials;
     const auth = this.createOAuthClient();
     this.drive = drive({ version: 'v3', auth: auth as any });
+    this.docsApi = docs({ version: 'v1', auth: auth as any });
   }
 
   async validate(): Promise<ValidationResult> {
@@ -111,6 +114,28 @@ export class GDocsClient implements ServiceClient {
       }));
     } catch (err) {
       this.throwApiError(err, 'list documents');
+    }
+  }
+
+  async batch(docIdOrUrl: string, requests: docs_v1.Schema$Request[]): Promise<GDocsBatchResult> {
+    const documentId = this.extractDocId(docIdOrUrl);
+
+    if (!Array.isArray(requests) || requests.length === 0) {
+      throw new CliError('INVALID_PARAMS', 'requests must be a non-empty array');
+    }
+
+    try {
+      const response = await this.docsApi.documents.batchUpdate({
+        documentId,
+        requestBody: { requests },
+      });
+
+      return {
+        replies: response.data.replies?.length ?? 0,
+        documentId,
+      };
+    } catch (err) {
+      this.throwApiError(err, 'execute batch update');
     }
   }
 

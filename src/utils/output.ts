@@ -1,7 +1,7 @@
 import { homedir } from 'os';
 import type { GmailMessage, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
-import type { GDocsDocument, GDocsCreateResult } from '../types/gdocs';
+import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult } from '../types/gdocs';
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult } from '../types/gdrive';
 import type { GCalCalendar, GCalEvent, GCalFreeBusyResponse } from '../types/gcal';
 import type { GTaskList, GTask } from '../types/gtasks';
@@ -697,6 +697,11 @@ export function printGDocCreated(result: GDocsCreateResult): void {
   console.log(`ID: ${result.id}`);
   console.log(`Title: ${result.title}`);
   console.log(`Link: ${result.webViewLink}`);
+}
+
+export function printGDocsBatchResult(result: GDocsBatchResult): void {
+  console.log(`Batch update applied to ${result.documentId}`);
+  console.log(`  Replies: ${result.replies}`);
 }
 
 // Google Sheets specific formatters
