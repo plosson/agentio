@@ -700,8 +700,8 @@ export function printGDocCreated(result: GDocsCreateResult): void {
 }
 
 export function printGDocsBatchResult(result: GDocsBatchResult): void {
-  console.log(`Batch update applied to ${result.documentId}`);
-  console.log(`  Replies: ${result.replies}`);
+  console.error(`Batch update applied to ${result.documentId} (${result.replies.length} replies)`);
+  console.log(JSON.stringify({ documentId: result.documentId, replies: result.replies }, null, 2));
 }
 
 // Google Sheets specific formatters

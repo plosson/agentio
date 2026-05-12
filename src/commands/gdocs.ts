@@ -153,6 +153,33 @@ modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.
 Combine with 'and'/'or'.`,
   );
 
+  addExamples(
+    gdocs
+      .command('structure')
+      .argument('<doc-id-or-url>', 'Document ID or URL')
+      .description('Dump the full Docs API document representation as JSON')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (docIdOrUrl: string, options) => {
+        try {
+          const { client } = await getGDocsClient(options.profile);
+          const structure = await client.getStructure(docIdOrUrl);
+          console.log(JSON.stringify(structure, null, 2));
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # dump full document structure (segment IDs, named styles, body indices, headers, footers)
+  agentio gdocs structure 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # extract the headerId after a createHeader batchUpdate
+  agentio gdocs structure 1A2bCdEf... | jq '.headers | keys'
+
+  # get body content with indices
+  agentio gdocs structure 1A2bCdEf... | jq '.body.content'`,
+  );
+
   const batchCmd = gdocs
     .command('batch')
     .argument('<doc-id-or-url>', 'Document ID or URL')

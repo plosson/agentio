@@ -28,6 +28,6 @@ export interface GDocsCreateResult {
 }
 
 export interface GDocsBatchResult {
-  replies: number;
   documentId: string;
+  replies: unknown[];
 }

@@ -131,11 +131,22 @@ export class GDocsClient implements ServiceClient {
       });
 
       return {
-        replies: response.data.replies?.length ?? 0,
         documentId,
+        replies: response.data.replies ?? [],
       };
     } catch (err) {
       this.throwApiError(err, 'execute batch update');
+    }
+  }
+
+  async getStructure(docIdOrUrl: string): Promise<unknown> {
+    const documentId = this.extractDocId(docIdOrUrl);
+
+    try {
+      const response = await this.docsApi.documents.get({ documentId });
+      return response.data;
+    } catch (err) {
+      this.throwApiError(err, 'get document structure');
     }
   }
 
