@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import type { GmailMessage, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult } from '../types/gdocs';
-import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult } from '../types/gdrive';
+import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult } from '../types/gdrive';
 import type { GCalCalendar, GCalEvent, GCalFreeBusyResponse } from '../types/gcal';
 import type { GTaskList, GTask } from '../types/gtasks';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
@@ -1003,6 +1003,35 @@ export function printGDriveUploaded(result: GDriveUploadResult): void {
   console.log(`  Size: ${formatBytes(result.size)}`);
   console.log(`  Type: ${result.mimeType}`);
   if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
+}
+
+export function printGDriveShared(result: GDriveShareResult, fileId: string): void {
+  console.log('Permission created');
+  console.log(`  Permission ID: ${result.permissionId}`);
+  console.log(`  Type: ${result.type}`);
+  console.log(`  Role: ${result.role}`);
+  if (result.emailAddress) console.log(`  Email: ${result.emailAddress}`);
+  if (result.domain) console.log(`  Domain: ${result.domain}`);
+  if (result.type === 'anyone') {
+    console.log(`  Public URL: https://drive.google.com/uc?id=${fileId}`);
+  }
+}
+
+export function printGDrivePermissions(permissions: GDrivePermission[]): void {
+  if (permissions.length === 0) {
+    console.log('No permissions found');
+    return;
+  }
+
+  console.log(`Permissions (${permissions.length})\n`);
+
+  for (const p of permissions) {
+    const target = p.emailAddress || p.domain || p.type;
+    const discovery = p.type === 'anyone' && p.allowFileDiscovery ? ' (discoverable)' : '';
+    console.log(`  ${p.role.padEnd(10)} ${target}${discovery}`);
+    console.log(`    ID: ${p.id}`);
+    if (p.displayName) console.log(`    Name: ${p.displayName}`);
+  }
 }
 
 // Google Calendar specific formatters

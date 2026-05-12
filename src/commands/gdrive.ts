@@ -6,7 +6,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDriveClient } from '../services/gdrive/client';
-import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded } from '../utils/output';
+import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -211,6 +211,7 @@ Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.`,
       .option('--folder <id>', 'Folder ID to upload to')
       .option('--type <mime>', 'MIME type (auto-detected if not specified)')
       .option('--convert', 'Convert to Google Workspace format (Doc, Sheet, or Slides)')
+      .option('--public', 'Share with anyone as reader after upload (shorthand for share --anyone)')
       .action(async (filePath: string, options) => {
         try {
           const { client, profile } = await getGDriveClient(options.profile);
@@ -223,6 +224,11 @@ Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.`,
             convert: options.convert,
           });
           printGDriveUploaded(result);
+
+          if (options.public) {
+            const shareResult = await client.share(result.id, { type: 'anyone', role: 'reader' });
+            printGDriveShared(shareResult, result.id);
+          }
         } catch (error) {
           handleError(error);
         }
@@ -241,8 +247,155 @@ Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.`,
   # upload and convert .xlsx to a native Google Sheet
   agentio gdrive put data.xlsx --convert
 
+  # upload an image and make it publicly accessible (for Docs/Slides API image insertion)
+  agentio gdrive put banner.png --public
+
 Conversion: docx/doc/odt/txt/html/rtf -> Google Doc,
 xlsx/xls/ods/csv/tsv -> Google Sheet, pptx/ppt/odp -> Google Slides.`,
+  );
+
+  addExamples(
+    gdrive
+      .command('permissions')
+      .argument('<file-id-or-url>', 'File ID or URL')
+      .description('List permissions on a file')
+      .option('--profile <name>', 'Profile name')
+      .action(async (fileIdOrUrl: string, options) => {
+        try {
+          const { client } = await getGDriveClient(options.profile);
+          const perms = await client.permissions(fileIdOrUrl);
+          printGDrivePermissions(perms);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list all permissions on a file
+  agentio gdrive permissions 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789`,
+  );
+
+  const shareCmd = gdrive
+    .command('share')
+    .argument('<file-id-or-url>', 'File ID or URL')
+    .description('Share a file by creating a permission')
+    .option('--profile <name>', 'Profile name')
+    .option('--anyone', 'Share via link (type=anyone)')
+    .option('--user <email>', 'Share with a specific user')
+    .option('--domain <domain>', 'Share with an entire domain')
+    .option('--group <email>', 'Share with a group')
+    .option('--role <role>', 'Permission role: reader, commenter, writer', 'reader')
+    .option('--notify', 'Send notification email (default: off)')
+    .option('--message <text>', 'Message body for notification email (requires --notify)')
+    .option('--allow-discovery', 'Make file findable via search (only with --anyone)')
+    .action(async (fileIdOrUrl: string, options) => {
+      try {
+        const targets = [options.anyone, options.user, options.domain, options.group].filter(Boolean);
+        if (targets.length === 0) {
+          throw new CliError('INVALID_PARAMS', 'Specify one of --anyone, --user, --domain, or --group');
+        }
+        if (targets.length > 1) {
+          throw new CliError('INVALID_PARAMS', '--anyone, --user, --domain, and --group are mutually exclusive');
+        }
+
+        const validRoles = ['reader', 'commenter', 'writer'];
+        if (!validRoles.includes(options.role)) {
+          throw new CliError('INVALID_PARAMS', `Invalid role: ${options.role}`, 'Use reader, commenter, or writer');
+        }
+
+        const { client, profile } = await getGDriveClient(options.profile);
+        await enforceWriteAccess('gdrive', profile, 'share file');
+
+        const type = options.anyone ? 'anyone' : options.user ? 'user' : options.domain ? 'domain' : 'group';
+        const emailAddress = options.user || options.group || undefined;
+        const domain = options.domain || undefined;
+
+        const fileId = fileIdOrUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] ||
+          fileIdOrUrl.match(/id=([a-zA-Z0-9_-]+)/)?.[1] ||
+          fileIdOrUrl;
+
+        const result = await client.share(fileIdOrUrl, {
+          type,
+          role: options.role,
+          emailAddress,
+          domain,
+          sendNotificationEmail: options.notify ?? false,
+          emailMessage: options.message,
+          allowFileDiscovery: options.allowDiscovery ?? false,
+        });
+
+        printGDriveShared(result, fileId);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  addExamples(
+    shareCmd,
+    `Examples:
+
+  # make a file publicly accessible via link (e.g. for Docs/Slides API image insertion)
+  agentio gdrive share 1A2bCdEf... --anyone
+
+  # share with a specific user as writer
+  agentio gdrive share 1A2bCdEf... --user alice@example.com --role writer
+
+  # share with a user and send a notification email
+  agentio gdrive share 1A2bCdEf... --user alice@example.com --notify --message "Here's the file"
+
+  # share with an entire domain
+  agentio gdrive share 1A2bCdEf... --domain example.com --role reader
+
+  # make publicly discoverable via search
+  agentio gdrive share 1A2bCdEf... --anyone --allow-discovery`,
+  );
+
+  const unshareCmd = gdrive
+    .command('unshare')
+    .argument('<file-id-or-url>', 'File ID or URL')
+    .description('Remove a permission from a file')
+    .option('--profile <name>', 'Profile name')
+    .option('--permission-id <id>', 'Permission ID to remove')
+    .option('--anyone', 'Remove the anyone-with-link permission')
+    .action(async (fileIdOrUrl: string, options) => {
+      try {
+        if (!options.permissionId && !options.anyone) {
+          throw new CliError('INVALID_PARAMS', 'Specify --permission-id or --anyone');
+        }
+        if (options.permissionId && options.anyone) {
+          throw new CliError('INVALID_PARAMS', '--permission-id and --anyone are mutually exclusive');
+        }
+
+        const { client, profile } = await getGDriveClient(options.profile);
+        await enforceWriteAccess('gdrive', profile, 'remove permission');
+
+        let permissionId: string = options.permissionId;
+
+        if (options.anyone) {
+          const perms = await client.permissions(fileIdOrUrl);
+          const anyonePerm = perms.find((p) => p.type === 'anyone');
+          if (!anyonePerm) {
+            throw new CliError('NOT_FOUND', 'No anyone-with-link permission found on this file');
+          }
+          permissionId = anyonePerm.id;
+        }
+
+        await client.unshare(fileIdOrUrl, permissionId);
+        console.log(`Permission ${permissionId} removed`);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  addExamples(
+    unshareCmd,
+    `Examples:
+
+  # remove anyone-with-link access
+  agentio gdrive unshare 1A2bCdEf... --anyone
+
+  # remove a specific permission by ID
+  agentio gdrive unshare 1A2bCdEf... --permission-id AKioiA...`,
   );
 
   // Profile management

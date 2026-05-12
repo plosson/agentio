@@ -17,6 +17,9 @@ import type {
   GDriveUploadResult,
   GDriveUploadOptions,
   GDriveExportFormat,
+  GDrivePermission,
+  GDriveShareOptions,
+  GDriveShareResult,
 } from '../../types/gdrive';
 
 // Export MIME types for Google Workspace files
@@ -356,6 +359,76 @@ export class GDriveClient implements ServiceClient {
     } catch (err) {
       if (err instanceof CliError) throw err;
       this.throwApiError(err, 'upload file');
+    }
+  }
+
+  async permissions(fileIdOrUrl: string): Promise<GDrivePermission[]> {
+    const fileId = this.extractFileId(fileIdOrUrl);
+
+    try {
+      const response = await this.drive.permissions.list({
+        fileId,
+        supportsAllDrives: true,
+        fields: 'permissions(id,type,role,emailAddress,domain,displayName,allowFileDiscovery)',
+      });
+
+      return (response.data.permissions || []).map((p) => ({
+        id: p.id!,
+        type: p.type as GDrivePermission['type'],
+        role: p.role as GDrivePermission['role'],
+        emailAddress: p.emailAddress || undefined,
+        domain: p.domain || undefined,
+        displayName: p.displayName || undefined,
+        allowFileDiscovery: p.allowFileDiscovery ?? undefined,
+      }));
+    } catch (err) {
+      this.throwApiError(err, 'list permissions');
+    }
+  }
+
+  async share(fileIdOrUrl: string, options: GDriveShareOptions): Promise<GDriveShareResult> {
+    const fileId = this.extractFileId(fileIdOrUrl);
+    const role = options.role || 'reader';
+
+    try {
+      const response = await this.drive.permissions.create({
+        fileId,
+        supportsAllDrives: true,
+        sendNotificationEmail: options.sendNotificationEmail ?? false,
+        emailMessage: options.emailMessage,
+        requestBody: {
+          type: options.type,
+          role,
+          emailAddress: options.emailAddress,
+          domain: options.domain,
+          allowFileDiscovery: options.allowFileDiscovery ?? false,
+        },
+        fields: 'id,type,role,emailAddress,domain',
+      });
+
+      return {
+        permissionId: response.data.id!,
+        type: response.data.type as GDriveShareResult['type'],
+        role: response.data.role as GDriveShareResult['role'],
+        emailAddress: response.data.emailAddress || undefined,
+        domain: response.data.domain || undefined,
+      };
+    } catch (err) {
+      this.throwApiError(err, 'share file');
+    }
+  }
+
+  async unshare(fileIdOrUrl: string, permissionId: string): Promise<void> {
+    const fileId = this.extractFileId(fileIdOrUrl);
+
+    try {
+      await this.drive.permissions.delete({
+        fileId,
+        permissionId,
+        supportsAllDrives: true,
+      });
+    } catch (err) {
+      this.throwApiError(err, 'remove permission');
     }
   }
 

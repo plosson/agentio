@@ -79,3 +79,34 @@ export interface GDriveUploadResult {
   size: number;
   webViewLink?: string;
 }
+
+export type GDrivePermissionType = 'anyone' | 'user' | 'domain' | 'group';
+export type GDrivePermissionRole = 'reader' | 'commenter' | 'writer' | 'owner';
+
+export interface GDrivePermission {
+  id: string;
+  type: GDrivePermissionType;
+  role: GDrivePermissionRole;
+  emailAddress?: string;
+  domain?: string;
+  displayName?: string;
+  allowFileDiscovery?: boolean;
+}
+
+export interface GDriveShareOptions {
+  type: GDrivePermissionType;
+  role?: GDrivePermissionRole;
+  emailAddress?: string;
+  domain?: string;
+  sendNotificationEmail?: boolean;
+  emailMessage?: string;
+  allowFileDiscovery?: boolean;
+}
+
+export interface GDriveShareResult {
+  permissionId: string;
+  type: GDrivePermissionType;
+  role: GDrivePermissionRole;
+  emailAddress?: string;
+  domain?: string;
+}
