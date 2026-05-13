@@ -20,6 +20,8 @@ import type {
   GDrivePermission,
   GDriveShareOptions,
   GDriveShareResult,
+  GDriveCopyOptions,
+  GDriveCopyResult,
 } from '../../types/gdrive';
 
 // Export MIME types for Google Workspace files
@@ -359,6 +361,41 @@ export class GDriveClient implements ServiceClient {
     } catch (err) {
       if (err instanceof CliError) throw err;
       this.throwApiError(err, 'upload file');
+    }
+  }
+
+  async copy(options: GDriveCopyOptions): Promise<GDriveCopyResult> {
+    if (!this.credentials.accessLevel || this.credentials.accessLevel === 'readonly') {
+      throw new CliError(
+        'PERMISSION_DENIED',
+        'This profile has read-only access',
+        'Create a new profile with full access: agentio gdrive profile add --full'
+      );
+    }
+
+    const fileId = this.extractFileId(options.fileIdOrUrl);
+
+    const requestBody: { name?: string; parents?: string[] } = {};
+    if (options.name) requestBody.name = options.name;
+    if (options.folderId) requestBody.parents = [options.folderId];
+
+    try {
+      const response = await this.drive.files.copy({
+        fileId,
+        supportsAllDrives: true,
+        requestBody,
+        fields: 'id,name,mimeType,parents,webViewLink',
+      });
+
+      return {
+        id: response.data.id!,
+        name: response.data.name || 'Untitled',
+        mimeType: response.data.mimeType || 'application/octet-stream',
+        parents: response.data.parents || undefined,
+        webViewLink: response.data.webViewLink || undefined,
+      };
+    } catch (err) {
+      this.throwApiError(err, 'copy file');
     }
   }
 

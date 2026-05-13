@@ -80,6 +80,20 @@ export interface GDriveUploadResult {
   webViewLink?: string;
 }
 
+export interface GDriveCopyOptions {
+  fileIdOrUrl: string;
+  name?: string;
+  folderId?: string;
+}
+
+export interface GDriveCopyResult {
+  id: string;
+  name: string;
+  mimeType: string;
+  parents?: string[];
+  webViewLink?: string;
+}
+
 export type GDrivePermissionType = 'anyone' | 'user' | 'domain' | 'group';
 export type GDrivePermissionRole = 'reader' | 'commenter' | 'writer' | 'owner';
 

@@ -6,7 +6,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDriveClient } from '../services/gdrive/client';
-import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions } from '../utils/output';
+import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions, printGDriveCopied } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -252,6 +252,47 @@ Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.`,
 
 Conversion: docx/doc/odt/txt/html/rtf -> Google Doc,
 xlsx/xls/ods/csv/tsv -> Google Sheet, pptx/ppt/odp -> Google Slides.`,
+  );
+
+  addExamples(
+    gdrive
+      .command('copy')
+      .argument('<file-id-or-url>', 'File ID or URL')
+      .description('Copy a file (server-side clone via Drive API)')
+      .option('--profile <name>', 'Profile name')
+      .option('--name <name>', 'Title for the copy (default: "Copy of <original>")')
+      .option('--folder <id>', 'Destination folder ID (default: same as source)')
+      .action(async (fileIdOrUrl: string, options) => {
+        try {
+          const { client, profile } = await getGDriveClient(options.profile);
+          await enforceWriteAccess('gdrive', profile, 'copy file');
+          const result = await client.copy({
+            fileIdOrUrl,
+            name: options.name,
+            folderId: options.folder,
+          });
+          printGDriveCopied(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # clone a Google Doc into the same folder (default name: "Copy of ...")
+  agentio gdrive copy 1A2bCdEf...
+
+  # clone with a custom title
+  agentio gdrive copy 1A2bCdEf... --name "Q2 report (working copy)"
+
+  # clone into a different folder
+  agentio gdrive copy 1A2bCdEf... --folder 1XyZaBc...
+
+  # clone with custom title into a specific folder
+  agentio gdrive copy https://docs.google.com/document/d/1A2bCdEf.../edit \\
+    --name "Draft v2" --folder 1XyZaBc...
+
+Server-side copy preserves layout, smart chips, and native blocks
+exactly — no re-rendering. Comments are not carried over.`,
   );
 
   addExamples(

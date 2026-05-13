@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import type { GmailMessage, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
 import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult } from '../types/gdocs';
-import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult } from '../types/gdrive';
+import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult, GDriveCopyResult } from '../types/gdrive';
 import type { GCalCalendar, GCalEvent, GCalFreeBusyResponse } from '../types/gcal';
 import type { GTaskList, GTask } from '../types/gtasks';
 import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
@@ -1002,6 +1002,14 @@ export function printGDriveUploaded(result: GDriveUploadResult): void {
   console.log(`  ID: ${result.id}`);
   console.log(`  Size: ${formatBytes(result.size)}`);
   console.log(`  Type: ${result.mimeType}`);
+  if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
+}
+
+export function printGDriveCopied(result: GDriveCopyResult): void {
+  console.log(`Copied: ${result.name}`);
+  console.log(`  ID: ${result.id}`);
+  console.log(`  Type: ${result.mimeType}`);
+  if (result.parents && result.parents.length > 0) console.log(`  Folder: ${result.parents[0]}`);
   if (result.webViewLink) console.log(`  Link: ${result.webViewLink}`);
 }
 
