@@ -134,7 +134,7 @@ agentio gmail list [--limit N] [--query Q] [--label L]
 agentio gmail get <message-id> [--format text|html|raw] [--body-only]
 agentio gmail search --query <query> [--limit N]
 agentio gmail send --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]
-agentio gmail draft --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]
+agentio gmail draft [draft-id] --to <email> --subject <subject> [--body <body>] [--attachment <path>] [--reply-to <thread-id>]  # pass draft-id to replace an existing draft
 agentio gmail archive <message-id...>
 agentio gmail mark <message-id...> --read|--unread
 agentio gmail labels list
