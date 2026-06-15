@@ -43,33 +43,34 @@ jobs:
             exit 1
           fi
 
-  publish-npm:
-    name: Publish to npm
-    runs-on: ubuntu-latest
-    needs: validate
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.11
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  # TODO: Re-enable npm publishing if needed (requires a valid NPM_TOKEN secret)
+  # publish-npm:
+  #   name: Publish to npm
+  #   runs-on: ubuntu-latest
+  #   needs: validate
+  #
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
+  #
+  #     - name: Setup Bun
+  #       uses: oven-sh/setup-bun@v2
+  #       with:
+  #         bun-version: 1.3.11
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v5
+  #       with:
+  #         node-version: '20'
+  #         registry-url: 'https://registry.npmjs.org'
+  #
+  #     - name: Install dependencies
+  #       run: bun install --frozen-lockfile
+  #
+  #     - name: Publish to npm
+  #       run: npm publish --access public
+  #       env:
+  #         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   build-binaries:
     name: Build ${{ matrix.target }}
@@ -142,7 +143,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [validate, publish-npm, build-binaries]
+    needs: [validate, build-binaries]
 
     steps:
       - name: Checkout
