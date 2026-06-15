@@ -78,6 +78,13 @@ export interface GChatListOptions {
   limit?: number;
   threadId?: string;
   since?: Date;
+  until?: Date;
+}
+
+export interface GChatListResult {
+  messages: GChatMessage[];
+  /** True when --limit was reached while more messages still exist in range. */
+  truncated: boolean;
 }
 
 export interface GChatGetOptions {
