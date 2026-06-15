@@ -119,8 +119,8 @@ export function printSendResult(result: { id: string; threadId: string }): void 
 }
 
 // Format draft creation result
-export function printDraftResult(result: { id: string; messageId: string }): void {
-  console.log('Draft created');
+export function printDraftResult(result: { id: string; messageId: string }, updated = false): void {
+  console.log(updated ? 'Draft updated' : 'Draft created');
   console.log(`Draft ID: ${result.id}`);
   console.log(`Message ID: ${result.messageId}`);
 }

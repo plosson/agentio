@@ -457,6 +457,34 @@ export class GmailClient implements ServiceClient {
     }
   }
 
+  async updateDraft(draftId: string, options: GmailSendOptions): Promise<{ id: string; messageId: string }> {
+    const encodedMessage = await this.buildEncodedMessage(options);
+
+    try {
+      const response = await this.gmail.users.drafts.update({
+        userId: 'me',
+        id: draftId,
+        requestBody: {
+          message: {
+            raw: encodedMessage,
+            ...(options.replyTo ? { threadId: options.replyTo } : {}),
+          },
+        },
+      });
+
+      return {
+        id: response.data.id!,
+        messageId: response.data.message?.id || '',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('404') || message.toLowerCase().includes('not found')) {
+        throw new CliError('NOT_FOUND', `Draft not found: ${draftId}`, 'Check the draft ID (use the ID returned when the draft was created).');
+      }
+      throw new CliError('API_ERROR', `Failed to update draft: ${message}`);
+    }
+  }
+
   private async buildMultipartMessage(options: {
     from: string;
     to: string[];

@@ -370,14 +370,21 @@ Combine with spaces (AND), OR, or - to negate.`,
   );
 
   addExamples(
-    addComposeOptions(gmail.command('draft').description('Create an email draft'))
-      .action(async (options) => {
+    addComposeOptions(
+      gmail
+        .command('draft')
+        .description('Create an email draft (or update an existing one with [draft-id])')
+        .argument('[draft-id]', 'Existing draft ID to replace (omit to create a new draft)'),
+    )
+      .action(async (draftId: string | undefined, options) => {
         try {
           const sendOptions = await parseSendOptions(options);
           const { client, profile } = await getGmailClient(options.profile);
-          await enforceWriteAccess('gmail', profile, 'create draft');
-          const result = await client.draft(sendOptions);
-          printDraftResult(result);
+          await enforceWriteAccess('gmail', profile, draftId ? 'update draft' : 'create draft');
+          const result = draftId
+            ? await client.updateDraft(draftId, sendOptions)
+            : await client.draft(sendOptions);
+          printDraftResult(result, Boolean(draftId));
         } catch (error) {
           handleError(error);
         }
@@ -386,6 +393,9 @@ Combine with spaces (AND), OR, or - to negate.`,
 
   # save a draft for later editing in Gmail
   agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # update an existing draft (replaces its entire content)
+  agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
 
   # draft a reply within an existing thread
   agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
