@@ -436,14 +436,26 @@ export class GChatClient implements ServiceClient {
       }
       const filter = filters.length > 0 ? filters.join(' AND ') : undefined;
 
-      const response = await chat.spaces.messages.list({
-        parent: `spaces/${options.spaceId}`,
-        pageSize: options.limit || 10,
-        orderBy: 'createTime desc',
-        filter,
-      });
+      // The Chat API caps pageSize at 1000 per page and returns the rest via
+      // nextPageToken. Loop until we've collected `limit` messages or run out
+      // of pages, so large --limit values aren't silently truncated to one page.
+      const limit = options.limit || 10;
+      const messages: chat_v1.Schema$Message[] = [];
+      let pageToken: string | undefined;
 
-      const messages = response.data.messages || [];
+      do {
+        const response = await chat.spaces.messages.list({
+          parent: `spaces/${options.spaceId}`,
+          pageSize: Math.min(limit - messages.length, 1000),
+          orderBy: 'createTime desc',
+          filter,
+          pageToken,
+        });
+        messages.push(...(response.data.messages || []));
+        pageToken = response.data.nextPageToken || undefined;
+      } while (pageToken && messages.length < limit);
+
+      if (messages.length > limit) messages.length = limit;
 
       // Resolve unique sender IDs to display names via People API
       const senderIds = [...new Set(messages.map(m => m.sender?.name).filter(Boolean))] as string[];
