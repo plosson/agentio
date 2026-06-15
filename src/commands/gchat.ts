@@ -154,17 +154,36 @@ export function registerGChatCommands(program: Command): void {
       .option('--limit <n>', 'Number of messages', '10')
       .option('--thread <id>', 'Filter by thread ID')
       .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
+      .option('--until <date>', 'Only messages before this date (YYYY-MM-DD)')
+      .option('--format <format>', 'Output format: text or json', 'text')
       .action(async (options) => {
         try {
+          if (options.format !== 'text' && options.format !== 'json') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${options.format}`, 'Use --format text or --format json');
+          }
+          const limit = parseInt(options.limit, 10);
           const { client } = await getGChatClient(options.profile);
-          const messages = await client.list({
+          const { messages, truncated } = await client.list({
             spaceId: options.space,
-            limit: parseInt(options.limit, 10),
+            limit,
             threadId: options.thread,
             since: options.since ? new Date(options.since) : undefined,
+            until: options.until ? new Date(options.until) : undefined,
           });
 
-          printGChatMessageList(messages);
+          if (options.format === 'json') {
+            console.log(JSON.stringify(messages, null, 2));
+          } else {
+            printGChatMessageList(messages);
+          }
+
+          if (truncated) {
+            const oldest = messages[messages.length - 1]?.createTime;
+            console.error(
+              `Warning: reached --limit ${limit}; more messages exist before ${oldest}. ` +
+              `Raise --limit or narrow the window with --since/--until.`
+            );
+          }
         } catch (error) {
           handleError(error);
         }
@@ -180,8 +199,8 @@ export function registerGChatCommands(program: Command): void {
   # only messages in a specific thread
   agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
 
-  # messages since a given date
-  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01`,
+  # messages within a closed date range, as JSON for scripting
+  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json`,
   );
 
   addExamples(
@@ -191,15 +210,23 @@ export function registerGChatCommands(program: Command): void {
       .description('Get a message from a Google Chat space (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
       .requiredOption('--space <id>', 'Space ID')
+      .option('--format <format>', 'Output format: text or json', 'text')
       .action(async (messageId: string, options) => {
         try {
+          if (options.format !== 'text' && options.format !== 'json') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${options.format}`, 'Use --format text or --format json');
+          }
           const { client } = await getGChatClient(options.profile);
           const message = await client.get({
             spaceId: options.space,
             messageId: messageId,
           });
 
-          printGChatMessage(message);
+          if (options.format === 'json') {
+            console.log(JSON.stringify(message, null, 2));
+          } else {
+            printGChatMessage(message);
+          }
         } catch (error) {
           handleError(error);
         }
@@ -207,7 +234,10 @@ export function registerGChatCommands(program: Command): void {
     `Examples:
 
   # fetch one message by id from a space (OAuth only)
-  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234`,
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234
+
+  # as JSON for scripting
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json`,
   );
 
   addExamples(

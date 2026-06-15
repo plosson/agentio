@@ -16,6 +16,7 @@ import type {
   GChatWebhookCredentials,
   GChatOAuthCredentials,
   GChatMessage,
+  GChatListResult,
   GChatSpace,
   GChatUser,
   GChatMember,
@@ -113,7 +114,7 @@ export class GChatClient implements ServiceClient {
     return this.sendViaOAuth(options);
   }
 
-  async list(options: GChatListOptions): Promise<GChatMessage[]> {
+  async list(options: GChatListOptions): Promise<GChatListResult> {
     if (!options.spaceId?.trim()) {
       throw new CliError(
         'INVALID_PARAMS',
@@ -422,7 +423,7 @@ export class GChatClient implements ServiceClient {
     }
   }
 
-  private async listViaOAuth(options: GChatListOptions): Promise<GChatMessage[]> {
+  private async listViaOAuth(options: GChatListOptions): Promise<GChatListResult> {
     const { auth, chat } = this.getOAuthChatApi();
 
     try {
@@ -433,6 +434,9 @@ export class GChatClient implements ServiceClient {
       }
       if (options.since) {
         filters.push(`createTime > "${options.since.toISOString()}"`);
+      }
+      if (options.until) {
+        filters.push(`createTime < "${options.until.toISOString()}"`);
       }
       const filter = filters.length > 0 ? filters.join(' AND ') : undefined;
 
@@ -455,13 +459,16 @@ export class GChatClient implements ServiceClient {
         pageToken = response.data.nextPageToken || undefined;
       } while (pageToken && messages.length < limit);
 
+      // The loop only exits with a pageToken still set when it stopped on the
+      // limit, meaning more messages exist in range than were returned.
+      const truncated = !!pageToken;
       if (messages.length > limit) messages.length = limit;
 
       // Resolve unique sender IDs to display names via People API
       const senderIds = [...new Set(messages.map(m => m.sender?.name).filter(Boolean))] as string[];
       await this.resolveUsers(senderIds, auth);
 
-      return messages.map((msg: chat_v1.Schema$Message) => {
+      const mapped = messages.map((msg: chat_v1.Schema$Message) => {
         const gchatMsg: GChatMessage = {
           name: msg.name || '',
           createTime: msg.createTime || new Date().toISOString(),
@@ -477,6 +484,8 @@ export class GChatClient implements ServiceClient {
         }
         return gchatMsg;
       });
+
+      return { messages: mapped, truncated };
     } catch (err) {
       const code = this.getErrorCode(err);
       const message = this.getErrorMessage(err);
