@@ -21,7 +21,7 @@ function addComposeOptions(cmd: Command): Command {
     .option('--cc <email>', 'CC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
     .option('--bcc <email>', 'BCC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
     .option('--subject <subject>', 'Email subject (required unless --reply-to)')
-    .option('--body <body>', 'Email body (or pipe via stdin)')
+    .option('--body <body>', 'Email body (omit or pass "-" to read from stdin)')
     .option('--html', 'Treat body as HTML')
     .option('--reply-to <thread-id>', 'Thread ID to reply to (derives to/subject from thread)')
     .option('--attachment <path>', 'File to attach (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
@@ -29,7 +29,9 @@ function addComposeOptions(cmd: Command): Command {
 }
 
 async function parseBody(body: string | undefined): Promise<string> {
-  if (!body) {
+  // Treat a bare "-" as an explicit "read from stdin" sentinel, matching the
+  // common CLI convention (otherwise the literal "-" would be sent as the body).
+  if (!body || body === '-') {
     body = await readStdin() ?? undefined;
   }
   if (!body) {
