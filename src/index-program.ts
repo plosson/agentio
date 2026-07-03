@@ -84,7 +84,6 @@ export function createProgram(): Command {
   registerMcpCommands(program);
   registerDocsCommand(program);
   registerDaemonCommands(program);
-  registerDaemonCommands(program, { base: 'gateway', deprecated: true });
   registerDoctorCommand(program);
   registerProfileCommands(program);
   registerReauthCommand(program);

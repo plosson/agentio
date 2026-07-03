@@ -56,7 +56,6 @@ export interface Config {
   };
   env?: Record<string, string>;
   daemon?: DaemonConfig;
-  gateway?: GatewayConfig;  // legacy; read-only, migrated to daemon on load
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'sql';

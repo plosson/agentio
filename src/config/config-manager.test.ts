@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { migrateGatewayToDaemon, resolveProfile, setProfile } from './config-manager';
+import { resolveProfile, setProfile } from './config-manager';
 import { clearVaultCache, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import {
   clearPassphraseCache,
@@ -58,32 +58,5 @@ describe('resolveProfile multi-profile case', () => {
     } else {
       throw new Error(`Expected multiple profiles error, got: ${JSON.stringify(r)}`);
     }
-  });
-});
-
-describe('migrateGatewayToDaemon', () => {
-  test('copies gateway into daemon when daemon absent', () => {
-    const input = { profiles: {}, gateway: { apiKey: 'k' } };
-    const out = migrateGatewayToDaemon(input);
-    expect(out.daemon).toEqual({ apiKey: 'k' });
-    expect(out.gateway).toBeUndefined();
-  });
-
-  test('leaves daemon alone when already present', () => {
-    const input = {
-      profiles: {},
-      gateway: { apiKey: 'old' },
-      daemon: { apiKey: 'new' },
-    };
-    const out = migrateGatewayToDaemon(input);
-    expect(out.daemon?.apiKey).toBe('new');
-    expect(out.gateway).toBeUndefined();
-  });
-
-  test('is a no-op when neither is present', () => {
-    const input = { profiles: {} };
-    const out = migrateGatewayToDaemon(input);
-    expect(out.daemon).toBeUndefined();
-    expect(out.gateway).toBeUndefined();
   });
 });

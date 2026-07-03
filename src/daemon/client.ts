@@ -1,7 +1,7 @@
 import { CliError } from '../utils/errors';
 import { loadConfig } from '../config/config-manager';
 import { getEnv } from '../config/config-manager';
-import type { GatewayConfig, HealthResponse } from './types';
+import type { HealthResponse } from './types';
 
 let cachedConfig: { url: string; apiKey: string } | null = null;
 
@@ -11,25 +11,19 @@ let cachedConfig: { url: string; apiKey: string } | null = null;
 async function getDaemonConnection(): Promise<{ url: string; apiKey: string }> {
   if (cachedConfig) return cachedConfig;
 
-  // Check environment variables first; legacy AGENTIO_GATEWAY_* still works.
+  // Check environment variables first.
   const envUrl =
-    process.env.AGENTIO_DAEMON_URL || process.env.AGENTIO_GATEWAY_URL ||
-    await getEnv('AGENTIO_DAEMON_URL') || await getEnv('AGENTIO_GATEWAY_URL');
+    process.env.AGENTIO_DAEMON_URL || await getEnv('AGENTIO_DAEMON_URL');
   const envApiKey =
-    process.env.AGENTIO_DAEMON_API_KEY || process.env.AGENTIO_GATEWAY_API_KEY ||
-    await getEnv('AGENTIO_DAEMON_API_KEY') || await getEnv('AGENTIO_GATEWAY_API_KEY');
+    process.env.AGENTIO_DAEMON_API_KEY || await getEnv('AGENTIO_DAEMON_API_KEY');
 
   if (envUrl) {
     cachedConfig = { url: envUrl, apiKey: envApiKey || '' };
     return cachedConfig;
   }
 
-  // Load from config (post-migration: config.daemon; pre-migration: config.gateway)
-  const config = await loadConfig() as unknown as {
-    daemon?: GatewayConfig;
-    gateway?: GatewayConfig;
-  };
-  const daemonConfig = config.daemon ?? config.gateway;
+  const config = await loadConfig();
+  const daemonConfig = config.daemon;
 
   // Construct URL from server host:port (local daemon)
   const host = daemonConfig?.server?.host ?? '127.0.0.1';
@@ -64,7 +58,7 @@ async function request<T>(method: string, endpoint: string, body?: unknown): Pro
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new CliError('AUTH_FAILED', 'Daemon authentication failed', 'Check AGENTIO_DAEMON_API_KEY (or legacy AGENTIO_GATEWAY_API_KEY)');
+        throw new CliError('AUTH_FAILED', 'Daemon authentication failed', 'Check AGENTIO_DAEMON_API_KEY');
       }
 
       const errorData = await response.json().catch(() => ({})) as { error?: string };

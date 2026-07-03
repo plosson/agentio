@@ -13,14 +13,4 @@ describe('DaemonConfig', () => {
     };
     expect(cfg.scheduler?.watchedFolders[0].path).toBe('/tmp/x');
   });
-
-  test('Config accepts both daemon and gateway (back-compat)', () => {
-    const cfg: Config = {
-      profiles: {},
-      daemon: { apiKey: 'a' },
-      gateway: { apiKey: 'b' },
-    };
-    expect(cfg.daemon?.apiKey).toBe('a');
-    expect(cfg.gateway?.apiKey).toBe('b');
-  });
 });
