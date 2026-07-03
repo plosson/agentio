@@ -1,6 +1,6 @@
 ---
 name: agentio-daemon
-description: Use to manage the agentio daemon (real-time messaging connections + scheduler).
+description: Use to manage the agentio daemon (runs the scheduler for .run.md prompts).
 ---
 
 # Daemon via agentio
@@ -74,7 +74,7 @@ Show daemon status
 ```
 Examples:
 
-  # show daemon state and which adapters (whatsapp/telegram) are connected
+  # show whether the daemon is running
   agentio daemon status
 ```
 
@@ -112,23 +112,4 @@ Examples:
 
   # Linux systemd uninstall needs sudo
   sudo agentio daemon uninstall
-```
-
-## agentio daemon teleport <url>
-
-Transfer auth state to a remote daemon
-
-Options:
-
-- `--api-key <key>`: Remote daemon API key (will prompt if not provided)
-- `--service <service>`: Service to teleport (default: all) (default: all)
-
-```
-Examples:
-
-  # transfer all adapter auth state (e.g. WhatsApp pairing) to a remote daemon
-  agentio daemon teleport https://my-daemon.example.com
-
-  # only teleport WhatsApp; pass api key inline (default: prompt)
-  agentio daemon teleport https://my-daemon.example.com --service whatsapp --api-key gw_xxx
 ```

@@ -1,14 +1,13 @@
 # agentio - Agent I/O CLI
 
-A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a daemon for real-time messaging and scheduled task execution.
+A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a daemon for scheduled task execution.
 
 ## Tech Stack
 
 - **Runtime**: Bun
 - **Language**: TypeScript
 - **CLI Framework**: Commander.js
-- **Database**: SQLite (for daemon message storage and WhatsApp auth state)
-- **APIs**: googleapis, Telegram Bot API, Baileys (WhatsApp), Slack Web API, JIRA REST API, GitHub API
+- **APIs**: googleapis, Telegram Bot API, Slack Web API, JIRA REST API, GitHub API
 
 ## Running the CLI
 
@@ -34,7 +33,7 @@ src/
 │   ├── gmail.ts             # Gmail commands
 │   ├── gdocs.ts             # Google Docs commands
 │   ├── gdrive.ts            # Google Drive commands
-│   ├── telegram.ts          # Telegram commands
+│   ├── telegram.ts          # Telegram commands (send)
 │   ├── gchat.ts             # Google Chat commands
 │   ├── github.ts            # GitHub commands
 │   ├── jira.ts              # JIRA commands
@@ -42,9 +41,9 @@ src/
 │   ├── rss.ts               # RSS feed commands
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
-│   ├── whatsapp.ts          # WhatsApp commands
-│   ├── daemon.ts            # Daemon commands
-│   ├── gateway.ts           # Gateway alias (deprecated)
+│   ├── daemon.ts            # Daemon commands (scheduler lifecycle)
+│   ├── schedule.ts          # Schedule folder registration
+│   ├── mcp.ts               # Local MCP server commands
 │   ├── config.ts            # Configuration management
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
@@ -62,19 +61,12 @@ src/
 │   ├── rss/client.ts        # RSS feed parser
 │   ├── discourse/client.ts  # Discourse API wrapper
 │   └── sql/client.ts        # SQL database client
-├── daemon/                  # Daemon for real-time messaging and scheduling
+├── daemon/                  # Daemon for folder-watched scheduling
 │   ├── daemon.ts            # Daemon lifecycle management
-│   ├── api.ts               # HTTP API server
+│   ├── api.ts               # HTTP API server (health + scheduler control)
 │   ├── client.ts            # Daemon client for CLI
-│   ├── store.ts             # SQLite message storage
-│   ├── webhook.ts           # Outbound webhook notifications
 │   ├── types.ts             # Daemon type definitions
-│   ├── scheduler.ts         # In-process scheduler (60-second tick)
-│   └── adapters/            # Service adapters
-│       ├── types.ts         # Base adapter interface
-│       ├── whatsapp.ts      # WhatsApp adapter (Baileys)
-│       ├── whatsapp-auth.ts # WhatsApp auth state management
-│       └── telegram.ts      # Telegram adapter
+│   └── scheduler.ts         # In-process scheduler (60-second tick)
 ├── auth/                    # Authentication logic
 │   ├── oauth.ts             # Google OAuth flow
 │   ├── oauth-server.ts      # OAuth callback server
@@ -99,7 +91,6 @@ src/
 │   ├── rss.ts               # RSS types
 │   ├── discourse.ts         # Discourse types
 │   ├── sql.ts               # SQL types
-│   ├── whatsapp.ts          # WhatsApp types
 │   └── service.ts           # Generic service types
 └── utils/
     ├── errors.ts            # CliError class and error handling
@@ -125,7 +116,7 @@ agentio setup --reset --force  # Wipe vault, pointer, and stored passphrase
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
 - Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location (it's outside the typical Dropbox/iCloud roots by default).
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
-- Runtime files (`daemon.db`, `media/`, `daemon.log`) remain plaintext under `~/.config/agentio/`.
+- Runtime files (`daemon.log`) remain plaintext under `~/.config/agentio/`.
 
 ### Gmail
 
@@ -177,15 +168,6 @@ agentio gdrive profile add|list|remove
 ```bash
 agentio telegram send [message] [--parse-mode html|markdown] [--silent]
 agentio telegram profile add|list|remove
-
-# Daemon-based operations
-agentio telegram inbox pull [--limit N] [--status pending|done]
-agentio telegram inbox get <id>
-agentio telegram inbox ack <id>
-agentio telegram inbox reply <id> [message]
-agentio telegram outbox send --to <chat-id> [message]
-agentio telegram outbox status <id>
-agentio telegram outbox list [--status pending|sending|sent|failed]
 ```
 
 ### Google Chat
@@ -249,42 +231,9 @@ agentio sql query [query] [--limit N] [--format table|json|csv]
 agentio sql profile add|list|remove
 ```
 
-### WhatsApp (requires daemon)
-
-```bash
-# Profile (includes QR pairing flow if daemon is running)
-agentio whatsapp profile add|list|remove
-
-# Inbox (receiving messages)
-agentio whatsapp inbox pull [--limit N] [--status pending|done] [--conversation <name>]
-agentio whatsapp inbox get <id>
-agentio whatsapp inbox ack <id>
-agentio whatsapp inbox reply <id> [message]
-agentio whatsapp inbox stats
-
-# Outbox (sending messages)
-agentio whatsapp outbox send --to <phone> [message] [--attachment <path>] [--type image|video|audio|document]
-agentio whatsapp outbox send --group <name> [message]
-agentio whatsapp outbox status <id>
-agentio whatsapp outbox list [--status pending|sending|sent|failed]
-
-# Group Management
-agentio whatsapp group list
-agentio whatsapp group get <id-or-name>
-agentio whatsapp group create <name> --participants <phones...> [--picture <path>]
-agentio whatsapp group update <id-or-name> [--name <name>] [--description <text>] [--picture <path>]
-agentio whatsapp group add <id-or-name> <phones...>
-agentio whatsapp group remove <id-or-name> <phones...>
-agentio whatsapp group promote <id-or-name> <phones...>
-agentio whatsapp group demote <id-or-name> <phones...>
-agentio whatsapp group leave <id-or-name>
-agentio whatsapp group invite <id-or-name>    # Get invite link
-agentio whatsapp group join <code-or-link>
-```
-
 ### Daemon
 
-The daemon is a long-lived background process that (1) maintains messaging connections (WhatsApp, Telegram) and (2) fires scheduled `.run.md` prompts in watched folders.
+The daemon is a long-lived background process that fires scheduled `.run.md` prompts in watched folders.
 
 ```bash
 agentio daemon install           # macOS: LaunchAgent; Linux: systemd unit
@@ -294,13 +243,9 @@ agentio daemon restart
 agentio daemon status
 agentio daemon logs [--follow]
 agentio daemon uninstall
-agentio daemon profile add|list|remove    # Remote daemon identity
-agentio daemon teleport <url>             # Transfer auth state to remote daemon
 ```
 
 The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` and runs as a user agent (no sudo).
-
-`agentio gateway ...` is a deprecated alias for `agentio daemon ...` and prints a stderr warning; it will be removed in a future release.
 
 ### Schedule
 
@@ -349,22 +294,8 @@ Each service supports multiple named profiles. Config and credentials are stored
 ### Daemon Architecture
 
 The daemon provides:
-- **Persistent connections**: Maintains WebSocket connections to WhatsApp/Telegram
-- **Message queuing**: Inbox (received) and outbox (to send) message queues
-- **SQLite storage**: Messages stored in `~/.config/agentio/daemon.db`
-- **HTTP API**: RESTful API on port 7890 for CLI communication
-- **Webhook notifications**: Optional outbound webhooks for new messages
-- **Media handling**: Downloads and stores media attachments locally
+- **HTTP API**: RESTful API on port 7890 for CLI communication (health + scheduler control)
 - **In-process scheduler**: Watches registered folders and fires due `.run.md` schedules on a 60-second tick; catches up on startup for schedules that missed their last expected run
-
-### WhatsApp Integration
-
-WhatsApp uses the Baileys library (unofficial WhatsApp Web API):
-- QR code pairing via `whatsapp pair --poll`
-- Auth state stored in SQLite database
-- Supports text, images, videos, audio, and documents
-- Full group management (create, update, participants, admin controls)
-- Profile pictures for groups
 
 ### Security
 
@@ -378,9 +309,8 @@ WhatsApp uses the Baileys library (unofficial WhatsApp Web API):
 - **Embedded OAuth credentials**: Gmail/GDocs/GDrive use embedded OAuth client (no user setup required)
 - **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
 - **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
-- **Stdin support**: Commands like `send` and `reply` accept body via pipe
-- **Daemon for real-time and scheduling**: WhatsApp/Telegram real-time features and folder-watched schedules require the daemon
-- **Group name resolution**: WhatsApp commands accept group names (fuzzy matched) or JIDs
+- **Stdin support**: Commands like `send` accept body via pipe
+- **Daemon for scheduling**: Folder-watched `.run.md` schedules require the daemon
 
 ## Service Development Guidelines
 

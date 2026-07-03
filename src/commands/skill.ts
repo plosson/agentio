@@ -8,7 +8,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   gmail: 'Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.',
   gdocs: 'Use when interacting with Google Docs via the agentio CLI - list, read, create.',
   gdrive: 'Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.',
-  telegram: 'Use when interacting with Telegram via the agentio CLI - send messages, manage inbox/outbox via the daemon.',
+  telegram: 'Use when sending Telegram messages via the agentio CLI.',
   gchat: 'Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.',
   gcal: 'Use when interacting with Google Calendar via the agentio CLI.',
   gsheets: 'Use when interacting with Google Sheets via the agentio CLI.',
