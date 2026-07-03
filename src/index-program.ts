@@ -116,7 +116,7 @@ export function createProgram(): Command {
   // Services
   [
     'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
-    'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'rss', 'sql',
   ].forEach((n) => setGroup(n, 'Services'));
 
   // Automation
