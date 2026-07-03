@@ -11,7 +11,6 @@ import { loadConfig, saveConfig } from '../config/config-manager';
 import { startDaemon, getDaemonConfig, LOG_FILE } from '../daemon/daemon';
 import { isDaemonAvailable } from '../daemon/client';
 import { setTimeout as sleep } from 'timers/promises';
-import { initDatabase, closeDatabase, exportWhatsAppAuthState } from '../daemon/store';
 import { isInteractive } from '../utils/interactive';
 import { buildDaemonPlist } from '../daemon/daemon-plist';
 import { DAEMON_PLIST_FILE } from '../daemon/labels';
@@ -91,7 +90,7 @@ function runCommand(cmd: string[], useSudo: boolean): { success: boolean; output
  */
 function generateServiceFile(binaryPath: string, configDir: string): string {
   return `[Unit]
-Description=agentio daemon - messaging connections and scheduler
+Description=agentio daemon - scheduler for .run.md prompts
 After=network.target
 
 [Service]
@@ -208,7 +207,7 @@ export function registerDaemonCommands(
   const baseName = opts.base ?? 'daemon';
   const description = opts.deprecated
     ? '[deprecated] alias of `agentio daemon`'
-    : 'Daemon lifecycle management (messaging connections + scheduler)';
+    : 'Daemon lifecycle management (runs the scheduler for .run.md prompts)';
   const daemon = program
     .command(baseName, opts.deprecated ? { hidden: true } : {})
     .description(description);
@@ -508,29 +507,6 @@ export function registerDaemonCommands(
 
         if (running) {
           console.log('Daemon: running');
-
-          // Fetch detailed status from API
-          try {
-            const response = await fetch(`http://127.0.0.1:${port}/status`, {
-              headers: gatewayConfig.apiKey ? { 'X-API-Key': gatewayConfig.apiKey } : {},
-            });
-
-            if (response.ok) {
-              const data = await response.json() as { adapters: { service: string; profile: string; connected: boolean }[] };
-
-              if (data.adapters && data.adapters.length > 0) {
-                console.log('\nConnected adapters:');
-                for (const adapter of data.adapters) {
-                  const icon = adapter.connected ? '✓' : '✗';
-                  console.log(`  ${icon} ${adapter.service}:${adapter.profile}`);
-                }
-              } else {
-                console.log('\nNo adapters connected');
-              }
-            }
-          } catch {
-            // API not responding yet
-          }
           return;
         }
 
@@ -554,7 +530,7 @@ export function registerDaemonCommands(
     statusCmd,
     `Examples:
 
-  # show daemon state and which adapters (whatsapp/telegram) are connected
+  # show whether the daemon is running
   agentio daemon status`,
   );
 
@@ -794,88 +770,4 @@ export function registerDaemonCommands(
       }
     });
 
-  // Teleport command
-  const teleportCmd = daemon
-    .command('teleport')
-    .description('Transfer auth state to a remote daemon')
-    .argument('<url>', 'Remote daemon URL (e.g., https://my-daemon.example.com)')
-    .option('--api-key <key>', 'Remote daemon API key (will prompt if not provided)')
-    .option('--service <service>', 'Service to teleport (default: all)', 'all')
-    .action(async (url: string, options) => {
-      try {
-        const config = await loadConfig() as Config;
-
-        let key = options.apiKey || config.daemon?.apiKey;
-
-        // Prompt for API key if not available
-        if (!key) {
-          if (!isInteractive()) {
-            throw new CliError('INVALID_PARAMS', 'API key is required', 'Provide --api-key or configure daemon profile');
-          }
-          key = await password({
-            message: 'Enter remote daemon API key:',
-            mask: '*',
-          });
-        }
-
-        console.log(`Teleporting to ${url}...`);
-
-        // Export WhatsApp auth state
-        if (options.service === 'all' || options.service === 'whatsapp') {
-          const profiles = config.profiles.whatsapp || [];
-
-          if (profiles.length > 0) {
-            await initDatabase();
-          }
-
-          try {
-            for (const entry of profiles) {
-              const profileName = typeof entry === 'string' ? entry : entry.name;
-              console.log(`  Exporting whatsapp:${profileName}...`);
-              const authState = await exportWhatsAppAuthState(profileName);
-
-              if (!authState) {
-                console.log('    No auth state found, skipping');
-                continue;
-              }
-
-              // Send to remote daemon
-              const response = await fetch(`${url}/import/whatsapp/${encodeURIComponent(profileName)}`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-API-Key': key,
-                },
-                body: JSON.stringify(authState),
-              });
-
-              if (!response.ok) {
-                const error = await response.text();
-                throw new CliError('API_ERROR', `Failed to import to remote: ${error}`);
-              }
-
-              console.log('    Transferred successfully');
-            }
-          } finally {
-            closeDatabase();
-          }
-        }
-
-        console.log('\nTeleport complete!');
-        console.log('You can now stop the local daemon and use the remote one.');
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  addExamples(
-    teleportCmd,
-    `Examples:
-
-  # transfer all adapter auth state (e.g. WhatsApp pairing) to a remote daemon
-  agentio daemon teleport https://my-daemon.example.com
-
-  # only teleport WhatsApp; pass api key inline (default: prompt)
-  agentio daemon teleport https://my-daemon.example.com --service whatsapp --api-key gw_xxx`,
-  );
 }

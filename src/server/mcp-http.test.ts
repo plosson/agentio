@@ -77,10 +77,10 @@ describe('parseServicesQuery — happy path', () => {
 
   test('accepts all valid registered services', () => {
     const all =
-      'discourse,gcal,gchat,gdocs,gdrive,github,gmail,gsheets,gtasks,jira,rss,slack,sql,telegram,whatsapp';
+      'discourse,gcal,gchat,gdocs,gdrive,github,gmail,gsheets,gtasks,jira,rss,slack,sql,telegram';
     const r = parseServicesQuery(all);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.services.length).toBe(15);
+    if (r.ok) expect(r.services.length).toBe(14);
   });
 });
 

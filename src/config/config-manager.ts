@@ -8,7 +8,7 @@ import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/c
 const CONFIG_DIR = join(process.env.HOME || homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json'); // kept for backward-compat imports elsewhere
 
-const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql'];
+const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'sql'];
 
 /**
  * Normalize a profile value to ProfileEntry format

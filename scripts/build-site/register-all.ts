@@ -17,7 +17,6 @@ import { registerRssCommands } from '../../src/commands/rss';
 import { registerSlackCommands } from '../../src/commands/slack';
 import { registerSqlCommands } from '../../src/commands/sql';
 import { registerTelegramCommands } from '../../src/commands/telegram';
-import { registerWhatsAppCommands } from '../../src/commands/whatsapp';
 
 export const SERVICE_SLUGS = [
   'confluence',
@@ -37,7 +36,6 @@ export const SERVICE_SLUGS = [
   'slack',
   'sql',
   'telegram',
-  'whatsapp',
 ] as const;
 
 export function registerAllCommands(program: Command): void {
@@ -58,5 +56,4 @@ export function registerAllCommands(program: Command): void {
   registerSlackCommands(program);
   registerSqlCommands(program);
   registerTelegramCommands(program);
-  registerWhatsAppCommands(program);
 }

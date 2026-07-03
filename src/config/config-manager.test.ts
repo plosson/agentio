@@ -49,10 +49,10 @@ describe('resolveProfile multi-profile case', () => {
   });
 
   test('returns names array when multiple profiles exist and none specified', async () => {
-    await setProfile('whatsapp', 'work');
-    await setProfile('whatsapp', 'personal');
+    await setProfile('telegram', 'work');
+    await setProfile('telegram', 'personal');
     clearVaultCache();
-    const r = await resolveProfile('whatsapp');
+    const r = await resolveProfile('telegram');
     if (r.profile === null && r.error === 'multiple') {
       expect(r.names).toEqual(['work', 'personal']);
     } else {

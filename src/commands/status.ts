@@ -38,8 +38,6 @@ import type { GScriptCredentials } from '../types/gscript';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { SqlCredentials } from '../types/sql';
-import type { WhatsAppCredentials } from '../types/whatsapp';
-import { isDaemonAvailable, getDaemonClient } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
 
 type GmailCredentials = OAuthTokens & { email?: string };
@@ -258,61 +256,6 @@ async function createServiceClient(
     case 'sql': {
       const creds = credentials as SqlCredentials;
       return new SqlClient(creds);
-    }
-
-    case 'whatsapp': {
-      const creds = credentials as WhatsAppCredentials;
-      return {
-        validate: async (): Promise<ValidationResult> => {
-          // Check if daemon is running
-          const daemonAvailable = await isDaemonAvailable();
-          if (!daemonAvailable) {
-            if (creds.paired) {
-              return {
-                valid: true,
-                info: `${creds.phoneNumber || 'paired'} (daemon not running)`,
-              };
-            }
-            return { valid: false, error: 'not paired (daemon not running)' };
-          }
-
-          // Check connection status via daemon - this is the source of truth
-          try {
-            const client = await getDaemonClient();
-            const status = await client.status();
-            const adapter = status.adapters.find(
-              (a) => a.service === 'whatsapp' && a.profile === profileName
-            );
-
-            if (adapter?.connected) {
-              // Connected via daemon = working
-              return { valid: true, info: creds.phoneNumber || 'connected' };
-            } else if (adapter) {
-              // Adapter exists but not connected
-              return {
-                valid: true,
-                info: `${creds.phoneNumber || 'configured'} (disconnected)`,
-              };
-            } else if (creds.paired) {
-              // Has paired credentials but no adapter in daemon
-              return {
-                valid: true,
-                info: `${creds.phoneNumber || 'paired'} (not loaded in daemon)`,
-              };
-            } else {
-              return { valid: false, error: 'not paired' };
-            }
-          } catch {
-            if (creds.paired) {
-              return {
-                valid: true,
-                info: `${creds.phoneNumber || 'paired'} (daemon error)`,
-              };
-            }
-            return { valid: false, error: 'daemon error' };
-          }
-        },
-      };
     }
 
     default:

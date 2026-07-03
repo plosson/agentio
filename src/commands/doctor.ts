@@ -70,7 +70,7 @@ function checkProfiles(cfg: Config | null): Check {
       name: 'Profiles',
       status: 'warn',
       detail: 'no services configured',
-      fix: 'agentio <service> profile add (e.g. gmail, slack, whatsapp)',
+      fix: 'agentio <service> profile add (e.g. gmail, slack, telegram)',
     };
   }
   return { name: 'Profiles', status: 'ok', detail: `${total} configured` };

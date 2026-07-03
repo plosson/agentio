@@ -19,7 +19,6 @@ import { registerRssCommands } from './commands/rss';
 import { registerSlackCommands } from './commands/slack';
 import { registerSqlCommands } from './commands/sql';
 import { registerTelegramCommands } from './commands/telegram';
-import { registerWhatsAppCommands } from './commands/whatsapp';
 
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
@@ -79,7 +78,6 @@ export function createProgram(): Command {
   registerSlackCommands(program);
   registerSqlCommands(program);
   registerTelegramCommands(program);
-  registerWhatsAppCommands(program);
 
   // Agentio utilities
   registerClaudeCommands(program);

@@ -19,8 +19,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   rss: 'Use when reading RSS feeds via the agentio CLI.',
   discourse: 'Use when interacting with Discourse forums via the agentio CLI.',
   sql: 'Use when running SQL queries via the agentio CLI.',
-  whatsapp: 'Use when interacting with WhatsApp via the agentio CLI - send/receive, group management. Requires daemon.',
-  daemon: 'Use to manage the agentio daemon (real-time messaging connections + scheduler).',
+  daemon: 'Use to manage the agentio daemon (runs the scheduler for .run.md prompts).',
   schedule: 'Use to manage agentio scheduled .run.md prompts in watched folders.',
 };
 

@@ -21,7 +21,6 @@ import { slackProfileAdd } from './slack';
 import { telegramProfileAdd } from './telegram';
 import { discourseProfileAdd } from './discourse';
 import { sqlProfileAdd } from './sql';
-import { whatsappProfileAdd } from './whatsapp';
 
 export interface ProfileSummary {
   service: ServiceName;
@@ -79,7 +78,6 @@ const ADD_HANDLERS: Record<ServiceName, (opts: AddOpts) => Promise<void>> = {
   confluence: confluenceProfileAdd,
   slack: slackProfileAdd,
   telegram: telegramProfileAdd,
-  whatsapp: whatsappProfileAdd,
   discourse: discourseProfileAdd,
   sql: sqlProfileAdd,
 };
@@ -132,18 +130,7 @@ export function registerProfileCommands(program: Command): void {
     .action(async (service: string, name: string) => {
       try {
         assertKnownService(service);
-        if (service === 'whatsapp') {
-          // WhatsApp auth state is in the daemon DB; only remove the profile entry
-          const removed = await removeProfile('whatsapp', name);
-          if (removed) {
-            console.log(`Removed profile "${name}"`);
-            console.log('Note: if the daemon is running, it will stop reconnecting this profile within ~30 seconds.');
-          } else {
-            console.error(`Profile "${name}" not found`);
-          }
-        } else {
-          await removeProfileForService(service as ServiceName, name);
-        }
+        await removeProfileForService(service as ServiceName, name);
       } catch (e) {
         handleError(e);
       }
