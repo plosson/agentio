@@ -86,3 +86,47 @@ Query syntax: name contains '...', name = '...', 'me' in owners,
 modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.
 Combine with 'and'/'or'.
 ```
+
+## agentio gdocs structure <doc-id-or-url>
+
+Dump the full Docs API document representation as JSON
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # dump full document structure (segment IDs, named styles, body indices, headers, footers)
+  agentio gdocs structure 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # extract the headerId after a createHeader batchUpdate
+  agentio gdocs structure 1A2bCdEf... | jq '.headers | keys'
+
+  # get body content with indices
+  agentio gdocs structure 1A2bCdEf... | jq '.body.content'
+```
+
+## agentio gdocs batch <doc-id-or-url>
+
+Execute raw documents.batchUpdate requests (escape hatch)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--requests-json <json>`: Inline JSON array of batchUpdate requests
+- `--file <path>`: Path to a JSON file containing the requests array
+
+```
+Examples:
+
+  # apply bold to a range of text (start/end offsets from the document body)
+  agentio gdocs batch 1A2bCdEf... --requests-json '[{"updateTextStyle":{"range":{"startIndex":1,"endIndex":10},"textStyle":{"bold":true},"fields":"bold"}}]'
+
+  # load requests from a file
+  agentio gdocs batch 1A2bCdEf... --file ./requests.json
+
+Accepts an array of Docs API Request objects. See:
+https://developers.google.com/docs/api/reference/rest/v1/documents/request
+```

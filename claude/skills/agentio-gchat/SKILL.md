@@ -50,6 +50,8 @@ Options:
 - `--limit <n>`: Number of messages (default: 10)
 - `--thread <id>`: Filter by thread ID
 - `--since <date>`: Only messages after this date (YYYY-MM-DD)
+- `--until <date>`: Only messages before this date (YYYY-MM-DD)
+- `--format <format>`: Output format: text or json (default: text)
 
 ```
 Examples:
@@ -63,8 +65,8 @@ Examples:
   # only messages in a specific thread
   agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
 
-  # messages since a given date
-  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01
+  # messages within a closed date range, as JSON for scripting
+  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json
 ```
 
 ## agentio gchat get <message-id>
@@ -75,12 +77,16 @@ Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--space <id>`: Space ID
+- `--format <format>`: Output format: text or json (default: text)
 
 ```
 Examples:
 
   # fetch one message by id from a space (OAuth only)
   agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234
+
+  # as JSON for scripting
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json
 ```
 
 ## agentio gchat spaces

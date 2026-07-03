@@ -8,7 +8,7 @@ import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/c
 const CONFIG_DIR = join(process.env.HOME || homedir(), '.config', 'agentio');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json'); // kept for backward-compat imports elsewhere
 
-const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'sql'];
+const ALL_SERVICES: ServiceName[] = ['gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'sql'];
 
 /**
  * Normalize a profile value to ProfileEntry format
@@ -30,34 +30,9 @@ export async function ensureConfigDir(): Promise<void> {
   }
 }
 
-/**
- * Migrate legacy `config.gateway` into `config.daemon` in place.
- * Pure: returns a new Config value; does not mutate input.
- * - If `daemon` already exists, drops `gateway` untouched.
- * - Otherwise moves `gateway` verbatim under `daemon`.
- */
-export function migrateGatewayToDaemon(config: Config): Config {
-  if (!config.gateway) return config;
-  if (config.daemon) {
-    const { gateway: _drop, ...rest } = config;
-    return rest;
-  }
-  const { gateway, ...rest } = config;
-  return { ...rest, daemon: gateway };
-}
-
 export async function loadConfig(): Promise<Config> {
   const vault = await loadVault();
-  const migrated = migrateGatewayToDaemon(vault.config);
-  // If migration changed anything, persist it.
-  if (migrated !== vault.config) {
-    await saveVault({
-      version: CURRENT_VAULT_VERSION,
-      config: migrated,
-      credentials: vault.credentials,
-    });
-  }
-  return migrated;
+  return vault.config;
 }
 
 export async function saveConfig(config: Config): Promise<void> {

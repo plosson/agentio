@@ -4,7 +4,6 @@ import { collectMcpTools } from '../tools';
 import { registerRssCommands } from '../../commands/rss';
 import { registerGmailCommands } from '../../commands/gmail';
 import { registerSlackCommands } from '../../commands/slack';
-import { registerWhatsAppCommands } from '../../commands/whatsapp';
 
 function buildProgram(...registers: ((p: Command) => void)[]): Command {
   const program = new Command();
@@ -80,27 +79,6 @@ describe('collectMcpTools', () => {
     const htmlProp = sendTool.inputSchema.properties['html'];
     expect(htmlProp).toBeDefined();
     expect(htmlProp.type).toBe('boolean');
-  });
-
-  test('handles nested commands (whatsapp inbox/outbox/group)', () => {
-    const program = buildProgram(registerWhatsAppCommands);
-    const tools = collectMcpTools(program, 'whatsapp');
-
-    const names = tools.map((t) => t.name);
-    expect(names).toContain('whatsapp_inbox_pull');
-    expect(names).toContain('whatsapp_inbox_get');
-    expect(names).toContain('whatsapp_inbox_ack');
-    expect(names).toContain('whatsapp_inbox_reply');
-    expect(names).toContain('whatsapp_outbox_send');
-    expect(names).toContain('whatsapp_group_list');
-  });
-
-  test('tool has correct commandPath', () => {
-    const program = buildProgram(registerWhatsAppCommands);
-    const tools = collectMcpTools(program, 'whatsapp');
-
-    const pullTool = tools.find((t) => t.name === 'whatsapp_inbox_pull')!;
-    expect(pullTool.commandPath).toEqual(['whatsapp', 'inbox', 'pull']);
   });
 
   test('tool inputSchema has valid JSON Schema structure', () => {

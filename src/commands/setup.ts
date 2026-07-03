@@ -28,7 +28,6 @@ async function maybeNudgeFirstService(): Promise<void> {
   console.log('');
   console.log('Next: configure a service. Examples:');
   console.log('  agentio gmail profile add');
-  console.log('  agentio whatsapp profile add');
   console.log('  agentio slack profile add');
   console.log('Run `agentio --help` to see all available services.');
 }

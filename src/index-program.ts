@@ -19,7 +19,6 @@ import { registerRssCommands } from './commands/rss';
 import { registerSlackCommands } from './commands/slack';
 import { registerSqlCommands } from './commands/sql';
 import { registerTelegramCommands } from './commands/telegram';
-import { registerWhatsAppCommands } from './commands/whatsapp';
 
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
@@ -31,7 +30,6 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
-import { registerServerCommands } from './commands/server';
 import { registerSetupCommand } from './commands/setup';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
@@ -79,7 +77,6 @@ export function createProgram(): Command {
   registerSlackCommands(program);
   registerSqlCommands(program);
   registerTelegramCommands(program);
-  registerWhatsAppCommands(program);
 
   // Agentio utilities
   registerClaudeCommands(program);
@@ -87,12 +84,10 @@ export function createProgram(): Command {
   registerMcpCommands(program);
   registerDocsCommand(program);
   registerDaemonCommands(program);
-  registerDaemonCommands(program, { base: 'gateway', deprecated: true });
   registerDoctorCommand(program);
   registerProfileCommands(program);
   registerReauthCommand(program);
   registerScheduleCommands(program);
-  registerServerCommands(program);
   registerSetupCommand(program);
   registerSkillCommand(program);
   registerStatusCommand(program);
@@ -121,14 +116,14 @@ export function createProgram(): Command {
   // Services
   [
     'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
-    'github', 'jira', 'confluence', 'slack', 'telegram', 'whatsapp', 'discourse', 'rss', 'sql',
+    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'rss', 'sql',
   ].forEach((n) => setGroup(n, 'Services'));
 
   // Automation
   ['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
 
   // Advanced
-  ['config', 'mcp', 'server', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['config', 'mcp', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

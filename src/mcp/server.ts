@@ -65,7 +65,6 @@ import { registerRssCommands } from '../commands/rss';
 import { registerSlackCommands } from '../commands/slack';
 import { registerSqlCommands } from '../commands/sql';
 import { registerTelegramCommands } from '../commands/telegram';
-import { registerWhatsAppCommands } from '../commands/whatsapp';
 
 export const SERVICE_REGISTRATIONS: Record<string, (program: Command) => void> = {
   discourse: registerDiscourseCommands,
@@ -82,7 +81,6 @@ export const SERVICE_REGISTRATIONS: Record<string, (program: Command) => void> =
   slack: registerSlackCommands,
   sql: registerSqlCommands,
   telegram: registerTelegramCommands,
-  whatsapp: registerWhatsAppCommands,
 };
 
 export interface ServiceProfilePair {

@@ -103,7 +103,7 @@ Options:
 - `--cc <email>`: CC recipient (repeatable) (default: )
 - `--bcc <email>`: BCC recipient (repeatable) (default: )
 - `--subject <subject>`: Email subject (required unless --reply-to)
-- `--body <body>`: Email body (or pipe via stdin)
+- `--body <body>`: Email body (omit or pass "-" to read from stdin)
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
 - `--attachment <path>`: File to attach (repeatable) (default: )
@@ -128,9 +128,9 @@ Examples:
     --attachment ./report.pdf --inline chart1:./chart.png
 ```
 
-## agentio gmail draft
+## agentio gmail draft [draft-id]
 
-Create an email draft
+Create an email draft (or update an existing one with [draft-id])
 
 Options:
 
@@ -139,7 +139,7 @@ Options:
 - `--cc <email>`: CC recipient (repeatable) (default: )
 - `--bcc <email>`: BCC recipient (repeatable) (default: )
 - `--subject <subject>`: Email subject (required unless --reply-to)
-- `--body <body>`: Email body (or pipe via stdin)
+- `--body <body>`: Email body (omit or pass "-" to read from stdin)
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
 - `--attachment <path>`: File to attach (repeatable) (default: )
@@ -150,6 +150,9 @@ Examples:
 
   # save a draft for later editing in Gmail
   agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # update an existing draft (replaces its entire content)
+  agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
 
   # draft a reply within an existing thread
   agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"

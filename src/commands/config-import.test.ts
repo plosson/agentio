@@ -147,11 +147,6 @@ const SAMPLE_SERVER: ServerStateLike = {
   ],
 };
 
-const SAMPLE_GATEWAY = {
-  apiKey: 'gw_preserved_gateway_key',
-  server: { port: 7890, host: '0.0.0.0' },
-};
-
 /* ------------------------------------------------------------------ */
 /* replace mode preserves config.server                               */
 /* ------------------------------------------------------------------ */
@@ -192,59 +187,6 @@ describe('config import (replace mode) — preserves config.server', () => {
     expect(server.apiKey).toBe(SAMPLE_SERVER.apiKey);
     expect(server.tokens).toEqual(SAMPLE_SERVER.tokens);
     expect(server.clients).toEqual(SAMPLE_SERVER.clients);
-  });
-
-  test('preserves config.gateway across import (migrated to daemon)', async () => {
-    await writeConfig({
-      profiles: { rss: [{ name: 'feeds' }] },
-      gateway: SAMPLE_GATEWAY,
-    });
-    const { key, blob } = await exportCurrentConfig();
-
-    await writeConfig({
-      profiles: {},
-      gateway: SAMPLE_GATEWAY,
-    });
-    const importRes = await runCli(['config', 'import'], {
-      AGENTIO_KEY: key,
-      AGENTIO_CONFIG: blob,
-    });
-    expect(importRes.exitCode).toBe(0);
-
-    // loadConfig migrates gateway → daemon on first load; the vault is
-    // re-persisted with daemon, so readConfig() (which reads the raw vault)
-    // sees daemon, not gateway.
-    const final = await readConfig();
-    expect(final.daemon).toEqual(SAMPLE_GATEWAY);
-    expect(final.gateway).toBeUndefined();
-    expect(profileNames(final, 'rss')).toEqual(['feeds']);
-  });
-
-  test('preserves both server and gateway in the same config (gateway migrated to daemon)', async () => {
-    await writeConfig({
-      profiles: { gmail: [{ name: 'p1' }] },
-      server: SAMPLE_SERVER,
-      gateway: SAMPLE_GATEWAY,
-    });
-    const { key, blob } = await exportCurrentConfig();
-
-    await writeConfig({
-      profiles: {},
-      server: SAMPLE_SERVER,
-      gateway: SAMPLE_GATEWAY,
-    });
-    const importRes = await runCli(['config', 'import'], {
-      AGENTIO_KEY: key,
-      AGENTIO_CONFIG: blob,
-    });
-    expect(importRes.exitCode).toBe(0);
-
-    // loadConfig migrates gateway → daemon on first load; the vault is
-    // re-persisted with daemon, not gateway.
-    const final = await readConfig();
-    expect(final.server).toEqual(SAMPLE_SERVER);
-    expect(final.daemon).toEqual(SAMPLE_GATEWAY);
-    expect(final.gateway).toBeUndefined();
   });
 
   test('replace still REPLACES profiles (not merge)', async () => {

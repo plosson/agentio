@@ -211,10 +211,6 @@ export async function reauthProfile(service: ServiceName, profileName: string): 
       await reauthJira(profileName);
       break;
 
-    case 'whatsapp':
-      console.error(`\nSkipping whatsapp / ${profileName}: use 'agentio whatsapp profile add' to re-pair.`);
-      break;
-
     default:
       if (MANUAL_SERVICES.includes(service)) {
         console.error(`\nSkipping ${service} / ${profileName}: uses manual credentials. Run 'agentio ${service} profile add' to update.`);
