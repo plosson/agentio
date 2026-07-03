@@ -8,7 +8,7 @@ import { password } from '@inquirer/prompts';
 import plist from 'plist';
 import { handleError, CliError } from '../utils/errors';
 import { loadConfig, saveConfig } from '../config/config-manager';
-import { startDaemon, getDaemonConfig, LOG_FILE } from '../daemon/daemon';
+import { startDaemon, LOG_FILE } from '../daemon/daemon';
 import { isDaemonAvailable } from '../daemon/client';
 import { setTimeout as sleep } from 'timers/promises';
 import { isInteractive } from '../utils/interactive';
@@ -494,18 +494,7 @@ export function registerDaemonCommands(
     .description('Show daemon status')
     .action(async () => {
       try {
-        const gatewayConfig = await getDaemonConfig();
-        const port = gatewayConfig.server?.port ?? 7890;
-        let running = false;
-        try {
-          const res = await fetch(`http://127.0.0.1:${port}/health`, {
-            headers: gatewayConfig.apiKey ? { 'X-API-Key': gatewayConfig.apiKey } : {},
-            signal: AbortSignal.timeout(1500),
-          });
-          running = res.ok;
-        } catch { /* not running */ }
-
-        if (running) {
+        if (await isDaemonAvailable()) {
           console.log('Daemon: running');
           return;
         }

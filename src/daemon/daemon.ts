@@ -11,14 +11,6 @@ const LOG_FILE = join(CONFIG_DIR, 'daemon.log');
 let shutdownRequested = false;
 
 /**
- * Get the daemon configuration from the vault.
- */
-export async function getDaemonConfig(): Promise<DaemonConfig> {
-  const config = await loadConfig();
-  return config.daemon ?? {};
-}
-
-/**
  * Start the daemon (runs in foreground, managed by launchd on macOS / systemd on Linux).
  */
 export async function startDaemon(): Promise<void> {

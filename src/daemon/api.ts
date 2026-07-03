@@ -1,7 +1,8 @@
 import type { Server } from 'bun';
-import type { GatewayConfig, HealthResponse } from './types';
-import { DEFAULT_GATEWAY_CONFIG } from './types';
-import type { WatchedFolder } from '../types/config';
+import type { HealthResponse } from './types';
+import type { DaemonConfig } from '../types/config';
+import { loadConfig } from '../config/config-manager';
+import { listSchedulerJobs, runOneJob, reloadScheduler } from './scheduler';
 
 let server: Server<unknown> | null = null;
 let apiKey: string = '';
@@ -69,7 +70,6 @@ async function handleRequest(request: Request): Promise<Response> {
 
   if (request.method === 'GET') {
     if (path === '/scheduler/list') {
-      const { listSchedulerJobs } = await import('./scheduler');
       const allHosts = url.searchParams.get('all') === '1';
       const jobs = await listSchedulerJobs({ allHosts });
       return Response.json({ jobs });
@@ -79,17 +79,14 @@ async function handleRequest(request: Request): Promise<Response> {
   if (request.method === 'POST' && path === '/scheduler/run') {
     const body = await request.json() as { folder?: string; id?: string };
     if (!body.folder || !body.id) return new Response('missing folder or id', { status: 400 });
-    const { runOneJob } = await import('./scheduler');
     const result = await runOneJob(body.folder, body.id);
     return Response.json(result);
   }
 
   if (request.method === 'POST' && path === '/scheduler/reload') {
-    const { loadConfig } = await import('../config/config-manager');
-    const config = await loadConfig() as unknown as { daemon?: { scheduler?: { watchedFolders?: unknown[] } } };
+    const config = await loadConfig();
     const folders = config.daemon?.scheduler?.watchedFolders ?? [];
-    const { reloadScheduler } = await import('./scheduler');
-    await reloadScheduler(folders as WatchedFolder[]);
+    await reloadScheduler(folders);
     return Response.json({ folders: folders.length });
   }
 
@@ -99,9 +96,9 @@ async function handleRequest(request: Request): Promise<Response> {
 /**
  * Start the API server
  */
-export function startApiServer(config: GatewayConfig): Server<unknown> {
-  const port = config?.server?.port ?? DEFAULT_GATEWAY_CONFIG.server.port;
-  const host = config?.server?.host ?? DEFAULT_GATEWAY_CONFIG.server.host;
+export function startApiServer(config: DaemonConfig): Server<unknown> {
+  const port = config?.server?.port ?? 7890;
+  const host = config?.server?.host ?? '0.0.0.0';
   apiKey = config?.apiKey ?? '';
   startTime = Date.now();
 
