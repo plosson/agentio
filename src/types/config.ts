@@ -1,35 +1,12 @@
-import type { ServerConfig } from './server';
-
 export interface GatewayServerConfig {
-  // Server binding (for running a gateway daemon)
+  // Server binding (for the local daemon's scheduler API)
   port?: number;          // Port to bind (default: 7890)
   host?: string;          // Host to bind (default: 0.0.0.0 for server)
 }
 
-export interface GatewayWebhookConfig {
-  url?: string;
-  secret?: string;
-  debounceMs?: number;
-}
-
-export interface GatewayMediaConfig {
-  download?: boolean;
-  maxSizeMb?: number;
-}
-
-export interface GatewayRetentionConfig {
-  doneMessagesDays?: number;
-  sentMessagesDays?: number;
-}
-
 export interface BaseDaemonConfig {
-  name?: string;           // Gateway identity name (for local server identification)
-  apiUrl?: string;         // Gateway URL (e.g., "https://gateway.example.com:7890")
   apiKey?: string;         // API key for authentication
   server?: GatewayServerConfig;  // Server binding settings (for running daemon)
-  webhook?: GatewayWebhookConfig;
-  media?: GatewayMediaConfig;
-  retention?: GatewayRetentionConfig;
 }
 
 /** @deprecated use DaemonConfig */
@@ -58,23 +35,6 @@ export interface ProfileEntry {
 // Helper type for backward compatibility during migration
 export type ProfileValue = string | ProfileEntry;
 
-/**
- * Record of a successfully teleported siteio app. Persisted so that
- * `agentio mcp teleport --sync` (and other name-optional variants) can
- * default to the most recently deployed app instead of forcing the
- * user to re-type the name every time.
- */
-export interface TeleportAppRecord {
-  name: string;
-  url?: string;
-  /** Unix epoch milliseconds of the last successful deploy or sync. */
-  deployedAt: number;
-}
-
-export interface TeleportConfig {
-  lastApp?: TeleportAppRecord;
-}
-
 export interface Config {
   profiles: {
     gdocs?: ProfileValue[];
@@ -97,8 +57,6 @@ export interface Config {
   env?: Record<string, string>;
   daemon?: DaemonConfig;
   gateway?: GatewayConfig;  // legacy; read-only, migrated to daemon on load
-  server?: ServerConfig;
-  teleport?: TeleportConfig;
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'sql';

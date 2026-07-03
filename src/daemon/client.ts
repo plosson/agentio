@@ -31,13 +31,7 @@ async function getDaemonConnection(): Promise<{ url: string; apiKey: string }> {
   };
   const daemonConfig = config.daemon ?? config.gateway;
 
-  // Priority: apiUrl > construct from server host:port
-  if (daemonConfig?.apiUrl) {
-    cachedConfig = { url: daemonConfig.apiUrl, apiKey: daemonConfig.apiKey ?? '' };
-    return cachedConfig;
-  }
-
-  // Fallback for local daemon (construct URL from server host:port)
+  // Construct URL from server host:port (local daemon)
   const host = daemonConfig?.server?.host ?? '127.0.0.1';
   const port = daemonConfig?.server?.port ?? 7890;
   const url = `http://${host}:${port}`;

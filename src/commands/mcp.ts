@@ -10,7 +10,6 @@ import {
   startMcpServer,
   type ServiceProfilePair,
 } from '../mcp/server';
-import { registerTeleportCommand } from './teleport';
 import { addExamples } from '../utils/command-tree';
 
 const MCP_JSON = '.mcp.json';
@@ -170,8 +169,4 @@ export function registerMcpCommands(program: Command): void {
   # default profile for one service
   agentio mcp install rss`,
   );
-
-  // teleport subcommand — `agentio mcp teleport <name>`. Lives here
-  // (not at the top level) so all MCP-related commands are grouped.
-  registerTeleportCommand(mcp);
 }

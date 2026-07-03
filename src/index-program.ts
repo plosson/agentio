@@ -30,7 +30,6 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
-import { registerServerCommands } from './commands/server';
 import { registerSetupCommand } from './commands/setup';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
@@ -90,7 +89,6 @@ export function createProgram(): Command {
   registerProfileCommands(program);
   registerReauthCommand(program);
   registerScheduleCommands(program);
-  registerServerCommands(program);
   registerSetupCommand(program);
   registerSkillCommand(program);
   registerStatusCommand(program);
@@ -126,7 +124,7 @@ export function createProgram(): Command {
   ['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
 
   // Advanced
-  ['config', 'mcp', 'server', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['config', 'mcp', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {
