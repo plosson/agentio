@@ -97,6 +97,14 @@ h3 { font-size: 1.25rem; }
   color: var(--text); font-weight: 600; font-size: 15px;
 }
 .nav-brand img { width: 20px; height: 20px; }
+.hh-crumbs { font-weight: 600; font-size: 15px; }
+.hh-crumbs a { color: var(--text); }
+.hh-crumbs a:hover { color: var(--accent); }
+.hh-crumbs a:first-child::before { content: '~/'; color: var(--accent); }
+.hh-crumbs .hh-sep { color: var(--muted); }
+.hh-crumbs::after { content: '▍'; color: var(--accent); animation: hh-blink 1.2s steps(1) infinite; }
+@keyframes hh-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hh-crumbs::after { animation: none; } }
 .nav-right { display: flex; align-items: center; gap: 16px; }
 .nav-link {
   color: rgba(255,255,255,0.6); font-size: 13px; font-weight: 500;
@@ -219,6 +227,8 @@ main { padding-top: 56px; }
   padding: 40px 24px;
   margin-top: 80px;
 }
+.footer-inner a { color: inherit; }
+.footer-inner a:hover { color: var(--text); }
 .footer-inner {
   width: 100%; max-width: var(--content-max);
   margin: 0 auto;
