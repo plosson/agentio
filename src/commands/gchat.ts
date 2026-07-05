@@ -278,7 +278,7 @@ export function registerGChatCommands(program: Command): void {
   agentio gchat spaces --filter eng
 
   # resolve the 1:1 DM space with a workspace user (1 API call, instant)
-  agentio gchat spaces --with pmontesel@hex-rays.com`,
+  agentio gchat spaces --with teammate@example.com`,
   );
 
   addExamples(
