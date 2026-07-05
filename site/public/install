@@ -1,6 +1,6 @@
 #!/bin/sh
 # agentio installer script
-# Usage: curl -LsSf https://agentio.me/install | sh
+# Usage: curl -LsSf https://agentio.houlahop.com/install | sh
 
 set -e
 
@@ -233,7 +233,7 @@ main() {
                 cat <<EOF
 agentio installer
 
-Usage: curl -LsSf https://agentio.me/install | sh
+Usage: curl -LsSf https://agentio.houlahop.com/install | sh
 
 Options:
   --install-dir DIR    Install to specific directory

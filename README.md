@@ -34,7 +34,7 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: curl -LsSf https://agentio.me/install | sh
+      - run: curl -LsSf https://agentio.houlahop.com/install | sh
       - run: npm install -g @anthropic-ai/claude-code
       - run: agentio config import && agentio claude install
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
@@ -53,12 +53,12 @@ See [`examples/daily-briefing/`](./examples/daily-briefing) for the complete wor
 
 **macOS / Linux:**
 ```bash
-curl -LsSf https://agentio.me/install | sh
+curl -LsSf https://agentio.houlahop.com/install | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-iwr -useb https://agentio.me/install.ps1 | iex
+iwr -useb https://agentio.houlahop.com/install.ps1 | iex
 ```
 
 <details>
@@ -279,7 +279,7 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: curl -LsSf https://agentio.me/install | sh
+      - run: curl -LsSf https://agentio.houlahop.com/install | sh
       - run: npm install -g @anthropic-ai/claude-code
       - run: agentio config import && agentio claude install
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
