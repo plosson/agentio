@@ -46,7 +46,7 @@ jobs:
       - name: Login
         run: siteio login --username github-actions
         env:
-          SITEIO_TOKEN: ${{ vars.SITEIO_TOKEN }}
+          SITEIO_TOKEN: ${{ secrets.SITEIO_TOKEN }}
 
       - name: Deploy site
         run: siteio sites deploy site/dist --subdomain agentio
