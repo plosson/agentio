@@ -77,7 +77,7 @@ h3 { font-size: 1.25rem; }
   max-width: 30ch;
 }
 
-.hero .eyebrow { margin-bottom: 12px; }
+.hero .eyebrow { margin-bottom: 12px; text-transform: none; letter-spacing: 0.04em; font-size: 12.5px; }
 
 .nav {
   position: fixed;
