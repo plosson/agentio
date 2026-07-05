@@ -114,26 +114,10 @@ async function main(): Promise<void> {
     <div class="term-bar">
       <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
     </div>
-    <pre class="term-body" id="hero-term"></pre>
+    <pre class="term-body" data-hh-terminal></pre>
   </div>
-  <script type="module">
-    const frames = ${JSON.stringify(terminalFrames)};
-    const el = document.getElementById('hero-term');
-    if (el) {
-      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const render = (f) => {
-        const lines = ['<span class="prompt">$</span> ' + f.cmd, ...f.output.map(l => '<span class="dim">' + l + '</span>')];
-        el.innerHTML = lines.join('\\n');
-      };
-      if (reduce) {
-        render(frames[0]);
-      } else {
-        let i = 0;
-        const tick = () => { render(frames[i % frames.length]); i++; setTimeout(tick, 4000); };
-        tick();
-      }
-    }
-  </script>
+  <script>window.hhTerminalFrames = ${JSON.stringify(terminalFrames)};</script>
+  <script src="/hh-terminal.js?v=1" defer></script>
 </section>`;
 
   await writePage(DIST, 'index.html', layout, {

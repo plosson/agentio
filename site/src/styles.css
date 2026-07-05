@@ -218,6 +218,12 @@ main { padding-top: 56px; }
 }
 .term-body .prompt { color: var(--accent); }
 .term-body .dim { color: var(--muted); }
+.term-body .hh-term-prompt { color: var(--accent); font-weight: 600; }
+.term-body .hh-term-dim { color: var(--muted); }
+.term-body .hh-term-cursor { color: var(--accent); animation: hh-term-blink 1s steps(1) infinite; }
+@keyframes hh-term-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .term-body .hh-term-cursor { display: none; } }
+.section > h2::before { content: '# '; color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .term-cursor { display: none; }
 }

@@ -1,5 +1,5 @@
 <section class="hero">
-  <h1>The CLI for LLM agents</h1>
+  <h1>Your agent reads email, posts to Slack, updates JIRA — one CLI.</h1>
   <p class="tagline">Run agentic workflows against Gmail, Slack, JIRA, WhatsApp, and 14 more — over MCP, in GitHub Actions, or as a daemon. One binary, encrypted vault, no third-party servers.</p>
   <div class="hero-ctas">
     <a href="#install" class="cta">curl -LsSf https://agentio.houlahop.com/install | sh</a>
@@ -8,6 +8,17 @@
 </section>
 
 {{terminal_html}}
+
+<section class="section" id="install">
+  <div class="eyebrow">Install</div>
+  <h2>One line</h2>
+  <p><strong>macOS / Linux</strong></p>
+  <pre><code>curl -LsSf https://agentio.houlahop.com/install | sh</code></pre>
+  <p><strong>Windows</strong></p>
+  <pre><code>iwr -useb https://agentio.houlahop.com/install.ps1 | iex</code></pre>
+  <p>Update later with <code>agentio update</code>.</p>
+</section>
+
 
 <section class="section">
   <div class="eyebrow">Why agentio</div>
@@ -73,16 +84,6 @@ jobs:
   <div class="eyebrow">Daemon &amp; scheduler</div>
   <h2>Real-time, when you need it</h2>
   <p>For services that need a persistent connection (WhatsApp, Telegram inbox) or scheduled runs (folder-watched <code>.run.md</code> files), <code>agentio daemon start</code> runs a single background process. Schedules are host-pinned so Dropbox-synced folders never double-fire.</p>
-</section>
-
-<section class="section" id="install">
-  <div class="eyebrow">Install</div>
-  <h2>One line</h2>
-  <p><strong>macOS / Linux</strong></p>
-  <pre><code>curl -LsSf https://agentio.houlahop.com/install | sh</code></pre>
-  <p><strong>Windows</strong></p>
-  <pre><code>iwr -useb https://agentio.houlahop.com/install.ps1 | iex</code></pre>
-  <p>Update later with <code>agentio update</code>.</p>
 </section>
 
 <section class="section section-narrow faq">
