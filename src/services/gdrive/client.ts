@@ -399,6 +399,23 @@ export class GDriveClient implements ServiceClient {
     }
   }
 
+  async trash(fileIdOrUrl: string): Promise<GDriveFile> {
+    const fileId = this.extractFileId(fileIdOrUrl);
+
+    try {
+      const response = await this.drive.files.update({
+        fileId,
+        supportsAllDrives: true,
+        requestBody: { trashed: true },
+        fields: 'id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description',
+      });
+
+      return this.parseFile(response.data);
+    } catch (err) {
+      this.throwApiError(err, 'trash file');
+    }
+  }
+
   async permissions(fileIdOrUrl: string): Promise<GDrivePermission[]> {
     const fileId = this.extractFileId(fileIdOrUrl);
 

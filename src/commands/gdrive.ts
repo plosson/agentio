@@ -297,6 +297,34 @@ exactly — no re-rendering. Comments are not carried over.`,
 
   addExamples(
     gdrive
+      .command('trash')
+      .argument('<file-id-or-url>', 'File ID or URL')
+      .description('Move a file to the trash')
+      .option('--profile <name>', 'Profile name')
+      .action(async (fileIdOrUrl: string, options) => {
+        try {
+          const { client, profile } = await getGDriveClient(options.profile);
+          await enforceWriteAccess('gdrive', profile, 'trash file');
+          const file = await client.trash(fileIdOrUrl);
+          console.log(`Trashed: ${file.name} (${file.id})`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # move a file to the trash by ID
+  agentio gdrive trash 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # move a file to the trash from a full Drive URL
+  agentio gdrive trash https://docs.google.com/document/d/1A2bCdEf.../edit
+
+Trashed files stay recoverable in Drive's trash for 30 days
+before Google deletes them permanently.`,
+  );
+
+  addExamples(
+    gdrive
       .command('permissions')
       .argument('<file-id-or-url>', 'File ID or URL')
       .description('List permissions on a file')

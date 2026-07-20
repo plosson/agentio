@@ -204,6 +204,27 @@ Server-side copy preserves layout, smart chips, and native blocks
 exactly — no re-rendering. Comments are not carried over.
 ```
 
+## agentio gdrive trash <file-id-or-url>
+
+Move a file to the trash
+
+Options:
+
+- `--profile <name>`: Profile name
+
+```
+Examples:
+
+  # move a file to the trash by ID
+  agentio gdrive trash 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # move a file to the trash from a full Drive URL
+  agentio gdrive trash https://docs.google.com/document/d/1A2bCdEf.../edit
+
+Trashed files stay recoverable in Drive's trash for 30 days
+before Google deletes them permanently.
+```
+
 ## agentio gdrive permissions <file-id-or-url>
 
 List permissions on a file
