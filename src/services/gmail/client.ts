@@ -485,6 +485,21 @@ export class GmailClient implements ServiceClient {
     }
   }
 
+  async deleteDraft(draftId: string): Promise<void> {
+    try {
+      await this.gmail.users.drafts.delete({
+        userId: 'me',
+        id: draftId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('404') || message.toLowerCase().includes('not found')) {
+        throw new CliError('NOT_FOUND', `Draft not found: ${draftId}`, 'Check the draft ID (use the ID returned when the draft was created).');
+      }
+      throw new CliError('API_ERROR', `Failed to delete draft: ${message}`);
+    }
+  }
+
   private async buildMultipartMessage(options: {
     from: string;
     to: string[];

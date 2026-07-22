@@ -125,6 +125,11 @@ export function printDraftResult(result: { id: string; messageId: string }, upda
   console.log(`Message ID: ${result.messageId}`);
 }
 
+// Format draft deletion confirmation
+export function printDraftDeleted(id: string): void {
+  console.log(`Deleted draft: ${id}`);
+}
+
 // Format archive confirmation
 export function printArchived(messageId: string): void {
   console.log(`Archived: ${messageId}`);

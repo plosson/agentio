@@ -7,7 +7,7 @@ import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
-import { printMessageList, printMessage, printSendResult, printDraftResult, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from '../utils/output';
+import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -371,13 +371,13 @@ Combine with spaces (AND), OR, or - to negate.`,
     --attachment ./report.pdf --inline chart1:./chart.png`,
   );
 
+  const draftCmd = gmail
+    .command('draft')
+    .description('Create an email draft (or update an existing one with [draft-id])')
+    .argument('[draft-id]', 'Existing draft ID to replace (omit to create a new draft)');
+
   addExamples(
-    addComposeOptions(
-      gmail
-        .command('draft')
-        .description('Create an email draft (or update an existing one with [draft-id])')
-        .argument('[draft-id]', 'Existing draft ID to replace (omit to create a new draft)'),
-    )
+    addComposeOptions(draftCmd)
       .action(async (draftId: string | undefined, options) => {
         try {
           const sendOptions = await parseSendOptions(options);
@@ -405,6 +405,42 @@ Combine with spaces (AND), OR, or - to negate.`,
   # draft with attachment, body from stdin
   cat message.txt | agentio gmail draft --to alice@example.com \\
     --subject "Notes" --attachment ./notes.pdf`,
+  );
+
+  addExamples(
+    draftCmd
+      .command('delete')
+      .argument('<draft-id...>', 'Draft ID(s) to delete')
+      .description('Delete (discard) one or more drafts')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (draftIds: string[], options) => {
+        try {
+          const { client, profile } = await getGmailClient(options.profile);
+          await enforceWriteAccess('gmail', profile, 'delete draft');
+
+          let failures = 0;
+          for (const id of draftIds) {
+            try {
+              await client.deleteDraft(id);
+              printDraftDeleted(id);
+            } catch (error) {
+              failures++;
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`Failed to delete draft ${id}: ${message}`);
+            }
+          }
+          if (failures > 0) process.exit(5);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # discard a draft
+  agentio gmail draft delete r-1234567890
+
+  # discard several at once
+  agentio gmail draft delete r-123... r-456...`,
   );
 
   addExamples(
