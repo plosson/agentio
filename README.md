@@ -16,17 +16,16 @@ You want your AI agent to:
 
 ## Quick Example
 
-A scheduled workflow that reads your emails, has Claude summarize them, and posts to Slack:
+A workflow that reads your latest emails, has Claude extract the action items, and appends them to a Google Sheet:
 
 ```yaml
-# .github/workflows/daily-briefing.yml
-name: Daily Briefing
+# .github/workflows/inbox-to-sheet.yml
+name: Inbox to Sheet
 on:
-  schedule:
-    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
 
 jobs:
-  briefing:
+  triage:
     runs-on: ubuntu-latest
     env:
       AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
@@ -42,12 +41,16 @@ jobs:
 
 ```markdown
 # prompt.md
-Fetch my unread emails from the last 24 hours using agentio-gmail.
-Summarize them by urgency and sender.
-Post the summary to Slack using agentio-slack.
+Read my unread emails from the last 24 hours using agentio-gmail.
+For each one that needs a follow-up, extract the sender, subject, and action item.
+Append a row per action item to my "Action Items" Google Sheet using agentio-gdrive.
 ```
 
-See [`examples/daily-briefing/`](./examples/daily-briefing) for the complete working example.
+Prefer the CLI directly? Reading an email is a single command:
+
+```bash
+agentio gmail get <message-id> --format text --body-only
+```
 
 ## Install
 
