@@ -16,40 +16,27 @@ You want your AI agent to:
 
 ## Quick Example
 
-A workflow that reads your latest emails, has Claude extract the action items, and appends them to a Google Sheet:
-
-```yaml
-# .github/workflows/inbox-to-sheet.yml
-name: Inbox to Sheet
-on:
-  workflow_dispatch:
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    env:
-      AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
-      AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: curl -LsSf https://agentio.houlahop.com/install | sh
-      - run: npm install -g @anthropic-ai/claude-code
-      - run: agentio config import && agentio claude install
-      - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
-```
-
-```markdown
-# prompt.md
-Read my unread emails from the last 24 hours using agentio-gmail.
-For each one that needs a follow-up, extract the sender, subject, and action item.
-Append a row per action item to my "Action Items" Google Sheet using agentio-gdrive.
-```
-
-Prefer the CLI directly? Reading an email is a single command:
+List your unread emails, then read one as plain text:
 
 ```bash
+# List the 5 most recent unread messages (id, sender, subject, snippet)
+agentio gmail list --query "is:unread" --limit 5
+
+# Read one by id — body only, no headers
 agentio gmail get <message-id> --format text --body-only
+```
+
+Everything is a plain CLI command, so you can pipe, script, or hand it to an agent:
+
+```bash
+# Send a Slack message
+agentio slack send "Deploy finished ✅"
+
+# Search JIRA
+agentio jira search --jql "assignee = currentUser() AND status = 'In Progress'"
+
+# Upload a file to Google Drive
+agentio gdrive put ./report.pdf --folder <folder-id>
 ```
 
 ## Install
