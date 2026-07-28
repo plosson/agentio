@@ -39,6 +39,31 @@ agentio jira search --jql "assignee = currentUser() AND status = 'In Progress'"
 agentio gdrive put ./report.pdf --folder <folder-id>
 ```
 
+### Run it in a GitHub workflow
+
+The same commands work in CI. Authenticate once locally, export your config as an
+encrypted file, store it as a secret, and run anywhere:
+
+```yaml
+# .github/workflows/inbox-triage.yml
+name: Inbox Triage
+on:
+  workflow_dispatch:
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    env:
+      AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
+      AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
+    steps:
+      - run: curl -LsSf https://agentio.houlahop.com/install | sh
+      - run: agentio config import
+      - run: |
+          agentio gmail list --query "is:unread" --limit 5
+          agentio slack send "Inbox checked ✅"
+```
+
 ## Install
 
 **macOS / Linux:**
