@@ -10,6 +10,8 @@ import {
 import { describeSchedule } from '../services/schedule/describe';
 import { walkRunFiles, type RunFile } from '../services/schedule/walker';
 import { runSchedule } from '../services/schedule/runner';
+import { checkClaude, CLAUDE_SEARCH_PATHS } from '../services/schedule/doctor';
+import type { Model } from '../types/schedule';
 import { nextRuns } from '../services/schedule/schedule-calculator';
 import { listRuns, type RunEntry } from '../services/schedule/runs';
 import { getCurrentHost, hostMatches } from '../services/schedule/host';
@@ -405,6 +407,74 @@ them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.`,
 
 Manual runs ignore the host pin — useful for testing on a machine that isn't
 the schedule's normal home.`,
+  );
+
+  const VALID_MODELS: Model[] = ['opus', 'sonnet', 'haiku'];
+
+  const doctorCmd = schedule.command('doctor')
+    .description('Check that the claude CLI is installed and logged in (runs a trivial prompt)')
+    .option('--model <model>', 'Model for the smoke test (opus|sonnet|haiku)', 'haiku')
+    .option('--timeout <seconds>', 'Seconds to wait for the test prompt', '60')
+    .action(async (opts: { model: string; timeout: string }) => {
+      try {
+        if (!VALID_MODELS.includes(opts.model as Model)) {
+          throw new CliError('INVALID_PARAMS', `Unknown model: ${opts.model}`, `Use one of: ${VALID_MODELS.join(', ')}`);
+        }
+        const timeoutSec = Number(opts.timeout);
+        if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+          throw new CliError('INVALID_PARAMS', `Invalid --timeout: ${opts.timeout}`, 'Pass a positive number of seconds.');
+        }
+
+        console.error('Locating claude CLI...');
+        const result = await checkClaude({ model: opts.model as Model, timeoutMs: timeoutSec * 1000 });
+
+        if (!result.claudePath) {
+          throw new CliError(
+            'NOT_FOUND',
+            'claude CLI not found.',
+            `Install Claude Code, then re-run. Searched: ${CLAUDE_SEARCH_PATHS.join(', ')}.`,
+          );
+        }
+        console.log(`claude binary:  ${result.claudePath}`);
+        console.log(`model:          ${result.model}`);
+        console.log(`exit code:      ${result.exitCode}`);
+        console.log(`duration:       ${formatDuration(result.durationMs)}`);
+        if (result.stdout) console.log(`output:         ${result.stdout.split('\n')[0].slice(0, 200)}`);
+
+        if (result.timedOut) {
+          throw new CliError(
+            'API_ERROR',
+            `claude did not respond within ${timeoutSec}s (killed).`,
+            'A hung login prompt is the usual cause — run `claude` once interactively to log in, or raise --timeout.',
+          );
+        }
+        if (!result.ok) {
+          const detail = result.stderr ? `\n${result.stderr.split('\n').slice(0, 5).join('\n')}` : '';
+          throw new CliError(
+            'AUTH_FAILED',
+            `claude exited with code ${result.exitCode}.${detail}`,
+            'Run `claude` once interactively to complete login, then re-run `agentio schedule doctor`.',
+          );
+        }
+
+        console.log('\n✓ claude is installed and logged in — scheduled runs can spawn it.');
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  addExamples(
+    doctorCmd,
+    `Examples:
+
+  # verify the daemon will be able to run claude
+  agentio schedule doctor
+
+  # test with a specific model and a longer timeout
+  agentio schedule doctor --model sonnet --timeout 90
+
+This runs a trivial prompt through the same login-shell environment the daemon
+uses, so a green result means scheduled .run.md jobs can launch claude.`,
   );
 
   interface AggregatedRun {
