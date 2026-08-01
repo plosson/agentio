@@ -174,6 +174,51 @@ export function registerScheduleCommands(program: Command): void {
     .command('schedule')
     .description('Watch folders for .run.md files (executed by the agentio daemon)');
 
+  addExamples(
+    schedule,
+    `.run.md frontmatter:
+
+  A .run.md file is YAML frontmatter (the schedule config) followed by the
+  prompt body that is passed to claude. The schedule id is the filename
+  without the ".run.md" suffix.
+
+  ---
+  schedule:
+    type: daily          # manual | daily | weekly | monthly | interval
+    hour: 9              # 0-23   (daily, weekly, monthly)
+    minute: 30           # 0-59   (daily, weekly, monthly)
+    # weekdays: [1, 5]   # 1=Mon..7=Sun            (weekly only)
+    # day: 1             # 1-31, day of month       (monthly only)
+    # intervalMinutes: 15                           (interval only)
+  host: my-laptop        # REQUIRED — only fires on the machine with this hostname
+  model: sonnet          # opus | sonnet | haiku            (default: sonnet)
+  permissionMode: bypassPermissions
+                         # default | bypassPermissions | plan | acceptEdits
+                         #                          (default: bypassPermissions)
+  sessionMode: new       # new | resume | fork  (default: new; not yet applied to runs)
+  enabled: true          # set false to keep the file but stop firing (default: true)
+  # command: "echo hi"   # optional: run this shell command instead of claude
+  ---
+  Your prompt to claude goes here, in plain markdown.
+
+Field notes:
+
+  schedule.type   manual   never auto-fires; run it with 'agentio schedule run <id>'
+                  daily     fires at hour:minute every day
+                  weekly    fires at hour:minute on each listed weekday
+                  monthly   fires at hour:minute on the given day-of-month
+                  interval  fires every intervalMinutes
+  host            Required. The daemon only fires schedules whose host matches the
+                  current hostname, so Dropbox-synced folders don't double-fire.
+                  Use 'agentio schedule doctor' to confirm claude runs on this host.
+  sessionMode     Recorded and shown by 'schedule show', but runs currently always
+                  start a fresh claude session regardless of this value.
+  command         When set, the shell command runs instead of claude (model,
+                  permissionMode and sessionMode are ignored).
+
+Run 'agentio schedule <subcommand> --help' for per-command options and examples.`,
+  );
+
   const addCmd = schedule.command('add')
     .description('Watch a folder for .run.md files')
     .argument('<folder>', 'Folder to watch')
