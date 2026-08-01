@@ -162,6 +162,24 @@ Examples:
     --subject "Notes" --attachment ./notes.pdf
 ```
 
+## agentio gmail draft delete <draft-id...>
+
+Delete (discard) one or more drafts
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # discard a draft
+  agentio gmail draft delete r-1234567890
+
+  # discard several at once
+  agentio gmail draft delete r-123... r-456...
+```
+
 ## agentio gmail archive [message-id...]
 
 Archive one or more messages (bulk-safe via batchModify)

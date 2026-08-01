@@ -93,7 +93,7 @@ function resolveJob(config: Config, id: string, explicitFolder?: string): Resolv
     throw new CliError(
       'NOT_FOUND',
       'No watched folders configured.',
-      'Add one with: agentio schedule add <folder>',
+      'Watch one with: agentio schedule watch <folder>',
     );
   }
   const matches: ResolvedJob[] = [];
@@ -125,7 +125,7 @@ function renderJobs(jobs: SchedulerJobView[], filterFolder?: string): void {
     : jobs;
   if (filtered.length === 0) {
     console.log('No schedules.');
-    console.log('Add one with: agentio schedule add <folder>');
+    console.log('Watch one with: agentio schedule watch <folder>');
     return;
   }
   const now = new Date();
@@ -219,7 +219,7 @@ Field notes:
 Run 'agentio schedule <subcommand> --help' for per-command options and examples.`,
   );
 
-  const addCmd = schedule.command('add')
+  const watchCmd = schedule.command('watch')
     .description('Watch a folder for .run.md files')
     .argument('<folder>', 'Folder to watch')
     .option('--no-host-pin', 'Do not pin this folder to the current host')
@@ -264,23 +264,23 @@ Run 'agentio schedule <subcommand> --help' for per-command options and examples.
     });
 
   addExamples(
-    addCmd,
+    watchCmd,
     `Examples:
 
   # watch a folder of .run.md files (pinned to this hostname by default)
-  agentio schedule add ~/Dropbox/schedules
+  agentio schedule watch ~/Dropbox/schedules
 
   # watch but allow any host to fire (for non-Dropbox-synced folders)
-  agentio schedule add ./agents --no-host-pin
+  agentio schedule watch ./agents --no-host-pin
 
-After adding, author .run.md files in the folder directly. The daemon picks
+After watching, author .run.md files in the folder directly. The daemon picks
 them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.`,
   );
 
   const printWatchedFolders = (folders: WatchedFolder[]): void => {
     if (folders.length === 0) {
       console.log('No folders watched.');
-      console.log('Add one with: agentio schedule add <folder>');
+      console.log('Watch one with: agentio schedule watch <folder>');
       return;
     }
     console.log('Watched folders:');
@@ -573,7 +573,7 @@ uses, so a green result means scheduled .run.md jobs can launch claude.`,
             : watchedFolders(config);
           if (folders.length === 0) {
             console.log('No watched folders configured.');
-            console.log('Add one with: agentio schedule add <folder>');
+            console.log('Watch one with: agentio schedule watch <folder>');
             return;
           }
           const rows = collectAllLastRuns(folders);
