@@ -7,7 +7,7 @@ description: Use to manage agentio scheduled .run.md prompts in watched folders.
 
 Auto-generated from `agentio skill schedule`. Do not edit by hand.
 
-## agentio schedule add <folder>
+## agentio schedule watch <folder>
 
 Watch a folder for .run.md files
 
@@ -19,12 +19,12 @@ Options:
 Examples:
 
   # watch a folder of .run.md files (pinned to this hostname by default)
-  agentio schedule add ~/Dropbox/schedules
+  agentio schedule watch ~/Dropbox/schedules
 
   # watch but allow any host to fire (for non-Dropbox-synced folders)
-  agentio schedule add ./agents --no-host-pin
+  agentio schedule watch ./agents --no-host-pin
 
-After adding, author .run.md files in the folder directly. The daemon picks
+After watching, author .run.md files in the folder directly. The daemon picks
 them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.
 ```
 
@@ -92,6 +92,28 @@ Examples:
 
 Manual runs ignore the host pin — useful for testing on a machine that isn't
 the schedule's normal home.
+```
+
+## agentio schedule doctor
+
+Check that the claude CLI is installed and logged in (runs a trivial prompt)
+
+Options:
+
+- `--model <model>`: Model for the smoke test (opus|sonnet|haiku) (default: haiku)
+- `--timeout <seconds>`: Seconds to wait for the test prompt (default: 60)
+
+```
+Examples:
+
+  # verify the daemon will be able to run claude
+  agentio schedule doctor
+
+  # test with a specific model and a longer timeout
+  agentio schedule doctor --model sonnet --timeout 90
+
+This runs a trivial prompt through the same login-shell environment the daemon
+uses, so a green result means scheduled .run.md jobs can launch claude.
 ```
 
 ## agentio schedule history [id]

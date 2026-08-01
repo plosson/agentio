@@ -32,4 +32,3 @@ Examples:
   # silent notification (no device ping)
   agentio telegram send "Nightly job done" --silent
 ```
-
