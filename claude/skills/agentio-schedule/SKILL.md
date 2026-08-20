@@ -28,6 +28,54 @@ After watching, author .run.md files in the folder directly. The daemon picks
 them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.
 ```
 
+## agentio schedule create [name]
+
+Create a new .run.md schedule (interactive, or non-interactive with flags)
+
+Options:
+
+- `--folder <path>`: Directory to create the file in (default: .)
+- `--schedule <type>`: manual | daily | weekly | monthly | interval
+- `--at <HH:MM>`: Time of day (daily/weekly/monthly)
+- `--hour <n>`: Hour 0-23 (alternative to --at)
+- `--minute <n>`: Minute 0-59 (alternative to --at)
+- `--weekdays <list>`: Weekdays for weekly, e.g. mon,fri or 1,5
+- `--day <n>`: Day of month 1-31 (monthly)
+- `--interval <dur>`: Interval, e.g. 30m, 2h, 1h30m
+- `--model <model>`: opus | sonnet | haiku (default: sonnet)
+- `--permission-mode <mode>`: default | bypass | plan | accept-edits (default: bypass)
+- `--host <name>`: Host to pin the schedule to (default: this hostname)
+- `--command <cmd>`: Run a shell command instead of claude
+- `--prompt <text>`: Prompt body for claude (or pipe via stdin)
+- `--prompt-file <path>`: Read the prompt body from a file
+- `--disabled`: Create the schedule disabled (enabled: false)
+- `--watch`: Also register the folder with the daemon
+- `-y, --yes`: Non-interactive: use flags + defaults, do not prompt
+- `--force`: Overwrite the file if it already exists
+
+```
+Examples:
+
+  # interactive — walks you through every field
+  agentio schedule create
+
+  # non-interactive: a daily 9am job in the current folder
+  agentio schedule create morning-brief --schedule daily --at 09:00 \
+    --prompt "Summarize my unread email and post it to Slack" -y
+
+  # weekly on Mon+Fri, pipe the prompt in, and start watching the folder
+  echo "Weekly report" | agentio schedule create weekly-report \
+    --folder ~/Dropbox/schedules --schedule weekly --weekdays mon,fri \
+    --at 08:00 --watch -y
+
+  # every 30 minutes, running a shell command instead of claude
+  agentio schedule create ping --schedule interval --interval 30m \
+    --command "curl -fsS https://example.com/health" -y
+
+Created files only fire once their folder is watched (see --watch and
+'agentio schedule watch'). Author or refine the prompt body in the file after.
+```
+
 ## agentio schedule list
 
 List watched folders and scheduled tasks

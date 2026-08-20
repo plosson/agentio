@@ -253,6 +253,7 @@ The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` 
 The daemon watches folders registered via `schedule watch` and fires due `.run.md` schedules. Filesystem changes are picked up live via `fs.watch`; a 60-second tick provides the safety net. Users author `.run.md` files directly in their text editor; the CLI only manages folder registration and visibility.
 
 ```bash
+agentio schedule create [name]             # Create a .run.md (interactive; -y for non-interactive)
 agentio schedule watch <folder>            # Watch a folder for .run.md files
 agentio schedule remove <folder>           # Stop watching a folder
 agentio schedule list [--all-hosts]        # List watched folders + detected schedules
