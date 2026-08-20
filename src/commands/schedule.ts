@@ -1,17 +1,41 @@
 import { Command } from 'commander';
 import { existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+import { readFile, writeFile } from 'fs/promises';
+import { resolve, join } from 'path';
 import { CliError, handleError } from '../utils/errors';
 import {
   mergeConfig,
   parseFrontmatter,
+  serializeFrontmatter,
 } from '../services/schedule/frontmatter';
 import { describeSchedule } from '../services/schedule/describe';
 import { walkRunFiles, type RunFile } from '../services/schedule/walker';
 import { runSchedule } from '../services/schedule/runner';
 import { checkClaude, CLAUDE_SEARCH_PATHS } from '../services/schedule/doctor';
-import type { Model } from '../types/schedule';
+import {
+  configFromFlags,
+  missingScheduleFields,
+  PERMISSION_MODE_CHOICES,
+  parseAt,
+  type ScheduleFlags,
+} from '../services/schedule/config-flags';
+import { parseWeekdays, weekdayNames } from '../services/schedule/weekdays';
+import { parseDuration } from '../services/schedule/duration';
+import {
+  isInteractive,
+  interactiveSelect,
+  interactiveInput,
+  interactiveConfirm,
+  interactiveCheckbox,
+} from '../utils/interactive';
+import { readStdin } from '../utils/stdin';
+import type {
+  FrontmatterConfig,
+  Model,
+  PermissionMode,
+  Schedule,
+  ScheduleType,
+} from '../types/schedule';
 import { nextRuns } from '../services/schedule/schedule-calculator';
 import { listRuns, type RunEntry } from '../services/schedule/runs';
 import { getCurrentHost, hostMatches } from '../services/schedule/host';
@@ -169,6 +193,249 @@ async function fetchSchedulerList(
   }
 }
 
+const PLACEHOLDER_BODY = 'Write your prompt to claude here.\n';
+
+const MODEL_CHOICES = [
+  { name: 'sonnet (balanced, default)', value: 'sonnet' as Model },
+  { name: 'opus (most capable)', value: 'opus' as Model },
+  { name: 'haiku (fastest, cheapest)', value: 'haiku' as Model },
+];
+
+const PERMISSION_CHOICES = [
+  { name: 'bypassPermissions (no prompts — default for schedules)', value: 'bypassPermissions' as PermissionMode },
+  { name: 'default (normal permission prompts)', value: 'default' as PermissionMode },
+  { name: 'acceptEdits (auto-accept file edits)', value: 'acceptEdits' as PermissionMode },
+  { name: 'plan (plan mode, no writes)', value: 'plan' as PermissionMode },
+];
+
+const SCHEDULE_TYPE_CHOICES = [
+  { name: 'daily — every day at a set time', value: 'daily' as ScheduleType },
+  { name: 'weekly — chosen weekdays at a set time', value: 'weekly' as ScheduleType },
+  { name: 'monthly — a day of the month at a set time', value: 'monthly' as ScheduleType },
+  { name: 'interval — every N minutes/hours', value: 'interval' as ScheduleType },
+  { name: 'manual — only when run explicitly', value: 'manual' as ScheduleType },
+];
+
+const WEEKDAY_CHOICES = [
+  { name: 'Mon', value: 1 }, { name: 'Tue', value: 2 }, { name: 'Wed', value: 3 },
+  { name: 'Thu', value: 4 }, { name: 'Fri', value: 5 }, { name: 'Sat', value: 6 }, { name: 'Sun', value: 7 },
+];
+
+interface CreateOpts extends ScheduleFlags {
+  folder?: string;
+  prompt?: string;
+  promptFile?: string;
+  watch?: boolean;
+  yes?: boolean;
+  force?: boolean;
+}
+
+/** Strip a trailing ".run.md" and reject path separators, returning a bare id. */
+function normalizeScheduleName(name: string): string {
+  let id = name.trim();
+  if (id.endsWith('.run.md')) id = id.slice(0, -'.run.md'.length);
+  if (!id || id.includes('/') || id.includes('\\')) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Invalid schedule name: "${name}"`,
+      'Use a simple name like "daily-report" (no path separators)',
+    );
+  }
+  return id;
+}
+
+/** Resolve the prompt body from --prompt, --prompt-file, or piped stdin. */
+async function resolveBody(opts: CreateOpts): Promise<string> {
+  if (opts.prompt !== undefined) return opts.prompt;
+  if (opts.promptFile !== undefined) {
+    const p = resolve(opts.promptFile);
+    if (!existsSync(p)) throw new CliError('NOT_FOUND', `Prompt file not found: ${p}`);
+    return await readFile(p, 'utf-8');
+  }
+  const piped = await readStdin(); // null when stdin is a TTY
+  return piped ?? '';
+}
+
+/** Format minutes back into a duration string parseDuration understands. */
+function intervalToDuration(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h ? `${h}h` : ''}${m ? `${m}m` : ''}` || `${min}m`;
+}
+
+/** Interactively prompt for the fields a given schedule type needs. */
+async function promptScheduleFields(type: ScheduleType, defaults: Schedule): Promise<Schedule> {
+  const schedule: Schedule = { type };
+  const askTime = async (): Promise<void> => {
+    const def = defaults.hour !== undefined
+      ? `${String(defaults.hour).padStart(2, '0')}:${String(defaults.minute ?? 0).padStart(2, '0')}`
+      : '09:00';
+    const at = await interactiveInput({ message: 'Time of day (HH:MM)', default: def, required: true });
+    const { hour, minute } = parseAt(at);
+    schedule.hour = hour;
+    schedule.minute = minute;
+  };
+
+  switch (type) {
+    case 'manual':
+      break;
+    case 'daily':
+      await askTime();
+      break;
+    case 'weekly': {
+      const weekdays = await interactiveCheckbox<number>({
+        message: 'Which weekdays?',
+        choices: WEEKDAY_CHOICES.map((c) => ({ ...c, checked: defaults.weekdays?.includes(c.value) })),
+        required: true,
+      });
+      schedule.weekdays = [...weekdays].sort((a, b) => a - b);
+      await askTime();
+      break;
+    }
+    case 'monthly': {
+      const dayStr = await interactiveInput({
+        message: 'Day of month (1-31)',
+        default: String(defaults.day ?? 1),
+        required: true,
+      });
+      const day = Number(dayStr);
+      if (!Number.isInteger(day) || day < 1 || day > 31) {
+        throw new CliError('INVALID_PARAMS', `Invalid day: "${dayStr}"`, 'Use a day-of-month 1-31');
+      }
+      schedule.day = day;
+      await askTime();
+      break;
+    }
+    case 'interval': {
+      const def = defaults.intervalMinutes ? intervalToDuration(defaults.intervalMinutes) : '1h';
+      const dur = await interactiveInput({
+        message: 'Interval (e.g. 30m, 2h, 1h30m)',
+        default: def,
+        required: true,
+      });
+      schedule.intervalMinutes = parseDuration(dur);
+      break;
+    }
+  }
+  return schedule;
+}
+
+/** Full interactive walk-through; flag values seed the prompt defaults. */
+async function runInteractiveCreate(params: {
+  id?: string;
+  flagsConfig: Partial<FrontmatterConfig>;
+  body: string;
+}): Promise<{ id: string; config: FrontmatterConfig; body: string }> {
+  const { flagsConfig } = params;
+  const id = params.id ?? normalizeScheduleName(
+    await interactiveInput({ message: 'Schedule name (file becomes <name>.run.md)', required: true }),
+  );
+
+  const type = await interactiveSelect<ScheduleType>({
+    message: 'Schedule type',
+    choices: SCHEDULE_TYPE_CHOICES,
+    default: flagsConfig.schedule?.type ?? 'daily',
+  });
+  const schedule = await promptScheduleFields(type, flagsConfig.schedule ?? { type });
+
+  const useCommand = flagsConfig.command !== undefined
+    ? true
+    : await interactiveConfirm({ message: 'Run a shell command instead of claude?', default: false });
+
+  let command: string | undefined;
+  let model: Model = flagsConfig.model ?? 'sonnet';
+  let permissionMode: PermissionMode = flagsConfig.permissionMode ?? 'bypassPermissions';
+  let body = params.body;
+
+  if (useCommand) {
+    command = await interactiveInput({ message: 'Shell command', default: flagsConfig.command ?? '', required: true });
+  } else {
+    model = await interactiveSelect<Model>({ message: 'Model', choices: MODEL_CHOICES, default: model });
+    permissionMode = await interactiveSelect<PermissionMode>({
+      message: 'Permission mode',
+      choices: PERMISSION_CHOICES,
+      default: permissionMode,
+    });
+    if (!body.trim()) {
+      body = await interactiveInput({
+        message: 'Prompt for claude (leave empty to scaffold a placeholder)',
+        default: '',
+      });
+    }
+  }
+
+  const host = await interactiveInput({
+    message: 'Host to pin to (only this machine fires the schedule)',
+    default: flagsConfig.host ?? getCurrentHost(),
+    required: true,
+  });
+
+  const config = mergeConfig({}, {
+    schedule,
+    model,
+    permissionMode,
+    host,
+    enabled: flagsConfig.enabled ?? true,
+    ...(command !== undefined ? { command } : {}),
+  });
+
+  if (!body.trim() && command === undefined) body = PLACEHOLDER_BODY;
+  return { id, config, body };
+}
+
+/** Render a preview of the file that will be written, plus its next run times. */
+function renderPreview(id: string, config: FrontmatterConfig, body: string): string {
+  const file = serializeFrontmatter(config, body);
+  const runs = nextRuns(config.schedule, 3);
+  const nextLines = runs.length
+    ? runs.map((d) => `  ${formatLocal(d)}`).join('\n')
+    : '  (manual — runs only when invoked)';
+  return `\n--- ${id}.run.md ---\n${file}\nNext runs:\n${nextLines}\n\n`;
+}
+
+/**
+ * After writing, ensure the folder is watched. Honors --watch, prompts in
+ * interactive mode, otherwise prints a hint. A schedule only fires once its
+ * folder is registered with the daemon.
+ */
+async function maybeWatchFolder(
+  folder: string,
+  host: string | undefined,
+  opts: CreateOpts,
+  interactive: boolean,
+): Promise<void> {
+  const config = await loadConfig();
+  if (watchedFolders(config).some((f) => f.path === folder)) return;
+
+  let doWatch = opts.watch === true;
+  if (!doWatch && interactive) {
+    doWatch = await interactiveConfirm({
+      message: `Folder ${abbrHome(folder)} isn't watched by the daemon. Watch it now?`,
+      default: true,
+    });
+  }
+  if (!doWatch) {
+    console.log(`\nThis schedule won't fire until its folder is watched:`);
+    console.log(`  agentio schedule watch ${abbrHome(folder)}`);
+    return;
+  }
+
+  const updated = addWatchedFolder(config, folder, host ?? getCurrentHost(), Date.now());
+  await saveConfig(updated);
+  console.log(`Watching ${abbrHome(folder)}.`);
+
+  const { apiKey, port } = getDaemonEndpoint(updated);
+  if (apiKey) {
+    try {
+      await fetch(`http://127.0.0.1:${port}/scheduler/reload`, {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey },
+        signal: AbortSignal.timeout(1500),
+      });
+    } catch { /* ignore */ }
+  }
+}
+
 export function registerScheduleCommands(program: Command): void {
   const schedule = program
     .command('schedule')
@@ -275,6 +542,142 @@ Run 'agentio schedule <subcommand> --help' for per-command options and examples.
 
 After watching, author .run.md files in the folder directly. The daemon picks
 them up via fs.watch within ~500ms. Run 'agentio schedule list' to confirm.`,
+  );
+
+  const createCmd = schedule.command('create')
+    .description('Create a new .run.md schedule (interactive, or non-interactive with flags)')
+    .argument('[name]', 'Schedule id (file becomes <name>.run.md)')
+    .option('--folder <path>', 'Directory to create the file in', '.')
+    .option('--schedule <type>', 'manual | daily | weekly | monthly | interval')
+    .option('--at <HH:MM>', 'Time of day (daily/weekly/monthly)')
+    .option('--hour <n>', 'Hour 0-23 (alternative to --at)')
+    .option('--minute <n>', 'Minute 0-59 (alternative to --at)')
+    .option('--weekdays <list>', 'Weekdays for weekly, e.g. mon,fri or 1,5')
+    .option('--day <n>', 'Day of month 1-31 (monthly)')
+    .option('--interval <dur>', 'Interval, e.g. 30m, 2h, 1h30m')
+    .option('--model <model>', 'opus | sonnet | haiku (default: sonnet)')
+    .option('--permission-mode <mode>', 'default | bypass | plan | accept-edits (default: bypass)')
+    .option('--host <name>', 'Host to pin the schedule to (default: this hostname)')
+    .option('--command <cmd>', 'Run a shell command instead of claude')
+    .option('--prompt <text>', 'Prompt body for claude (or pipe via stdin)')
+    .option('--prompt-file <path>', 'Read the prompt body from a file')
+    .option('--disabled', 'Create the schedule disabled (enabled: false)')
+    .option('--watch', 'Also register the folder with the daemon')
+    .option('-y, --yes', 'Non-interactive: use flags + defaults, do not prompt')
+    .option('--force', 'Overwrite the file if it already exists')
+    .action(async (name: string | undefined, opts: CreateOpts) => {
+      try {
+        const folder = resolve(opts.folder ?? '.');
+        if (!existsSync(folder)) {
+          throw new CliError('NOT_FOUND', `Folder does not exist: ${folder}`);
+        }
+        const flags: ScheduleFlags = {
+          schedule: opts.schedule, at: opts.at, hour: opts.hour, minute: opts.minute,
+          weekdays: opts.weekdays, day: opts.day, interval: opts.interval,
+          model: opts.model, permissionMode: opts.permissionMode,
+          host: opts.host, command: opts.command, disabled: opts.disabled,
+        };
+        const flagsConfig = configFromFlags(flags);
+        const body0 = await resolveBody(opts);
+        const interactive = !opts.yes && isInteractive();
+
+        let id: string;
+        let config: FrontmatterConfig;
+        let body: string;
+
+        if (interactive) {
+          const r = await runInteractiveCreate({
+            id: name ? normalizeScheduleName(name) : undefined,
+            flagsConfig,
+            body: body0,
+          });
+          ({ id, config, body } = r);
+        } else {
+          if (!name) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Schedule name is required in non-interactive mode',
+              'agentio schedule create <name> --schedule <type> ...',
+            );
+          }
+          id = normalizeScheduleName(name);
+          if (!flagsConfig.schedule) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              '--schedule is required in non-interactive mode',
+              'Use one of: manual, daily, weekly, monthly, interval',
+            );
+          }
+          const missing = missingScheduleFields(flagsConfig.schedule);
+          if (missing.length) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              `Missing required schedule fields: ${missing.join(', ')}`,
+              'Pass the flags shown in parentheses',
+            );
+          }
+          if (flagsConfig.host === undefined) flagsConfig.host = getCurrentHost();
+          config = mergeConfig({}, flagsConfig);
+          body = (!body0.trim() && config.command === undefined) ? PLACEHOLDER_BODY : body0;
+        }
+
+        const filePath = join(folder, `${id}.run.md`);
+        if (existsSync(filePath) && !opts.force) {
+          throw new CliError(
+            'INVALID_PARAMS',
+            `File already exists: ${abbrHome(filePath)}`,
+            'Use --force to overwrite, or choose another name',
+          );
+        }
+
+        if (interactive) {
+          process.stderr.write(renderPreview(id, config, body));
+          const ok = await interactiveConfirm({ message: 'Create this schedule?', default: true });
+          if (!ok) {
+            console.error('Aborted.');
+            return;
+          }
+        }
+
+        await writeFile(filePath, serializeFrontmatter(config, body));
+        console.log(`Created ${abbrHome(filePath)}`);
+
+        const runs = nextRuns(config.schedule, 3);
+        if (runs.length) {
+          console.log('Next runs:');
+          for (const d of runs) console.log(`  ${formatLocal(d)} (${relativeFromNow(d)})`);
+        } else {
+          console.log(`Manual schedule — run it with: agentio schedule run ${id}`);
+        }
+
+        await maybeWatchFolder(folder, config.host, opts, interactive);
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  addExamples(
+    createCmd,
+    `Examples:
+
+  # interactive — walks you through every field
+  agentio schedule create
+
+  # non-interactive: a daily 9am job in the current folder
+  agentio schedule create morning-brief --schedule daily --at 09:00 \\
+    --prompt "Summarize my unread email and post it to Slack" -y
+
+  # weekly on Mon+Fri, pipe the prompt in, and start watching the folder
+  echo "Weekly report" | agentio schedule create weekly-report \\
+    --folder ~/Dropbox/schedules --schedule weekly --weekdays mon,fri \\
+    --at 08:00 --watch -y
+
+  # every 30 minutes, running a shell command instead of claude
+  agentio schedule create ping --schedule interval --interval 30m \\
+    --command "curl -fsS https://example.com/health" -y
+
+Created files only fire once their folder is watched (see --watch and
+'agentio schedule watch'). Author or refine the prompt body in the file after.`,
   );
 
   const printWatchedFolders = (folders: WatchedFolder[]): void => {
