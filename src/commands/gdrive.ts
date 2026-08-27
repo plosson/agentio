@@ -297,6 +297,89 @@ exactly — no re-rendering. Comments are not carried over.`,
 
   addExamples(
     gdrive
+      .command('mkdir')
+      .argument('<name>', 'Folder name')
+      .description('Create a folder')
+      .option('--profile <name>', 'Profile name')
+      .option('--parent <id>', 'Parent folder ID or URL (default: My Drive root)')
+      .action(async (name: string, options) => {
+        try {
+          const { client, profile } = await getGDriveClient(options.profile);
+          await enforceWriteAccess('gdrive', profile, 'create folder');
+          const folder = await client.mkdir(name, options.parent);
+          console.log(`Created folder: ${folder.name} (${folder.id})`);
+          if (folder.webViewLink) console.log(`  Link: ${folder.webViewLink}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # create a folder in My Drive root
+  agentio gdrive mkdir "Reports"
+
+  # create a subfolder inside an existing folder
+  agentio gdrive mkdir "2026" --parent 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
+  );
+
+  addExamples(
+    gdrive
+      .command('rename')
+      .argument('<file-id-or-url>', 'File or folder ID or URL')
+      .argument('<new-name>', 'New name')
+      .description('Rename a file or folder')
+      .option('--profile <name>', 'Profile name')
+      .action(async (fileIdOrUrl: string, newName: string, options) => {
+        try {
+          const { client, profile } = await getGDriveClient(options.profile);
+          await enforceWriteAccess('gdrive', profile, 'rename file');
+          const file = await client.rename(fileIdOrUrl, newName);
+          console.log(`Renamed: ${file.name} (${file.id})`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # rename a file by ID
+  agentio gdrive rename 1A2bCdEfGhIjKlMnOpQrStUvWxYz "report-final.pdf"
+
+  # rename a folder from a full Drive URL
+  agentio gdrive rename https://drive.google.com/drive/folders/1A2bCdEf... "Archive 2025"`,
+  );
+
+  addExamples(
+    gdrive
+      .command('move')
+      .argument('<file-id-or-url>', 'File or folder ID or URL')
+      .argument('<folder-id-or-url>', 'Destination folder ID or URL (use "root" for My Drive root)')
+      .description('Move a file or folder to another folder')
+      .option('--profile <name>', 'Profile name')
+      .action(async (fileIdOrUrl: string, folderIdOrUrl: string, options) => {
+        try {
+          const { client, profile } = await getGDriveClient(options.profile);
+          await enforceWriteAccess('gdrive', profile, 'move file');
+          const file = await client.move(fileIdOrUrl, folderIdOrUrl);
+          console.log(`Moved: ${file.name} (${file.id})`);
+          if (file.parents && file.parents.length > 0) console.log(`  Folder: ${file.parents[0]}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # move a file into a folder
+  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz 1XyZaBcDeFgHiJkLmNoPqRsTuVw
+
+  # move a folder (and its contents) into another folder
+  agentio gdrive move https://drive.google.com/drive/folders/1A2bCdEf... 1XyZaBc...
+
+  # move a file back to My Drive root
+  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz root`,
+  );
+
+  addExamples(
+    gdrive
       .command('trash')
       .argument('<file-id-or-url>', 'File ID or URL')
       .description('Move a file to the trash')

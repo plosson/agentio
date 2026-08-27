@@ -160,6 +160,9 @@ agentio gdrive get <file-id-or-url>
 agentio gdrive search --query <query> [--limit N]
 agentio gdrive download <file-id-or-url> [--output <path>] [--format <type>]
 agentio gdrive put <file-path> [--folder <id>] [--name <name>]
+agentio gdrive mkdir <name> [--parent <id>]
+agentio gdrive rename <file-id-or-url> <new-name>
+agentio gdrive move <file-id-or-url> <folder-id-or-url>
 agentio gdrive trash <file-id-or-url>
 agentio gdrive profile add|list|remove
 ```
