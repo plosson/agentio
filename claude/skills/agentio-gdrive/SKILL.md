@@ -204,6 +204,64 @@ Server-side copy preserves layout, smart chips, and native blocks
 exactly — no re-rendering. Comments are not carried over.
 ```
 
+## agentio gdrive mkdir <name>
+
+Create a folder
+
+Options:
+
+- `--profile <name>`: Profile name
+- `--parent <id>`: Parent folder ID or URL (default: My Drive root)
+
+```
+Examples:
+
+  # create a folder in My Drive root
+  agentio gdrive mkdir "Reports"
+
+  # create a subfolder inside an existing folder
+  agentio gdrive mkdir "2026" --parent 1A2bCdEfGhIjKlMnOpQrStUvWxYz
+```
+
+## agentio gdrive rename <file-id-or-url> <new-name>
+
+Rename a file or folder
+
+Options:
+
+- `--profile <name>`: Profile name
+
+```
+Examples:
+
+  # rename a file by ID
+  agentio gdrive rename 1A2bCdEfGhIjKlMnOpQrStUvWxYz "report-final.pdf"
+
+  # rename a folder from a full Drive URL
+  agentio gdrive rename https://drive.google.com/drive/folders/1A2bCdEf... "Archive 2025"
+```
+
+## agentio gdrive move <file-id-or-url> <folder-id-or-url>
+
+Move a file or folder to another folder
+
+Options:
+
+- `--profile <name>`: Profile name
+
+```
+Examples:
+
+  # move a file into a folder
+  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz 1XyZaBcDeFgHiJkLmNoPqRsTuVw
+
+  # move a folder (and its contents) into another folder
+  agentio gdrive move https://drive.google.com/drive/folders/1A2bCdEf... 1XyZaBc...
+
+  # move a file back to My Drive root
+  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz root
+```
+
 ## agentio gdrive trash <file-id-or-url>
 
 Move a file to the trash
@@ -294,3 +352,4 @@ Examples:
   # remove a specific permission by ID
   agentio gdrive unshare 1A2bCdEf... --permission-id AKioiA...
 ```
+

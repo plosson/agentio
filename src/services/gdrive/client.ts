@@ -297,14 +297,7 @@ export class GDriveClient implements ServiceClient {
   }
 
   async upload(options: GDriveUploadOptions): Promise<GDriveUploadResult> {
-    // Treat missing accessLevel as readonly for backward compatibility
-    if (!this.credentials.accessLevel || this.credentials.accessLevel === 'readonly') {
-      throw new CliError(
-        'PERMISSION_DENIED',
-        'This profile has read-only access',
-        'Create a new profile with full access: agentio gdrive profile add --full'
-      );
-    }
+    this.assertWriteAccess();
 
     const { filePath, name, folderId, mimeType, convert } = options;
 
@@ -365,13 +358,7 @@ export class GDriveClient implements ServiceClient {
   }
 
   async copy(options: GDriveCopyOptions): Promise<GDriveCopyResult> {
-    if (!this.credentials.accessLevel || this.credentials.accessLevel === 'readonly') {
-      throw new CliError(
-        'PERMISSION_DENIED',
-        'This profile has read-only access',
-        'Create a new profile with full access: agentio gdrive profile add --full'
-      );
-    }
+    this.assertWriteAccess();
 
     const fileId = this.extractFileId(options.fileIdOrUrl);
 
@@ -413,6 +400,76 @@ export class GDriveClient implements ServiceClient {
       return this.parseFile(response.data);
     } catch (err) {
       this.throwApiError(err, 'trash file');
+    }
+  }
+
+  async rename(fileIdOrUrl: string, name: string): Promise<GDriveFile> {
+    this.assertWriteAccess();
+    const fileId = this.extractFileId(fileIdOrUrl);
+
+    try {
+      const response = await this.drive.files.update({
+        fileId,
+        supportsAllDrives: true,
+        requestBody: { name },
+        fields: 'id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description',
+      });
+
+      return this.parseFile(response.data);
+    } catch (err) {
+      this.throwApiError(err, 'rename file');
+    }
+  }
+
+  async move(fileIdOrUrl: string, folderIdOrUrl: string): Promise<GDriveFile> {
+    this.assertWriteAccess();
+    const fileId = this.extractFileId(fileIdOrUrl);
+    const folderId = this.extractFileId(folderIdOrUrl);
+
+    try {
+      const current = await this.drive.files.get({
+        fileId,
+        supportsAllDrives: true,
+        fields: 'parents',
+      });
+      const previousParents = (current.data.parents || []).join(',');
+
+      const response = await this.drive.files.update({
+        fileId,
+        supportsAllDrives: true,
+        addParents: folderId,
+        removeParents: previousParents || undefined,
+        fields: 'id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description',
+      });
+
+      return this.parseFile(response.data);
+    } catch (err) {
+      this.throwApiError(err, 'move file');
+    }
+  }
+
+  async mkdir(name: string, parentIdOrUrl?: string): Promise<GDriveFile> {
+    this.assertWriteAccess();
+
+    const requestBody: { name: string; mimeType: string; parents?: string[] } = {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+    };
+
+    if (parentIdOrUrl) {
+      requestBody.parents = [this.extractFileId(parentIdOrUrl)];
+    }
+
+    try {
+      const response = await this.drive.files.create({
+        requestBody,
+        supportsAllDrives: true,
+        fields: 'id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description',
+      });
+
+      return this.parseFile(response.data);
+    } catch (err) {
+      this.throwApiError(err, 'create folder');
     }
   }
 
@@ -483,6 +540,17 @@ export class GDriveClient implements ServiceClient {
       });
     } catch (err) {
       this.throwApiError(err, 'remove permission');
+    }
+  }
+
+  // Treat missing accessLevel as readonly for backward compatibility
+  private assertWriteAccess(): void {
+    if (!this.credentials.accessLevel || this.credentials.accessLevel === 'readonly') {
+      throw new CliError(
+        'PERMISSION_DENIED',
+        'This profile has read-only access',
+        'Create a new profile with full access: agentio gdrive profile add --full'
+      );
     }
   }
 
