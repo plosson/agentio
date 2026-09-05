@@ -15,6 +15,7 @@ import { registerGSlidesCommands } from './commands/gslides';
 import { registerGScriptCommands } from './commands/gscript';
 import { registerGTasksCommands } from './commands/gtasks';
 import { registerJiraCommands } from './commands/jira';
+import { registerRevolutCommands } from './commands/revolut';
 import { registerRssCommands } from './commands/rss';
 import { registerSlackCommands } from './commands/slack';
 import { registerSqlCommands } from './commands/sql';
@@ -73,6 +74,7 @@ export function createProgram(): Command {
   registerGScriptCommands(program);
   registerGTasksCommands(program);
   registerJiraCommands(program);
+  registerRevolutCommands(program);
   registerRssCommands(program);
   registerSlackCommands(program);
   registerSqlCommands(program);
@@ -116,7 +118,7 @@ export function createProgram(): Command {
   // Services
   [
     'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
-    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'rss', 'sql',
+    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'rss', 'sql', 'revolut',
   ].forEach((n) => setGroup(n, 'Services'));
 
   // Automation
