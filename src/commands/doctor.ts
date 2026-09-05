@@ -45,7 +45,7 @@ async function checkVault(): Promise<Check> {
       name: 'Vault',
       status: 'error',
       detail: 'not configured',
-      fix: 'agentio setup',
+      fix: 'agentio vault init',
     };
   }
   const path = await readPointer();

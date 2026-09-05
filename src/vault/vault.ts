@@ -43,7 +43,7 @@ async function resolvePassphraseOrThrow(): Promise<string> {
     throw new CliError(
       'VAULT_LOCKED',
       'Vault is locked — passphrase not found',
-      'Run `agentio setup` to set the passphrase, or set the AGENTIO_PASSPHRASE env var.'
+      'Run `agentio vault set <path>` to re-store the passphrase, or set the AGENTIO_PASSPHRASE env var.'
     );
   }
   return pw;
@@ -56,7 +56,7 @@ export async function loadVault(): Promise<VaultContents> {
     throw new CliError(
       'VAULT_NOT_CONFIGURED',
       'agentio is not configured yet',
-      'Run `agentio setup` to initialize the vault.'
+      'Run `agentio vault init` to create one, or `agentio vault set <path>` to use an existing vault.'
     );
   }
   const path = (await readPointer())!;
@@ -64,7 +64,7 @@ export async function loadVault(): Promise<VaultContents> {
     throw new CliError(
       'CONFIG_ERROR',
       `Vault file missing at ${path}`,
-      'Run: agentio setup'
+      'Run `agentio vault set <path>` to point at an existing vault, or `agentio vault init` to create one'
     );
   }
 
@@ -96,13 +96,13 @@ export async function loadVault(): Promise<VaultContents> {
       throw new CliError(
         'AUTH_FAILED',
         'Wrong passphrase for vault',
-        'If you changed the passphrase elsewhere, run: agentio setup'
+        'If you changed the passphrase elsewhere, run: agentio vault set <path>'
       );
     }
     throw new CliError(
       'VAULT_CORRUPT',
       'Vault file is malformed',
-      'Restore from backup or run: agentio setup --reset'
+      'Restore from backup or run: agentio vault reset'
     );
   }
 
@@ -113,7 +113,7 @@ export async function loadVault(): Promise<VaultContents> {
     throw new CliError(
       'VAULT_CORRUPT',
       'Vault contents are not valid JSON',
-      'Restore from backup or run: agentio setup --reset'
+      'Restore from backup or run: agentio vault reset'
     );
   }
 
@@ -134,7 +134,7 @@ export async function saveVault(contents: VaultContents): Promise<void> {
     throw new CliError(
       'VAULT_NOT_CONFIGURED',
       'agentio is not configured yet',
-      'Run `agentio setup` to initialize the vault.'
+      'Run `agentio vault init` to create one, or `agentio vault set <path>` to use an existing vault.'
     );
   }
   const path = (await readPointer())!;

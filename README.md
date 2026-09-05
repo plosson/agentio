@@ -58,7 +58,7 @@ jobs:
       AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
     steps:
       - run: curl -LsSf https://agentio.houlahop.com/install | sh
-      - run: agentio config import
+      - run: agentio vault import
       - run: |
           agentio gmail list --query "is:unread" --limit 5
           agentio slack send "Inbox checked ✅"
@@ -117,7 +117,7 @@ agentio slack profile add
 ### 2. Export your config
 
 ```bash
-agentio config export
+agentio vault export
 # Outputs:
 #   ✓ Exported to agentio.config
 #   ✓ Encryption key: abc123...
@@ -149,7 +149,7 @@ env:
   AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
 
 steps:
-  - run: agentio config import  # Auto-detects env vars
+  - run: agentio vault import  # Auto-detects env vars
   - run: agentio gmail list --limit 10
 ```
 
@@ -297,7 +297,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: curl -LsSf https://agentio.houlahop.com/install | sh
       - run: npm install -g @anthropic-ai/claude-code
-      - run: agentio config import && agentio claude install
+      - run: agentio vault import && agentio claude install
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
 ```
 

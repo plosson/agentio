@@ -52,12 +52,8 @@ export async function generateExportData(): Promise<{ key: string; config: strin
   };
 }
 
-export function registerConfigCommands(program: Command): void {
-  const config = program
-    .command('config')
-    .description('Configuration management');
-
-  const exportCmd = config
+export function registerVaultConfigCommands(vault: Command): void {
+  const exportCmd = vault
     .command('export')
     .description('Export configuration and credentials (as environment variables by default, or to a file)')
     .option('--key <key>', 'Encryption key (64 hex characters). If not provided, a random key will be generated')
@@ -194,19 +190,19 @@ export function registerConfigCommands(program: Command): void {
     `Examples:
 
   # interactive picker, prints AGENTIO_KEY=… and AGENTIO_CONFIG=… to stdout
-  agentio config export
+  agentio vault export
 
   # export every profile non-interactively (good in scripts / CI)
-  agentio config export --all
+  agentio vault export --all
 
   # write the encrypted blob to a file; only AGENTIO_KEY goes to stdout
-  agentio config export --all --file ./agentio.enc
+  agentio vault export --all --file ./agentio.enc
 
   # bring your own encryption key (64 hex chars)
-  agentio config export --all --key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
+  agentio vault export --all --key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
   );
 
-  const importCmd = config
+  const importCmd = vault
     .command('import')
     .description('Import configuration and credentials from an encrypted file or environment variables')
     .argument('[file]', 'Path to the encrypted configuration file (optional if AGENTIO_CONFIG env var is set)')
@@ -346,26 +342,26 @@ export function registerConfigCommands(program: Command): void {
     `Examples:
 
   # import from a file (key passed inline)
-  agentio config import ./agentio.enc --key 0123…cdef
+  agentio vault import ./agentio.enc --key 0123…cdef
 
   # import from AGENTIO_CONFIG env var, key from AGENTIO_KEY env var
-  AGENTIO_KEY=… AGENTIO_CONFIG=… agentio config import
+  AGENTIO_KEY=… AGENTIO_CONFIG=… agentio vault import
 
   # merge into existing config (only adds missing profiles/credentials)
-  agentio config import ./agentio.enc --key 0123…cdef --merge`,
+  agentio vault import ./agentio.enc --key 0123…cdef --merge`,
   );
 
   // Environment variable management
-  const env = config
+  const env = vault
     .command('env')
-    .description('Manage environment variables')
+    .description('Manage agentio settings stored in the vault (daemon URL / API key)')
     .action(async () => {
       try {
         const vars = await listEnv();
         const entries = Object.entries(vars).sort(([a], [b]) => a.localeCompare(b));
         if (entries.length === 0) {
           console.log('No environment variables configured.');
-          console.log('Add one with: agentio config env set <key> <value>');
+          console.log('Add one with: agentio vault env set <key> <value>');
           return;
         }
         for (const [key, value] of entries) {
@@ -392,11 +388,14 @@ export function registerConfigCommands(program: Command): void {
       }),
     `Examples:
 
-  # set a variable that downstream services / hooks can read
-  agentio config env set OPENAI_API_KEY sk-...
+  # point the CLI at a remote daemon
+  agentio vault env set AGENTIO_DAEMON_URL http://box.local:7890
+  agentio vault env set AGENTIO_DAEMON_API_KEY secret
 
-  # values can contain spaces if quoted
-  agentio config env set GREETING "hello world"`,
+Stored variables are read by agentio itself, NOT exported to your shell or to
+processes agentio spawns (scheduled .run.md jobs inherit your real environment,
+not these). Only AGENTIO_DAEMON_URL and AGENTIO_DAEMON_API_KEY are consulted
+today; other keys are carried by 'vault export'/'import' but nothing reads them.`,
   );
 
   addExamples(
@@ -419,10 +418,10 @@ export function registerConfigCommands(program: Command): void {
     `Examples:
 
   # remove a previously-set variable
-  agentio config env unset OPENAI_API_KEY`,
+  agentio vault env unset OPENAI_API_KEY`,
   );
 
-  const clearCmd = config
+  const clearCmd = vault
     .command('clear')
     .description('Clear all configuration and credentials')
     .option('--force', 'Skip confirmation prompt')
@@ -455,9 +454,9 @@ export function registerConfigCommands(program: Command): void {
     `Examples:
 
   # interactive: deletes all profiles and credentials after confirmation
-  agentio config clear
+  agentio vault clear
 
   # non-interactive (CI / scripted reset)
-  agentio config clear --force`,
+  agentio vault clear --force`,
   );
 }
