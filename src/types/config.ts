@@ -47,14 +47,15 @@ export interface Config {
     telegram?: ProfileValue[];
     discourse?: ProfileValue[];
     sql?: ProfileValue[];
+    revolut?: ProfileValue[];
   };
   env?: Record<string, string>;
   daemon?: DaemonConfig;
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'sql';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'sql' | 'revolut';
 
 export const ALL_SERVICES: readonly ServiceName[] = [
   'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides', 'gscript',
-  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'sql',
+  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'sql', 'revolut',
 ];

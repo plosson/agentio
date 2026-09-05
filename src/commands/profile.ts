@@ -20,6 +20,7 @@ import { confluenceProfileAdd } from './confluence';
 import { slackProfileAdd } from './slack';
 import { telegramProfileAdd } from './telegram';
 import { discourseProfileAdd } from './discourse';
+import { revolutProfileAdd } from './revolut';
 import { sqlProfileAdd } from './sql';
 
 export interface ProfileSummary {
@@ -78,6 +79,7 @@ const ADD_HANDLERS: Record<ServiceName, (opts: AddOpts) => Promise<void>> = {
   confluence: confluenceProfileAdd,
   slack: slackProfileAdd,
   telegram: telegramProfileAdd,
+  revolut: revolutProfileAdd,
   discourse: discourseProfileAdd,
   sql: sqlProfileAdd,
 };

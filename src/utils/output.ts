@@ -19,6 +19,7 @@ import type {
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
 import type { DiscourseCategory, DiscourseTopic, DiscourseTopicDetail } from '../types/discourse';
+import type { RevolutAccount, RevolutCounterparty, RevolutTransaction } from '../types/revolut';
 import type {
   GSlidesListItem,
   GSlidesPresentation,
@@ -1398,4 +1399,173 @@ export function printFilterCreated(filter: GmailFilter, labelNamesById: Map<stri
 
 export function printFilterDeleted(id: string): void {
   console.log(`Deleted filter: ${id}`);
+}
+
+function formatAmount(amount: number, currency: string): string {
+  return `${amount.toFixed(2)} ${currency}`;
+}
+
+export function printRevolutAccountList(accounts: RevolutAccount[]): void {
+  if (accounts.length === 0) {
+    console.log('No accounts found');
+    return;
+  }
+
+  console.log(`Accounts (${accounts.length})\n`);
+
+  for (const account of accounts) {
+    const name = account.name || '(unnamed)';
+    const inactive = account.state === 'active' ? '' : ` [${account.state}]`;
+    console.log(`${account.id} | ${name}${inactive}`);
+    console.log(`    Balance: ${formatAmount(account.balance, account.currency)}`);
+    console.log('');
+  }
+
+  const totals = new Map<string, number>();
+  for (const account of accounts) {
+    totals.set(account.currency, (totals.get(account.currency) ?? 0) + account.balance);
+  }
+  const summary = [...totals.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, total]) => formatAmount(total, currency))
+    .join(' | ');
+  console.log(`Total: ${summary}`);
+}
+
+export function printRevolutTransactionList(transactions: RevolutTransaction[]): void {
+  if (transactions.length === 0) {
+    console.log('No transactions found');
+    return;
+  }
+
+  console.log(`Transactions (${transactions.length})\n`);
+
+  for (const transaction of transactions) {
+    // The first leg is our own account's, and carries the signed amount.
+    const leg = transaction.legs[0];
+    const amount = leg ? formatAmount(leg.amount, leg.currency) : '-';
+    const date = (transaction.completedAt || transaction.createdAt).slice(0, 10);
+    const description = leg?.description || transaction.merchant?.name || transaction.reference || '';
+
+    console.log(`${date} | ${amount} | ${transaction.type} [${transaction.state}]`);
+    if (description) console.log(`    ${description}`);
+    console.log(`    ID: ${transaction.id}`);
+    console.log('');
+  }
+}
+
+export function printRevolutTransaction(transaction: RevolutTransaction): void {
+  console.log(`ID: ${transaction.id}`);
+  console.log(`Type: ${transaction.type}`);
+  console.log(`State: ${transaction.state}`);
+  if (transaction.reasonCode) console.log(`Reason: ${transaction.reasonCode}`);
+  console.log(`Created: ${transaction.createdAt}`);
+  if (transaction.completedAt) console.log(`Completed: ${transaction.completedAt}`);
+  if (transaction.reference) console.log(`Reference: ${transaction.reference}`);
+  if (transaction.cardHolder) console.log(`Card holder: ${transaction.cardHolder}`);
+
+  if (transaction.merchant?.name) {
+    const location = [transaction.merchant.city, transaction.merchant.country].filter(Boolean).join(', ');
+    console.log(`Merchant: ${transaction.merchant.name}${location ? ` (${location})` : ''}`);
+    if (transaction.merchant.categoryCode) console.log(`Category: ${transaction.merchant.categoryCode}`);
+  }
+
+  console.log('---');
+
+  for (const leg of transaction.legs) {
+    console.log(`\n[Leg ${leg.legId}]`);
+    console.log(`Account: ${leg.accountId}`);
+    console.log(`Amount: ${formatAmount(leg.amount, leg.currency)}`);
+    if (leg.billAmount !== undefined && leg.billCurrency && leg.billCurrency !== leg.currency) {
+      console.log(`Billed: ${formatAmount(leg.billAmount, leg.billCurrency)}`);
+    }
+    if (leg.balance !== undefined) console.log(`Balance after: ${formatAmount(leg.balance, leg.currency)}`);
+    if (leg.description) console.log(`Description: ${leg.description}`);
+    if (leg.counterpartyId) console.log(`Counterparty: ${leg.counterpartyId} (${leg.counterpartyType || 'unknown'})`);
+  }
+}
+
+export function printRevolutTransactionsCsv(transactions: RevolutTransaction[]): void {
+  const escape = (value: string | number | undefined): string => {
+    if (value === undefined) return '';
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  console.log('date,transaction_id,leg_id,type,state,amount,currency,description,merchant,reference,account_id,counterparty_id');
+
+  for (const transaction of transactions) {
+    const date = transaction.completedAt || transaction.createdAt;
+    for (const leg of transaction.legs) {
+      console.log([
+        escape(date),
+        escape(transaction.id),
+        escape(leg.legId),
+        escape(transaction.type),
+        escape(transaction.state),
+        escape(leg.amount.toFixed(2)),
+        escape(leg.currency),
+        escape(leg.description),
+        escape(transaction.merchant?.name),
+        escape(transaction.reference),
+        escape(leg.accountId),
+        escape(leg.counterpartyId),
+      ].join(','));
+    }
+  }
+}
+
+function describeCounterpartyAccount(account: RevolutCounterparty['accounts'][number]): string {
+  return account.iban || account.accountNo || account.id || '(no account number)';
+}
+
+export function printRevolutCounterpartyList(counterparties: RevolutCounterparty[]): void {
+  if (counterparties.length === 0) {
+    console.log('No counterparties found');
+    return;
+  }
+
+  console.log(`Counterparties (${counterparties.length})\n`);
+
+  for (const counterparty of counterparties) {
+    const inactive = counterparty.state === 'created' ? '' : ` [${counterparty.state}]`;
+    console.log(`${counterparty.id} | ${counterparty.name}${inactive}`);
+    if (counterparty.country) console.log(`    Country: ${counterparty.country}`);
+    for (const account of counterparty.accounts) {
+      const currency = account.currency ? ` ${account.currency}` : '';
+      console.log(`    ${describeCounterpartyAccount(account)}${currency}`);
+    }
+    console.log('');
+  }
+}
+
+export function printRevolutCounterparty(counterparty: RevolutCounterparty): void {
+  console.log(`ID: ${counterparty.id}`);
+  console.log(`Name: ${counterparty.name}`);
+  console.log(`State: ${counterparty.state}`);
+  if (counterparty.profileType) console.log(`Profile type: ${counterparty.profileType}`);
+  if (counterparty.country) console.log(`Country: ${counterparty.country}`);
+  if (counterparty.phone) console.log(`Phone: ${counterparty.phone}`);
+  console.log(`Created: ${counterparty.createdAt}`);
+
+  if (counterparty.accounts.length > 0) {
+    console.log('---');
+    for (const account of counterparty.accounts) {
+      console.log(`\n[Account ${account.id || '-'}]`);
+      if (account.name) console.log(`Name: ${account.name}`);
+      if (account.currency) console.log(`Currency: ${account.currency}`);
+      if (account.type) console.log(`Type: ${account.type}`);
+      if (account.iban) console.log(`IBAN: ${account.iban}`);
+      if (account.accountNo) console.log(`Account number: ${account.accountNo}`);
+      if (account.bic) console.log(`BIC: ${account.bic}`);
+      if (account.sortCode) console.log(`Sort code: ${account.sortCode}`);
+      if (account.routingNumber) console.log(`Routing number: ${account.routingNumber}`);
+      if (account.bankCountry) console.log(`Bank country: ${account.bankCountry}`);
+      if (account.recipientCharges) console.log(`Recipient charges: ${account.recipientCharges}`);
+    }
+  }
+}
+
+export function printRevolutCounterpartyDeleted(id: string): void {
+  console.log(`Deleted counterparty: ${id}`);
 }

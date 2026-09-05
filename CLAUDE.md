@@ -38,6 +38,7 @@ src/
 │   ├── github.ts            # GitHub commands
 │   ├── jira.ts              # JIRA commands
 │   ├── slack.ts             # Slack commands
+│   ├── revolut.ts           # Revolut Business commands
 │   ├── rss.ts               # RSS feed commands
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
@@ -58,6 +59,7 @@ src/
 │   ├── github/client.ts     # GitHub API wrapper
 │   ├── jira/client.ts       # JIRA API wrapper
 │   ├── slack/client.ts      # Slack API wrapper
+│   ├── revolut/client.ts    # Revolut Business API wrapper
 │   ├── rss/client.ts        # RSS feed parser
 │   ├── discourse/client.ts  # Discourse API wrapper
 │   └── sql/client.ts        # SQL database client
@@ -72,6 +74,7 @@ src/
 │   ├── oauth-server.ts      # OAuth callback server
 │   ├── github-oauth.ts      # GitHub OAuth flow
 │   ├── jira-oauth.ts        # JIRA OAuth flow
+│   ├── revolut-oauth.ts     # Revolut JWT client-assertion + token flow
 │   ├── token-manager.ts     # Token validation/refresh
 │   └── token-store.ts       # Encrypted credential storage
 ├── config/
@@ -88,6 +91,7 @@ src/
 │   ├── github.ts            # GitHub types
 │   ├── jira.ts              # JIRA types
 │   ├── slack.ts             # Slack types
+│   ├── revolut.ts           # Revolut types
 │   ├── rss.ts               # RSS types
 │   ├── discourse.ts         # Discourse types
 │   ├── sql.ts               # SQL types
@@ -210,6 +214,39 @@ agentio jira profile add|list|remove
 agentio slack send [message] [--channel <id>]
 agentio slack profile add|list|remove
 ```
+
+### Revolut
+
+Revolut Business API. Unlike the Google services there are no embedded OAuth
+credentials: each business uploads its own X.509 certificate to Revolut and
+receives a Client ID, so `profile add` collects those interactively.
+
+```bash
+agentio revolut accounts [--format text|json]
+agentio revolut transactions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--account <id>] [--counterparty <id>] [--type <type>] [--count N] [--format text|json|csv]
+agentio revolut transaction <id> [--format text|json]
+agentio revolut counterparties list [--format text|json]
+agentio revolut counterparties get <id> [--format text|json]
+agentio revolut counterparties add (--company-name <name> | --first-name <n> --last-name <n>) --bank-country <code> --currency <code> [--iban <iban>] [--bic <bic>] [--account-no <no>] [--sort-code <code>] [--routing-number <no>] [--email <email>] [--phone <phone>]
+agentio revolut counterparties delete <id> [--force]
+agentio revolut profile add [--environment production|sandbox] [--client-id <id>] [--private-key <path>] [--redirect-uri <uri>]
+agentio revolut profile list|update|remove
+```
+
+Auth notes:
+
+- Every token request is authenticated by an RS256 JWT (`client_assertion`)
+  signed with the private key, built in `src/auth/revolut-oauth.ts` using
+  `node:crypto` — no JWT dependency.
+- The JWT `iss` claim is the **host** of the registered redirect URI, not the
+  full URI. `sub` is the Client ID and `aud` is always `https://revolut.com`.
+- `profile add` prints the consent URL and accepts either the pasted redirect
+  URL or a bare code. Authorisation codes expire about two minutes after issue.
+- Access tokens last 40 minutes, so nearly every invocation refreshes first.
+  Revolut does **not** rotate refresh tokens — only the access token is replaced.
+- The private key is stored in the vault (encrypted at rest), not referenced by
+  path, so no plaintext key needs to stay on disk.
+- Writes (`counterparties add`/`delete`) honour the read-only profile flag.
 
 ### RSS
 

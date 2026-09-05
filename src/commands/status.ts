@@ -4,6 +4,7 @@ import { getCredentials, setCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
 import { refreshConfluenceToken } from '../auth/confluence-oauth';
+import { refreshRevolutToken } from '../auth/revolut-oauth';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -16,6 +17,7 @@ import { ConfluenceClient } from '../services/confluence/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
+import { RevolutClient } from '../services/revolut/client';
 import { GSheetsClient } from '../services/gsheets/client';
 import { GSlidesClient } from '../services/gslides/client';
 import { GScriptClient } from '../services/gscript/client';
@@ -37,6 +39,7 @@ import type { GSlidesCredentials } from '../types/gslides';
 import type { GScriptCredentials } from '../types/gscript';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
+import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
 
@@ -251,6 +254,33 @@ async function createServiceClient(
     case 'discourse': {
       const creds = credentials as DiscourseCredentials;
       return new DiscourseClient(creds);
+    }
+
+    case 'revolut': {
+      let creds = credentials as RevolutCredentials;
+
+      // Access tokens live 40 minutes, so status almost always refreshes first.
+      const bufferTime = 5 * 60 * 1000;
+      if (!creds.expiryDate || Date.now() + bufferTime >= creds.expiryDate) {
+        try {
+          const refreshed = await refreshRevolutToken(creds);
+          creds = {
+            ...creds,
+            accessToken: refreshed.accessToken,
+            expiryDate: Date.now() + refreshed.expiresIn * 1000,
+          };
+          await setCredentials('revolut', profileName, creds);
+        } catch {
+          return {
+            validate: async () => ({
+              valid: false,
+              error: 'refresh token rejected, re-authenticate',
+            }),
+          };
+        }
+      }
+
+      return new RevolutClient(creds);
     }
 
     case 'sql': {
