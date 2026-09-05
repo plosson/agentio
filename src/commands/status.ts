@@ -302,56 +302,132 @@ export interface ProfileStatus {
   error?: string;
 }
 
-export async function getProfileStatuses(options?: { test?: boolean }): Promise<ProfileStatus[]> {
-  const shouldTest = options?.test !== false;
+interface ProfileRef {
+  service: ServiceName;
+  profile: string;
+  readOnly?: boolean;
+}
+
+/**
+ * Flattens the configured profiles into the order they are reported in.
+ */
+async function listProfileRefs(): Promise<ProfileRef[]> {
   const allProfiles = await listProfiles();
-  const statuses: ProfileStatus[] = [];
+  const refs: ProfileRef[] = [];
 
   for (const { service, profiles } of allProfiles) {
     for (const entry of profiles) {
-      const credentials = await getCredentials(service, entry.name);
-
-      if (!credentials) {
-        statuses.push({
-          service,
-          profile: entry.name,
-          readOnly: entry.readOnly,
-          status: 'no-creds',
-        });
-        continue;
-      }
-
-      if (!shouldTest) {
-        statuses.push({
-          service,
-          profile: entry.name,
-          readOnly: entry.readOnly,
-          status: 'skipped',
-        });
-        continue;
-      }
-
-      const client = await createServiceClient(service, credentials, entry.name);
-      let result: ValidationResult;
-
-      if (client) {
-        result = await client.validate();
-      } else {
-        result = { valid: true, info: 'unknown service' };
-      }
-
-      statuses.push({
-        service,
-        profile: entry.name,
-        readOnly: entry.readOnly,
-        status: result.valid ? 'ok' : 'invalid',
-        info: result.info,
-        error: result.error,
-      });
+      refs.push({ service, profile: entry.name, readOnly: entry.readOnly });
     }
   }
 
+  return refs;
+}
+
+/**
+ * Tests one profile. Kept sequential by callers: refreshing a token writes the
+ * new credentials back to the vault, and concurrent writes would clobber it.
+ */
+async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
+  const credentials = await getCredentials(ref.service, ref.profile);
+
+  if (!credentials) {
+    return { ...ref, status: 'no-creds' };
+  }
+
+  if (!shouldTest) {
+    return { ...ref, status: 'skipped' };
+  }
+
+  const client = await createServiceClient(ref.service, credentials, ref.profile);
+  const result: ValidationResult = client
+    ? await client.validate()
+    : { valid: true, info: 'unknown service' };
+
+  return {
+    ...ref,
+    status: result.valid ? 'ok' : 'invalid',
+    info: result.info,
+    error: result.error,
+  };
+}
+
+export async function getProfileStatuses(options?: { test?: boolean }): Promise<ProfileStatus[]> {
+  const shouldTest = options?.test !== false;
+  const refs = await listProfileRefs();
+  const statuses: ProfileStatus[] = [];
+
+  for (const ref of refs) {
+    statuses.push(await checkProfile(ref, shouldTest));
+  }
+
   return statuses;
+}
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/**
+ * Progress indicator on stderr. Returns null when stderr is not a TTY, so piped
+ * or redirected output stays clean.
+ */
+function createSpinner(): { start: (label: string, index: number, total: number) => void; stop: () => void } | null {
+  if (!process.stderr.isTTY) {
+    return null;
+  }
+
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let frame = 0;
+
+  return {
+    start(label: string, index: number, total: number): void {
+      frame = 0;
+      const render = () => {
+        const spin = SPINNER_FRAMES[frame % SPINNER_FRAMES.length];
+        process.stderr.write(`\r\x1b[K  ${spin} checking ${label} (${index}/${total})`);
+        frame++;
+      };
+      render();
+      timer = setInterval(render, 80);
+    },
+    stop(): void {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      process.stderr.write('\r\x1b[K');
+    },
+  };
+}
+
+function formatStatusLine(s: ProfileStatus, serviceWidth: number, profileWidth: number): string {
+  const servicePad = s.service.padEnd(serviceWidth);
+  const readOnlyIndicator = s.readOnly ? ' [RO]' : '';
+  const profileWithRo = s.profile + readOnlyIndicator;
+  const profilePad = profileWithRo.padEnd(profileWidth + 5); // +5 for [RO]
+
+  let statusStr: string;
+  let details: string;
+
+  switch (s.status) {
+    case 'ok':
+      statusStr = 'ok';
+      details = s.info || '';
+      break;
+    case 'invalid':
+      statusStr = 'ERR';
+      details = s.error || '';
+      break;
+    case 'no-creds':
+      statusStr = 'ERR';
+      details = 'no credentials';
+      break;
+    case 'skipped':
+      statusStr = '-';
+      details = '';
+      break;
+  }
+
+  return `${servicePad}  ${profilePad}  ${statusStr.padEnd(3)}  ${details}`.trimEnd();
 }
 
 export function registerStatusCommand(program: Command): void {
@@ -366,10 +442,10 @@ export function registerStatusCommand(program: Command): void {
         const envVars = await listEnv();
         const envKeys = Object.keys(envVars).sort();
 
-        const statuses = await getProfileStatuses({ test: options.test });
-
         // JSON output mode
         if (options.json) {
+          const statuses = await getProfileStatuses({ test: options.test });
+
           // Group profiles by service
           const services: Record<string, Array<Omit<ProfileStatus, 'service'>>> = {};
           for (const s of statuses) {
@@ -394,47 +470,33 @@ export function registerStatusCommand(program: Command): void {
         console.log(`Config: ${CONFIG_DIR}`);
         console.log(`Env: ${envKeys.length > 0 ? envKeys.join(', ') : 'none'}\n`);
 
-        if (statuses.length === 0) {
+        const refs = await listProfileRefs();
+
+        if (refs.length === 0) {
           console.log('No profiles configured.');
           console.log('Run: agentio <service> profile add');
           return;
         }
 
-        // Calculate column widths
-        const serviceWidth = Math.max(...statuses.map((s) => s.service.length));
-        const profileWidth = Math.max(...statuses.map((s) => s.profile.length));
+        // Widths come from the profile list, which is known before any check runs
+        const serviceWidth = Math.max(...refs.map((r) => r.service.length));
+        const profileWidth = Math.max(...refs.map((r) => r.profile.length));
 
-        // Print each profile on one line
-        for (const s of statuses) {
-          const servicePad = s.service.padEnd(serviceWidth);
-          const readOnlyIndicator = s.readOnly ? ' [RO]' : '';
-          const profileWithRo = s.profile + readOnlyIndicator;
-          const profilePad = profileWithRo.padEnd(profileWidth + 5); // +5 for [RO]
+        // Print each profile as soon as its own check finishes, so a slow or
+        // unreachable service does not hold back everything already tested
+        const shouldTest = options.test !== false;
+        const spinner = shouldTest ? createSpinner() : null;
 
-          let statusStr: string;
-          let details: string;
-
-          switch (s.status) {
-            case 'ok':
-              statusStr = 'ok';
-              details = s.info || '';
-              break;
-            case 'invalid':
-              statusStr = 'ERR';
-              details = s.error || '';
-              break;
-            case 'no-creds':
-              statusStr = 'ERR';
-              details = 'no credentials';
-              break;
-            case 'skipped':
-              statusStr = '-';
-              details = '';
-              break;
+        for (let i = 0; i < refs.length; i++) {
+          const ref = refs[i];
+          spinner?.start(`${ref.service} ${ref.profile}`, i + 1, refs.length);
+          let status: ProfileStatus;
+          try {
+            status = await checkProfile(ref, shouldTest);
+          } finally {
+            spinner?.stop();
           }
-
-          const line = `${servicePad}  ${profilePad}  ${statusStr.padEnd(3)}  ${details}`.trimEnd();
-          console.log(line);
+          console.log(formatStatusLine(status, serviceWidth, profileWidth));
         }
       } catch (error) {
         console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
