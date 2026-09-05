@@ -94,6 +94,8 @@ Dump the full Docs API document representation as JSON
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
+- `--tab <tab-id>`: Return only this tab (indices are relative to the tab)
+- `--all-tabs`: Include the content of every tab under .tabs[]
 
 ```
 Examples:
@@ -106,6 +108,37 @@ Examples:
 
   # get body content with indices
   agentio gdocs structure 1A2bCdEf... | jq '.body.content'
+
+  # body content of one tab (find the ID with: agentio gdocs tabs)
+  agentio gdocs structure 1A2bCdEf... --tab t.4cykv13flp0m | jq '.body.content'
+
+  # every tab's content in one payload
+  agentio gdocs structure 1A2bCdEf... --all-tabs | jq '.tabs[].tabProperties'
+
+Without --tab or --all-tabs, only the first tab is returned (Docs API default).
+Indices from --tab are relative to that tab: pass the same tabId in the
+location/range of every batch request that writes to it.
+```
+
+## agentio gdocs tabs <doc-id-or-url>
+
+List the tabs of a document (ID, title, nesting)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+
+```
+Examples:
+
+  # list every tab with its ID
+  agentio gdocs tabs 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # a tab ID also appears in the browser URL as ?tab=t.xxxx
+  agentio gdocs tabs https://docs.google.com/document/d/1A2bCdEf.../edit
+
+Tab IDs feed --tab on 'structure' and the location.tabId / range.tabId
+fields of 'batch' requests.
 ```
 
 ## agentio gdocs batch <doc-id-or-url>
@@ -127,6 +160,13 @@ Examples:
   # load requests from a file
   agentio gdocs batch 1A2bCdEf... --file ./requests.json
 
+  # write into a specific tab (indices come from: agentio gdocs structure --tab)
+  agentio gdocs batch 1A2bCdEf... --requests-json '[{"insertText":{"location":{"index":1,"tabId":"t.4cykv13flp0m"},"text":"Hello"}}]'
+
+In a multi-tab document every location/range must carry the tabId, otherwise
+the request lands in the first tab.
+
 Accepts an array of Docs API Request objects. See:
 https://developers.google.com/docs/api/reference/rest/v1/documents/request
 ```
+

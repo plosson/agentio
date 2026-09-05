@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
-import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult, GDocsBatchResult } from '../../types/gdocs';
+import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult, GDocsBatchResult, GDocsTab, GDocsStructureOptions } from '../../types/gdocs';
 
 export class GDocsClient implements ServiceClient {
   private credentials: GDocsCredentials;
@@ -139,15 +139,65 @@ export class GDocsClient implements ServiceClient {
     }
   }
 
-  async getStructure(docIdOrUrl: string): Promise<unknown> {
+  async getStructure(docIdOrUrl: string, options: GDocsStructureOptions = {}): Promise<unknown> {
     const documentId = this.extractDocId(docIdOrUrl);
+    const includeTabsContent = !!(options.tabId || options.allTabs);
 
+    let document: docs_v1.Schema$Document;
     try {
-      const response = await this.docsApi.documents.get({ documentId });
-      return response.data;
+      const response = await this.docsApi.documents.get({ documentId, includeTabsContent });
+      document = response.data;
     } catch (err) {
       this.throwApiError(err, 'get document structure');
     }
+
+    if (!options.tabId) return document;
+
+    const tab = this.findTab(document.tabs ?? [], options.tabId);
+    if (!tab) {
+      const available = this.flattenTabs(document.tabs ?? [])
+        .map((t) => `${t.id} (${t.title})`)
+        .join(', ');
+      throw new CliError(
+        'NOT_FOUND',
+        `Tab not found: ${options.tabId}`,
+        available ? `Available tabs: ${available}` : 'Run: agentio gdocs tabs <doc-id-or-url>'
+      );
+    }
+
+    return tab.documentTab;
+  }
+
+  async listTabs(docIdOrUrl: string): Promise<GDocsTab[]> {
+    const documentId = this.extractDocId(docIdOrUrl);
+
+    try {
+      // The API only populates `tabs` when includeTabsContent is true.
+      const response = await this.docsApi.documents.get({ documentId, includeTabsContent: true });
+      return this.flattenTabs(response.data.tabs ?? []);
+    } catch (err) {
+      this.throwApiError(err, 'list document tabs');
+    }
+  }
+
+  private flattenTabs(tabs: docs_v1.Schema$Tab[], depth = 0): GDocsTab[] {
+    return tabs.flatMap((tab) => [
+      {
+        id: tab.tabProperties?.tabId ?? '',
+        title: tab.tabProperties?.title ?? '',
+        depth,
+      },
+      ...this.flattenTabs(tab.childTabs ?? [], depth + 1),
+    ]);
+  }
+
+  private findTab(tabs: docs_v1.Schema$Tab[], tabId: string): docs_v1.Schema$Tab | undefined {
+    for (const tab of tabs) {
+      if (tab.tabProperties?.tabId === tabId) return tab;
+      const child = this.findTab(tab.childTabs ?? [], tabId);
+      if (child) return child;
+    }
+    return undefined;
   }
 
   private extractDocId(docIdOrUrl: string): string {
