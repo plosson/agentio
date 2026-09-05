@@ -7,7 +7,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDocsClient } from '../services/gdocs/client';
-import { printGDocsList, printGDocCreated, printGDocsBatchResult, raw } from '../utils/output';
+import { printGDocsList, printGDocCreated, printGDocsBatchResult, printGDocsTabs, raw } from '../utils/output';
 import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -159,10 +159,19 @@ Combine with 'and'/'or'.`,
       .argument('<doc-id-or-url>', 'Document ID or URL')
       .description('Dump the full Docs API document representation as JSON')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--tab <tab-id>', 'Return only this tab (indices are relative to the tab)')
+      .option('--all-tabs', 'Include the content of every tab under .tabs[]')
       .action(async (docIdOrUrl: string, options) => {
         try {
+          if (options.tab && options.allTabs) {
+            throw new CliError('INVALID_PARAMS', '--tab and --all-tabs are mutually exclusive');
+          }
+
           const { client } = await getGDocsClient(options.profile);
-          const structure = await client.getStructure(docIdOrUrl);
+          const structure = await client.getStructure(docIdOrUrl, {
+            tabId: options.tab,
+            allTabs: options.allTabs,
+          });
           console.log(JSON.stringify(structure, null, 2));
         } catch (error) {
           handleError(error);
@@ -177,7 +186,44 @@ Combine with 'and'/'or'.`,
   agentio gdocs structure 1A2bCdEf... | jq '.headers | keys'
 
   # get body content with indices
-  agentio gdocs structure 1A2bCdEf... | jq '.body.content'`,
+  agentio gdocs structure 1A2bCdEf... | jq '.body.content'
+
+  # body content of one tab (find the ID with: agentio gdocs tabs)
+  agentio gdocs structure 1A2bCdEf... --tab t.4cykv13flp0m | jq '.body.content'
+
+  # every tab's content in one payload
+  agentio gdocs structure 1A2bCdEf... --all-tabs | jq '.tabs[].tabProperties'
+
+Without --tab or --all-tabs, only the first tab is returned (Docs API default).
+Indices from --tab are relative to that tab: pass the same tabId in the
+location/range of every batch request that writes to it.`,
+  );
+
+  addExamples(
+    gdocs
+      .command('tabs')
+      .argument('<doc-id-or-url>', 'Document ID or URL')
+      .description('List the tabs of a document (ID, title, nesting)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (docIdOrUrl: string, options) => {
+        try {
+          const { client } = await getGDocsClient(options.profile);
+          const tabs = await client.listTabs(docIdOrUrl);
+          printGDocsTabs(tabs);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # list every tab with its ID
+  agentio gdocs tabs 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
+
+  # a tab ID also appears in the browser URL as ?tab=t.xxxx
+  agentio gdocs tabs https://docs.google.com/document/d/1A2bCdEf.../edit
+
+Tab IDs feed --tab on 'structure' and the location.tabId / range.tabId
+fields of 'batch' requests.`,
   );
 
   const batchCmd = gdocs
@@ -225,6 +271,12 @@ Combine with 'and'/'or'.`,
 
   # load requests from a file
   agentio gdocs batch 1A2bCdEf... --file ./requests.json
+
+  # write into a specific tab (indices come from: agentio gdocs structure --tab)
+  agentio gdocs batch 1A2bCdEf... --requests-json '[{"insertText":{"location":{"index":1,"tabId":"t.4cykv13flp0m"},"text":"Hello"}}]'
+
+In a multi-tab document every location/range must carry the tabId, otherwise
+the request lands in the first tab.
 
 Accepts an array of Docs API Request objects. See:
 https://developers.google.com/docs/api/reference/rest/v1/documents/request`,

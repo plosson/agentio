@@ -31,3 +31,14 @@ export interface GDocsBatchResult {
   documentId: string;
   replies: unknown[];
 }
+
+export interface GDocsTab {
+  id: string;
+  title: string;
+  depth: number;
+}
+
+export interface GDocsStructureOptions {
+  tabId?: string;
+  allTabs?: boolean;
+}

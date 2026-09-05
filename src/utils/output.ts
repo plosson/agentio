@@ -1,7 +1,7 @@
 import { homedir } from 'os';
 import type { GmailMessage, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from '../types/gmail';
 import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from '../types/gchat';
-import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult } from '../types/gdocs';
+import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult, GDocsTab } from '../types/gdocs';
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult, GDriveCopyResult } from '../types/gdrive';
 import type { GCalCalendar, GCalEvent, GCalFreeBusyResponse } from '../types/gcal';
 import type { GTaskList, GTask } from '../types/gtasks';
@@ -703,6 +703,19 @@ export function printGDocCreated(result: GDocsCreateResult): void {
   console.log(`ID: ${result.id}`);
   console.log(`Title: ${result.title}`);
   console.log(`Link: ${result.webViewLink}`);
+}
+
+export function printGDocsTabs(tabs: GDocsTab[]): void {
+  if (tabs.length === 0) {
+    console.log('No tabs found (document has a single untitled tab)');
+    return;
+  }
+
+  console.log(`Tabs (${tabs.length})\n`);
+
+  for (const tab of tabs) {
+    console.log(`${'  '.repeat(tab.depth)}${tab.id}\t${tab.title}`);
+  }
 }
 
 export function printGDocsBatchResult(result: GDocsBatchResult): void {
