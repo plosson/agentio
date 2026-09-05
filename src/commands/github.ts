@@ -5,7 +5,7 @@ import { createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { GitHubClient } from '../services/github/client';
 import { performGitHubOAuthFlow } from '../auth/github-oauth';
-import { generateExportData } from './config';
+import { generateExportData } from './vault-config';
 import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
 import { addExamples } from '../utils/command-tree';

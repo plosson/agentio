@@ -55,8 +55,8 @@ describe('command gating', () => {
     expect(res.exitCode).toBe(0);
   });
 
-  test('setup bypasses gate', async () => {
-    const res = await runCli(['setup', '--help']);
+  test('vault bypasses gate', async () => {
+    const res = await runCli(['vault', '--help']);
     expect(res.exitCode).toBe(0);
   });
 

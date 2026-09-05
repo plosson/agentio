@@ -23,7 +23,6 @@ import { registerTelegramCommands } from './commands/telegram';
 
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
-import { registerConfigCommands } from './commands/config';
 import { registerMcpCommands } from './commands/mcp';
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
@@ -31,10 +30,10 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerScheduleCommands } from './commands/schedule';
-import { registerSetupCommand } from './commands/setup';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
+import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
 
 declare const BUILD_VERSION: string | undefined;
@@ -82,7 +81,6 @@ export function createProgram(): Command {
 
   // Agentio utilities
   registerClaudeCommands(program);
-  registerConfigCommands(program);
   registerMcpCommands(program);
   registerDocsCommand(program);
   registerDaemonCommands(program);
@@ -90,12 +88,30 @@ export function createProgram(): Command {
   registerProfileCommands(program);
   registerReauthCommand(program);
   registerScheduleCommands(program);
-  registerSetupCommand(program);
   registerSkillCommand(program);
   registerStatusCommand(program);
   registerUpdateCommand(program);
+  registerVaultCommands(program);
 
-  const BYPASS_COMMANDS = new Set(['setup', 'docs', 'update', 'doctor']);
+  // `setup` and `config` were folded into `vault` in 2.0. Keep hidden stubs so
+  // the old names fail with a pointer to the new command rather than
+  // commander's generic "unknown command" noise.
+  for (const [removed, replacement] of [
+    ['setup', 'agentio vault init'],
+    ['config', 'agentio vault export | import | env | clear'],
+  ]) {
+    program
+      .command(removed, { hidden: true })
+      .allowUnknownOption()
+      .allowExcessArguments()
+      .action(() => {
+        console.error(`Error [INVALID_PARAMS]: \`agentio ${removed}\` was removed in 2.0`);
+        console.error(`Suggestion: use \`${replacement}\` (see: agentio vault --help)`);
+        process.exit(1);
+      });
+  }
+
+  const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
     const name = actionCommand.name();
@@ -107,13 +123,13 @@ export function createProgram(): Command {
 
     if (!(await vaultExists())) {
       console.error('Error [VAULT_NOT_CONFIGURED]: No vault configured');
-      console.error('Suggestion: Run: agentio setup');
+      console.error('Suggestion: Run: agentio vault init');
       process.exit(2);
     }
   });
 
   // Setup
-  ['setup', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
+  ['vault', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
 
   // Services
   [
@@ -125,7 +141,7 @@ export function createProgram(): Command {
   ['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
 
   // Advanced
-  ['config', 'mcp', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['mcp', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

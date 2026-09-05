@@ -45,9 +45,11 @@ src/
 │   ├── daemon.ts            # Daemon commands (scheduler lifecycle)
 │   ├── schedule.ts          # Schedule folder registration
 │   ├── mcp.ts               # Local MCP server commands
-│   ├── config.ts            # Configuration management
+│   ├── vault-config.ts      # Vault contents: export/import/env/clear
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
+│   ├── vault.ts             # Vault group: set/status + registers the two below
+│   ├── vault-init.ts        # Vault lifecycle: init/passphrase/reset
 │   ├── docs.ts              # Documentation generator
 │   └── claude.ts            # Claude Code plugin operations
 ├── services/                # API clients (one folder per service)
@@ -108,19 +110,32 @@ src/
 
 ## Commands Reference
 
-### Setup (vault)
+### Vault
 
-The agentio config + credentials are stored in a single encrypted **vault** file. First-time installs must run `agentio setup` before any other command.
+All agentio config + credentials live in a single encrypted **vault** file. `vault` is the only command that manages it; every other command requires one to exist.
 
 ```bash
-agentio setup                  # First-time, migration, adopt existing, or manage vault
-agentio setup --reset --force  # Wipe vault, pointer, and stored passphrase
+agentio vault init [--path <p>] [--passphrase <v> | --passphrase-stdin] [--no-migrate]
+agentio vault set <path> [--passphrase <v> | --passphrase-stdin]   # switch to an existing vault
+agentio vault status                       # active path + profile count
+agentio vault passphrase [--passphrase <v> | --passphrase-stdin]   # change it
+agentio vault reset [--force]              # DELETES the vault file
+agentio vault export [--file <path>] [--all] [--key <hex>]
+agentio vault import [file] [--merge]
+agentio vault env [set <k> <v> | unset <k>]
+agentio vault clear [--force]
 ```
 
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
-- Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location (it's outside the typical Dropbox/iCloud roots by default).
+- Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location — the encrypted vault may be synced, the passphrase must not be.
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
 - Runtime files (`daemon.log`) remain plaintext under `~/.config/agentio/`.
+
+**Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
+
+**init vs set** — `init` creates a new vault (and imports legacy config unless `--no-migrate`). `set` points at a vault that already exists, which is the multi-machine case: the encrypted vault is synced, the passphrase file is not. `set` verifies by decrypting *before* writing the pointer, so a wrong passphrase changes nothing, and it never moves or deletes either vault file. To relocate a vault, move the file yourself then `vault set` the new path.
+
+**`vault env` is not a general env-var store.** Only `AGENTIO_DAEMON_URL` and `AGENTIO_DAEMON_API_KEY` are ever read (by `daemon/client.ts`). Stored values are *not* exported to your shell or injected into processes agentio spawns — scheduled `.run.md` jobs inherit your real environment. Other keys are carried by `vault export`/`import` but nothing reads them.
 
 ### Gmail
 
@@ -308,14 +323,6 @@ For the id-based commands (`show`, `run`, `history <id>`), the id is resolved by
 
 `.run.md` frontmatter requires a `host:` field. The daemon only fires schedules whose `host` matches the current hostname — ensures Dropbox-synced folders don't double-fire across machines.
 
-### Configuration
-
-```bash
-agentio config export [--file <path>]      # Export as env vars or encrypted file
-agentio config import [file]               # Import from file or AGENTIO_CONFIG env var
-agentio config env set|get|list|remove     # Manage environment variables
-agentio config clear [--force]             # Clear all config and credentials
-```
 
 ### Utility Commands
 

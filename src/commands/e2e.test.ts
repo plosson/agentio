@@ -42,19 +42,19 @@ async function runCli(args: string[], extraEnv: Record<string, string> = {}): Pr
   };
 }
 
-describe('e2e: first-install → setup → status → reset', () => {
+describe('e2e: first-install → vault init → status → reset', () => {
   test('full happy path', async () => {
     // Gate blocks
     const r1 = await runCli(['status', '--no-test']);
     expect(r1.exitCode).not.toBe(0);
     expect(r1.stderr).toContain('VAULT_NOT_CONFIGURED');
 
-    // Setup
-    const r2 = await runCli(['setup'], {
-      AGENTIO_SETUP_NONINTERACTIVE: '1',
-      AGENTIO_SETUP_VAULT_PATH: join(tempHome, '.config', 'agentio', 'vault.enc'),
-      AGENTIO_SETUP_PASSPHRASE: 'e2e-passphrase-12345',
-    });
+    // Init
+    const r2 = await runCli([
+      'vault', 'init',
+      '--path', join(tempHome, '.config', 'agentio', 'vault.enc'),
+      '--passphrase', 'e2e-passphrase-12345',
+    ]);
     expect(r2.exitCode).toBe(0);
 
     // Status now works — store-resolved passphrase
@@ -62,7 +62,7 @@ describe('e2e: first-install → setup → status → reset', () => {
     expect(r3.exitCode).toBe(0);
 
     // Reset
-    const r4 = await runCli(['setup', '--reset', '--force']);
+    const r4 = await runCli(['vault', 'reset', '--force']);
     expect(r4.exitCode).toBe(0);
 
     // Gate blocks again
@@ -75,11 +75,11 @@ describe('e2e: first-install → setup → status → reset', () => {
 describe('e2e: daemon fails fast with VAULT_LOCKED when no passphrase source', () => {
   test('non-bypass command without store or env fails cleanly', async () => {
     // Create vault with passphrase written to passphrase store
-    await runCli(['setup'], {
-      AGENTIO_SETUP_NONINTERACTIVE: '1',
-      AGENTIO_SETUP_VAULT_PATH: join(tempHome, '.config', 'agentio', 'vault.enc'),
-      AGENTIO_SETUP_PASSPHRASE: 'daemon-pw-12345',
-    });
+    await runCli([
+      'vault', 'init',
+      '--path', join(tempHome, '.config', 'agentio', 'vault.enc'),
+      '--passphrase', 'daemon-pw-12345',
+    ]);
 
     // Run a non-bypass command (gmail list) with an EMPTY store file —
     // simulates a subprocess with no cached passphrase (e.g. headless daemon).

@@ -432,7 +432,7 @@ async function setupWebhookProfile(profileName: string, readOnly?: boolean): Pro
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: 'Test message from agentio setup' }),
+      body: JSON.stringify({ text: 'Test message from agentio' }),
     });
 
     if (!response.ok) {

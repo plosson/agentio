@@ -103,7 +103,7 @@ async function exportCurrentConfig(): Promise<{
   key: string;
   blob: string;
 }> {
-  const res = await runCli(['config', 'export', '--all']);
+  const res = await runCli(['vault', 'export', '--all']);
   if (res.exitCode !== 0) {
     throw new Error(
       `export failed: exit ${res.exitCode}\nstdout: ${res.stdout}\nstderr: ${res.stderr}`
@@ -171,7 +171,7 @@ describe('config import (replace mode) — preserves config.server', () => {
     });
 
     // 4. Run import — replace mode (no --merge).
-    const importRes = await runCli(['config', 'import'], {
+    const importRes = await runCli(['vault', 'import'], {
       AGENTIO_KEY: key,
       AGENTIO_CONFIG: blob,
     });
@@ -203,7 +203,7 @@ describe('config import (replace mode) — preserves config.server', () => {
       profiles: { jira: [{ name: 'tickets' }] },
       server: SAMPLE_SERVER,
     });
-    const importRes = await runCli(['config', 'import'], {
+    const importRes = await runCli(['vault', 'import'], {
       AGENTIO_KEY: key,
       AGENTIO_CONFIG: blob,
     });
@@ -230,7 +230,7 @@ describe('config import (replace mode) — preserves config.server', () => {
       env: { NEW_VAR: 'new' },
       server: SAMPLE_SERVER,
     });
-    const importRes = await runCli(['config', 'import'], {
+    const importRes = await runCli(['vault', 'import'], {
       AGENTIO_KEY: key,
       AGENTIO_CONFIG: blob,
     });
@@ -260,7 +260,7 @@ describe('config import (merge mode) — preserves server + adds profiles', () =
       profiles: { jira: [{ name: 'tickets' }] },
       server: SAMPLE_SERVER,
     });
-    const importRes = await runCli(['config', 'import', '--merge'], {
+    const importRes = await runCli(['vault', 'import', '--merge'], {
       AGENTIO_KEY: key,
       AGENTIO_CONFIG: blob,
     });
@@ -283,7 +283,7 @@ describe('config import (merge mode) — preserves server + adds profiles', () =
       profiles: {},
       server: SAMPLE_SERVER,
     });
-    const importRes = await runCli(['config', 'import', '--merge'], {
+    const importRes = await runCli(['vault', 'import', '--merge'], {
       AGENTIO_KEY: key,
       AGENTIO_CONFIG: blob,
     });

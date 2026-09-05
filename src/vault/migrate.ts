@@ -66,7 +66,7 @@ export async function readLegacy(): Promise<MigrateResult> {
     throw new CliError(
       'NOT_FOUND',
       'No legacy config.json to migrate',
-      'Run: agentio setup for a fresh install'
+      'Run: agentio vault init for a fresh install'
     );
   }
 
