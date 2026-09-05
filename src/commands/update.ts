@@ -9,6 +9,7 @@ import * as os from 'os';
 import pkg from '../../package.json';
 
 const GITHUB_REPO = 'plosson/agentio';
+const USER_AGENT = 'agentio-updater';
 
 interface GitHubRelease {
   tag_name: string;
@@ -61,12 +62,45 @@ function getExecutablePath(): string {
   return process.execPath;
 }
 
+interface LatestRelease {
+  tag: string;
+  // Populated only when the REST API answered; the redirect path knows the tag
+  // but not the asset list.
+  assets: GitHubRelease['assets'] | null;
+}
+
+function githubAuthHeaders(): Record<string, string> {
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// github.com/<repo>/releases/latest redirects to /releases/tag/<tag>. This is not
+// the REST API, so it does not consume the 60 requests/hour that api.github.com
+// allows an unauthenticated IP - a budget other tools on the same machine (or
+// behind the same NAT) can exhaust on their own.
+async function fetchLatestTagViaRedirect(): Promise<string | null> {
+  try {
+    const response = await fetch(`https://github.com/${GITHUB_REPO}/releases/latest`, {
+      method: 'HEAD',
+      redirect: 'manual',
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const location = response.headers.get('location');
+    const match = location?.match(/\/releases\/tag\/([^/?#]+)$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchLatestRelease(): Promise<GitHubRelease> {
   const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'agentio-updater',
+      'User-Agent': USER_AGENT,
+      ...githubAuthHeaders(),
     },
   });
 
@@ -74,10 +108,54 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
     if (response.status === 404) {
       throw new CliError('NOT_FOUND', 'No releases found');
     }
+    if (response.headers.get('x-ratelimit-remaining') === '0') {
+      const reset = Number(response.headers.get('x-ratelimit-reset') || 0);
+      const minutes = reset ? Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60000)) : 0;
+      throw new CliError(
+        'RATE_LIMITED',
+        `GitHub API rate limit exceeded${minutes ? ` (resets in ~${minutes} min)` : ''}`,
+        'Set GITHUB_TOKEN (or GH_TOKEN) to raise the limit, or install manually with: curl -LsSf https://agentio.houlahop.com/install | sh'
+      );
+    }
     throw new CliError('API_ERROR', `Failed to fetch release info: ${response.statusText}`);
   }
 
   return response.json();
+}
+
+async function resolveLatestRelease(): Promise<LatestRelease> {
+  const tag = await fetchLatestTagViaRedirect();
+  if (tag) {
+    return { tag, assets: null };
+  }
+
+  const release = await fetchLatestRelease();
+  return { tag: release.tag_name, assets: release.assets };
+}
+
+async function resolveDownloadUrl(release: LatestRelease, assetName: string, platform: string): Promise<string> {
+  if (release.assets) {
+    const asset = release.assets.find(a => a.name === assetName);
+    if (!asset) {
+      throw new CliError(
+        'NOT_FOUND',
+        `No binary found for ${platform}`,
+        `Available assets: ${release.assets.map(a => a.name).join(', ')}`
+      );
+    }
+    return asset.browser_download_url;
+  }
+
+  const url = `https://github.com/${GITHUB_REPO}/releases/download/${release.tag}/${assetName}`;
+  const response = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': USER_AGENT } });
+  if (!response.ok) {
+    throw new CliError(
+      'NOT_FOUND',
+      `No binary found for ${platform} in release ${release.tag}`,
+      `Expected asset: ${assetName}`
+    );
+  }
+  return url;
 }
 
 function compareVersions(current: string, latest: string): number {
@@ -271,8 +349,8 @@ export function registerUpdateCommand(program: Command): void {
         console.error('');
         console.error('Checking for updates...');
 
-        const release = await fetchLatestRelease();
-        const latestVersion = release.tag_name.replace(/^v/, '');
+        const release = await resolveLatestRelease();
+        const latestVersion = release.tag.replace(/^v/, '');
 
         const comparison = compareVersions(currentVersion, latestVersion);
 
@@ -295,14 +373,7 @@ export function registerUpdateCommand(program: Command): void {
         }
 
         // Find the asset for this platform
-        const asset = release.assets.find(a => a.name === assetName);
-        if (!asset) {
-          throw new CliError(
-            'NOT_FOUND',
-            `No binary found for ${platform}`,
-            `Available assets: ${release.assets.map(a => a.name).join(', ')}`
-          );
-        }
+        const downloadUrl = await resolveDownloadUrl(release, assetName, platform);
 
         // Confirm update
         if (!options.yes) {
@@ -315,7 +386,7 @@ export function registerUpdateCommand(program: Command): void {
 
         try {
           const execPath = getExecutablePath();
-          await updateBinary(asset.browser_download_url, execPath);
+          await updateBinary(downloadUrl, execPath);
           console.log(`Successfully updated to version ${latestVersion}`);
         } catch (error) {
           console.error('');

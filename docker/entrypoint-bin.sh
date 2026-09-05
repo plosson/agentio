@@ -14,8 +14,10 @@ esac
 if [ -n "$AGENTIO_VERSION" ]; then
   VERSION="$AGENTIO_VERSION"
 else
-  VERSION=$(curl -sL https://api.github.com/repos/plosson/agentio/releases/latest \
-    | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+  # Read the /releases/latest redirect rather than api.github.com, which caps
+  # unauthenticated IPs at 60 requests/hour
+  VERSION=$(curl -sI https://github.com/plosson/agentio/releases/latest \
+    | tr -d '\r' | sed -n 's|.*[Ll]ocation:.*/releases/tag/v||p' | head -n 1)
 fi
 
 echo "Installing agentio v${VERSION} (${PLATFORM})..."
