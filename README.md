@@ -98,6 +98,11 @@ npx @plosson/agentio --help
 npm install -g @plosson/agentio
 ```
 
+agentio is a Bun program: the published package ships TypeScript sources and
+runs under `bun`, so this route needs [Bun](https://bun.sh) already on your
+PATH. npm will install it happily without Bun and then fail on first run. The
+standalone installers above embed the runtime and have no such requirement.
+
 </details>
 
 ## Setup: Authenticate Once, Run Anywhere

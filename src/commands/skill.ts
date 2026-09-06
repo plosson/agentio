@@ -18,6 +18,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   slack: 'Use when sending Slack messages via the agentio CLI.',
   rss: 'Use when reading RSS feeds via the agentio CLI.',
   discourse: 'Use when interacting with Discourse forums via the agentio CLI.',
+  dropbox: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
   sql: 'Use when running SQL queries via the agentio CLI.',
   daemon: 'Use to manage the agentio daemon (runs the scheduler for .run.md prompts).',
   schedule: 'Use to manage agentio scheduled .run.md prompts in watched folders.',

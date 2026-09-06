@@ -46,6 +46,7 @@ export interface Config {
     slack?: ProfileValue[];
     telegram?: ProfileValue[];
     discourse?: ProfileValue[];
+    dropbox?: ProfileValue[];
     sql?: ProfileValue[];
     revolut?: ProfileValue[];
   };
@@ -53,9 +54,9 @@ export interface Config {
   daemon?: DaemonConfig;
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'sql' | 'revolut';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut';
 
 export const ALL_SERVICES: readonly ServiceName[] = [
   'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides', 'gscript',
-  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'sql', 'revolut',
+  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'sql', 'revolut',
 ];

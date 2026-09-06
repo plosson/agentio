@@ -20,7 +20,7 @@ bun run dev --help
 bun run typecheck
 
 # Build
-bun run build              # Node target
+bun run build              # JS bundle to dist/index.js (run with `bun`)
 bun run build:native       # Native executable
 ```
 
@@ -33,6 +33,7 @@ src/
 │   ├── gmail.ts             # Gmail commands
 │   ├── gdocs.ts             # Google Docs commands
 │   ├── gdrive.ts            # Google Drive commands
+│   ├── dropbox.ts           # Dropbox commands
 │   ├── telegram.ts          # Telegram commands (send)
 │   ├── gchat.ts             # Google Chat commands
 │   ├── github.ts            # GitHub commands
@@ -56,6 +57,7 @@ src/
 │   ├── gmail/client.ts      # Gmail API wrapper
 │   ├── gdocs/client.ts      # Google Docs API wrapper
 │   ├── gdrive/client.ts     # Google Drive API wrapper
+│   ├── dropbox/client.ts    # Dropbox API wrapper
 │   ├── telegram/client.ts   # Telegram Bot API wrapper
 │   ├── gchat/client.ts      # Google Chat API wrapper
 │   ├── github/client.ts     # GitHub API wrapper
@@ -75,6 +77,7 @@ src/
 │   ├── oauth.ts             # Google OAuth flow
 │   ├── oauth-server.ts      # OAuth callback server
 │   ├── github-oauth.ts      # GitHub OAuth flow
+│   ├── dropbox-oauth.ts     # Dropbox PKCE OAuth flow
 │   ├── jira-oauth.ts        # JIRA OAuth flow
 │   ├── revolut-oauth.ts     # Revolut JWT client-assertion + token flow
 │   ├── token-manager.ts     # Token validation/refresh
@@ -88,6 +91,7 @@ src/
 │   ├── gmail.ts             # Gmail types
 │   ├── gdocs.ts             # Google Docs types
 │   ├── gdrive.ts            # Google Drive types
+│   ├── dropbox.ts           # Dropbox types
 │   ├── telegram.ts          # Telegram types
 │   ├── gchat.ts             # Google Chat types
 │   ├── github.ts            # GitHub types
@@ -185,6 +189,49 @@ agentio gdrive move <file-id-or-url> <folder-id-or-url>
 agentio gdrive trash <file-id-or-url>
 agentio gdrive profile add|list|remove
 ```
+
+### Dropbox
+
+Full-Dropbox access via the HTTP API v2. There are no embedded OAuth
+credentials: each user registers their own app in the Dropbox App Console and
+`profile add` collects the App key.
+
+```bash
+agentio dropbox list [path] [--limit N] [--recursive] [--folders]
+agentio dropbox get <path>
+agentio dropbox search --query <text> [--path <p>] [--limit N] [--filename-only]
+agentio dropbox download <path> [--output <p>]        # folders arrive as a zip
+agentio dropbox put <file-path> [--path <dest>] [--overwrite]
+agentio dropbox mkdir <path>
+agentio dropbox move <from> <to>                      # also renames
+agentio dropbox copy <from> <to>
+agentio dropbox delete <path> [--force]
+agentio dropbox link <path> [--temporary]
+agentio dropbox account
+agentio dropbox profile add [--app-key <key>] | list | update | remove
+```
+
+Auth notes:
+
+- OAuth 2 with PKCE and **no redirect URI**: Dropbox renders the authorisation
+  code in the browser, so there is no app-console redirect to register and no
+  local callback server. `profile add` prints the consent URL and reads the
+  pasted code.
+- The app must be created as **Scoped access / Full Dropbox**, with these
+  permissions enabled in the console: `account_info.read`,
+  `files.metadata.read`, `files.content.read`, `files.content.write`,
+  `sharing.read`, `sharing.write`. The scopes are also requested in the consent
+  URL, so a missing one fails loudly at authorisation time.
+- Access tokens last 4 hours; the refresh token is long-lived and Dropbox does
+  **not** rotate it, so only the access token is replaced on refresh.
+- Paths are absolute from the Dropbox root (`/Documents/report.pdf`); the
+  account root is the empty string. Casing is preserved, matching is
+  case-insensitive. `id:`/`rev:` identifiers are passed through untouched.
+- `Dropbox-API-Arg` is an HTTP header, so its JSON is `\u`-escaped to stay
+  ASCII — accented file names break otherwise.
+- Uploads above 150 MB automatically switch to a chunked upload session.
+- Writes (`put`, `mkdir`, `move`, `copy`, `delete`, and shared-link creation)
+  honour the read-only profile flag.
 
 ### Telegram
 
