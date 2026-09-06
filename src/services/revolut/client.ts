@@ -10,9 +10,7 @@ import type {
   RevolutPaymentDraft,
   RevolutPaymentDraftCreateOptions,
   RevolutPaymentDraftSummary,
-  RevolutPaymentOptions,
   RevolutPayoutLink,
-  RevolutPayoutLinkCreateOptions,
   RevolutPayoutLinkListOptions,
   RevolutPayoutMethod,
   RevolutTransaction,
@@ -423,31 +421,6 @@ export class RevolutClient implements ServiceClient {
     await this.request<void>('DELETE', `/counterparty/${encodeURIComponent(id)}`);
   }
 
-  /**
-   * Send money to a counterparty. `requestId` is the idempotency key: Revolut
-   * de-duplicates repeats for two weeks, so a retry after a network error is safe.
-   */
-  async createPayment(options: RevolutPaymentOptions): Promise<RevolutTransferResult> {
-    const receiver: Record<string, unknown> = { counterparty_id: options.counterpartyId };
-    if (options.counterpartyAccountId) receiver.account_id = options.counterpartyAccountId;
-    if (options.counterpartyCardId) receiver.card_id = options.counterpartyCardId;
-
-    const body: Record<string, unknown> = {
-      request_id: options.requestId,
-      account_id: options.accountId,
-      receiver,
-      amount: options.amount,
-      currency: options.currency,
-    };
-
-    if (options.reference) body.reference = options.reference;
-    if (options.chargeBearer) body.charge_bearer = options.chargeBearer;
-    if (options.transferReasonCode) body.transfer_reason_code = options.transferReasonCode;
-
-    const raw = await this.request<RawTransferResult>('POST', '/pay', body);
-    return mapTransferResult(raw);
-  }
-
   /** Move money between two of the business's own accounts, same currency only. */
   async createTransfer(options: RevolutTransferOptions): Promise<RevolutTransferResult> {
     const body: Record<string, unknown> = {
@@ -522,29 +495,6 @@ export class RevolutClient implements ServiceClient {
 
   async deletePaymentDraft(id: string): Promise<void> {
     await this.request<void>('DELETE', `/payment-drafts/${encodeURIComponent(id)}`);
-  }
-
-  /**
-   * Create a payout link: money is blocked on the account and the recipient
-   * claims it through the returned URL, so no bank details are needed up front.
-   */
-  async createPayoutLink(options: RevolutPayoutLinkCreateOptions): Promise<RevolutPayoutLink> {
-    const body: Record<string, unknown> = {
-      request_id: options.requestId,
-      counterparty_name: options.counterpartyName,
-      account_id: options.accountId,
-      amount: options.amount,
-      currency: options.currency,
-      reference: options.reference,
-    };
-
-    if (options.saveCounterparty !== undefined) body.save_counterparty = options.saveCounterparty;
-    if (options.expiryPeriod) body.expiry_period = options.expiryPeriod;
-    if (options.payoutMethods?.length) body.payout_methods = options.payoutMethods;
-    if (options.transferReasonCode) body.transfer_reason_code = options.transferReasonCode;
-
-    const raw = await this.request<RawPayoutLink>('POST', '/payout-links', body);
-    return mapPayoutLink(raw);
   }
 
   async listPayoutLinks(options: RevolutPayoutLinkListOptions = {}): Promise<RevolutPayoutLink[]> {

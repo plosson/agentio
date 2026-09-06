@@ -72,7 +72,7 @@ Examples:
 
 ## agentio revolut pay
 
-Send money: to a counterparty, between your own accounts, as a draft, or as a payout link
+Draft a payment to a counterparty, or move money between your own accounts
 
 Options:
 
@@ -80,44 +80,38 @@ Options:
 - `--to <id>`: Counterparty ID, or one of your own account IDs to move money internally
 - `--amount <number>`: Amount to send
 - `--currency <code>`: Currency, ISO 4217 (e.g. EUR)
+- `--reference <text>`: Reference shown to you and the recipient (required for a counterparty)
 - `--to-account <id>`: Counterparty's receiving account (when it has more than one)
 - `--to-card <id>`: Counterparty's card, for a card transfer
-- `--reference <text>`: Reference shown to you and the recipient
+- `--title <text>`: Title for the draft
+- `--on <date>`: Schedule the draft for a date, YYYY-MM-DD
 - `--charge-bearer <who>`: Who pays the route fees: shared (SHA) or debtor (OUR)
 - `--reason-code <code>`: Transfer reason code, required by some corridors
-- `--request-id <id>`: Idempotency key (a UUID is generated when omitted)
-- `--draft`: Create a payment draft to approve in the Revolut Business app instead of paying now
-- `--title <text>`: Title for the draft (with --draft)
-- `--on <date>`: Schedule the draft for a date, YYYY-MM-DD (implies --draft)
-- `--link`: Create a payout link the recipient claims, instead of paying a counterparty
-- `--name <name>`: Recipient name (with --link)
-- `--expires-in <duration>`: Link lifetime as an ISO 8601 duration, P1D to P7D (with --link)
-- `--method <method>`: Payout method: revolut, bank_account, or card (repeatable, with --link) (default: )
-- `--save-counterparty`: Save the recipient as a counterparty when the link is claimed (with --link)
-- `--force`: Skip the confirmation prompt
+- `--request-id <id>`: Idempotency key for an own-account move (a UUID is generated when omitted)
+- `--force`: Skip the confirmation prompt on an own-account move
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--format <format>`: Output format: text or json (default: text)
 
 ```
 Examples:
 
-  # pay a counterparty, with a confirmation prompt
+  # draft a payment - nothing moves until it is approved in the Revolut Business app
   agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
     --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \
     --amount 250 --currency EUR --reference "Invoice 42"
 
-  # move money between two of your own accounts (detected from --to)
-  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
-    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR --force
-
-  # queue a draft for the 1st, to approve in the Revolut Business app
+  # draft it for the 1st of next month
   agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
     --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \
-    --amount 250 --currency EUR --reference "Rent" --on 2026-10-01
+    --amount 1200 --currency EUR --reference "Rent" --title "October rent" --on 2026-10-01
 
-  # send a payout link when you do not have the recipient's bank details
-  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a --link \
-    --name "Jane Doe" --amount 50 --currency EUR --reference "Expenses"
+  # move money between two of your own accounts (detected from --to, executes now)
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
+    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR
+
+  # then review and discard what was drafted
+  agentio revolut drafts list
+  agentio revolut drafts delete <draft-id>
 ```
 
 ## agentio revolut counterparties list
@@ -313,3 +307,4 @@ Examples:
   # cancel without prompting
   agentio revolut links cancel 12dcd8c2-6408-458f-98a9-3f4abc180898 --force
 ```
+

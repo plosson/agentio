@@ -40,7 +40,6 @@ import type {
   RevolutChargeBearer,
   RevolutCredentials,
   RevolutEnvironment,
-  RevolutPayoutMethod,
 } from '../types/revolut';
 
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
@@ -147,12 +146,6 @@ function parseChargeBearer(value: string): RevolutChargeBearer {
   );
 }
 
-function parsePayoutMethod(value: string): RevolutPayoutMethod {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'revolut' || normalized === 'bank_account' || normalized === 'card') return normalized;
-  throw new CliError('INVALID_PARAMS', `Unknown payout method "${value}"`, 'Use revolut, bank_account, or card');
-}
-
 function describeAccount(account: RevolutAccount): string {
   return account.name ? `"${account.name}"` : account.id;
 }
@@ -171,7 +164,7 @@ function parseEnvironment(value: string): RevolutEnvironment {
 interface PayOptions {
   profile?: string;
   from: string;
-  to?: string;
+  to: string;
   toAccount?: string;
   toCard?: string;
   amount: string;
@@ -180,43 +173,20 @@ interface PayOptions {
   chargeBearer?: string;
   reasonCode?: string;
   requestId?: string;
-  draft?: boolean;
   title?: string;
   on?: string;
-  link?: boolean;
-  name?: string;
-  expiresIn?: string;
-  method: string[];
-  saveCounterparty?: boolean;
   force?: boolean;
   format: string;
 }
 
-async function confirmOrCancel(summary: string, force?: boolean): Promise<boolean> {
-  if (force) return true;
-
-  const confirmed = await confirm(`${summary}?`);
-  if (!confirmed) console.error('Cancelled');
-  return confirmed;
-}
-
 /**
- * One entry point for every way money leaves an account. The destination decides
- * the endpoint: an ID that matches one of your own accounts is an internal
- * transfer, anything else is a counterparty payment. `--draft` and `--link` swap
- * the immediate payment for a draft awaiting approval or a link the recipient claims.
+ * Paying a counterparty always produces a payment draft, never a transfer.
+ * Nothing leaves the business until a human approves the draft in the Revolut
+ * Business app, so a mistake here is recoverable with `drafts delete`. The one
+ * destination that acts immediately is another of your own accounts, where the
+ * money never leaves the business at all.
  */
 async function runPay(options: PayOptions): Promise<void> {
-  const wantsDraft = Boolean(options.draft || options.on);
-
-  if (options.link && wantsDraft) {
-    throw new CliError(
-      'INVALID_PARAMS',
-      '--link and --draft cannot be combined',
-      'A payout link is claimed by the recipient; a draft is approved by you in the Revolut Business app',
-    );
-  }
-
   if (options.on && !/^\d{4}-\d{2}-\d{2}$/.test(options.on)) {
     throw new CliError('INVALID_PARAMS', `--on must be a date as YYYY-MM-DD, got "${options.on}"`);
   }
@@ -224,10 +194,6 @@ async function runPay(options: PayOptions): Promise<void> {
   const amount = parseAmount(options.amount);
   const currency = options.currency.trim().toUpperCase();
   const chargeBearer = options.chargeBearer ? parseChargeBearer(options.chargeBearer) : undefined;
-  const payoutMethods = options.method.map(parsePayoutMethod);
-  // Revolut de-duplicates repeats of a request ID for two weeks, so a retry after
-  // a network error cannot double-pay. Reuse the same one when retrying by hand.
-  const requestId = options.requestId?.trim() || randomUUID();
   const asJson = options.format === 'json';
 
   const { client, profile } = await getRevolutClient(options.profile);
@@ -243,68 +209,21 @@ async function runPay(options: PayOptions): Promise<void> {
     );
   }
 
-  if (options.link) {
-    if (options.to) {
-      throw new CliError(
-        'INVALID_PARAMS',
-        '--link does not take --to',
-        'Name the recipient with --name; they supply their own bank details when they claim the link',
-      );
-    }
-    if (!options.name) {
-      throw new CliError('INVALID_PARAMS', '--link requires --name', 'Pass the recipient name, e.g. --name "Jane Doe"');
-    }
-    if (!options.reference) {
-      throw new CliError('INVALID_PARAMS', '--link requires --reference');
-    }
-
-    const summary = `Create a payout link for ${formatMoney(amount, currency)} to ${options.name}, from ${describeAccount(source)}`;
-    if (!(await confirmOrCancel(summary, options.force))) return;
-
-    const link = await client.createPayoutLink({
-      requestId,
-      counterpartyName: options.name,
-      accountId: source.id,
-      amount,
-      currency,
-      reference: options.reference,
-      saveCounterparty: options.saveCounterparty,
-      expiryPeriod: options.expiresIn,
-      payoutMethods,
-      transferReasonCode: options.reasonCode,
-    });
-
-    if (asJson) {
-      console.log(JSON.stringify(link, null, 2));
-    } else {
-      printRevolutPayoutLink(link);
-    }
-    return;
-  }
-
-  if (!options.to) {
-    throw new CliError(
-      'INVALID_PARAMS',
-      '--to is required',
-      'Pass a counterparty ID, or one of your own account IDs to move money between your accounts',
-    );
-  }
-
   const target = accounts.find((account) => account.id === options.to);
 
   if (target) {
-    if (wantsDraft) {
-      throw new CliError(
-        'INVALID_PARAMS',
-        'Payment drafts are only for payments to a counterparty',
-        `"${options.to}" is your own account, so the money moves immediately - drop --draft`,
-      );
-    }
     if (options.toAccount || options.toCard) {
       throw new CliError('INVALID_PARAMS', '--to-account and --to-card only apply to counterparty payments');
     }
     if (chargeBearer || options.reasonCode) {
       throw new CliError('INVALID_PARAMS', '--charge-bearer and --reason-code only apply to counterparty payments');
+    }
+    if (options.on || options.title) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--on and --title only apply to counterparty payments',
+        `"${options.to}" is your own account, so the money moves immediately and there is no draft to schedule or name`,
+      );
     }
     if (source.currency !== currency || target.currency !== currency) {
       throw new CliError(
@@ -314,8 +233,19 @@ async function runPay(options: PayOptions): Promise<void> {
       );
     }
 
+    // Revolut de-duplicates repeats of a request ID for two weeks, so a retry
+    // after a network error cannot move the money twice.
+    const requestId = options.requestId?.trim() || randomUUID();
     const summary = `Move ${formatMoney(amount, currency)} from ${describeAccount(source)} to ${describeAccount(target)} (your own account)`;
-    if (!(await confirmOrCancel(summary, options.force))) return;
+
+    // The only path that acts straight away, so it is the only one that asks.
+    if (!options.force) {
+      const confirmed = await confirm(`${summary}?`);
+      if (!confirmed) {
+        console.error('Cancelled');
+        return;
+      }
+    }
 
     const result = await client.createTransfer({
       requestId,
@@ -334,46 +264,17 @@ async function runPay(options: PayOptions): Promise<void> {
     return;
   }
 
-  // Resolve the payee up front so the confirmation names it and a wrong ID fails
-  // before any money moves.
-  const counterparty = await client.getCounterparty(options.to);
-
-  if (wantsDraft) {
-    if (!options.reference) {
-      throw new CliError('INVALID_PARAMS', 'A payment draft requires --reference');
-    }
-
-    const when = options.on ? `, scheduled for ${options.on}` : '';
-    const summary = `Create a payment draft for ${formatMoney(amount, currency)} to ${counterparty.name}${when}, from ${describeAccount(source)}`;
-    if (!(await confirmOrCancel(summary, options.force))) return;
-
-    const id = await client.createPaymentDraft({
-      title: options.title,
-      scheduleFor: options.on,
-      accountId: source.id,
-      counterpartyId: counterparty.id,
-      counterpartyAccountId: options.toAccount,
-      counterpartyCardId: options.toCard,
-      amount,
-      currency,
-      reference: options.reference,
-      chargeBearer,
-      transferReasonCode: options.reasonCode,
-    });
-
-    if (asJson) {
-      console.log(JSON.stringify({ id }, null, 2));
-    } else {
-      printRevolutPaymentDraftCreated(id, summary);
-    }
-    return;
+  if (!options.reference) {
+    throw new CliError('INVALID_PARAMS', 'A payment draft requires --reference');
   }
 
-  const summary = `Pay ${formatMoney(amount, currency)} to ${counterparty.name} from ${describeAccount(source)}`;
-  if (!(await confirmOrCancel(summary, options.force))) return;
+  // Resolve the payee up front so the summary names it and a wrong ID fails
+  // before the draft is written.
+  const counterparty = await client.getCounterparty(options.to);
 
-  const result = await client.createPayment({
-    requestId,
+  const id = await client.createPaymentDraft({
+    title: options.title,
+    scheduleFor: options.on,
     accountId: source.id,
     counterpartyId: counterparty.id,
     counterpartyAccountId: options.toAccount,
@@ -386,10 +287,15 @@ async function runPay(options: PayOptions): Promise<void> {
   });
 
   if (asJson) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    printRevolutTransferResult(result, summary);
+    console.log(JSON.stringify({ id }, null, 2));
+    return;
   }
+
+  const when = options.on ? `, scheduled for ${options.on}` : '';
+  printRevolutPaymentDraftCreated(
+    id,
+    `Drafted ${formatMoney(amount, currency)} to ${counterparty.name}${when}, from ${describeAccount(source)}`,
+  );
 }
 
 export function registerRevolutCommands(program: Command): void {
@@ -506,26 +412,20 @@ export function registerRevolutCommands(program: Command): void {
   addExamples(
     revolut
       .command('pay')
-      .description('Send money: to a counterparty, between your own accounts, as a draft, or as a payout link')
+      .description('Draft a payment to a counterparty, or move money between your own accounts')
       .requiredOption('--from <account-id>', 'Your account to pay from')
-      .option('--to <id>', 'Counterparty ID, or one of your own account IDs to move money internally')
+      .requiredOption('--to <id>', 'Counterparty ID, or one of your own account IDs to move money internally')
       .requiredOption('--amount <number>', 'Amount to send')
       .requiredOption('--currency <code>', 'Currency, ISO 4217 (e.g. EUR)')
+      .option('--reference <text>', 'Reference shown to you and the recipient (required for a counterparty)')
       .option('--to-account <id>', "Counterparty's receiving account (when it has more than one)")
       .option('--to-card <id>', "Counterparty's card, for a card transfer")
-      .option('--reference <text>', 'Reference shown to you and the recipient')
+      .option('--title <text>', 'Title for the draft')
+      .option('--on <date>', 'Schedule the draft for a date, YYYY-MM-DD')
       .option('--charge-bearer <who>', 'Who pays the route fees: shared (SHA) or debtor (OUR)')
       .option('--reason-code <code>', 'Transfer reason code, required by some corridors')
-      .option('--request-id <id>', 'Idempotency key (a UUID is generated when omitted)')
-      .option('--draft', 'Create a payment draft to approve in the Revolut Business app instead of paying now')
-      .option('--title <text>', 'Title for the draft (with --draft)')
-      .option('--on <date>', 'Schedule the draft for a date, YYYY-MM-DD (implies --draft)')
-      .option('--link', 'Create a payout link the recipient claims, instead of paying a counterparty')
-      .option('--name <name>', 'Recipient name (with --link)')
-      .option('--expires-in <duration>', 'Link lifetime as an ISO 8601 duration, P1D to P7D (with --link)')
-      .option('--method <method>', 'Payout method: revolut, bank_account, or card (repeatable, with --link)', (val: string, acc: string[]) => [...acc, val], [])
-      .option('--save-counterparty', 'Save the recipient as a counterparty when the link is claimed (with --link)')
-      .option('--force', 'Skip the confirmation prompt')
+      .option('--request-id <id>', 'Idempotency key for an own-account move (a UUID is generated when omitted)')
+      .option('--force', 'Skip the confirmation prompt on an own-account move')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
       .option('--format <format>', 'Output format: text or json', 'text')
       .action(async (options: PayOptions) => {
@@ -537,23 +437,23 @@ export function registerRevolutCommands(program: Command): void {
       }),
     `Examples:
 
-  # pay a counterparty, with a confirmation prompt
+  # draft a payment - nothing moves until it is approved in the Revolut Business app
   agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
     --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \\
     --amount 250 --currency EUR --reference "Invoice 42"
 
-  # move money between two of your own accounts (detected from --to)
-  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
-    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR --force
-
-  # queue a draft for the 1st, to approve in the Revolut Business app
+  # draft it for the 1st of next month
   agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
     --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \\
-    --amount 250 --currency EUR --reference "Rent" --on 2026-10-01
+    --amount 1200 --currency EUR --reference "Rent" --title "October rent" --on 2026-10-01
 
-  # send a payout link when you do not have the recipient's bank details
-  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a --link \\
-    --name "Jane Doe" --amount 50 --currency EUR --reference "Expenses"`,
+  # move money between two of your own accounts (detected from --to, executes now)
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
+    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR
+
+  # then review and discard what was drafted
+  agentio revolut drafts list
+  agentio revolut drafts delete <draft-id>`,
   );
 
   const counterparties = revolut
@@ -714,7 +614,7 @@ export function registerRevolutCommands(program: Command): void {
   agentio revolut counterparties delete 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f --force`,
   );
 
-  const drafts = revolut.command('drafts').description('Manage payment drafts created with pay --draft');
+  const drafts = revolut.command('drafts').description('Manage the payment drafts that pay creates');
 
   addExamples(
     drafts
@@ -810,7 +710,7 @@ export function registerRevolutCommands(program: Command): void {
   agentio revolut drafts delete e7e54cb2-861a-4a1f-80e9-3e6600f3db10 --force`,
   );
 
-  const links = revolut.command('links').description('Manage payout links created with pay --link');
+  const links = revolut.command('links').description('Inspect and cancel payout links raised in the Revolut Business app');
 
   addExamples(
     links

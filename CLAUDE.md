@@ -291,7 +291,7 @@ agentio revolut counterparties list [--format text|json]
 agentio revolut counterparties get <id> [--format text|json]
 agentio revolut counterparties add (--company-name <name> | --first-name <n> --last-name <n>) --bank-country <code> --currency <code> [--iban <iban>] [--bic <bic>] [--account-no <no>] [--sort-code <code>] [--routing-number <no>] [--email <email>] [--phone <phone>]
 agentio revolut counterparties delete <id> [--force]
-agentio revolut pay --from <account-id> --amount <n> --currency <code> [--to <counterparty-id|own-account-id>] [--to-account <id>] [--to-card <id>] [--reference <text>] [--charge-bearer shared|debtor] [--reason-code <code>] [--request-id <id>] [--draft] [--title <text>] [--on YYYY-MM-DD] [--link --name <recipient> [--expires-in <P1D..P7D>] [--method revolut|bank_account|card]... [--save-counterparty]] [--force] [--format text|json]
+agentio revolut pay --from <account-id> --to <counterparty-id|own-account-id> --amount <n> --currency <code> [--reference <text>] [--to-account <id>] [--to-card <id>] [--title <text>] [--on YYYY-MM-DD] [--charge-bearer shared|debtor] [--reason-code <code>] [--request-id <id>] [--force] [--format text|json]
 agentio revolut drafts list [--source api|integration|email|all] | get <id> | delete <id> [--force]
 agentio revolut links list [--created-before <ts>] [--limit N] | get <id> | cancel <id> [--force]
 agentio revolut profile add [--environment production|sandbox] [--client-id <id>] [--private-key <path>] [--redirect-uri <uri>]
@@ -300,20 +300,23 @@ agentio revolut profile list|update|remove
 
 Money movement notes:
 
-- `pay` is the single entry point for every outbound route. The destination
-  decides the endpoint: a `--to` that matches one of your own accounts is an
-  internal `POST /transfer`, anything else is a counterparty `POST /pay`. The
-  confirmation line names the route before anything moves.
-- `--draft` (implied by `--on`) creates a `POST /payment-drafts` entry instead.
-  Nothing moves until it is approved in the Revolut Business app, and that is
-  also the only way to schedule a payment for a future date — `/pay` has no
-  `schedule_for`.
-- `--link` creates a payout link: the money is blocked on the account and the
-  recipient supplies their own bank details when they claim the URL. UK, EEA,
-  AU and SG only.
-- Every create call sends a `request_id`. A UUID is generated when
-  `--request-id` is omitted; Revolut de-duplicates repeats for two weeks, so
-  retrying with the same ID cannot double-pay.
+- **agentio cannot send money out of the business.** Paying a counterparty
+  always creates a payment draft (`POST /payment-drafts`); nothing leaves until
+  a human approves it in the Revolut Business app. `POST /pay` and
+  `POST /payout-links` are deliberately not wired up — a y/n prompt is too weak
+  a guard for an irreversible transfer, and a mistaken draft is undone with
+  `drafts delete`.
+- The one immediate path is `--to <own-account-id>`, which the command detects
+  by matching `--to` against the caller's own accounts and routes to
+  `POST /transfer`. The money stays inside the business, currencies must match,
+  and it is the only path that asks for confirmation (skippable with `--force`).
+- `--on` schedules the draft. Drafts are the only way to schedule a payment at
+  all: `/pay` has no `schedule_for`.
+- The own-account move sends a `request_id`; a UUID is generated when
+  `--request-id` is omitted, and Revolut de-duplicates repeats for two weeks,
+  so retrying after a network error cannot move the money twice.
+- `links` is read-and-undo only: payout links raised in the Revolut Business app
+  can be listed, inspected, and cancelled while unclaimed, but not created.
 - The API app must hold the `PAY` permission. A read-only Revolut app gets a
   403 no matter what the profile flag says; the local `readOnly` profile flag
   blocks the write before the request is made.

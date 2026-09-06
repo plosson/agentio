@@ -126,21 +126,6 @@ export type RevolutChargeBearer = 'shared' | 'debtor';
 /** How a payout link recipient may claim the money. */
 export type RevolutPayoutMethod = 'revolut' | 'bank_account' | 'card';
 
-export interface RevolutPaymentOptions {
-  /** Idempotency key. Revolut de-duplicates for two weeks; max 40 chars. */
-  requestId: string;
-  accountId: string;
-  counterpartyId: string;
-  /** Required when the counterparty has more than one payment method. */
-  counterpartyAccountId?: string;
-  counterpartyCardId?: string;
-  amount: number;
-  currency: string;
-  reference?: string;
-  chargeBearer?: RevolutChargeBearer;
-  transferReasonCode?: string;
-}
-
 export interface RevolutTransferOptions {
   requestId: string;
   sourceAccountId: string;
@@ -214,20 +199,6 @@ export interface RevolutPaymentDraft {
   scheduledFor?: string;
   source?: string;
   payments: RevolutDraftPayment[];
-}
-
-export interface RevolutPayoutLinkCreateOptions {
-  requestId: string;
-  counterpartyName: string;
-  accountId: string;
-  amount: number;
-  currency: string;
-  reference: string;
-  saveCounterparty?: boolean;
-  /** ISO 8601 duration, P1D to P7D. Defaults to P7D at Revolut's end. */
-  expiryPeriod?: string;
-  payoutMethods?: RevolutPayoutMethod[];
-  transferReasonCode?: string;
 }
 
 export interface RevolutPayoutLink {

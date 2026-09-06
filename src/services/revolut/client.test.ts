@@ -50,64 +50,6 @@ function client(): RevolutClient {
   return new RevolutClient(CREDENTIALS);
 }
 
-describe('createPayment', () => {
-  test('nests the counterparty under receiver and omits absent optionals', async () => {
-    stubFetch({ id: 'tx-1', state: 'pending', created_at: '2026-09-06T10:00:00Z' });
-
-    const result = await client().createPayment({
-      requestId: 'req-1',
-      accountId: 'acc-1',
-      counterpartyId: 'cp-1',
-      amount: 250,
-      currency: 'EUR',
-    });
-
-    expect(captured[0]?.url).toBe(`${BASE}/pay`);
-    expect(captured[0]?.method).toBe('POST');
-    expect(captured[0]?.body).toEqual({
-      request_id: 'req-1',
-      account_id: 'acc-1',
-      receiver: { counterparty_id: 'cp-1' },
-      amount: 250,
-      currency: 'EUR',
-    });
-    expect(result).toEqual({
-      id: 'tx-1',
-      state: 'pending',
-      createdAt: '2026-09-06T10:00:00Z',
-      completedAt: undefined,
-    });
-  });
-
-  test('carries the receiving account, card, charge bearer and reason code', async () => {
-    stubFetch({ id: 'tx-2', state: 'completed', created_at: '2026-09-06T10:00:00Z' });
-
-    await client().createPayment({
-      requestId: 'req-2',
-      accountId: 'acc-1',
-      counterpartyId: 'cp-1',
-      counterpartyAccountId: 'cp-acc-1',
-      counterpartyCardId: 'cp-card-1',
-      amount: 10,
-      currency: 'INR',
-      reference: 'Invoice 42',
-      chargeBearer: 'debtor',
-      transferReasonCode: 'advertising',
-    });
-
-    expect(captured[0]?.body).toEqual({
-      request_id: 'req-2',
-      account_id: 'acc-1',
-      receiver: { counterparty_id: 'cp-1', account_id: 'cp-acc-1', card_id: 'cp-card-1' },
-      amount: 10,
-      currency: 'INR',
-      reference: 'Invoice 42',
-      charge_bearer: 'debtor',
-      transfer_reason_code: 'advertising',
-    });
-  });
-});
-
 describe('createTransfer', () => {
   test('sends source and target account IDs', async () => {
     stubFetch({
@@ -215,8 +157,8 @@ describe('payment drafts', () => {
 });
 
 describe('payout links', () => {
-  test('omits payout_methods when none were chosen', async () => {
-    stubFetch(
+  test('list maps a link and defaults the absent fields', async () => {
+    stubFetch([
       {
         id: 'link-1',
         state: 'active',
@@ -230,67 +172,14 @@ describe('payout links', () => {
         reference: 'Expenses',
         url: 'https://business.revolut.com/p/abc',
       },
-      201,
-    );
+    ]);
 
-    const link = await client().createPayoutLink({
-      requestId: 'req-4',
-      counterpartyName: 'Jane Doe',
-      accountId: 'acc-1',
-      amount: 50,
-      currency: 'EUR',
-      reference: 'Expenses',
-      payoutMethods: [],
-    });
+    const links = await client().listPayoutLinks({ limit: 10 });
 
-    expect(captured[0]?.body).toEqual({
-      request_id: 'req-4',
-      counterparty_name: 'Jane Doe',
-      account_id: 'acc-1',
-      amount: 50,
-      currency: 'EUR',
-      reference: 'Expenses',
-    });
-    expect(link.url).toBe('https://business.revolut.com/p/abc');
-    expect(link.payoutMethods).toEqual([]);
-    expect(link.saveCounterparty).toBe(false);
-  });
-
-  test('sends the chosen methods and expiry period', async () => {
-    stubFetch(
-      {
-        id: 'link-2',
-        state: 'active',
-        created_at: '2026-09-06T10:00:00Z',
-        updated_at: '2026-09-06T10:00:00Z',
-        counterparty_name: 'Jane Doe',
-        request_id: 'req-5',
-        account_id: 'acc-1',
-        amount: 50,
-        currency: 'EUR',
-        reference: 'Expenses',
-        payout_methods: ['revolut'],
-      },
-      201,
-    );
-
-    await client().createPayoutLink({
-      requestId: 'req-5',
-      counterpartyName: 'Jane Doe',
-      accountId: 'acc-1',
-      amount: 50,
-      currency: 'EUR',
-      reference: 'Expenses',
-      saveCounterparty: true,
-      expiryPeriod: 'P3D',
-      payoutMethods: ['revolut'],
-    });
-
-    expect(captured[0]?.body).toMatchObject({
-      save_counterparty: true,
-      expiry_period: 'P3D',
-      payout_methods: ['revolut'],
-    });
+    expect(captured[0]?.url).toBe(`${BASE}/payout-links?limit=10`);
+    expect(links[0]?.url).toBe('https://business.revolut.com/p/abc');
+    expect(links[0]?.payoutMethods).toEqual([]);
+    expect(links[0]?.saveCounterparty).toBe(false);
   });
 
   test('cancel posts to the cancel path and tolerates an empty response', async () => {
