@@ -169,7 +169,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **Telegram** | Bot Token | `send` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
 | **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
-| **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties` |
+| **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay`, `drafts`, `links` |
 | **Discourse** | API Key | `list`, `get`, `categories` |
 | **RSS** | None | `articles`, `get`, `info` |
 

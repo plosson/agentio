@@ -6,8 +6,19 @@ import type {
   RevolutCounterparty,
   RevolutCounterpartyCreateOptions,
   RevolutCredentials,
+  RevolutDraftPayment,
+  RevolutPaymentDraft,
+  RevolutPaymentDraftCreateOptions,
+  RevolutPaymentDraftSummary,
+  RevolutPaymentOptions,
+  RevolutPayoutLink,
+  RevolutPayoutLinkCreateOptions,
+  RevolutPayoutLinkListOptions,
+  RevolutPayoutMethod,
   RevolutTransaction,
   RevolutTransactionListOptions,
+  RevolutTransferOptions,
+  RevolutTransferResult,
 } from '../../types/revolut';
 
 interface RawAccount {
@@ -72,6 +83,79 @@ interface RawCounterparty {
   created_at: string;
   updated_at: string;
   accounts?: RawCounterpartyAccount[];
+}
+
+interface RawTransferResult {
+  id: string;
+  state: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+interface RawAmount {
+  amount?: number;
+  currency?: string;
+}
+
+interface RawReceiver {
+  counterparty_id?: string;
+  account_id?: string;
+  card_id?: string;
+}
+
+interface RawDraftPayment {
+  id: string;
+  amount?: RawAmount;
+  currency?: string;
+  account_id: string;
+  receiver?: RawReceiver;
+  state: string;
+  reason?: string;
+  error_message?: string;
+  reference?: string;
+  transfer_reason_code?: string;
+  current_charge_options?: {
+    from?: RawAmount;
+    to?: RawAmount;
+    rate?: string;
+    fee?: RawAmount;
+  };
+}
+
+interface RawPaymentDraft {
+  title?: string;
+  scheduled_for?: string;
+  source?: string;
+  payments?: RawDraftPayment[];
+}
+
+interface RawPaymentDraftSummary {
+  id: string;
+  title?: string;
+  scheduled_for?: string;
+  payments_count: number;
+  source?: string;
+}
+
+interface RawPayoutLink {
+  id: string;
+  state: string;
+  created_at: string;
+  updated_at: string;
+  counterparty_name: string;
+  save_counterparty?: boolean;
+  request_id: string;
+  expiry_date?: string;
+  payout_methods?: RevolutPayoutMethod[];
+  account_id: string;
+  amount: number;
+  currency: string;
+  url?: string;
+  reference: string;
+  transfer_reason_code?: string;
+  counterparty_id?: string;
+  transaction_id?: string;
+  cancellation_reason?: string;
 }
 
 function mapAccount(raw: RawAccount): RevolutAccount {
@@ -148,6 +232,68 @@ function mapCounterparty(raw: RawCounterparty): RevolutCounterparty {
       bic: account.bic,
       recipientCharges: account.recipient_charges,
     })),
+  };
+}
+
+function mapTransferResult(raw: RawTransferResult): RevolutTransferResult {
+  return {
+    id: raw.id,
+    state: raw.state,
+    createdAt: raw.created_at,
+    completedAt: raw.completed_at,
+  };
+}
+
+function mapDraftPayment(raw: RawDraftPayment): RevolutDraftPayment {
+  const charge = raw.current_charge_options;
+
+  return {
+    id: raw.id,
+    amount: raw.amount?.amount ?? 0,
+    currency: raw.amount?.currency ?? raw.currency,
+    accountId: raw.account_id,
+    counterpartyId: raw.receiver?.counterparty_id,
+    counterpartyAccountId: raw.receiver?.account_id,
+    counterpartyCardId: raw.receiver?.card_id,
+    state: raw.state,
+    reason: raw.reason,
+    errorMessage: raw.error_message,
+    reference: raw.reference,
+    transferReasonCode: raw.transfer_reason_code,
+    charge: charge
+      ? {
+          fromAmount: charge.from?.amount,
+          fromCurrency: charge.from?.currency,
+          toAmount: charge.to?.amount,
+          toCurrency: charge.to?.currency,
+          rate: charge.rate,
+          feeAmount: charge.fee?.amount,
+          feeCurrency: charge.fee?.currency,
+        }
+      : undefined,
+  };
+}
+
+function mapPayoutLink(raw: RawPayoutLink): RevolutPayoutLink {
+  return {
+    id: raw.id,
+    state: raw.state,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    counterpartyName: raw.counterparty_name,
+    saveCounterparty: raw.save_counterparty ?? false,
+    requestId: raw.request_id,
+    expiryDate: raw.expiry_date,
+    payoutMethods: raw.payout_methods ?? [],
+    accountId: raw.account_id,
+    amount: raw.amount,
+    currency: raw.currency,
+    url: raw.url,
+    reference: raw.reference,
+    transferReasonCode: raw.transfer_reason_code,
+    counterpartyId: raw.counterparty_id,
+    transactionId: raw.transaction_id,
+    cancellationReason: raw.cancellation_reason,
   };
 }
 
@@ -275,5 +421,149 @@ export class RevolutClient implements ServiceClient {
 
   async deleteCounterparty(id: string): Promise<void> {
     await this.request<void>('DELETE', `/counterparty/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Send money to a counterparty. `requestId` is the idempotency key: Revolut
+   * de-duplicates repeats for two weeks, so a retry after a network error is safe.
+   */
+  async createPayment(options: RevolutPaymentOptions): Promise<RevolutTransferResult> {
+    const receiver: Record<string, unknown> = { counterparty_id: options.counterpartyId };
+    if (options.counterpartyAccountId) receiver.account_id = options.counterpartyAccountId;
+    if (options.counterpartyCardId) receiver.card_id = options.counterpartyCardId;
+
+    const body: Record<string, unknown> = {
+      request_id: options.requestId,
+      account_id: options.accountId,
+      receiver,
+      amount: options.amount,
+      currency: options.currency,
+    };
+
+    if (options.reference) body.reference = options.reference;
+    if (options.chargeBearer) body.charge_bearer = options.chargeBearer;
+    if (options.transferReasonCode) body.transfer_reason_code = options.transferReasonCode;
+
+    const raw = await this.request<RawTransferResult>('POST', '/pay', body);
+    return mapTransferResult(raw);
+  }
+
+  /** Move money between two of the business's own accounts, same currency only. */
+  async createTransfer(options: RevolutTransferOptions): Promise<RevolutTransferResult> {
+    const body: Record<string, unknown> = {
+      request_id: options.requestId,
+      source_account_id: options.sourceAccountId,
+      target_account_id: options.targetAccountId,
+      amount: options.amount,
+      currency: options.currency,
+    };
+
+    if (options.reference) body.reference = options.reference;
+
+    const raw = await this.request<RawTransferResult>('POST', '/transfer', body);
+    return mapTransferResult(raw);
+  }
+
+  /**
+   * Create a payment draft. Nothing moves until someone sends it for processing
+   * in the Revolut Business app, which is also where scheduled payments live.
+   * Returns the draft ID.
+   */
+  async createPaymentDraft(options: RevolutPaymentDraftCreateOptions): Promise<string> {
+    const receiver: Record<string, unknown> = { counterparty_id: options.counterpartyId };
+    if (options.counterpartyAccountId) receiver.account_id = options.counterpartyAccountId;
+    if (options.counterpartyCardId) receiver.card_id = options.counterpartyCardId;
+
+    const payment: Record<string, unknown> = {
+      account_id: options.accountId,
+      receiver,
+      amount: options.amount,
+      currency: options.currency,
+      reference: options.reference,
+    };
+
+    if (options.chargeBearer) payment.charge_bearer = options.chargeBearer;
+    if (options.transferReasonCode) payment.transfer_reason_code = options.transferReasonCode;
+
+    const body: Record<string, unknown> = { payments: [payment] };
+    if (options.title) body.title = options.title;
+    if (options.scheduleFor) body.schedule_for = options.scheduleFor;
+
+    const raw = await this.request<{ id: string }>('POST', '/payment-drafts', body);
+    return raw.id;
+  }
+
+  async listPaymentDrafts(source?: string): Promise<RevolutPaymentDraftSummary[]> {
+    const query = source ? `?source=${encodeURIComponent(source)}` : '';
+    const raw = await this.request<{ payment_orders?: RawPaymentDraftSummary[] }>(
+      'GET',
+      `/payment-drafts${query}`,
+    );
+
+    return (raw.payment_orders ?? []).map((order) => ({
+      id: order.id,
+      title: order.title,
+      scheduledFor: order.scheduled_for,
+      paymentsCount: order.payments_count,
+      source: order.source,
+    }));
+  }
+
+  async getPaymentDraft(id: string): Promise<RevolutPaymentDraft> {
+    const raw = await this.request<RawPaymentDraft>('GET', `/payment-drafts/${encodeURIComponent(id)}`);
+
+    return {
+      title: raw.title,
+      scheduledFor: raw.scheduled_for,
+      source: raw.source,
+      payments: (raw.payments ?? []).map(mapDraftPayment),
+    };
+  }
+
+  async deletePaymentDraft(id: string): Promise<void> {
+    await this.request<void>('DELETE', `/payment-drafts/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Create a payout link: money is blocked on the account and the recipient
+   * claims it through the returned URL, so no bank details are needed up front.
+   */
+  async createPayoutLink(options: RevolutPayoutLinkCreateOptions): Promise<RevolutPayoutLink> {
+    const body: Record<string, unknown> = {
+      request_id: options.requestId,
+      counterparty_name: options.counterpartyName,
+      account_id: options.accountId,
+      amount: options.amount,
+      currency: options.currency,
+      reference: options.reference,
+    };
+
+    if (options.saveCounterparty !== undefined) body.save_counterparty = options.saveCounterparty;
+    if (options.expiryPeriod) body.expiry_period = options.expiryPeriod;
+    if (options.payoutMethods?.length) body.payout_methods = options.payoutMethods;
+    if (options.transferReasonCode) body.transfer_reason_code = options.transferReasonCode;
+
+    const raw = await this.request<RawPayoutLink>('POST', '/payout-links', body);
+    return mapPayoutLink(raw);
+  }
+
+  async listPayoutLinks(options: RevolutPayoutLinkListOptions = {}): Promise<RevolutPayoutLink[]> {
+    const params = new URLSearchParams();
+    if (options.createdBefore) params.set('created_before', options.createdBefore);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+
+    const query = params.toString();
+    const raw = await this.request<RawPayoutLink[]>('GET', `/payout-links${query ? `?${query}` : ''}`);
+    return raw.map(mapPayoutLink);
+  }
+
+  async getPayoutLink(id: string): Promise<RevolutPayoutLink> {
+    const raw = await this.request<RawPayoutLink>('GET', `/payout-links/${encodeURIComponent(id)}`);
+    return mapPayoutLink(raw);
+  }
+
+  /** Only links that have not been claimed yet can be cancelled. */
+  async cancelPayoutLink(id: string): Promise<void> {
+    await this.request<void>('POST', `/payout-links/${encodeURIComponent(id)}/cancel`);
   }
 }

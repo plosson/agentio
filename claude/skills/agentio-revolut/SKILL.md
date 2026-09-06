@@ -70,6 +70,56 @@ Examples:
   agentio revolut transaction 6b8e1f30-1c2d-4a5b-8e9f-0a1b2c3d4e5f
 ```
 
+## agentio revolut pay
+
+Send money: to a counterparty, between your own accounts, as a draft, or as a payout link
+
+Options:
+
+- `--from <account-id>`: Your account to pay from
+- `--to <id>`: Counterparty ID, or one of your own account IDs to move money internally
+- `--amount <number>`: Amount to send
+- `--currency <code>`: Currency, ISO 4217 (e.g. EUR)
+- `--to-account <id>`: Counterparty's receiving account (when it has more than one)
+- `--to-card <id>`: Counterparty's card, for a card transfer
+- `--reference <text>`: Reference shown to you and the recipient
+- `--charge-bearer <who>`: Who pays the route fees: shared (SHA) or debtor (OUR)
+- `--reason-code <code>`: Transfer reason code, required by some corridors
+- `--request-id <id>`: Idempotency key (a UUID is generated when omitted)
+- `--draft`: Create a payment draft to approve in the Revolut Business app instead of paying now
+- `--title <text>`: Title for the draft (with --draft)
+- `--on <date>`: Schedule the draft for a date, YYYY-MM-DD (implies --draft)
+- `--link`: Create a payout link the recipient claims, instead of paying a counterparty
+- `--name <name>`: Recipient name (with --link)
+- `--expires-in <duration>`: Link lifetime as an ISO 8601 duration, P1D to P7D (with --link)
+- `--method <method>`: Payout method: revolut, bank_account, or card (repeatable, with --link) (default: )
+- `--save-counterparty`: Save the recipient as a counterparty when the link is claimed (with --link)
+- `--force`: Skip the confirmation prompt
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # pay a counterparty, with a confirmation prompt
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
+    --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \
+    --amount 250 --currency EUR --reference "Invoice 42"
+
+  # move money between two of your own accounts (detected from --to)
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
+    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR --force
+
+  # queue a draft for the 1st, to approve in the Revolut Business app
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \
+    --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \
+    --amount 250 --currency EUR --reference "Rent" --on 2026-10-01
+
+  # send a payout link when you do not have the recipient's bank details
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a --link \
+    --name "Jane Doe" --amount 50 --currency EUR --reference "Expenses"
+```
+
 ## agentio revolut counterparties list
 
 List counterparties
@@ -153,3 +203,113 @@ Examples:
   agentio revolut counterparties delete 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f --force
 ```
 
+## agentio revolut drafts list
+
+List payment drafts awaiting approval
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--source <source>`: Filter by origin: api, integration, email, or all (default: api)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # drafts created through the API
+  agentio revolut drafts list
+
+  # every draft, including ones raised in the Revolut Business app
+  agentio revolut drafts list --source all
+```
+
+## agentio revolut drafts get <id>
+
+Get one payment draft with its payments
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # full detail for one draft
+  agentio revolut drafts get e7e54cb2-861a-4a1f-80e9-3e6600f3db10
+```
+
+## agentio revolut drafts delete <id>
+
+Delete a payment draft that has not been sent for processing
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--force`: Skip the confirmation prompt
+
+```
+Examples:
+
+  # delete with a confirmation prompt
+  agentio revolut drafts delete e7e54cb2-861a-4a1f-80e9-3e6600f3db10
+
+  # delete without prompting
+  agentio revolut drafts delete e7e54cb2-861a-4a1f-80e9-3e6600f3db10 --force
+```
+
+## agentio revolut links list
+
+List payout links
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--created-before <timestamp>`: Only links created before this ISO 8601 timestamp
+- `--limit <number>`: Maximum links to return (max 1000) (default: 100)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # most recent payout links
+  agentio revolut links list
+
+  # the next page, using the created_at of the last link on this one
+  agentio revolut links list --created-before 2026-07-11T13:55:54.834963Z
+```
+
+## agentio revolut links get <id>
+
+Get one payout link
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # check whether a link has been claimed
+  agentio revolut links get 12dcd8c2-6408-458f-98a9-3f4abc180898
+```
+
+## agentio revolut links cancel <id>
+
+Cancel a payout link that has not been claimed
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--force`: Skip the confirmation prompt
+
+```
+Examples:
+
+  # cancel with a confirmation prompt
+  agentio revolut links cancel 12dcd8c2-6408-458f-98a9-3f4abc180898
+
+  # cancel without prompting
+  agentio revolut links cancel 12dcd8c2-6408-458f-98a9-3f4abc180898 --force
+```

@@ -119,3 +119,140 @@ export interface RevolutCounterpartyCreateOptions {
   email?: string;
   phone?: string;
 }
+
+/** Who pays the transaction route fees: `shared` is SHA, `debtor` is OUR. */
+export type RevolutChargeBearer = 'shared' | 'debtor';
+
+/** How a payout link recipient may claim the money. */
+export type RevolutPayoutMethod = 'revolut' | 'bank_account' | 'card';
+
+export interface RevolutPaymentOptions {
+  /** Idempotency key. Revolut de-duplicates for two weeks; max 40 chars. */
+  requestId: string;
+  accountId: string;
+  counterpartyId: string;
+  /** Required when the counterparty has more than one payment method. */
+  counterpartyAccountId?: string;
+  counterpartyCardId?: string;
+  amount: number;
+  currency: string;
+  reference?: string;
+  chargeBearer?: RevolutChargeBearer;
+  transferReasonCode?: string;
+}
+
+export interface RevolutTransferOptions {
+  requestId: string;
+  sourceAccountId: string;
+  targetAccountId: string;
+  amount: number;
+  currency: string;
+  reference?: string;
+}
+
+/** Shared response of POST /pay and POST /transfer. */
+export interface RevolutTransferResult {
+  id: string;
+  state: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface RevolutPaymentDraftCreateOptions {
+  title?: string;
+  /** YYYY-MM-DD. Drafts are the only way to schedule a payment for a later date. */
+  scheduleFor?: string;
+  accountId: string;
+  counterpartyId: string;
+  counterpartyAccountId?: string;
+  counterpartyCardId?: string;
+  amount: number;
+  currency: string;
+  reference: string;
+  chargeBearer?: RevolutChargeBearer;
+  transferReasonCode?: string;
+}
+
+/** One row of GET /payment-drafts; carries counts, not payment details. */
+export interface RevolutPaymentDraftSummary {
+  id: string;
+  title?: string;
+  scheduledFor?: string;
+  paymentsCount: number;
+  source?: string;
+}
+
+export interface RevolutDraftPaymentCharge {
+  fromAmount?: number;
+  fromCurrency?: string;
+  toAmount?: number;
+  toCurrency?: string;
+  rate?: string;
+  feeAmount?: number;
+  feeCurrency?: string;
+}
+
+export interface RevolutDraftPayment {
+  id: string;
+  amount: number;
+  currency?: string;
+  accountId: string;
+  counterpartyId?: string;
+  counterpartyAccountId?: string;
+  counterpartyCardId?: string;
+  state: string;
+  reason?: string;
+  errorMessage?: string;
+  reference?: string;
+  transferReasonCode?: string;
+  charge?: RevolutDraftPaymentCharge;
+}
+
+/** GET /payment-drafts/{id}. The draft ID is not echoed back by the API. */
+export interface RevolutPaymentDraft {
+  title?: string;
+  scheduledFor?: string;
+  source?: string;
+  payments: RevolutDraftPayment[];
+}
+
+export interface RevolutPayoutLinkCreateOptions {
+  requestId: string;
+  counterpartyName: string;
+  accountId: string;
+  amount: number;
+  currency: string;
+  reference: string;
+  saveCounterparty?: boolean;
+  /** ISO 8601 duration, P1D to P7D. Defaults to P7D at Revolut's end. */
+  expiryPeriod?: string;
+  payoutMethods?: RevolutPayoutMethod[];
+  transferReasonCode?: string;
+}
+
+export interface RevolutPayoutLink {
+  id: string;
+  state: string;
+  createdAt: string;
+  updatedAt: string;
+  counterpartyName: string;
+  saveCounterparty: boolean;
+  requestId: string;
+  expiryDate?: string;
+  payoutMethods: RevolutPayoutMethod[];
+  accountId: string;
+  amount: number;
+  currency: string;
+  /** Only returned while the link is active. */
+  url?: string;
+  reference: string;
+  transferReasonCode?: string;
+  counterpartyId?: string;
+  transactionId?: string;
+  cancellationReason?: string;
+}
+
+export interface RevolutPayoutLinkListOptions {
+  createdBefore?: string;
+  limit?: number;
+}
