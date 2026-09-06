@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
-import { createPrivateKey } from 'crypto';
+import { createPrivateKey, randomUUID } from 'crypto';
 import { setCredentials, getCredentials } from '../auth/token-store';
 import { setProfile, resolveProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
@@ -26,8 +26,21 @@ import {
   printRevolutCounterpartyList,
   printRevolutCounterparty,
   printRevolutCounterpartyDeleted,
+  printRevolutTransferResult,
+  printRevolutPaymentDraftCreated,
+  printRevolutPaymentDraftList,
+  printRevolutPaymentDraft,
+  printRevolutPaymentDraftDeleted,
+  printRevolutPayoutLink,
+  printRevolutPayoutLinkList,
+  printRevolutPayoutLinkCancelled,
 } from '../utils/output';
-import type { RevolutCredentials, RevolutEnvironment } from '../types/revolut';
+import type {
+  RevolutAccount,
+  RevolutChargeBearer,
+  RevolutCredentials,
+  RevolutEnvironment,
+} from '../types/revolut';
 
 const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
@@ -115,11 +128,174 @@ function readPrivateKey(filePath: string): string {
   return pem;
 }
 
+function parseAmount(value: string): number {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new CliError('INVALID_PARAMS', `--amount must be a positive number, got "${value}"`);
+  }
+  return amount;
+}
+
+function parseChargeBearer(value: string): RevolutChargeBearer {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'shared' || normalized === 'debtor') return normalized;
+  throw new CliError(
+    'INVALID_PARAMS',
+    `Unknown charge bearer "${value}"`,
+    'Use shared (SHA, fees split) or debtor (OUR, you pay all fees)',
+  );
+}
+
+function describeAccount(account: RevolutAccount): string {
+  return account.name ? `"${account.name}"` : account.id;
+}
+
+function formatMoney(amount: number, currency: string): string {
+  return `${amount.toFixed(2)} ${currency}`;
+}
+
 function parseEnvironment(value: string): RevolutEnvironment {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'production' || normalized === 'prod') return 'production';
   if (normalized === 'sandbox') return 'sandbox';
   throw new CliError('INVALID_PARAMS', `Unknown environment "${value}"`, 'Use production or sandbox');
+}
+
+interface PayOptions {
+  profile?: string;
+  from: string;
+  to: string;
+  toAccount?: string;
+  toCard?: string;
+  amount: string;
+  currency: string;
+  reference?: string;
+  chargeBearer?: string;
+  reasonCode?: string;
+  requestId?: string;
+  title?: string;
+  on?: string;
+  force?: boolean;
+  format: string;
+}
+
+/**
+ * Paying a counterparty always produces a payment draft, never a transfer.
+ * Nothing leaves the business until a human approves the draft in the Revolut
+ * Business app, so a mistake here is recoverable with `drafts delete`. The one
+ * destination that acts immediately is another of your own accounts, where the
+ * money never leaves the business at all.
+ */
+async function runPay(options: PayOptions): Promise<void> {
+  if (options.on && !/^\d{4}-\d{2}-\d{2}$/.test(options.on)) {
+    throw new CliError('INVALID_PARAMS', `--on must be a date as YYYY-MM-DD, got "${options.on}"`);
+  }
+
+  const amount = parseAmount(options.amount);
+  const currency = options.currency.trim().toUpperCase();
+  const chargeBearer = options.chargeBearer ? parseChargeBearer(options.chargeBearer) : undefined;
+  const asJson = options.format === 'json';
+
+  const { client, profile } = await getRevolutClient(options.profile);
+  await enforceWriteAccess('revolut', profile, 'move money');
+
+  const accounts = await client.listAccounts();
+  const source = accounts.find((account) => account.id === options.from);
+  if (!source) {
+    throw new CliError(
+      'NOT_FOUND',
+      `--from "${options.from}" is not one of your accounts`,
+      'Run: agentio revolut accounts',
+    );
+  }
+
+  const target = accounts.find((account) => account.id === options.to);
+
+  if (target) {
+    if (options.toAccount || options.toCard) {
+      throw new CliError('INVALID_PARAMS', '--to-account and --to-card only apply to counterparty payments');
+    }
+    if (chargeBearer || options.reasonCode) {
+      throw new CliError('INVALID_PARAMS', '--charge-bearer and --reason-code only apply to counterparty payments');
+    }
+    if (options.on || options.title) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--on and --title only apply to counterparty payments',
+        `"${options.to}" is your own account, so the money moves immediately and there is no draft to schedule or name`,
+      );
+    }
+    if (source.currency !== currency || target.currency !== currency) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Moving money between your own accounts needs a single currency: ${describeAccount(source)} holds ${source.currency}, ${describeAccount(target)} holds ${target.currency}, and --currency is ${currency}`,
+        'Exchange the funds in the Revolut Business app first',
+      );
+    }
+
+    // Revolut de-duplicates repeats of a request ID for two weeks, so a retry
+    // after a network error cannot move the money twice.
+    const requestId = options.requestId?.trim() || randomUUID();
+    const summary = `Move ${formatMoney(amount, currency)} from ${describeAccount(source)} to ${describeAccount(target)} (your own account)`;
+
+    // The only path that acts straight away, so it is the only one that asks.
+    if (!options.force) {
+      const confirmed = await confirm(`${summary}?`);
+      if (!confirmed) {
+        console.error('Cancelled');
+        return;
+      }
+    }
+
+    const result = await client.createTransfer({
+      requestId,
+      sourceAccountId: source.id,
+      targetAccountId: target.id,
+      amount,
+      currency,
+      reference: options.reference,
+    });
+
+    if (asJson) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      printRevolutTransferResult(result, summary);
+    }
+    return;
+  }
+
+  if (!options.reference) {
+    throw new CliError('INVALID_PARAMS', 'A payment draft requires --reference');
+  }
+
+  // Resolve the payee up front so the summary names it and a wrong ID fails
+  // before the draft is written.
+  const counterparty = await client.getCounterparty(options.to);
+
+  const id = await client.createPaymentDraft({
+    title: options.title,
+    scheduleFor: options.on,
+    accountId: source.id,
+    counterpartyId: counterparty.id,
+    counterpartyAccountId: options.toAccount,
+    counterpartyCardId: options.toCard,
+    amount,
+    currency,
+    reference: options.reference,
+    chargeBearer,
+    transferReasonCode: options.reasonCode,
+  });
+
+  if (asJson) {
+    console.log(JSON.stringify({ id }, null, 2));
+    return;
+  }
+
+  const when = options.on ? `, scheduled for ${options.on}` : '';
+  printRevolutPaymentDraftCreated(
+    id,
+    `Drafted ${formatMoney(amount, currency)} to ${counterparty.name}${when}, from ${describeAccount(source)}`,
+  );
 }
 
 export function registerRevolutCommands(program: Command): void {
@@ -231,6 +407,53 @@ export function registerRevolutCommands(program: Command): void {
 
   # full detail for one transaction
   agentio revolut transaction 6b8e1f30-1c2d-4a5b-8e9f-0a1b2c3d4e5f`,
+  );
+
+  addExamples(
+    revolut
+      .command('pay')
+      .description('Draft a payment to a counterparty, or move money between your own accounts')
+      .requiredOption('--from <account-id>', 'Your account to pay from')
+      .requiredOption('--to <id>', 'Counterparty ID, or one of your own account IDs to move money internally')
+      .requiredOption('--amount <number>', 'Amount to send')
+      .requiredOption('--currency <code>', 'Currency, ISO 4217 (e.g. EUR)')
+      .option('--reference <text>', 'Reference shown to you and the recipient (required for a counterparty)')
+      .option('--to-account <id>', "Counterparty's receiving account (when it has more than one)")
+      .option('--to-card <id>', "Counterparty's card, for a card transfer")
+      .option('--title <text>', 'Title for the draft')
+      .option('--on <date>', 'Schedule the draft for a date, YYYY-MM-DD')
+      .option('--charge-bearer <who>', 'Who pays the route fees: shared (SHA) or debtor (OUR)')
+      .option('--reason-code <code>', 'Transfer reason code, required by some corridors')
+      .option('--request-id <id>', 'Idempotency key for an own-account move (a UUID is generated when omitted)')
+      .option('--force', 'Skip the confirmation prompt on an own-account move')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (options: PayOptions) => {
+        try {
+          await runPay(options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # draft a payment - nothing moves until it is approved in the Revolut Business app
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
+    --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \\
+    --amount 250 --currency EUR --reference "Invoice 42"
+
+  # draft it for the 1st of next month
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
+    --to 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f \\
+    --amount 1200 --currency EUR --reference "Rent" --title "October rent" --on 2026-10-01
+
+  # move money between two of your own accounts (detected from --to, executes now)
+  agentio revolut pay --from 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a \\
+    --to 1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e --amount 500 --currency EUR
+
+  # then review and discard what was drafted
+  agentio revolut drafts list
+  agentio revolut drafts delete <draft-id>`,
   );
 
   const counterparties = revolut
@@ -389,6 +612,205 @@ export function registerRevolutCommands(program: Command): void {
 
   # delete without prompting
   agentio revolut counterparties delete 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f --force`,
+  );
+
+  const drafts = revolut.command('drafts').description('Manage the payment drafts that pay creates');
+
+  addExamples(
+    drafts
+      .command('list')
+      .description('List payment drafts awaiting approval')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--source <source>', 'Filter by origin: api, integration, email, or all', 'api')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (options) => {
+        try {
+          const { client } = await getRevolutClient(options.profile);
+          const results = await client.listPaymentDrafts(options.source);
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(results, null, 2));
+          } else {
+            printRevolutPaymentDraftList(results);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # drafts created through the API
+  agentio revolut drafts list
+
+  # every draft, including ones raised in the Revolut Business app
+  agentio revolut drafts list --source all`,
+  );
+
+  addExamples(
+    drafts
+      .command('get')
+      .description('Get one payment draft with its payments')
+      .argument('<id>', 'Payment draft ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (id: string, options) => {
+        try {
+          const { client } = await getRevolutClient(options.profile);
+          const draft = await client.getPaymentDraft(id);
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(draft, null, 2));
+          } else {
+            printRevolutPaymentDraft(id, draft);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # full detail for one draft
+  agentio revolut drafts get e7e54cb2-861a-4a1f-80e9-3e6600f3db10`,
+  );
+
+  addExamples(
+    drafts
+      .command('delete')
+      .description('Delete a payment draft that has not been sent for processing')
+      .argument('<id>', 'Payment draft ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--force', 'Skip the confirmation prompt')
+      .action(async (id: string, options) => {
+        try {
+          const { client, profile } = await getRevolutClient(options.profile);
+          await enforceWriteAccess('revolut', profile, 'delete a payment draft');
+
+          if (!options.force) {
+            const draft = await client.getPaymentDraft(id);
+            const title = draft.title ? `"${draft.title}"` : id;
+            const confirmed = await confirm(`Delete payment draft ${title} (${draft.payments.length} payment(s))?`);
+            if (!confirmed) {
+              console.error('Cancelled');
+              return;
+            }
+          }
+
+          await client.deletePaymentDraft(id);
+          printRevolutPaymentDraftDeleted(id);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # delete with a confirmation prompt
+  agentio revolut drafts delete e7e54cb2-861a-4a1f-80e9-3e6600f3db10
+
+  # delete without prompting
+  agentio revolut drafts delete e7e54cb2-861a-4a1f-80e9-3e6600f3db10 --force`,
+  );
+
+  const links = revolut.command('links').description('Inspect and cancel payout links raised in the Revolut Business app');
+
+  addExamples(
+    links
+      .command('list')
+      .description('List payout links')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--created-before <timestamp>', 'Only links created before this ISO 8601 timestamp')
+      .option('--limit <number>', 'Maximum links to return (max 1000)', '100')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (options) => {
+        try {
+          const limit = parseInt(options.limit, 10);
+          if (isNaN(limit) || limit < 1) {
+            throw new CliError('INVALID_PARAMS', '--limit must be a positive number');
+          }
+
+          const { client } = await getRevolutClient(options.profile);
+          const results = await client.listPayoutLinks({ createdBefore: options.createdBefore, limit });
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(results, null, 2));
+          } else {
+            printRevolutPayoutLinkList(results);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # most recent payout links
+  agentio revolut links list
+
+  # the next page, using the created_at of the last link on this one
+  agentio revolut links list --created-before 2026-07-11T13:55:54.834963Z`,
+  );
+
+  addExamples(
+    links
+      .command('get')
+      .description('Get one payout link')
+      .argument('<id>', 'Payout link ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (id: string, options) => {
+        try {
+          const { client } = await getRevolutClient(options.profile);
+          const link = await client.getPayoutLink(id);
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(link, null, 2));
+          } else {
+            printRevolutPayoutLink(link);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # check whether a link has been claimed
+  agentio revolut links get 12dcd8c2-6408-458f-98a9-3f4abc180898`,
+  );
+
+  addExamples(
+    links
+      .command('cancel')
+      .description('Cancel a payout link that has not been claimed')
+      .argument('<id>', 'Payout link ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--force', 'Skip the confirmation prompt')
+      .action(async (id: string, options) => {
+        try {
+          const { client, profile } = await getRevolutClient(options.profile);
+          await enforceWriteAccess('revolut', profile, 'cancel a payout link');
+
+          if (!options.force) {
+            const link = await client.getPayoutLink(id);
+            const confirmed = await confirm(
+              `Cancel the ${formatMoney(link.amount, link.currency)} payout link to ${link.counterpartyName}?`,
+            );
+            if (!confirmed) {
+              console.error('Cancelled');
+              return;
+            }
+          }
+
+          await client.cancelPayoutLink(id);
+          printRevolutPayoutLinkCancelled(id);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # cancel with a confirmation prompt
+  agentio revolut links cancel 12dcd8c2-6408-458f-98a9-3f4abc180898
+
+  # cancel without prompting
+  agentio revolut links cancel 12dcd8c2-6408-458f-98a9-3f4abc180898 --force`,
   );
 
   const profile = createProfileCommands<RevolutCredentials>(revolut, {

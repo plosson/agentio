@@ -26,7 +26,15 @@ import type {
 import type { SlackSendResult } from '../types/slack';
 import type { RssFeed, RssArticle } from '../types/rss';
 import type { DiscourseCategory, DiscourseTopic, DiscourseTopicDetail } from '../types/discourse';
-import type { RevolutAccount, RevolutCounterparty, RevolutTransaction } from '../types/revolut';
+import type {
+  RevolutAccount,
+  RevolutCounterparty,
+  RevolutPaymentDraft,
+  RevolutPaymentDraftSummary,
+  RevolutPayoutLink,
+  RevolutTransaction,
+  RevolutTransferResult,
+} from '../types/revolut';
 import type {
   GSlidesListItem,
   GSlidesPresentation,
@@ -1588,6 +1596,110 @@ export function printRevolutCounterparty(counterparty: RevolutCounterparty): voi
 
 export function printRevolutCounterpartyDeleted(id: string): void {
   console.log(`Deleted counterparty: ${id}`);
+}
+
+export function printRevolutTransferResult(result: RevolutTransferResult, summary: string): void {
+  console.log(summary);
+  console.log(`ID: ${result.id}`);
+  console.log(`State: ${result.state}`);
+  console.log(`Created: ${result.createdAt}`);
+  if (result.completedAt) console.log(`Completed: ${result.completedAt}`);
+}
+
+export function printRevolutPaymentDraftCreated(id: string, summary: string): void {
+  console.log(summary);
+  console.log(`Draft ID: ${id}`);
+  console.log('Nothing has moved yet - approve it in the Revolut Business app to send it.');
+}
+
+export function printRevolutPaymentDraftList(drafts: RevolutPaymentDraftSummary[]): void {
+  if (drafts.length === 0) {
+    console.log('No payment drafts found');
+    return;
+  }
+
+  console.log(`Payment drafts (${drafts.length})\n`);
+
+  for (const draft of drafts) {
+    const title = draft.title || '(untitled)';
+    console.log(`${draft.id} | ${title}`);
+    console.log(`    Payments: ${draft.paymentsCount}`);
+    if (draft.scheduledFor) console.log(`    Scheduled for: ${draft.scheduledFor}`);
+    if (draft.source) console.log(`    Source: ${draft.source}`);
+    console.log('');
+  }
+}
+
+export function printRevolutPaymentDraft(id: string, draft: RevolutPaymentDraft): void {
+  console.log(`ID: ${id}`);
+  if (draft.title) console.log(`Title: ${draft.title}`);
+  if (draft.scheduledFor) console.log(`Scheduled for: ${draft.scheduledFor}`);
+  if (draft.source) console.log(`Source: ${draft.source}`);
+
+  for (const payment of draft.payments) {
+    console.log(`\n[Payment ${payment.id}]`);
+    console.log(`Amount: ${formatAmount(payment.amount, payment.currency || '')}`.trimEnd());
+    console.log(`State: ${payment.state}`);
+    console.log(`From account: ${payment.accountId}`);
+    if (payment.counterpartyId) console.log(`Counterparty: ${payment.counterpartyId}`);
+    if (payment.counterpartyAccountId) console.log(`Counterparty account: ${payment.counterpartyAccountId}`);
+    if (payment.counterpartyCardId) console.log(`Counterparty card: ${payment.counterpartyCardId}`);
+    if (payment.reference) console.log(`Reference: ${payment.reference}`);
+    if (payment.transferReasonCode) console.log(`Transfer reason: ${payment.transferReasonCode}`);
+    if (payment.reason) console.log(`Reason: ${payment.reason}`);
+    if (payment.errorMessage) console.log(`Error: ${payment.errorMessage}`);
+
+    const charge = payment.charge;
+    if (charge?.rate && charge.fromCurrency !== charge.toCurrency) {
+      console.log(`Rate: ${charge.rate}`);
+    }
+    if (charge?.feeAmount !== undefined && charge.feeCurrency) {
+      console.log(`Fee: ${formatAmount(charge.feeAmount, charge.feeCurrency)}`);
+    }
+  }
+}
+
+export function printRevolutPaymentDraftDeleted(id: string): void {
+  console.log(`Deleted payment draft: ${id}`);
+}
+
+export function printRevolutPayoutLink(link: RevolutPayoutLink): void {
+  console.log(`ID: ${link.id}`);
+  console.log(`State: ${link.state}`);
+  console.log(`Recipient: ${link.counterpartyName}`);
+  console.log(`Amount: ${formatAmount(link.amount, link.currency)}`);
+  console.log(`Reference: ${link.reference}`);
+  if (link.url) console.log(`URL: ${link.url}`);
+  console.log(`From account: ${link.accountId}`);
+  console.log(`Payout methods: ${link.payoutMethods.join(', ') || '-'}`);
+  console.log(`Save counterparty: ${link.saveCounterparty ? 'yes' : 'no'}`);
+  if (link.expiryDate) console.log(`Expires: ${link.expiryDate}`);
+  console.log(`Created: ${link.createdAt}`);
+  if (link.transferReasonCode) console.log(`Transfer reason: ${link.transferReasonCode}`);
+  if (link.counterpartyId) console.log(`Counterparty: ${link.counterpartyId}`);
+  if (link.transactionId) console.log(`Transaction: ${link.transactionId}`);
+  if (link.cancellationReason) console.log(`Cancellation reason: ${link.cancellationReason}`);
+}
+
+export function printRevolutPayoutLinkList(links: RevolutPayoutLink[]): void {
+  if (links.length === 0) {
+    console.log('No payout links found');
+    return;
+  }
+
+  console.log(`Payout links (${links.length})\n`);
+
+  for (const link of links) {
+    console.log(`${link.id} | ${formatAmount(link.amount, link.currency)} | ${link.state}`);
+    console.log(`    Recipient: ${link.counterpartyName}`);
+    console.log(`    Reference: ${link.reference}`);
+    if (link.url) console.log(`    URL: ${link.url}`);
+    console.log('');
+  }
+}
+
+export function printRevolutPayoutLinkCancelled(id: string): void {
+  console.log(`Cancelled payout link: ${id}`);
 }
 
 // Dropbox specific formatters
