@@ -10,7 +10,7 @@
 
 ## Build, Test, and Development Commands
 - `bun run src/index.ts`: run the CLI locally in dev mode.
-- `bun build src/index.ts --outdir dist --target node`: build the JS bundle to `dist/`.
+- `bun run build`: build the JS bundle to `dist/index.js`. The CLI uses Bun-native APIs (`Bun.serve`, `Bun.spawn`, `bun:SQL`), so the bundle targets `bun`, not node.
 - `bun build src/index.ts --compile ... --outfile dist/agentio`: build the native binary (see `package.json` script `build:native`).
 - `bun run typecheck`: run `tsc --noEmit` with strict settings.
 

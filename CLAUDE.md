@@ -20,7 +20,7 @@ bun run dev --help
 bun run typecheck
 
 # Build
-bun run build              # Node target
+bun run build              # JS bundle to dist/index.js (run with `bun`)
 bun run build:native       # Native executable
 ```
 
