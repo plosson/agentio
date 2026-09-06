@@ -5,6 +5,7 @@ import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
 import { refreshConfluenceToken } from '../auth/confluence-oauth';
 import { refreshRevolutToken } from '../auth/revolut-oauth';
+import { refreshDropboxToken } from '../auth/dropbox-oauth';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -17,6 +18,7 @@ import { ConfluenceClient } from '../services/confluence/client';
 import { GChatClient } from '../services/gchat/client';
 import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
+import { DropboxClient } from '../services/dropbox/client';
 import { RevolutClient } from '../services/revolut/client';
 import { GSheetsClient } from '../services/gsheets/client';
 import { GSlidesClient } from '../services/gslides/client';
@@ -39,6 +41,7 @@ import type { GSlidesCredentials } from '../types/gslides';
 import type { GScriptCredentials } from '../types/gscript';
 import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
+import type { DropboxCredentials } from '../types/dropbox';
 import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
@@ -281,6 +284,33 @@ async function createServiceClient(
       }
 
       return new RevolutClient(creds);
+    }
+
+    case 'dropbox': {
+      let creds = credentials as DropboxCredentials;
+
+      // Access tokens live 4 hours, so status often refreshes first.
+      const bufferTime = 5 * 60 * 1000;
+      if (!creds.expiryDate || Date.now() + bufferTime >= creds.expiryDate) {
+        try {
+          const refreshed = await refreshDropboxToken(creds.appKey, creds.refreshToken);
+          creds = {
+            ...creds,
+            accessToken: refreshed.accessToken,
+            expiryDate: Date.now() + refreshed.expiresIn * 1000,
+          };
+          await setCredentials('dropbox', profileName, creds);
+        } catch {
+          return {
+            validate: async () => ({
+              valid: false,
+              error: 'refresh token rejected, re-authenticate',
+            }),
+          };
+        }
+      }
+
+      return new DropboxClient(creds);
     }
 
     case 'sql': {

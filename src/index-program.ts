@@ -4,6 +4,7 @@ import { Command } from 'commander';
 // Services (alphabetical)
 import { registerConfluenceCommands } from './commands/confluence';
 import { registerDiscourseCommands } from './commands/discourse';
+import { registerDropboxCommands } from './commands/dropbox';
 import { registerGCalCommands } from './commands/gcal';
 import { registerGChatCommands } from './commands/gchat';
 import { registerGDocsCommands } from './commands/gdocs';
@@ -62,6 +63,7 @@ export function createProgram(): Command {
   // Services (alphabetical)
   registerConfluenceCommands(program);
   registerDiscourseCommands(program);
+  registerDropboxCommands(program);
   registerGCalCommands(program);
   registerGChatCommands(program);
   registerGDocsCommands(program);
@@ -134,7 +136,7 @@ export function createProgram(): Command {
   // Services
   [
     'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
-    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'rss', 'sql', 'revolut',
+    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'rss', 'sql', 'revolut',
   ].forEach((n) => setGroup(n, 'Services'));
 
   // Automation

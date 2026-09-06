@@ -28,7 +28,7 @@ const GOOGLE_SIMPLE_SERVICES: ServiceName[] = ['gmail', 'gcal', 'gtasks'];
 const GOOGLE_CUSTOM_SERVICES: ServiceName[] = ['gdocs', 'gsheets'];
 
 // Services that require manual credential setup
-const MANUAL_SERVICES: ServiceName[] = ['telegram', 'slack', 'discourse', 'sql'];
+const MANUAL_SERVICES: ServiceName[] = ['telegram', 'slack', 'discourse', 'dropbox', 'sql'];
 
 async function reauthGoogleSimple(
   service: ServiceName,
