@@ -1,5 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
+import { createInterface } from 'readline';
 import { URL } from 'url';
+import { CliError } from '../utils/errors';
 
 const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
@@ -27,12 +29,30 @@ export async function findAvailablePort(): Promise<number> {
 }
 
 /**
- * Launch the default browser to open a URL.
+ * Open the default browser, best effort.
+ *
+ * A headless box has no opener at all - `xdg-open` is absent over SSH - and
+ * spawning a missing executable throws. That must not take the OAuth flow down
+ * with it: the URL has already been printed, and the caller can still finish
+ * the flow by hand.
+ *
+ * `start` on Windows is a shell builtin rather than an executable, so it has to
+ * go through cmd. The empty argument after it is the window title, which cmd
+ * would otherwise take from a quoted URL.
+ *
+ * @returns whether an opener was actually spawned
  */
-export function launchBrowser(url: string): void {
-  const open = process.platform === 'darwin' ? 'open' :
-               process.platform === 'win32' ? 'start' : 'xdg-open';
-  Bun.spawn([open, url], { stdout: 'ignore', stderr: 'ignore' });
+export function launchBrowser(url: string): boolean {
+  const command = process.platform === 'darwin' ? ['open', url] :
+                  process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] :
+                  ['xdg-open', url];
+
+  try {
+    Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -54,6 +74,8 @@ export interface OAuthServerConfig {
   port: number;
   serviceName: string;
   expectedState?: string;
+  /** Closes the server when the code arrived some other way. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -145,5 +167,140 @@ export function startOAuthCallbackServer(
       server?.close();
       reject(err);
     });
+
+    // The code can also arrive by hand. Shut the server down so the process can
+    // exit, and leave the promise unsettled - the race has already been decided.
+    config.signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timeout);
+        server?.close();
+      },
+      { once: true },
+    );
   });
+}
+
+/**
+ * Read an authorization code out of a pasted redirect URL, or accept a bare code.
+ */
+export function parseOAuthRedirect(
+  input: string,
+  serviceName: string,
+  expectedState?: string,
+): OAuthCallbackResult {
+  const trimmed = input.trim();
+
+  if (!trimmed) {
+    throw new CliError('INVALID_PARAMS', 'An authorization code is required');
+  }
+
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return { code: trimmed };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new CliError(
+      'INVALID_PARAMS',
+      'Could not parse the pasted redirect URL',
+      'Copy the whole address bar, starting with http://',
+    );
+  }
+
+  const error = parsed.searchParams.get('error');
+  if (error) {
+    const description = parsed.searchParams.get('error_description');
+    throw new CliError(
+      'AUTH_FAILED',
+      `${serviceName} denied the authorization: ${description ? `${error} - ${description}` : error}`,
+    );
+  }
+
+  const returnedState = parsed.searchParams.get('state');
+  if (expectedState && returnedState !== expectedState) {
+    throw new CliError('AUTH_FAILED', 'OAuth state mismatch - possible CSRF attack');
+  }
+
+  const code = parsed.searchParams.get('code');
+  if (!code) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      'No "code" parameter found in the pasted redirect URL',
+      'Copy the full URL from the browser address bar after approving access',
+    );
+  }
+
+  return { code, state: returnedState || undefined };
+}
+
+/**
+ * Prompt for a pasted redirect URL, cancellably.
+ *
+ * The returned promise stays unsettled if cancelled: the caller has already
+ * taken the code from the callback server and only needs stdin released.
+ */
+function readPastedRedirect(): { promise: Promise<string>; cancel: () => void } {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+
+  const promise = new Promise<string>((resolve) => {
+    rl.question('? Redirect URL (or code): ', (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+
+  return {
+    promise,
+    cancel: () => {
+      rl.close();
+      process.stdin.pause();
+    },
+  };
+}
+
+export interface AwaitOAuthCodeConfig extends Omit<OAuthServerConfig, 'signal'> {
+  authUrl: string;
+}
+
+/**
+ * Get the authorization code back from the user, whichever way it can reach us.
+ *
+ * On a desktop the browser opens and the callback server picks the code up with
+ * no interaction. Over SSH neither half of that works: there may be no opener at
+ * all, and the redirect points at the *remote* host's localhost, which the
+ * browser on the user's laptop cannot reach. So the pasted address bar is
+ * accepted in parallel, and whichever arrives first wins.
+ */
+export async function awaitOAuthCode(config: AwaitOAuthCodeConfig): Promise<OAuthCallbackResult> {
+  const { authUrl, serviceName, expectedState } = config;
+
+  const controller = new AbortController();
+  const callbackPromise = startOAuthCallbackServer({ ...config, signal: controller.signal });
+
+  console.error(`\nOpening browser for ${serviceName} authorization...`);
+  console.error(`If the browser doesn't open, visit:\n${authUrl}\n`);
+
+  if (!launchBrowser(authUrl)) {
+    console.error('No browser could be opened on this machine.\n');
+  }
+
+  console.error('Waiting for the browser to come back.');
+  console.error('On a remote machine the redirect lands on this host and your browser cannot');
+  console.error('reach it - approve access anyway, then paste the address bar contents here.\n');
+
+  const pasted = readPastedRedirect();
+
+  try {
+    const result = await Promise.race([
+      callbackPromise,
+      pasted.promise.then((answer) => parseOAuthRedirect(answer, serviceName, expectedState)),
+    ]);
+    return result;
+  } finally {
+    controller.abort();
+    pasted.cancel();
+  }
 }
