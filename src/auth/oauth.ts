@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
-import { findAvailablePort, startOAuthCallbackServer, launchBrowser } from './oauth-server';
+import { findAvailablePort, awaitOAuthCode } from './oauth-server';
 import type { OAuthTokens } from '../types/tokens';
 
 const GMAIL_SCOPES = [
@@ -103,18 +103,11 @@ export async function performOAuthFlow(
     prompt: 'consent',
   });
 
-  // Start callback server and browser in parallel
-  const callbackPromise = startOAuthCallbackServer({
+  const { code } = await awaitOAuthCode({
     port,
     serviceName: 'Google',
+    authUrl,
   });
-
-  console.error(`\nOpening browser for authorization...`);
-  console.error(`If browser doesn't open, visit:\n${authUrl}\n`);
-  launchBrowser(authUrl);
-
-  // Wait for the callback with the authorization code
-  const { code } = await callbackPromise;
 
   // Exchange code for tokens using Google's OAuth client
   const { tokens } = await oauth2Client.getToken(code);
