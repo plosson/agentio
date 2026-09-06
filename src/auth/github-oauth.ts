@@ -1,6 +1,6 @@
 import { URL } from 'url';
 import { GITHUB_OAUTH_CONFIG } from '../config/credentials';
-import { findAvailablePort, startOAuthCallbackServer, launchBrowser } from './oauth-server';
+import { findAvailablePort, awaitOAuthCode } from './oauth-server';
 
 const GITHUB_SCOPES = ['repo'];
 
@@ -19,19 +19,12 @@ export async function performGitHubOAuthFlow(): Promise<GitHubOAuthResult> {
   authUrl.searchParams.set('scope', GITHUB_SCOPES.join(' '));
   authUrl.searchParams.set('state', state);
 
-  // Start callback server and browser in parallel
-  const callbackPromise = startOAuthCallbackServer({
+  const { code } = await awaitOAuthCode({
     port,
     serviceName: 'GitHub',
     expectedState: state,
+    authUrl: authUrl.toString(),
   });
-
-  console.error(`\nOpening browser for GitHub authorization...`);
-  console.error(`If browser doesn't open, visit:\n${authUrl.toString()}\n`);
-  launchBrowser(authUrl.toString());
-
-  // Wait for the callback with the authorization code
-  const { code } = await callbackPromise;
 
   // Exchange code for access token
   const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {

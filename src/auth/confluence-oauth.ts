@@ -1,6 +1,6 @@
 import { URL } from 'url';
 import { ATLASSIAN_OAUTH_CONFIG } from '../config/credentials';
-import { startOAuthCallbackServer, launchBrowser } from './oauth-server';
+import { awaitOAuthCode } from './oauth-server';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
@@ -130,17 +130,12 @@ export async function performConfluenceOAuthFlow(
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('prompt', 'consent');
 
-  const callbackPromise = startOAuthCallbackServer({
+  const { code } = await awaitOAuthCode({
     port: OAUTH_PORT,
     serviceName: 'Atlassian',
     expectedState: state,
+    authUrl: authUrl.toString(),
   });
-
-  console.error(`\nOpening browser for Atlassian authorization...`);
-  console.error(`If browser doesn't open, visit:\n${authUrl.toString()}\n`);
-  launchBrowser(authUrl.toString());
-
-  const { code } = await callbackPromise;
 
   const tokens = await exchangeCodeForTokens(
     code,
