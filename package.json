@@ -64,7 +64,6 @@
     "google-auth-library": "^10.0.0",
     "gray-matter": "^4.0.3",
     "libsodium-wrappers": "^0.8.1",
-    "long": "^5.3.2",
     "marked": "^18.0.3",
     "plist": "^3.1.0",
     "rss-parser": "^3.13.0"

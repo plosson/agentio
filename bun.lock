@@ -20,7 +20,6 @@
         "google-auth-library": "^10.0.0",
         "gray-matter": "^4.0.3",
         "libsodium-wrappers": "^0.8.1",
-        "long": "^5.3.2",
         "marked": "^18.0.3",
         "plist": "^3.1.0",
         "rss-parser": "^3.13.0",
@@ -289,8 +288,6 @@
     "libsodium": ["libsodium@0.8.1", "", {}, "sha512-V70In9cepY7MMoKyEvnrojqgQN5yQM/8i8kGh4n/IC1g3thA5nonK0d84e0fR86tFOeAQsOdaL5ONuR93ru25A=="],
 
     "libsodium-wrappers": ["libsodium-wrappers@0.8.1", "", { "dependencies": { "libsodium": "^0.8.0" } }, "sha512-UOqD9M4HhAhwEo2foIgnUrpqXCj2VKdndZXM3PZ0zGe++9808TzAFSp4o2mOgPM/DNUnUqncR3G0xqiKDoAQXQ=="],
-
-    "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
 
     "lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 

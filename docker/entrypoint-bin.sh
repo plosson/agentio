@@ -25,4 +25,10 @@ curl -fL "https://github.com/plosson/agentio/releases/download/v${VERSION}/agent
     -o "${BIN_DIR}/agentio"
 chmod +x "${BIN_DIR}/agentio"
 
+# Import vault credentials when CI/CD-style env vars are present
+if [ -n "$AGENTIO_KEY" ] && [ -n "$AGENTIO_CONFIG" ]; then
+  echo "Importing vault from AGENTIO_KEY / AGENTIO_CONFIG..."
+  agentio vault import
+fi
+
 exec "$@"
