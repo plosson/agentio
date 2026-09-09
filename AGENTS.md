@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `src/` contains the TypeScript CLI implementation. Entry point is `src/index.ts`.
 - `src/commands/` holds subcommand registrations (e.g., `gmail`, `slack`, `jira`).
-- `src/services/`, `src/auth/`, `src/config/`, `src/gateway/`, `src/utils/`, and `src/types/` group supporting logic by concern.
+- `src/services/`, `src/auth/`, `src/config/`, `src/daemon/`, `src/vault/`, `src/mcp/`, `src/utils/`, and `src/types/` group supporting logic by concern.
 - `examples/` provides runnable workflow examples for CI/CD usage.
 - `docs/` and `site/` contain documentation and website assets.
 - `dist/` is build output (generated).
@@ -21,9 +21,8 @@
 - No formatter/linter is configured; keep edits consistent with nearby code.
 
 ## Testing Guidelines
-- There is no automated test suite in this repo today.
+- Run `bun test` (or `bun run test`) for the Bun test suite. Tests live next to sources as `*.test.ts` under `src/` (and some under `scripts/`).
 - Use `bun run typecheck` to validate types.
-- If you add tests, place them near sources (e.g., `src/**/__tests__/`) and document how to run them in `package.json`.
 
 ## Commit & Pull Request Guidelines
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `chore:`, `refactor:` (see recent history).

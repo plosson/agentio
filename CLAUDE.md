@@ -411,9 +411,10 @@ agentio claude docs|agentio-json           # Claude Code plugin operations
 
 ### Multi-Profile Support
 
-Each service supports multiple named profiles. Config and credentials are stored separately:
-- **Config**: `~/.config/agentio/config.json` - profile names and defaults
-- **Credentials**: `~/.config/agentio/tokens.enc` - encrypted with AES-256-GCM
+Each service supports multiple named profiles. Config and credentials live together in the encrypted vault (see Vault above):
+- **Vault**: `~/.config/agentio/vault.enc` (path tracked by `vault.path`) — profiles + credentials, AES-256-GCM with a passphrase-derived key
+- **Passphrase**: `~/.config/agentio/vault.passphrase` (mode 0600), or `AGENTIO_PASSPHRASE`
+- Legacy `config.json` / `tokens.enc` exist only for one-time `vault init` migration (machine-bound decrypt of old tokens)
 
 ### Daemon Architecture
 
@@ -423,7 +424,7 @@ The daemon provides:
 
 ### Security
 
-- **Machine-bound encryption**: Credentials encrypted with key derived from hostname+username
+- **Passphrase-encrypted vault**: Config + credentials encrypted at rest; key derived from user passphrase via scrypt (portable across machines when the vault is synced and the passphrase is set locally)
 - **No plain-text secrets**: All sensitive data encrypted at rest
 - **Embedded OAuth**: Google services use embedded OAuth credentials (no user setup)
 - **Token refresh**: Automatic token refresh for OAuth services
@@ -431,7 +432,7 @@ The daemon provides:
 ## Design Decisions
 
 - **Embedded OAuth credentials**: Gmail/GDocs/GDrive use embedded OAuth client (no user setup required)
-- **Machine-bound encryption**: Credentials are encrypted with a key derived from hostname+username
+- **Passphrase vault**: Credentials travel with a synced vault file; passphrase stays local (not machine-bound hostname+username)
 - **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
 - **Stdin support**: Commands like `send` accept body via pipe
 - **Daemon for scheduling**: Folder-watched `.run.md` schedules require the daemon
