@@ -65,14 +65,22 @@ interface RawExpense {
   state: string;
   expense_date?: string;
   completed_at?: string;
+  /** Docs use spent_amount; keep amount as a legacy/fallback shape. */
+  spent_amount?: RawAmount;
   amount?: number | RawAmount;
   currency?: string;
   description?: string;
   category?: string;
   merchant?: string | { name?: string };
   transaction_id?: string;
+  /** Business API field is `payer`; older drafts used `spender`. */
+  payer?: string | { name?: string; first_name?: string; last_name?: string };
   spender?: string | { name?: string; first_name?: string; last_name?: string };
   receipt_ids?: string[];
+  splits?: Array<{
+    amount?: RawAmount;
+    category?: { id?: string; name?: string; code?: string };
+  }>;
 }
 
 interface RawCounterpartyAccount {
@@ -233,10 +241,16 @@ function personName(value: RawExpense['spender']): string | undefined {
 }
 
 function mapExpense(raw: RawExpense): RevolutExpense {
-  // `amount` is a bare number on some expense states and an {amount, currency}
-  // object on others, so unwrap both rather than trust one shape.
-  const money = typeof raw.amount === 'object' && raw.amount !== null ? raw.amount : undefined;
-  const amount = money ? money.amount : raw.amount;
+  // Revolut Business returns money under `spent_amount` ({amount, currency}).
+  // Older drafts / fixtures used a top-level `amount` that was either a bare
+  // number or the same wrapper, so keep those as fallbacks.
+  const money =
+    raw.spent_amount ??
+    (typeof raw.amount === 'object' && raw.amount !== null ? raw.amount : undefined);
+  const amount = money?.amount ?? (typeof raw.amount === 'number' ? raw.amount : undefined);
+  const category =
+    raw.category ??
+    raw.splits?.map((split) => split.category?.name).find((name): name is string => Boolean(name));
 
   return {
     id: raw.id,
@@ -246,10 +260,10 @@ function mapExpense(raw: RawExpense): RevolutExpense {
     amount: typeof amount === 'number' ? amount : undefined,
     currency: money?.currency ?? raw.currency,
     description: raw.description,
-    category: raw.category,
+    category,
     merchant: typeof raw.merchant === 'string' ? raw.merchant || undefined : raw.merchant?.name,
     transactionId: raw.transaction_id,
-    spender: personName(raw.spender),
+    spender: personName(raw.payer ?? raw.spender),
     receiptIds: raw.receipt_ids ?? [],
   };
 }
@@ -688,7 +702,8 @@ export class RevolutClient implements ServiceClient {
    * bypasses `request()` and its JSON parse. Receipt IDs live on the expense.
    */
   async getReceipt(expenseId: string, receiptId: string): Promise<RevolutReceipt> {
-    const path = `/expenses/${encodeURIComponent(expenseId)}/receipts/${encodeURIComponent(receiptId)}`;
+    // Docs: GET /expenses/{expense_id}/receipts/{receipt_id}/content
+    const path = `/expenses/${encodeURIComponent(expenseId)}/receipts/${encodeURIComponent(receiptId)}/content`;
     const { buffer, contentType, disposition } = await this.requestBinary(path);
 
     return {

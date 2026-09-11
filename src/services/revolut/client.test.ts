@@ -193,15 +193,15 @@ describe('payout links', () => {
 });
 
 describe('expenses', () => {
-  test('list passes the date range and maps the receipt IDs', async () => {
+  test('list passes the date range and maps spent_amount plus receipt IDs', async () => {
     stubFetch([
       {
         id: 'exp-1',
         state: 'approved',
         expense_date: '2026-08-14T09:30:00Z',
-        amount: { amount: 42.5, currency: 'EUR' },
+        spent_amount: { amount: 42.5, currency: 'EUR' },
         merchant: { name: 'Coffee Bar' },
-        category: 'Meals',
+        splits: [{ amount: { amount: 42.5, currency: 'EUR' }, category: { name: 'Meals' } }],
         transaction_id: 'tx-9',
         receipt_ids: ['rec-1', 'rec-2'],
       },
@@ -212,6 +212,7 @@ describe('expenses', () => {
     expect(captured[0]?.url).toBe(`${BASE}/expenses?from=2026-08-01&to=2026-08-31&count=50`);
     expect(expenses[0]?.amount).toBe(42.5);
     expect(expenses[0]?.currency).toBe('EUR');
+    expect(expenses[0]?.category).toBe('Meals');
     expect(expenses[0]?.merchant).toBe('Coffee Bar');
     expect(expenses[0]?.receiptIds).toEqual(['rec-1', 'rec-2']);
   });
@@ -237,17 +238,33 @@ describe('expenses', () => {
     expect(expenses[0]?.merchant).toBe('Taxi Co');
   });
 
-  test('get builds the single-expense path and joins a split spender name', async () => {
+  test('get builds the single-expense path and joins a split payer name', async () => {
     stubFetch({
       id: 'exp 4',
       state: 'approved',
-      spender: { first_name: 'Ada', last_name: 'Lovelace' },
+      payer: { first_name: 'Ada', last_name: 'Lovelace' },
     });
 
     const expense = await client().getExpense('exp 4');
 
     expect(captured[0]?.url).toBe(`${BASE}/expenses/exp%204`);
     expect(expense.spender).toBe('Ada Lovelace');
+  });
+
+  test('list prefers spent_amount over a conflicting top-level amount', async () => {
+    stubFetch([
+      {
+        id: 'exp-5',
+        state: 'approved',
+        spent_amount: { amount: 24.38, currency: 'GBP' },
+        amount: { amount: 99, currency: 'EUR' },
+      },
+    ]);
+
+    const expenses = await client().listExpenses();
+
+    expect(expenses[0]?.amount).toBe(24.38);
+    expect(expenses[0]?.currency).toBe('GBP');
   });
 });
 
@@ -265,7 +282,7 @@ describe('receipts', () => {
 
     const receipt = await client().getReceipt('exp-1', 'rec-1');
 
-    expect(captured[0]?.url).toBe(`${BASE}/expenses/exp-1/receipts/rec-1`);
+    expect(captured[0]?.url).toBe(`${BASE}/expenses/exp-1/receipts/rec-1/content`);
     expect(receipt.filename).toBe('rec-1.pdf');
     expect(receipt.data).toEqual(Buffer.from([1, 2, 3]));
   });

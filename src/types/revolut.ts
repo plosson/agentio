@@ -239,6 +239,7 @@ export interface RevolutExpense {
   /** ISO 8601. Completion time once the underlying transaction settles. */
   expenseDate?: string;
   completedAt?: string;
+  /** From `spent_amount` on the Business API (billed currency). */
   amount?: number;
   currency?: string;
   description?: string;
