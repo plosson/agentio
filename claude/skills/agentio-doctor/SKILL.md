@@ -9,11 +9,12 @@ Auto-generated from `agentio skill doctor`. Do not edit by hand.
 
 ## agentio doctor
 
-Diagnose vault, daemon, profiles, and watched folders
+Diagnose vault, daemon, and profiles
 
 ```
 Examples:
 
-  # run all health checks (vault, daemon, profiles, watched folders, legacy plists)
+  # run all health checks (vault, daemon, profiles)
   agentio doctor
 ```
+

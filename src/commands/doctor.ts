@@ -47,7 +47,7 @@ async function checkVault(): Promise<Check> {
   return { name: 'Vault', status: 'ok', detail: `at ${path}` };
 }
 
-async function checkDaemon(): Promise<Check> {
+export async function checkDaemon(): Promise<Check> {
   const healthy = await isDaemonAvailable();
   if (healthy) return { name: 'Daemon', status: 'ok', detail: 'running' };
   return { name: 'Daemon', status: 'warn', detail: 'not running', fix: 'agentio daemon start' };
@@ -75,10 +75,10 @@ export function registerDoctorCommand(program: Command): void {
       try {
         const cfg = await loadConfig().catch(() => null);
 
-        const checks: Check[] = [];
-        checks.push(await checkVault());
-        checks.push(await checkDaemon());
-        checks.push(checkProfiles(cfg));
+        const checks: Check[] = [
+          ...(await Promise.all([checkVault(), checkDaemon()])),
+          checkProfiles(cfg),
+        ];
 
         console.log(renderChecks(checks));
 

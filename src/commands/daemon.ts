@@ -1,13 +1,13 @@
 import { Command } from 'commander';
 import { handleError } from '../utils/errors';
 import { startDaemon } from '../daemon/daemon';
-import { isDaemonAvailable } from '../daemon/client';
+import { checkDaemon, renderChecks } from './doctor';
 import { addExamples } from '../utils/command-tree';
 
 export function registerDaemonCommands(program: Command): void {
   const daemon = program
     .command('daemon')
-    .description('Daemon lifecycle management (HTTP API server)');
+    .description('Run or probe the local HTTP daemon');
 
   const startCmd = daemon
     .command('start')
@@ -33,12 +33,7 @@ export function registerDaemonCommands(program: Command): void {
     .description('Show daemon status')
     .action(async () => {
       try {
-        if (await isDaemonAvailable()) {
-          console.log('Daemon: running');
-        } else {
-          console.log('Daemon: not running');
-          console.log('Start it with: agentio daemon start');
-        }
+        console.log(renderChecks([await checkDaemon()]));
       } catch (error) {
         handleError(error);
       }
