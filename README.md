@@ -119,6 +119,13 @@ agentio slack profile add
 # Add any other services you need...
 ```
 
+**On a remote or headless machine**, `profile add` cannot open a browser, and the
+OAuth redirect points at *that* host's localhost, which your laptop's browser
+cannot reach. The flow handles this: it prints the URL, tells you it could not
+open a browser, and waits. Open the URL on your own machine, approve access, and
+when the redirect fails to load, paste the address bar contents back into the
+terminal. The code is in the URL, so the failed page is expected.
+
 ### 2. Export your config
 
 ```bash
