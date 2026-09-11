@@ -1,6 +1,6 @@
 # agentio - Agent I/O CLI
 
-A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a daemon for scheduled task execution.
+A CLI designed for LLM agents to interact with communication services, productivity tools, and tracking systems. Features multi-profile support, encrypted credential storage, and a local HTTP daemon (future home for vault UI/API).
 
 ## Tech Stack
 
@@ -43,8 +43,7 @@ src/
 │   ├── rss.ts               # RSS feed commands
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
-│   ├── daemon.ts            # Daemon commands (scheduler lifecycle)
-│   ├── schedule.ts          # Schedule folder registration
+│   ├── daemon.ts            # Daemon lifecycle (install/start/stop/status/logs)
 │   ├── vault-config.ts      # Vault contents: export/import/env/clear
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
@@ -66,12 +65,11 @@ src/
 │   ├── rss/client.ts        # RSS feed parser
 │   ├── discourse/client.ts  # Discourse API wrapper
 │   └── sql/client.ts        # SQL database client
-├── daemon/                  # Daemon for folder-watched scheduling
+├── daemon/                  # Local HTTP daemon (health API; vault UI/API later)
 │   ├── daemon.ts            # Daemon lifecycle management
-│   ├── api.ts               # HTTP API server (health + scheduler control)
+│   ├── api.ts               # HTTP API server (health + auth)
 │   ├── client.ts            # Daemon client for CLI
-│   ├── types.ts             # Daemon type definitions
-│   └── scheduler.ts         # In-process scheduler (60-second tick)
+│   └── types.ts             # Daemon type definitions
 ├── auth/                    # Authentication logic
 │   ├── oauth.ts             # Google OAuth flow
 │   ├── oauth-server.ts      # OAuth callback server
@@ -138,7 +136,7 @@ agentio vault clear [--force]
 
 **init vs set** — `init` creates a new vault (and imports legacy config unless `--no-migrate`). `set` points at a vault that already exists, which is the multi-machine case: the encrypted vault is synced, the passphrase file is not. `set` verifies by decrypting *before* writing the pointer, so a wrong passphrase changes nothing, and it never moves or deletes either vault file. To relocate a vault, move the file yourself then `vault set` the new path.
 
-**`vault env` is not a general env-var store.** Only `AGENTIO_DAEMON_URL` and `AGENTIO_DAEMON_API_KEY` are ever read (by `daemon/client.ts`). Stored values are *not* exported to your shell or injected into processes agentio spawns — scheduled `.run.md` jobs inherit your real environment. Other keys are carried by `vault export`/`import` but nothing reads them.
+**`vault env` is not a general env-var store.** Only `AGENTIO_DAEMON_URL` and `AGENTIO_DAEMON_API_KEY` are ever read (by `daemon/client.ts`). Stored values are *not* exported to your shell or injected into processes agentio spawns. Other keys are carried by `vault export`/`import` but nothing reads them.
 
 ### Gmail
 
@@ -381,7 +379,7 @@ agentio sql profile add|list|remove
 
 ### Daemon
 
-The daemon is a long-lived background process that fires scheduled `.run.md` prompts in watched folders.
+The daemon is a long-lived background process that hosts a local HTTP API (`/health`, API-key auth). It is the future home for vault UI/API. Install as a LaunchAgent (macOS) or systemd unit (Linux).
 
 ```bash
 agentio daemon install           # macOS: LaunchAgent; Linux: systemd unit
@@ -394,27 +392,6 @@ agentio daemon uninstall
 ```
 
 The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` and runs as a user agent (no sudo).
-
-### Schedule
-
-The daemon watches folders registered via `schedule watch` and fires due `.run.md` schedules. Filesystem changes are picked up live via `fs.watch`; a 60-second tick provides the safety net. Users author `.run.md` files directly in their text editor; the CLI only manages folder registration and visibility.
-
-```bash
-agentio schedule create [name]             # Create a .run.md (interactive; -y for non-interactive)
-agentio schedule watch <folder>            # Watch a folder for .run.md files
-agentio schedule remove <folder>           # Stop watching a folder
-agentio schedule list [--all-hosts]        # List watched folders + detected schedules
-agentio schedule show <id>                 # Show one schedule's frontmatter + next run times
-agentio schedule run <id>                  # Run a schedule immediately (delegates to daemon if running)
-agentio schedule doctor [--model M]        # Check the claude CLI is installed and logged in
-agentio schedule history                   # Last run of every job across watched folders
-agentio schedule history <id>              # List all runs of one schedule
-```
-
-For the id-based commands (`show`, `run`, `history <id>`), the id is resolved by scanning all watched folders — CWD is irrelevant. Use `--folder` to disambiguate when the same id exists in multiple folders.
-
-`.run.md` frontmatter requires a `host:` field. The daemon only fires schedules whose `host` matches the current hostname — ensures Dropbox-synced folders don't double-fire across machines.
-
 
 ### Utility Commands
 
@@ -437,8 +414,7 @@ Each service supports multiple named profiles. Config and credentials live toget
 ### Daemon Architecture
 
 The daemon provides:
-- **HTTP API**: RESTful API on port 7890 for CLI communication (health + scheduler control)
-- **In-process scheduler**: Watches registered folders and fires due `.run.md` schedules on a 60-second tick; catches up on startup for schedules that missed their last expected run
+- **HTTP API**: Bun.serve on port 7890 with `/health` and X-API-Key auth (future vault UI/API)
 
 ### Security
 
@@ -453,7 +429,7 @@ The daemon provides:
 - **Passphrase vault**: Credentials travel with a synced vault file; passphrase stays local (not machine-bound hostname+username)
 - **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
 - **Stdin support**: Commands like `send` accept body via pipe
-- **Daemon for scheduling**: Folder-watched `.run.md` schedules require the daemon
+- **Daemon shell**: Local HTTP daemon kept as the future home for vault UI/API
 
 ## Service Development Guidelines
 

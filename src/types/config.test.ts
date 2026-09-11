@@ -1,16 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { Config, DaemonConfig } from './config';
+import type { DaemonConfig } from './config';
 
 describe('DaemonConfig', () => {
-  test('has all gateway fields plus scheduler', () => {
+  test('has apiKey and server binding fields', () => {
     const cfg: DaemonConfig = {
       apiKey: 'k',
-      server: { port: 7890 },
-      scheduler: {
-        watchedFolders: [{ path: '/tmp/x', addedAt: 1 }],
-        tickIntervalSec: 60,
-      },
+      server: { port: 7890, host: '0.0.0.0' },
     };
-    expect(cfg.scheduler?.watchedFolders[0].path).toBe('/tmp/x');
+    expect(cfg.apiKey).toBe('k');
+    expect(cfg.server?.port).toBe(7890);
   });
 });

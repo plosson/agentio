@@ -90,7 +90,7 @@ function runCommand(cmd: string[], useSudo: boolean): { success: boolean; output
  */
 function generateServiceFile(binaryPath: string, configDir: string): string {
   return `[Unit]
-Description=agentio daemon - scheduler for .run.md prompts
+Description=agentio daemon
 After=network.target
 
 [Service]
@@ -207,7 +207,7 @@ export function registerDaemonCommands(
   const baseName = opts.base ?? 'daemon';
   const description = opts.deprecated
     ? '[deprecated] alias of `agentio daemon`'
-    : 'Daemon lifecycle management (runs the scheduler for .run.md prompts)';
+    : 'Daemon lifecycle management (HTTP API server)';
   const daemon = program
     .command(baseName, opts.deprecated ? { hidden: true } : {})
     .description(description);

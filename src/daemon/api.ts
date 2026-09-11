@@ -1,8 +1,6 @@
 import type { Server } from 'bun';
 import type { HealthResponse } from './types';
 import type { DaemonConfig } from '../types/config';
-import { loadConfig } from '../config/config-manager';
-import { listSchedulerJobs, runOneJob, reloadScheduler } from './scheduler';
 
 let server: Server<unknown> | null = null;
 let apiKey: string = '';
@@ -66,28 +64,6 @@ async function handleRequest(request: Request): Promise<Response> {
   // All other endpoints require auth
   if (!verifyAuth(request)) {
     return jsonError('Unauthorized', 401);
-  }
-
-  if (request.method === 'GET') {
-    if (path === '/scheduler/list') {
-      const allHosts = url.searchParams.get('all') === '1';
-      const jobs = await listSchedulerJobs({ allHosts });
-      return Response.json({ jobs });
-    }
-  }
-
-  if (request.method === 'POST' && path === '/scheduler/run') {
-    const body = await request.json() as { folder?: string; id?: string };
-    if (!body.folder || !body.id) return new Response('missing folder or id', { status: 400 });
-    const result = await runOneJob(body.folder, body.id);
-    return Response.json(result);
-  }
-
-  if (request.method === 'POST' && path === '/scheduler/reload') {
-    const config = await loadConfig();
-    const folders = config.daemon?.scheduler?.watchedFolders ?? [];
-    await reloadScheduler(folders);
-    return Response.json({ folders: folders.length });
   }
 
   return jsonError('Not found', 404);
