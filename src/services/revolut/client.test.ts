@@ -191,3 +191,118 @@ describe('payout links', () => {
     expect(captured[0]?.method).toBe('POST');
   });
 });
+
+describe('expenses', () => {
+  test('list passes the date range and maps the receipt IDs', async () => {
+    stubFetch([
+      {
+        id: 'exp-1',
+        state: 'approved',
+        expense_date: '2026-08-14T09:30:00Z',
+        amount: { amount: 42.5, currency: 'EUR' },
+        merchant: { name: 'Coffee Bar' },
+        category: 'Meals',
+        transaction_id: 'tx-9',
+        receipt_ids: ['rec-1', 'rec-2'],
+      },
+    ]);
+
+    const expenses = await client().listExpenses({ from: '2026-08-01', to: '2026-08-31', count: 50 });
+
+    expect(captured[0]?.url).toBe(`${BASE}/expenses?from=2026-08-01&to=2026-08-31&count=50`);
+    expect(expenses[0]?.amount).toBe(42.5);
+    expect(expenses[0]?.currency).toBe('EUR');
+    expect(expenses[0]?.merchant).toBe('Coffee Bar');
+    expect(expenses[0]?.receiptIds).toEqual(['rec-1', 'rec-2']);
+  });
+
+  test('list accepts an enveloped response and defaults a missing receipt list', async () => {
+    stubFetch({ expenses: [{ id: 'exp-2', state: 'awaiting_review' }] });
+
+    const expenses = await client().listExpenses();
+
+    expect(captured[0]?.url).toBe(`${BASE}/expenses`);
+    expect(expenses).toHaveLength(1);
+    expect(expenses[0]?.receiptIds).toEqual([]);
+    expect(expenses[0]?.amount).toBeUndefined();
+  });
+
+  test('list unwraps a bare numeric amount and a string merchant', async () => {
+    stubFetch([{ id: 'exp-3', state: 'approved', amount: 12, currency: 'GBP', merchant: 'Taxi Co' }]);
+
+    const expenses = await client().listExpenses();
+
+    expect(expenses[0]?.amount).toBe(12);
+    expect(expenses[0]?.currency).toBe('GBP');
+    expect(expenses[0]?.merchant).toBe('Taxi Co');
+  });
+
+  test('get builds the single-expense path and joins a split spender name', async () => {
+    stubFetch({
+      id: 'exp 4',
+      state: 'approved',
+      spender: { first_name: 'Ada', last_name: 'Lovelace' },
+    });
+
+    const expense = await client().getExpense('exp 4');
+
+    expect(captured[0]?.url).toBe(`${BASE}/expenses/exp%204`);
+    expect(expense.spender).toBe('Ada Lovelace');
+  });
+});
+
+describe('receipts', () => {
+  function stubBinary(body: Uint8Array, headers: Record<string, string>, status = 200): void {
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured.push({ url: String(url), method: init.method ?? 'GET', body: undefined });
+      const payload: BodyInit = status === 200 ? (body.buffer as ArrayBuffer) : 'nope';
+      return new Response(payload, { status, headers });
+    }) as unknown as typeof fetch;
+  }
+
+  test('downloads the file and names it from the content type', async () => {
+    stubBinary(new Uint8Array([1, 2, 3]), { 'Content-Type': 'application/pdf' });
+
+    const receipt = await client().getReceipt('exp-1', 'rec-1');
+
+    expect(captured[0]?.url).toBe(`${BASE}/expenses/exp-1/receipts/rec-1`);
+    expect(receipt.filename).toBe('rec-1.pdf');
+    expect(receipt.data).toEqual(Buffer.from([1, 2, 3]));
+  });
+
+  test('prefers the name in Content-Disposition', async () => {
+    stubBinary(new Uint8Array([0]), {
+      'Content-Type': 'image/jpeg',
+      'Content-Disposition': 'attachment; filename="August lunch.jpg"',
+    });
+
+    const receipt = await client().getReceipt('exp-1', 'rec-1');
+
+    expect(receipt.filename).toBe('August lunch.jpg');
+  });
+
+  test('decodes an RFC 5987 name and strips any directory component', async () => {
+    stubBinary(new Uint8Array([0]), {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': "attachment; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd",
+    });
+
+    const receipt = await client().getReceipt('exp-1', 'rec-1');
+
+    expect(receipt.filename).toBe('passwd');
+  });
+
+  test('falls back to .bin for an unknown content type', async () => {
+    stubBinary(new Uint8Array([0]), { 'Content-Type': 'application/octet-stream' });
+
+    const receipt = await client().getReceipt('exp-1', 'rec-1');
+
+    expect(receipt.filename).toBe('rec-1.bin');
+  });
+
+  test('a 403 explains the missing expenses permission', async () => {
+    stubBinary(new Uint8Array([0]), {}, 403);
+
+    await expect(client().getReceipt('exp-1', 'rec-1')).rejects.toThrow(/Revolut API error \(403\)/);
+  });
+});

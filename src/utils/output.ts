@@ -29,6 +29,7 @@ import type { DiscourseCategory, DiscourseTopic, DiscourseTopicDetail } from '..
 import type {
   RevolutAccount,
   RevolutCounterparty,
+  RevolutExpense,
   RevolutPaymentDraft,
   RevolutPaymentDraftSummary,
   RevolutPayoutLink,
@@ -1540,6 +1541,93 @@ export function printRevolutTransactionsCsv(transactions: RevolutTransaction[]):
         escape(leg.counterpartyId),
       ].join(','));
     }
+  }
+}
+
+function expenseDate(expense: RevolutExpense): string {
+  return (expense.expenseDate || expense.completedAt || '').slice(0, 10) || '-';
+}
+
+function expenseAmount(expense: RevolutExpense): string {
+  if (expense.amount === undefined || !expense.currency) return '-';
+  return formatAmount(expense.amount, expense.currency);
+}
+
+export function printRevolutExpenseList(expenses: RevolutExpense[]): void {
+  if (expenses.length === 0) {
+    console.log('No expenses found');
+    return;
+  }
+
+  console.log(`Expenses (${expenses.length})\n`);
+
+  let withReceipts = 0;
+
+  for (const expense of expenses) {
+    const label = expense.merchant || expense.description || expense.category || '';
+    console.log(`${expenseDate(expense)} | ${expenseAmount(expense)} | ${expense.state}`);
+    if (label) console.log(`    ${label}`);
+
+    const count = expense.receiptIds.length;
+    if (count > 0) withReceipts += 1;
+    console.log(`    Receipts: ${count === 0 ? 'none' : count}`);
+    console.log(`    ID: ${expense.id}`);
+    console.log('');
+  }
+
+  console.log(`${withReceipts} of ${expenses.length} have a receipt`);
+}
+
+export function printRevolutExpense(expense: RevolutExpense): void {
+  console.log(`ID: ${expense.id}`);
+  console.log(`State: ${expense.state}`);
+  if (expense.expenseDate) console.log(`Date: ${expense.expenseDate}`);
+  if (expense.completedAt) console.log(`Completed: ${expense.completedAt}`);
+  if (expense.amount !== undefined && expense.currency) {
+    console.log(`Amount: ${formatAmount(expense.amount, expense.currency)}`);
+  }
+  if (expense.merchant) console.log(`Merchant: ${expense.merchant}`);
+  if (expense.category) console.log(`Category: ${expense.category}`);
+  if (expense.description) console.log(`Description: ${expense.description}`);
+  if (expense.spender) console.log(`Spender: ${expense.spender}`);
+  if (expense.transactionId) console.log(`Transaction: ${expense.transactionId}`);
+
+  if (expense.receiptIds.length === 0) {
+    console.log('Receipts: none');
+    return;
+  }
+
+  console.log(`Receipts (${expense.receiptIds.length}):`);
+  for (const receiptId of expense.receiptIds) {
+    console.log(`  ${receiptId}`);
+  }
+  console.log(`\nDownload them with: agentio revolut receipt ${expense.id}`);
+}
+
+export function printRevolutExpensesCsv(expenses: RevolutExpense[]): void {
+  const escape = (value: string | number | undefined): string => {
+    if (value === undefined) return '';
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  console.log('date,expense_id,state,amount,currency,merchant,category,description,spender,transaction_id,receipt_count,receipt_ids');
+
+  for (const expense of expenses) {
+    console.log([
+      escape(expense.expenseDate || expense.completedAt),
+      escape(expense.id),
+      escape(expense.state),
+      escape(expense.amount === undefined ? undefined : expense.amount.toFixed(2)),
+      escape(expense.currency),
+      escape(expense.merchant),
+      escape(expense.category),
+      escape(expense.description),
+      escape(expense.spender),
+      escape(expense.transactionId),
+      escape(expense.receiptIds.length),
+      escape(expense.receiptIds.join(' ')),
+    ].join(','));
   }
 }
 

@@ -7,12 +7,15 @@ import type {
   RevolutCounterpartyCreateOptions,
   RevolutCredentials,
   RevolutDraftPayment,
+  RevolutExpense,
+  RevolutExpenseListOptions,
   RevolutPaymentDraft,
   RevolutPaymentDraftCreateOptions,
   RevolutPaymentDraftSummary,
   RevolutPayoutLink,
   RevolutPayoutLinkListOptions,
   RevolutPayoutMethod,
+  RevolutReceipt,
   RevolutTransaction,
   RevolutTransactionListOptions,
   RevolutTransferOptions,
@@ -55,6 +58,21 @@ interface RawTransaction {
   legs?: RawLeg[];
   merchant?: { name?: string; city?: string; category_code?: string; country?: string };
   card?: { first_name?: string; last_name?: string };
+}
+
+interface RawExpense {
+  id: string;
+  state: string;
+  expense_date?: string;
+  completed_at?: string;
+  amount?: number | RawAmount;
+  currency?: string;
+  description?: string;
+  category?: string;
+  merchant?: string | { name?: string };
+  transaction_id?: string;
+  spender?: string | { name?: string; first_name?: string; last_name?: string };
+  receipt_ids?: string[];
 }
 
 interface RawCounterpartyAccount {
@@ -207,6 +225,35 @@ function mapTransaction(raw: RawTransaction): RevolutTransaction {
   };
 }
 
+function personName(value: RawExpense['spender']): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  if (!value) return undefined;
+  const full = value.name || [value.first_name, value.last_name].filter(Boolean).join(' ');
+  return full || undefined;
+}
+
+function mapExpense(raw: RawExpense): RevolutExpense {
+  // `amount` is a bare number on some expense states and an {amount, currency}
+  // object on others, so unwrap both rather than trust one shape.
+  const money = typeof raw.amount === 'object' && raw.amount !== null ? raw.amount : undefined;
+  const amount = money ? money.amount : raw.amount;
+
+  return {
+    id: raw.id,
+    state: raw.state,
+    expenseDate: raw.expense_date,
+    completedAt: raw.completed_at,
+    amount: typeof amount === 'number' ? amount : undefined,
+    currency: money?.currency ?? raw.currency,
+    description: raw.description,
+    category: raw.category,
+    merchant: typeof raw.merchant === 'string' ? raw.merchant || undefined : raw.merchant?.name,
+    transactionId: raw.transaction_id,
+    spender: personName(raw.spender),
+    receiptIds: raw.receipt_ids ?? [],
+  };
+}
+
 function mapCounterparty(raw: RawCounterparty): RevolutCounterparty {
   return {
     id: raw.id,
@@ -295,6 +342,64 @@ function mapPayoutLink(raw: RawPayoutLink): RevolutPayoutLink {
   };
 }
 
+const RECEIPT_EXTENSIONS: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/tiff': '.tiff',
+};
+
+/** Strip any directory component so a crafted header cannot escape the output dir. */
+function basename(name: string): string {
+  const tail = name.split(/[\\/]/).pop() ?? '';
+  return tail === '.' || tail === '..' ? '' : tail;
+}
+
+function filenameFromDisposition(disposition: string | undefined): string | undefined {
+  if (!disposition) return undefined;
+
+  // RFC 5987 form wins when present: filename*=UTF-8''receipt%20jan.pdf
+  const encoded = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(disposition);
+  if (encoded?.[1]) {
+    try {
+      const name = basename(decodeURIComponent(encoded[1].trim()));
+      if (name) return name;
+    } catch {
+      // Malformed percent-encoding: fall through to the plain form.
+    }
+  }
+
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(disposition);
+  const name = plain?.[1] ? basename(plain[1].trim()) : '';
+  return name || undefined;
+}
+
+/**
+ * Revolut does not promise a file name, so fall back to the receipt ID with an
+ * extension guessed from the content type. `.bin` keeps an unknown type honest
+ * rather than mislabelling it as a PDF.
+ */
+function receiptFilename(receiptId: string, contentType?: string, disposition?: string): string {
+  const provided = filenameFromDisposition(disposition);
+  if (provided) return provided;
+
+  const type = contentType?.split(';')[0]?.trim().toLowerCase() ?? '';
+  return `${receiptId}${RECEIPT_EXTENSIONS[type] ?? '.bin'}`;
+}
+
+function receiptErrorSuggestion(status: number): string | undefined {
+  if (status === 401) return 'Run: agentio revolut profile add to re-authorise';
+  if (status === 403) {
+    return 'The Revolut API app needs read access to expenses; check its permissions in the Revolut Business app';
+  }
+  return undefined;
+}
+
 export class RevolutClient implements ServiceClient {
   private credentials: RevolutCredentials;
   private baseUrl: string;
@@ -354,6 +459,39 @@ export class RevolutClient implements ServiceClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  private async requestBinary(
+    path: string,
+  ): Promise<{ buffer: Buffer; contentType?: string; disposition?: string }> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.credentials.accessToken}`,
+          Accept: '*/*',
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new CliError('NETWORK_ERROR', `Could not reach the Revolut API: ${message}`);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new CliError(
+        httpStatusToErrorCode(response.status),
+        `Revolut API error (${response.status}): ${text}`,
+        receiptErrorSuggestion(response.status),
+      );
+    }
+
+    return {
+      buffer: Buffer.from(await response.arrayBuffer()),
+      contentType: response.headers.get('content-type') ?? undefined,
+      disposition: response.headers.get('content-disposition') ?? undefined,
+    };
   }
 
   async listAccounts(): Promise<RevolutAccount[]> {
@@ -515,5 +653,50 @@ export class RevolutClient implements ServiceClient {
   /** Only links that have not been claimed yet can be cancelled. */
   async cancelPayoutLink(id: string): Promise<void> {
     await this.request<void>('POST', `/payout-links/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /**
+   * Expenses are paginated on time, not page number: narrow with `from`/`to`
+   * and walk backwards. Revolut caps one response at 500 rows.
+   */
+  async listExpenses(options: RevolutExpenseListOptions = {}): Promise<RevolutExpense[]> {
+    const params = new URLSearchParams();
+    if (options.from) params.set('from', options.from);
+    if (options.to) params.set('to', options.to);
+    if (options.count !== undefined) params.set('count', String(options.count));
+
+    const query = params.toString();
+    const raw = await this.request<RawExpense[] | { expenses?: RawExpense[] }>(
+      'GET',
+      `/expenses${query ? `?${query}` : ''}`,
+    );
+
+    // Revolut's reference does not pin the envelope, and sibling endpoints here
+    // differ (/transactions is a bare array, /payment-drafts wraps), so accept
+    // either rather than guess.
+    const rows = Array.isArray(raw) ? raw : (raw.expenses ?? []);
+    return rows.map(mapExpense);
+  }
+
+  async getExpense(id: string): Promise<RevolutExpense> {
+    const raw = await this.request<RawExpense>('GET', `/expenses/${encodeURIComponent(id)}`);
+    return mapExpense(raw);
+  }
+
+  /**
+   * Receipts come back as the file itself (PDF or image), not JSON, so this
+   * bypasses `request()` and its JSON parse. Receipt IDs live on the expense.
+   */
+  async getReceipt(expenseId: string, receiptId: string): Promise<RevolutReceipt> {
+    const path = `/expenses/${encodeURIComponent(expenseId)}/receipts/${encodeURIComponent(receiptId)}`;
+    const { buffer, contentType, disposition } = await this.requestBinary(path);
+
+    return {
+      expenseId,
+      receiptId,
+      filename: receiptFilename(receiptId, contentType, disposition),
+      contentType,
+      data: buffer,
+    };
   }
 }

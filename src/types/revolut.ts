@@ -227,3 +227,44 @@ export interface RevolutPayoutLinkListOptions {
   createdBefore?: string;
   limit?: number;
 }
+
+/**
+ * One expense from GET /expenses. Only `id` and `state` are guaranteed; the
+ * rest depend on how far through review the expense is, so everything else is
+ * optional and an unrecognised field is simply dropped by the mapper.
+ */
+export interface RevolutExpense {
+  id: string;
+  state: string;
+  /** ISO 8601. Completion time once the underlying transaction settles. */
+  expenseDate?: string;
+  completedAt?: string;
+  amount?: number;
+  currency?: string;
+  description?: string;
+  category?: string;
+  merchant?: string;
+  transactionId?: string;
+  /** Who submitted it, when the API names them. */
+  spender?: string;
+  /** Receipt IDs, each downloadable with `revolut receipt`. */
+  receiptIds: string[];
+}
+
+export interface RevolutExpenseListOptions {
+  /** ISO 8601 date or datetime; the API paginates on time, not page number. */
+  from?: string;
+  to?: string;
+  /** Revolut caps a single response at 500. */
+  count?: number;
+}
+
+/** A receipt file as returned by the receipt endpoint. */
+export interface RevolutReceipt {
+  expenseId: string;
+  receiptId: string;
+  /** Derived from Content-Disposition, else the receipt ID plus a type-guessed extension. */
+  filename: string;
+  contentType?: string;
+  data: Buffer;
+}
