@@ -6,6 +6,7 @@ on:
     paths:
       - 'site/**'
       - 'src/commands/**'
+      - 'src/mcp/**'
       - 'scripts/build-site.ts'
       - 'scripts/build-site/**'
       - 'package.json'
