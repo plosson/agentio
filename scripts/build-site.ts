@@ -88,15 +88,6 @@ async function main(): Promise<void> {
         'wa-3  Alice               "did you read the doc?"',
       ],
     },
-    {
-      cmd: 'agentio schedule list',
-      output: [
-        'id              folder                  next run',
-        '─────────────────────────────────────────────────',
-        'daily-summary   ~/agents/                09:00 (in 3h)',
-        'weekly-report   ~/agents/reports/        Mon 09:00',
-      ],
-    },
   ];
 
   const terminalHtml = `

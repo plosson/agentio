@@ -67,9 +67,9 @@ jobs:
 </section>
 
 <section class="section">
-  <div class="eyebrow">Daemon &amp; scheduler</div>
-  <h2>Persistent schedules when you need them</h2>
-  <p>For scheduled runs (folder-watched <code>.run.md</code> files), <code>agentio daemon start</code> runs a single background process. Schedules are host-pinned so Dropbox-synced folders never double-fire. Everything else is a one-shot CLI invocation.</p>
+  <div class="eyebrow">Daemon</div>
+  <h2>Local HTTP daemon when you need it</h2>
+  <p><code>agentio daemon start</code> runs a single background process with a health endpoint and API-key auth. It is the future home for vault UI/API. Everything else is a one-shot CLI invocation.</p>
 </section>
 
 <section class="section section-narrow faq">
@@ -77,7 +77,7 @@ jobs:
   <h2>Common questions</h2>
   <details><summary>Is agentio free?</summary><p>Yes — MIT-licensed, self-hosted. No accounts, no telemetry.</p></details>
   <details><summary>Where are my credentials stored?</summary><p>In an encrypted vault at <code>~/.config/agentio/vault.enc</code>, AES-256-GCM. The passphrase is machine-bound by default; you can supply one via <code>AGENTIO_PASSPHRASE</code>.</p></details>
-  <details><summary>Do I need the daemon?</summary><p>Only for scheduled <code>.run.md</code> runs (and other persistent daemon needs). Everything else runs as a one-shot CLI invocation — including Telegram send.</p></details>
+  <details><summary>Do I need the daemon?</summary><p>Only if you want the local HTTP daemon (health API today; vault UI/API later). Everything else runs as a one-shot CLI invocation — including Telegram send.</p></details>
   <details><summary>Can I use it without an LLM?</summary><p>Yes. It's a regular CLI — pipe its output into anything.</p></details>
   <details><summary>How is this different from Zapier?</summary><p>You own the credentials and the workflow definitions. Runs in your CI or on your machine; no third-party servers in the path.</p></details>
 </section>

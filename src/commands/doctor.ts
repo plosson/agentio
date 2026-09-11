@@ -1,7 +1,4 @@
 import { Command } from 'commander';
-import { existsSync, readdirSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
 import { handleError } from '../utils/errors';
 import { vaultExists } from '../vault/vault';
 import { loadConfig } from '../config/config-manager';
@@ -9,7 +6,6 @@ import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
 import { isDaemonInstalled } from '../utils/daemon-ensure';
 import { isDaemonAvailable } from '../daemon/client';
-import { abbrHome } from '../utils/output';
 import { addExamples } from '../utils/command-tree';
 
 export interface Check {
@@ -76,51 +72,10 @@ function checkProfiles(cfg: Config | null): Check {
   return { name: 'Profiles', status: 'ok', detail: `${total} configured` };
 }
 
-async function checkLegacyPlists(): Promise<Check | null> {
-  if (process.platform !== 'darwin') return null;
-  const dir = join(homedir(), 'Library', 'LaunchAgents');
-  if (!existsSync(dir)) return null;
-  const legacy = readdirSync(dir)
-    .filter((f) => f.startsWith('me.agentio.schedule.') && f.endsWith('.plist'));
-  if (legacy.length === 0) return null;
-  return {
-    name: 'Legacy plists',
-    status: 'warn',
-    detail: `${legacy.length} per-schedule plist(s) detected`,
-    fix: 'agentio schedule migrate',
-  };
-}
-
-function checkWatchedFolders(cfg: Config | null): Check | null {
-  const folders = cfg?.daemon?.scheduler?.watchedFolders ?? [];
-  if (folders.length === 0) return null;
-  const items = folders.map((f) => {
-    const pin = f.host ? ` (pinned to ${f.host})` : '';
-    const missing = !existsSync(f.path) ? ' [missing]' : '';
-    return `${abbrHome(f.path)}${pin}${missing}`;
-  });
-  const missing = folders.filter((f) => !existsSync(f.path));
-  if (missing.length > 0) {
-    return {
-      name: 'Watched folders',
-      status: 'warn',
-      detail: `${folders.length} folder(s), ${missing.length} missing on disk`,
-      items,
-      fix: `agentio schedule remove <folder>`,
-    };
-  }
-  return {
-    name: 'Watched folders',
-    status: 'ok',
-    detail: `${folders.length} folder(s)`,
-    items,
-  };
-}
-
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = program
     .command('doctor')
-    .description('Diagnose vault, daemon, profiles, and watched folders')
+    .description('Diagnose vault, daemon, and profiles')
     .action(async () => {
       try {
         const cfg = await loadConfig().catch(() => null);
@@ -129,10 +84,6 @@ export function registerDoctorCommand(program: Command): void {
         checks.push(await checkVault());
         checks.push(await checkDaemon());
         checks.push(checkProfiles(cfg));
-        const w = checkWatchedFolders(cfg);
-        if (w) checks.push(w);
-        const legacy = await checkLegacyPlists();
-        if (legacy) checks.push(legacy);
 
         console.log(renderChecks(checks));
 
@@ -147,7 +98,7 @@ export function registerDoctorCommand(program: Command): void {
     doctorCmd,
     `Examples:
 
-  # run all health checks (vault, daemon, profiles, watched folders, legacy plists)
+  # run all health checks (vault, daemon, profiles)
   agentio doctor`,
   );
 }
