@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig, saveConfig, setEnv, unsetEnv, listEnv } from '../config/config-manager';
+import { loadConfig, saveConfig } from '../config/config-manager';
 import { getAllCredentials, setAllCredentials } from '../auth/token-store';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
@@ -149,11 +149,6 @@ export function registerVaultConfigCommands(vault: Command): void {
             }
             filteredCredentials[service][profile] = credentials[service][profile];
           }
-        }
-
-        // Include env vars if they exist
-        if (configData.env) {
-          filteredConfig.env = configData.env;
         }
 
         const exportData: ExportedData = {
@@ -315,18 +310,14 @@ export function registerVaultConfigCommands(vault: Command): void {
           await setAllCredentials(currentCredentials);
           console.log('Configuration merged successfully');
         } else {
-          // Replace profiles + env from the export, but PRESERVE any
-          // other top-level fields (e.g. daemon.*). The export blob only
-          // contains `{profiles, env}` by construction; everything else in
-          // the existing config is per-machine state that the import has no
-          // business destroying.
+          // Replace profiles from the export, but PRESERVE any other
+          // top-level fields. The export blob only contains `{profiles}` by
+          // construction; everything else in the existing config is
+          // per-machine state that the import has no business destroying.
           const currentConfig = await loadConfig();
           const newConfig: Config = {
             ...currentConfig,
             profiles: exportData.config.profiles,
-            ...(exportData.config.env !== undefined
-              ? { env: exportData.config.env }
-              : {}),
           };
           await saveConfig(newConfig);
           await setAllCredentials(exportData.credentials);
@@ -349,75 +340,6 @@ export function registerVaultConfigCommands(vault: Command): void {
 
   # merge into existing config (only adds missing profiles/credentials)
   agentio vault import ./agentio.enc --key 0123…cdef --merge`,
-  );
-
-  // Environment variable management
-  const env = vault
-    .command('env')
-    .description('Manage agentio settings stored in the vault (daemon URL / API key)')
-    .action(async () => {
-      try {
-        const vars = await listEnv();
-        const entries = Object.entries(vars).sort(([a], [b]) => a.localeCompare(b));
-        if (entries.length === 0) {
-          console.log('No environment variables configured.');
-          console.log('Add one with: agentio vault env set <key> <value>');
-          return;
-        }
-        for (const [key, value] of entries) {
-          console.log(`${key}=${value}`);
-        }
-      } catch (error) {
-        handleError(error);
-      }
-    });
-
-  addExamples(
-    env
-      .command('set')
-      .description('Set an environment variable')
-      .argument('<key>', 'Variable name')
-      .argument('<value>', 'Variable value')
-      .action(async (key, value) => {
-        try {
-          await setEnv(key, value);
-          console.log(`Set ${key}`);
-        } catch (error) {
-          handleError(error);
-        }
-      }),
-    `Examples:
-
-  # point the CLI at a remote daemon
-  agentio vault env set AGENTIO_DAEMON_URL http://box.local:7890
-  agentio vault env set AGENTIO_DAEMON_API_KEY secret
-
-Stored variables are read by agentio itself, NOT exported to your shell or to
-processes agentio spawns. Only AGENTIO_DAEMON_URL and AGENTIO_DAEMON_API_KEY are consulted
-today; other keys are carried by 'vault export'/'import' but nothing reads them.`,
-  );
-
-  addExamples(
-    env
-      .command('unset')
-      .description('Remove an environment variable')
-      .argument('<key>', 'Variable name')
-      .action(async (key) => {
-        try {
-          const removed = await unsetEnv(key);
-          if (removed) {
-            console.log(`Removed ${key}`);
-          } else {
-            throw new CliError('NOT_FOUND', `Variable not found: ${key}`);
-          }
-        } catch (error) {
-          handleError(error);
-        }
-      }),
-    `Examples:
-
-  # remove a previously-set variable
-  agentio vault env unset OPENAI_API_KEY`,
   );
 
   const clearCmd = vault

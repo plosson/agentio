@@ -8,7 +8,7 @@ import { loadVault, clearVaultCache } from '../vault/vault';
 /**
  * Subprocess tests for `agentio config import` — specifically the fix
  * that makes import preserve top-level config fields the export blob
- * doesn't contain (server, gateway/daemon).
+ * doesn't contain (e.g. a legacy server section).
  *
  * Why subprocess: config import touches the real config-manager and
  * credential store (vault-backed). Each test runs in an isolated
@@ -213,34 +213,6 @@ describe('config import (replace mode) — preserves config.server', () => {
     expect(profileNames(final, 'gmail')).toEqual(['p1']);
     // jira is gone — replace, not merge.
     expect(profileNames(final, 'jira')).toEqual([]);
-  });
-
-  test('replace replaces env vars too', async () => {
-    await writeConfig({
-      profiles: { gmail: [{ name: 'p1' }] },
-      env: { OLD_VAR: 'old' },
-      server: SAMPLE_SERVER,
-    });
-    const { key, blob } = await exportCurrentConfig();
-
-    // Mutate to new env, then import the snapshot — env should revert
-    // to the snapshot's env.
-    await writeConfig({
-      profiles: {},
-      env: { NEW_VAR: 'new' },
-      server: SAMPLE_SERVER,
-    });
-    const importRes = await runCli(['vault', 'import'], {
-      AGENTIO_KEY: key,
-      AGENTIO_CONFIG: blob,
-    });
-    expect(importRes.exitCode).toBe(0);
-
-    const final = await readConfig();
-    const env = final.env as Record<string, unknown>;
-    expect(env).toBeDefined();
-    expect(env.OLD_VAR).toBe('old');
-    expect(env.NEW_VAR).toBeUndefined();
   });
 });
 

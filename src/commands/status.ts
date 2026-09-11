@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { listProfiles, listEnv, CONFIG_DIR } from '../config/config-manager';
+import { listProfiles, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials, setCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { refreshJiraToken } from '../auth/jira-oauth';
@@ -469,9 +469,6 @@ export function registerStatusCommand(program: Command): void {
     .action(async (options) => {
       try {
         const version = program.version();
-        const envVars = await listEnv();
-        const envKeys = Object.keys(envVars).sort();
-
         // JSON output mode
         if (options.json) {
           const statuses = await getProfileStatuses({ test: options.test });
@@ -488,7 +485,6 @@ export function registerStatusCommand(program: Command): void {
           const output = {
             version,
             configDir: CONFIG_DIR,
-            env: envKeys,
             services,
           };
           console.log(JSON.stringify(output, null, 2));
@@ -498,7 +494,7 @@ export function registerStatusCommand(program: Command): void {
         // Human-readable output
         console.log(`agentio v${version}`);
         console.log(`Config: ${CONFIG_DIR}`);
-        console.log(`Env: ${envKeys.length > 0 ? envKeys.join(', ') : 'none'}\n`);
+        console.log('');
 
         const refs = await listProfileRefs();
 

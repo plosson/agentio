@@ -1,12 +1,15 @@
-import { randomBytes } from 'crypto';
-import type { Config, DaemonConfig } from '../types/config';
-import { loadConfig, saveConfig } from '../config/config-manager';
 import { startApiServer, stopApiServer } from './api';
+import { memoryOnlyProvider, setPassphraseProvider } from '../vault/passphrase';
+import { unlockVault } from '../vault/vault';
 
 /**
  * Start the daemon. Runs in the foreground and logs to stdout; process
  * supervision is the container runtime's job. The Bun.serve handle keeps
  * the process alive until a signal arrives.
+ *
+ * The daemon never reads the passphrase file. It starts locked unless
+ * AGENTIO_PASSPHRASE is set, in which case the passphrase is verified
+ * against the vault before the server comes up.
  */
 export async function startDaemon(): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);
@@ -20,25 +23,17 @@ export async function startDaemon(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Load config and auto-generate API key on first run
-  const config = await loadConfig() as Config;
-  let daemonConfig: DaemonConfig = config.daemon ?? {};
+  setPassphraseProvider(memoryOnlyProvider());
 
-  if (!daemonConfig.apiKey) {
-    const generatedKey = `gw_${randomBytes(24).toString('base64url')}`;
-    daemonConfig = {
-      ...daemonConfig,
-      apiKey: generatedKey,
-    };
-    config.daemon = daemonConfig;
-    await saveConfig(config);
+  const envPassphrase = process.env.AGENTIO_PASSPHRASE;
+  if (envPassphrase) {
+    await unlockVault(envPassphrase);
+    console.log('Vault unlocked from AGENTIO_PASSPHRASE');
+  } else {
+    console.log('Vault is locked; waiting for an unlock');
   }
 
-  // Always display API key for easy access (e.g., Docker logs)
-  console.log(`API Key: ${daemonConfig.apiKey}`);
-
-  // Start API server (health endpoint; future vault UI/API home)
-  startApiServer(daemonConfig);
+  startApiServer();
 
   console.log('Daemon ready');
 }

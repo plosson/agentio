@@ -41,6 +41,7 @@ The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), runs `ag
 | `AGENTIO_KEY` | Encryption key from `agentio vault export` |
 | `AGENTIO_CONFIG` | Encrypted config from `agentio vault export` |
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
+| `AGENTIO_PASSPHRASE` | Optional: vault passphrase. When set the daemon starts unlocked; otherwise it starts locked and waits for an unlock |
 
 ## Volumes / health
 
@@ -48,7 +49,7 @@ The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), runs `ag
 |------|-------------|
 | `/data` | Vault + daemon state (`HOME` / `XDG_CONFIG_HOME`) |
 
-Health check: `GET http://localhost:7890/health`
+Health check: `GET http://localhost:7890/health`. It answers 200 whether the vault is locked or not, and the body carries `locked`.
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' agentio
