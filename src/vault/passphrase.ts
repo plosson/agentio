@@ -72,6 +72,20 @@ function memoryFileProvider(path: string): PassphraseProvider {
   };
 }
 
+/**
+ * Provider that never reads or writes a store. With it installed, the
+ * passphrase can only come from AGENTIO_PASSPHRASE or from
+ * setPassphraseInMemory(); this is how the daemon stays locked until
+ * someone unlocks it.
+ */
+export function memoryOnlyProvider(): PassphraseProvider {
+  return {
+    async get() { return null; },
+    async set() { /* noop */ },
+    async delete() { /* noop */ },
+  };
+}
+
 function defaultProvider(): PassphraseProvider {
   const test = process.env.AGENTIO_PASSPHRASE_STORE;
   if (test && test.startsWith('memory:')) {
@@ -96,6 +110,16 @@ export function resetPassphraseProvider(): void {
 
 export function clearPassphraseCache(): void {
   cached = null;
+}
+
+/** Hold the passphrase for this process only; the store is not touched. */
+export function setPassphraseInMemory(passphrase: string): void {
+  cached = passphrase;
+}
+
+/** True when a passphrase resolves without consulting the store. */
+export function hasResidentPassphrase(): boolean {
+  return Boolean(process.env.AGENTIO_PASSPHRASE) || cached !== null;
 }
 
 export async function getPassphrase(): Promise<string | null> {

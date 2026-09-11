@@ -6,6 +6,9 @@ import {
   clearPassphraseCache,
   setPassphraseProvider,
   resetPassphraseProvider,
+  setPassphraseInMemory,
+  hasResidentPassphrase,
+  memoryOnlyProvider,
   type PassphraseProvider,
 } from './passphrase';
 
@@ -79,6 +82,30 @@ describe('passphrase resolution', () => {
     await setPassphrase('pw');
     await clearPassphrase();
     expect(await mem.get('vault')).toBeNull();
+    expect(await getPassphrase()).toBeNull();
+  });
+
+  test('setPassphraseInMemory serves getPassphrase without writing the store', async () => {
+    setPassphraseInMemory('mem-pw');
+    expect(await getPassphrase()).toBe('mem-pw');
+    expect(await mem.get('vault')).toBeNull();
+  });
+
+  test('hasResidentPassphrase reflects env and memory but not the store', async () => {
+    expect(hasResidentPassphrase()).toBe(false);
+    await mem.set('vault', 'from-store');
+    expect(hasResidentPassphrase()).toBe(false);
+    setPassphraseInMemory('mem-pw');
+    expect(hasResidentPassphrase()).toBe(true);
+    clearPassphraseCache();
+    process.env.AGENTIO_PASSPHRASE = 'env-pw';
+    expect(hasResidentPassphrase()).toBe(true);
+  });
+
+  test('memoryOnlyProvider never yields a passphrase and ignores writes', async () => {
+    setPassphraseProvider(memoryOnlyProvider());
+    await setPassphrase('pw');
+    clearPassphraseCache();
     expect(await getPassphrase()).toBeNull();
   });
 
