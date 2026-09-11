@@ -1,16 +1,13 @@
-import { join } from 'path';
 import { randomBytes } from 'crypto';
 import type { Config, DaemonConfig } from '../types/config';
-import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
+import { loadConfig, saveConfig } from '../config/config-manager';
 import { startApiServer, stopApiServer } from './api';
-import { migrateLegacyFiles } from './path-migration';
-
-const LOG_FILE = join(CONFIG_DIR, 'daemon.log');
 
 let shutdownRequested = false;
 
 /**
- * Start the daemon (runs in foreground, managed by launchd on macOS / systemd on Linux).
+ * Start the daemon. Runs in the foreground and logs to stdout; process
+ * supervision is the container runtime's job.
  */
 export async function startDaemon(): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);
@@ -50,9 +47,6 @@ export async function startDaemon(): Promise<void> {
     // Always display API key for easy access (e.g., Docker logs)
     console.log(`API Key: ${daemonConfig.apiKey}`);
 
-    // Migrate legacy gateway.* files to daemon.*
-    migrateLegacyFiles(CONFIG_DIR);
-
     // Start API server (health endpoint; future vault UI/API home)
     startApiServer(daemonConfig);
 
@@ -65,5 +59,3 @@ export async function startDaemon(): Promise<void> {
     process.exit(1);
   }
 }
-
-export { LOG_FILE };

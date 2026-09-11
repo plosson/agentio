@@ -1,5 +1,5 @@
 # Agentio daemon Docker image
-# Runs `agentio daemon start --foreground` (daemon API /health on port 7890).
+# Runs `agentio daemon start` (daemon API /health on port 7890).
 # Binary is fetched at container start to always use the latest version.
 # Pin a version with AGENTIO_VERSION env var.
 
@@ -35,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 EXPOSE 7890
 
 ENTRYPOINT ["/usr/bin/tini", "--", "entrypoint-bin.sh"]
-CMD ["agentio", "daemon", "start", "--foreground"]
+CMD ["agentio", "daemon", "start"]

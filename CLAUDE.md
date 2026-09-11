@@ -130,7 +130,6 @@ agentio vault clear [--force]
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
 - Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location — the encrypted vault may be synced, the passphrase must not be.
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
-- Runtime files (`daemon.log`) remain plaintext under `~/.config/agentio/`.
 
 **Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
 
@@ -379,19 +378,12 @@ agentio sql profile add|list|remove
 
 ### Daemon
 
-The daemon is a long-lived background process that hosts a local HTTP API (`/health`, API-key auth). It is the future home for vault UI/API. Install as a LaunchAgent (macOS) or systemd unit (Linux).
+The daemon is a long-lived process that hosts a local HTTP API (`/health`, API-key auth). It is the future home for vault UI/API. It always runs in the foreground and logs to stdout; the Docker image under `docker/` is the supported way to run it. There is no native service install.
 
 ```bash
-agentio daemon install           # macOS: LaunchAgent; Linux: systemd unit
-agentio daemon start [--foreground]
-agentio daemon stop
-agentio daemon restart
-agentio daemon status
-agentio daemon logs [--follow]
-agentio daemon uninstall
+agentio daemon start             # run in the foreground (Docker CMD)
+agentio daemon status            # probe /health
 ```
-
-The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` and runs as a user agent (no sudo).
 
 ### Utility Commands
 
