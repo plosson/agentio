@@ -449,6 +449,9 @@ before Google deletes them permanently.`,
         if (targets.length > 1) {
           throw new CliError('INVALID_PARAMS', '--anyone, --user, --domain, and --group are mutually exclusive');
         }
+        if (options.allowDiscovery && !options.anyone) {
+          throw new CliError('INVALID_PARAMS', '--allow-discovery only applies with --anyone');
+        }
 
         const validRoles = ['reader', 'commenter', 'writer'];
         if (!validRoles.includes(options.role)) {
@@ -473,7 +476,8 @@ before Google deletes them permanently.`,
           domain,
           sendNotificationEmail: options.notify ?? false,
           emailMessage: options.message,
-          allowFileDiscovery: options.allowDiscovery ?? false,
+          // Only meaningful for --anyone; client omits it for user/group/domain.
+          allowFileDiscovery: type === 'anyone' ? (options.allowDiscovery ?? false) : undefined,
         });
 
         printGDriveShared(result, fileId);
