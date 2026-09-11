@@ -1,6 +1,6 @@
 import { writePointer } from './pointer';
 import { saveVault, CURRENT_VAULT_VERSION } from './vault';
-import { setPassphraseProvider, type PassphraseProvider } from './passphrase';
+import { setPassphraseProvider, memoryOnlyProvider } from './passphrase';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
@@ -33,14 +33,9 @@ export async function seedVault(options: {
     await mkdir(dirname(vaultPath), { recursive: true, mode: 0o700 });
   }
 
-  // Use a dummy in-memory provider so saveVault's resolvePassphraseOrThrow
-  // doesn't try to touch the passphrase store during in-process seeding.
-  class DummyProvider implements PassphraseProvider {
-    async get() { return null; }
-    async set() { /* noop */ }
-    async delete() { /* noop */ }
-  }
-  setPassphraseProvider(new DummyProvider());
+  // Memory-only provider so saveVault's resolvePassphraseOrThrow doesn't
+  // touch the passphrase store during in-process seeding.
+  setPassphraseProvider(memoryOnlyProvider());
 
   await writePointer(vaultPath);
   process.env.AGENTIO_PASSPHRASE = passphrase;

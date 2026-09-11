@@ -9,10 +9,15 @@ import {
   vaultExists,
   resetVault,
   clearVaultCache,
+  unlockVault,
+  lockVault,
+  isVaultUnlocked,
   CURRENT_VAULT_VERSION,
 } from './vault';
 import {
   clearPassphraseCache,
+  getPassphrase,
+  memoryOnlyProvider,
   resetPassphraseProvider,
   setPassphraseProvider,
   type PassphraseProvider,
@@ -152,15 +157,84 @@ describe('vault', () => {
     expect(await mem.get('vault')).toBeNull();
   });
 
-  test('loadVault caches across calls (second call does not re-decrypt)', async () => {
+  test('loadVault serves the cache while the file is untouched', async () => {
     process.env.AGENTIO_PASSPHRASE = 'pw';
     await writePointer(vaultFile);
-    const payload = { version: 1, config: { profiles: {} }, credentials: {} };
-    await saveVault(payload);
+    await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
     const a = await loadVault();
-    // Corrupt the file on disk; cached value should still work
-    await writeFile(vaultFile, 'corrupted');
     const b = await loadVault();
-    expect(a).toEqual(b);
+    expect(b).toBe(a);
+  });
+
+  test('loadVault picks up a rewrite made by another process', async () => {
+    process.env.AGENTIO_PASSPHRASE = 'pw';
+    await writePointer(vaultFile);
+    await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
+    await loadVault();
+
+    // Another process writes new contents (and a new mtime).
+    const external = { version: 1, config: { profiles: { gmail: [{ name: 'ext' }] } }, credentials: {} };
+    await new Promise((r) => setTimeout(r, 10));
+    await writeFile(vaultFile, encryptVault(JSON.stringify(external), 'pw'));
+
+    expect(await loadVault()).toEqual(external);
+  });
+});
+
+describe('vault lock state', () => {
+  const payload = { version: 1, config: { profiles: { gmail: [{ name: 'w' }] } }, credentials: {} };
+
+  beforeEach(async () => {
+    setPassphraseProvider(memoryOnlyProvider());
+    await writePointer(vaultFile);
+    await writeFile(vaultFile, encryptVault(JSON.stringify(payload), 'right-pw'));
+  });
+
+  test('starts locked when neither env nor memory holds a passphrase', async () => {
+    expect(isVaultUnlocked()).toBe(false);
+    await expect(loadVault()).rejects.toMatchObject({ code: 'VAULT_LOCKED' });
+  });
+
+  test('unlockVault with the right passphrase makes loadVault work', async () => {
+    await unlockVault('right-pw');
+    expect(isVaultUnlocked()).toBe(true);
+    expect(await loadVault()).toEqual(payload);
+  });
+
+  test('unlockVault with a wrong passphrase throws AUTH_FAILED and stays locked', async () => {
+    await expect(unlockVault('wrong-pw')).rejects.toMatchObject({ code: 'AUTH_FAILED' });
+    expect(isVaultUnlocked()).toBe(false);
+    expect(await getPassphrase()).toBeNull();
+  });
+
+  test('unlockVault never touches the passphrase store', async () => {
+    const mem = new MemoryPassphraseStore();
+    await mem.set('vault', 'stale-pw');
+    setPassphraseProvider(mem);
+
+    await expect(unlockVault('wrong-pw')).rejects.toMatchObject({ code: 'AUTH_FAILED' });
+    expect(await mem.get('vault')).toBe('stale-pw');
+
+    await unlockVault('right-pw');
+    expect(await mem.get('vault')).toBe('stale-pw');
+  });
+
+  test('unlockVault reports a missing vault like loadVault', async () => {
+    await writePointer('/does/not/exist.enc');
+    await expect(unlockVault('right-pw')).rejects.toMatchObject({ code: 'CONFIG_ERROR' });
+    await deletePointer();
+    await expect(unlockVault('right-pw')).rejects.toMatchObject({ code: 'VAULT_NOT_CONFIGURED' });
+  });
+
+  test('lockVault forgets passphrase and contents', async () => {
+    await unlockVault('right-pw');
+    lockVault();
+    expect(isVaultUnlocked()).toBe(false);
+    await expect(loadVault()).rejects.toMatchObject({ code: 'VAULT_LOCKED' });
+  });
+
+  test('AGENTIO_PASSPHRASE counts as unlocked', () => {
+    process.env.AGENTIO_PASSPHRASE = 'right-pw';
+    expect(isVaultUnlocked()).toBe(true);
   });
 });
