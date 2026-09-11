@@ -45,7 +45,6 @@ src/
 │   ├── sql.ts               # SQL database commands
 │   ├── daemon.ts            # Daemon commands (scheduler lifecycle)
 │   ├── schedule.ts          # Schedule folder registration
-│   ├── mcp.ts               # Local MCP server commands
 │   ├── vault-config.ts      # Vault contents: export/import/env/clear
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update

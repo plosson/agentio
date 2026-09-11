@@ -22,7 +22,6 @@ import { registerTelegramCommands } from './commands/telegram';
 
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
-import { registerMcpCommands } from './commands/mcp';
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
 import { registerDoctorCommand } from './commands/doctor';
@@ -81,7 +80,6 @@ export function createProgram(): Command {
 
   // Agentio utilities
   registerClaudeCommands(program);
-  registerMcpCommands(program);
   registerDocsCommand(program);
   registerDaemonCommands(program);
   registerDoctorCommand(program);
@@ -141,7 +139,7 @@ export function createProgram(): Command {
   ['schedule', 'daemon'].forEach((n) => setGroup(n, 'Automation'));
 
   // Advanced
-  ['mcp', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {
