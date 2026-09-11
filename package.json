@@ -60,7 +60,6 @@
     "@inquirer/prompts": "^8.2.0",
     "commander": "^14.0.2",
     "google-auth-library": "^10.0.0",
-    "gray-matter": "^4.0.3",
     "libsodium-wrappers": "^0.8.1",
     "marked": "^18.0.3",
     "plist": "^3.1.0",

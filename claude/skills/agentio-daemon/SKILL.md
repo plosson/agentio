@@ -1,6 +1,6 @@
 ---
 name: agentio-daemon
-description: Use to manage the agentio daemon (runs the scheduler for .run.md prompts).
+description: Use to manage the agentio daemon (HTTP API server for health and future vault UI/API).
 ---
 
 # Daemon via agentio

@@ -393,8 +393,7 @@ export function registerVaultConfigCommands(vault: Command): void {
   agentio vault env set AGENTIO_DAEMON_API_KEY secret
 
 Stored variables are read by agentio itself, NOT exported to your shell or to
-processes agentio spawns (scheduled .run.md jobs inherit your real environment,
-not these). Only AGENTIO_DAEMON_URL and AGENTIO_DAEMON_API_KEY are consulted
+processes agentio spawns. Only AGENTIO_DAEMON_URL and AGENTIO_DAEMON_API_KEY are consulted
 today; other keys are carried by 'vault export'/'import' but nothing reads them.`,
   );
 

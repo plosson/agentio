@@ -20,8 +20,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   discourse: 'Use when interacting with Discourse forums via the agentio CLI.',
   dropbox: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
   sql: 'Use when running SQL queries via the agentio CLI.',
-  daemon: 'Use to manage the agentio daemon (runs the scheduler for .run.md prompts).',
-  schedule: 'Use to manage agentio scheduled .run.md prompts in watched folders.',
+  daemon: 'Use to manage the agentio daemon (HTTP API server for health and future vault UI/API).',
 };
 
 function formatOption(opt: { flags: string; description: string; defaultValue?: string }): string {

@@ -1,7 +1,6 @@
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import type { Config, DaemonConfig } from '../types/config';
-import { startScheduler, stopScheduler } from './scheduler';
 import { CONFIG_DIR, loadConfig, saveConfig } from '../config/config-manager';
 import { startApiServer, stopApiServer } from './api';
 import { migrateLegacyFiles } from './path-migration';
@@ -22,9 +21,6 @@ export async function startDaemon(): Promise<void> {
     shutdownRequested = true;
 
     console.log(`\nReceived ${signal}, shutting down...`);
-
-    // Stop scheduler
-    await stopScheduler();
 
     // Stop API server
     stopApiServer();
@@ -57,18 +53,8 @@ export async function startDaemon(): Promise<void> {
     // Migrate legacy gateway.* files to daemon.*
     migrateLegacyFiles(CONFIG_DIR);
 
-    // Start API server (health + scheduler control)
+    // Start API server (health endpoint; future vault UI/API home)
     startApiServer(daemonConfig);
-
-    // Start scheduler
-    const schedulerConfig = daemonConfig.scheduler;
-    const folders = schedulerConfig?.watchedFolders ?? [];
-    const tickMs = (schedulerConfig?.tickIntervalSec ?? 60) * 1000;
-    await startScheduler({
-      watchedFolders: folders,
-      tickIntervalMs: tickMs,
-    });
-    console.log(`[scheduler] watching ${folders.length} folder(s), tick=${tickMs}ms`);
 
     console.log('Daemon ready');
 

@@ -1,24 +1,12 @@
 export interface DaemonServerConfig {
-  // Server binding for the local daemon's scheduler API
+  // Server binding for the local daemon HTTP API
   port?: number;          // Port to bind (default: 7890)
   host?: string;          // Host to bind (default: 0.0.0.0)
-}
-
-export interface WatchedFolder {
-  path: string;      // absolute path
-  host?: string;     // optional hostname pin; skip if current host mismatches
-  addedAt: number;   // unix ms
-}
-
-export interface SchedulerConfig {
-  watchedFolders: WatchedFolder[];
-  tickIntervalSec?: number;  // default 60
 }
 
 export interface DaemonConfig {
   apiKey?: string;                 // API key for authentication
   server?: DaemonServerConfig;     // Server binding settings
-  scheduler?: SchedulerConfig;
 }
 
 export interface ProfileEntry {
