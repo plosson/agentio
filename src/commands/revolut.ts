@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
 import { setCredentials, getCredentials } from '../auth/token-store';
@@ -23,6 +24,10 @@ import {
   printRevolutTransactionList,
   printRevolutTransaction,
   printRevolutTransactionsCsv,
+  printRevolutExpenseList,
+  printRevolutExpense,
+  printRevolutExpensesCsv,
+  printAttachmentDownloaded,
   printRevolutCounterpartyList,
   printRevolutCounterparty,
   printRevolutCounterpartyDeleted,
@@ -38,6 +43,7 @@ import {
 import type {
   RevolutAccount,
   RevolutChargeBearer,
+  RevolutExpense,
   RevolutCredentials,
   RevolutEnvironment,
 } from '../types/revolut';
@@ -298,6 +304,65 @@ async function runPay(options: PayOptions): Promise<void> {
   );
 }
 
+/** Keep two receipts that report the same file name from clobbering each other. */
+function uniqueFilename(used: Set<string>, filename: string): string {
+  if (!used.has(filename)) {
+    used.add(filename);
+    return filename;
+  }
+
+  const dot = filename.lastIndexOf('.');
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
+  const extension = dot > 0 ? filename.slice(dot) : '';
+
+  for (let suffix = 2; ; suffix += 1) {
+    const candidate = `${stem}-${suffix}${extension}`;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+  }
+}
+
+/**
+ * Bulk receipt export. Names every file after its expense so one directory can
+ * hold a whole quarter, and reports progress on stderr so the listing on stdout
+ * stays pipeable. One unreachable receipt must not abandon the rest of the run.
+ */
+async function downloadReceipts(
+  client: RevolutClient,
+  expenses: RevolutExpense[],
+  directory: string,
+): Promise<void> {
+  const withReceipts = expenses.filter((expense) => expense.receiptIds.length > 0);
+
+  if (withReceipts.length === 0) {
+    console.error('No receipts to download');
+    return;
+  }
+
+  const used = new Set<string>();
+  let downloaded = 0;
+  let failed = 0;
+
+  for (const expense of withReceipts) {
+    for (const receiptId of expense.receiptIds) {
+      try {
+        const receipt = await client.getReceipt(expense.id, receiptId);
+        const name = uniqueFilename(used, `${expense.id}-${receipt.filename}`);
+        await Bun.write(join(directory, name), receipt.data);
+        downloaded += 1;
+      } catch (error) {
+        failed += 1;
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`Failed to download receipt ${receiptId} of expense ${expense.id}: ${message}`);
+      }
+    }
+  }
+
+  console.error(`Downloaded ${downloaded} receipt(s) to ${directory}${failed > 0 ? `, ${failed} failed` : ''}`);
+}
+
 export function registerRevolutCommands(program: Command): void {
   const revolut = program.command('revolut').description('Revolut Business operations');
 
@@ -407,6 +472,143 @@ export function registerRevolutCommands(program: Command): void {
 
   # full detail for one transaction
   agentio revolut transaction 6b8e1f30-1c2d-4a5b-8e9f-0a1b2c3d4e5f`,
+  );
+
+  addExamples(
+    revolut
+      .command('expenses')
+      .description('List expenses and their receipt counts')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--from <date>', 'Start date (YYYY-MM-DD)')
+      .option('--to <date>', 'End date (YYYY-MM-DD)')
+      .option('--count <number>', 'Maximum expenses to return (max 500)', '100')
+      .option('--receipts <dir>', 'Also download every receipt into this directory')
+      .option('--format <format>', 'Output format: text, json, or csv', 'text')
+      .action(async (options) => {
+        try {
+          const count = parseInt(options.count, 10);
+          if (isNaN(count) || count < 1) {
+            throw new CliError('INVALID_PARAMS', '--count must be a positive number');
+          }
+
+          const { client } = await getRevolutClient(options.profile);
+          const expenses = await client.listExpenses({
+            from: options.from,
+            to: options.to,
+            count,
+          });
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(expenses, null, 2));
+          } else if (options.format === 'csv') {
+            printRevolutExpensesCsv(expenses);
+          } else {
+            printRevolutExpenseList(expenses);
+          }
+
+          if (options.receipts) {
+            // Receipts go to stderr so a piped --format csv stays parseable.
+            await downloadReceipts(client, expenses, options.receipts);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # this month's expenses
+  agentio revolut expenses --from 2026-09-01
+
+  # a quarter as CSV, for the books
+  agentio revolut expenses --from 2026-07-01 --to 2026-09-30 --format csv
+
+  # the same quarter, with every receipt file alongside it
+  agentio revolut expenses --from 2026-07-01 --to 2026-09-30 --format csv --receipts ./q3-receipts > q3.csv`,
+  );
+
+  addExamples(
+    revolut
+      .command('expense')
+      .description('Get one expense with its receipt IDs')
+      .argument('<id>', 'Expense ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (id: string, options) => {
+        try {
+          const { client } = await getRevolutClient(options.profile);
+          const expense = await client.getExpense(id);
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(expense, null, 2));
+          } else {
+            printRevolutExpense(expense);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # full detail, including the receipt IDs
+  agentio revolut expense 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d`,
+  );
+
+  addExamples(
+    revolut
+      .command('receipt')
+      .description('Download the receipt files attached to an expense')
+      .argument('<expense-id>', 'Expense ID')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--receipt <id>', 'Download one receipt by ID (downloads all if not specified)')
+      .option('--output <dir>', 'Output directory', '.')
+      .action(async (expenseId: string, options) => {
+        try {
+          const { client } = await getRevolutClient(options.profile);
+          const expense = await client.getExpense(expenseId);
+
+          const receiptIds = options.receipt
+            ? expense.receiptIds.filter((id) => id === options.receipt)
+            : expense.receiptIds;
+
+          if (options.receipt && receiptIds.length === 0) {
+            throw new CliError(
+              'NOT_FOUND',
+              `Expense ${expenseId} has no receipt "${options.receipt}"`,
+              `Run: agentio revolut expense ${expenseId}`,
+            );
+          }
+
+          if (receiptIds.length === 0) {
+            console.log('No receipts found');
+            return;
+          }
+
+          if (receiptIds.length > 1) {
+            console.log(`Downloading ${receiptIds.length} receipt(s)...\n`);
+          }
+
+          const used = new Set<string>();
+
+          for (const receiptId of receiptIds) {
+            const receipt = await client.getReceipt(expenseId, receiptId);
+            const name = uniqueFilename(used, receipt.filename);
+            const outputPath = join(options.output, name);
+            await Bun.write(outputPath, receipt.data);
+            printAttachmentDownloaded(name, outputPath, receipt.data.length);
+            if (receiptIds.length > 1) console.log('');
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # every receipt on one expense, into the current directory
+  agentio revolut receipt 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d
+
+  # one receipt, into a folder
+  agentio revolut receipt 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d \\
+    --receipt 9f8e7d6c-5b4a-3210-9876-543210fedcba --output ./receipts`,
   );
 
   addExamples(

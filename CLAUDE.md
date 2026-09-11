@@ -287,6 +287,9 @@ receives a Client ID, so `profile add` collects those interactively.
 agentio revolut accounts [--format text|json]
 agentio revolut transactions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--account <id>] [--counterparty <id>] [--type <type>] [--count N] [--format text|json|csv]
 agentio revolut transaction <id> [--format text|json]
+agentio revolut expenses [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--count N] [--receipts <dir>] [--format text|json|csv]
+agentio revolut expense <id> [--format text|json]
+agentio revolut receipt <expense-id> [--receipt <id>] [--output <dir>]
 agentio revolut counterparties list [--format text|json]
 agentio revolut counterparties get <id> [--format text|json]
 agentio revolut counterparties add (--company-name <name> | --first-name <n> --last-name <n>) --bank-country <code> --currency <code> [--iban <iban>] [--bic <bic>] [--account-no <no>] [--sort-code <code>] [--routing-number <no>] [--email <email>] [--phone <phone>]
@@ -297,6 +300,22 @@ agentio revolut links list [--created-before <ts>] [--limit N] | get <id> | canc
 agentio revolut profile add [--environment production|sandbox] [--client-id <id>] [--private-key <path>] [--redirect-uri <uri>]
 agentio revolut profile list|update|remove
 ```
+
+Expense notes:
+
+- `expenses` lists the expense records behind card spend; `receipt` downloads the
+  files attached to one. Receipt IDs are only on the expense, so `receipt` fetches
+  the expense first and then each file.
+- `expenses --receipts <dir>` is the month-end path: the listing goes to stdout
+  (pipe it as CSV) while the files land in `<dir>`, named `<expense-id>-<file>` so
+  one directory holds a whole quarter. Progress and failures go to stderr, and one
+  unreachable receipt does not abandon the rest of the run.
+- Receipts are PDFs or images, not JSON, so the client reads them through a
+  separate binary path. The file name comes from `Content-Disposition` when the
+  API sends one, else the receipt ID plus an extension guessed from the content
+  type; an unrecognised type is written `.bin` rather than mislabelled.
+- Reading expenses needs the API app to have read access to expenses. Without it
+  Revolut answers 403 no matter what the local profile flag says.
 
 Money movement notes:
 

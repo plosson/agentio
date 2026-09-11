@@ -70,6 +70,69 @@ Examples:
   agentio revolut transaction 6b8e1f30-1c2d-4a5b-8e9f-0a1b2c3d4e5f
 ```
 
+## agentio revolut expenses
+
+List expenses and their receipt counts
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--from <date>`: Start date (YYYY-MM-DD)
+- `--to <date>`: End date (YYYY-MM-DD)
+- `--count <number>`: Maximum expenses to return (max 500) (default: 100)
+- `--receipts <dir>`: Also download every receipt into this directory
+- `--format <format>`: Output format: text, json, or csv (default: text)
+
+```
+Examples:
+
+  # this month's expenses
+  agentio revolut expenses --from 2026-09-01
+
+  # a quarter as CSV, for the books
+  agentio revolut expenses --from 2026-07-01 --to 2026-09-30 --format csv
+
+  # the same quarter, with every receipt file alongside it
+  agentio revolut expenses --from 2026-07-01 --to 2026-09-30 --format csv --receipts ./q3-receipts > q3.csv
+```
+
+## agentio revolut expense <id>
+
+Get one expense with its receipt IDs
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # full detail, including the receipt IDs
+  agentio revolut expense 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d
+```
+
+## agentio revolut receipt <expense-id>
+
+Download the receipt files attached to an expense
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--receipt <id>`: Download one receipt by ID (downloads all if not specified)
+- `--output <dir>`: Output directory (default: .)
+
+```
+Examples:
+
+  # every receipt on one expense, into the current directory
+  agentio revolut receipt 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d
+
+  # one receipt, into a folder
+  agentio revolut receipt 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d \
+    --receipt 9f8e7d6c-5b4a-3210-9876-543210fedcba --output ./receipts
+```
+
 ## agentio revolut pay
 
 Draft a payment to a counterparty, or move money between your own accounts
