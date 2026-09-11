@@ -3,8 +3,9 @@ import { randomBytes } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig, saveConfig } from '../config/config-manager';
-import { getAllCredentials, setAllCredentials } from '../auth/token-store';
+import { loadConfig } from '../config/config-manager';
+import { getAllCredentials } from '../auth/token-store';
+import { loadVault, saveVault, type VaultContents } from '../vault/vault';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
@@ -18,11 +19,8 @@ interface ProfileSelection {
   profile: string;
 }
 
-interface ExportedData {
-  version: number;
-  config: Config;
-  credentials: StoredCredentials;
-}
+/** The export blob has the vault's own shape, minus anything not selected. */
+type ExportedData = VaultContents;
 
 function generateKey(): string {
   return randomBytes(32).toString('hex');
@@ -271,8 +269,9 @@ export function registerVaultConfigCommands(vault: Command): void {
 
         if (options.merge) {
           // Merge with existing config
-          const currentConfig = await loadConfig();
-          const currentCredentials = await getAllCredentials();
+          const current = await loadVault();
+          const currentConfig = current.config;
+          const currentCredentials = current.credentials;
 
           // Merge profiles
           for (const [service, profiles] of Object.entries(exportData.config.profiles)) {
@@ -306,21 +305,19 @@ export function registerVaultConfigCommands(vault: Command): void {
             }
           }
 
-          await saveConfig(currentConfig);
-          await setAllCredentials(currentCredentials);
+          await saveVault({ ...current, config: currentConfig, credentials: currentCredentials });
           console.log('Configuration merged successfully');
         } else {
           // Replace profiles from the export, but PRESERVE any other
           // top-level fields. The export blob only contains `{profiles}` by
           // construction; everything else in the existing config is
           // per-machine state that the import has no business destroying.
-          const currentConfig = await loadConfig();
-          const newConfig: Config = {
-            ...currentConfig,
-            profiles: exportData.config.profiles,
-          };
-          await saveConfig(newConfig);
-          await setAllCredentials(exportData.credentials);
+          const current = await loadVault();
+          await saveVault({
+            ...current,
+            config: { ...current.config, profiles: exportData.config.profiles },
+            credentials: exportData.credentials,
+          });
           console.log('Configuration imported successfully');
         }
       } catch (error) {
@@ -358,11 +355,9 @@ export function registerVaultConfigCommands(vault: Command): void {
           }
         }
 
-        // Reset config to default (empty profiles)
-        await saveConfig({ profiles: {} });
-
-        // Clear all credentials
-        await setAllCredentials({});
+        // Empty profiles and credentials in one write
+        const current = await loadVault();
+        await saveVault({ ...current, config: { profiles: {} }, credentials: {} });
 
         console.log('Configuration cleared');
       } catch (error) {

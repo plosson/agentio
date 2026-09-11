@@ -493,8 +493,7 @@ export function registerStatusCommand(program: Command): void {
 
         // Human-readable output
         console.log(`agentio v${version}`);
-        console.log(`Config: ${CONFIG_DIR}`);
-        console.log('');
+        console.log(`Config: ${CONFIG_DIR}\n`);
 
         const refs = await listProfileRefs();
 

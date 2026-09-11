@@ -382,7 +382,7 @@ agentio daemon start             # run in the foreground (Docker CMD)
 agentio daemon status            # probe /health
 ```
 
-The daemon never reads `vault.passphrase`. It starts **locked** and stays so until unlocked, unless `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one exits 1. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
+The daemon never reads `vault.passphrase`. It starts **locked**; until the admin UI ships, `AGENTIO_PASSPHRASE` is the only way to unlock it. When set, the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
 ### Utility Commands
 

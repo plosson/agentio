@@ -1,5 +1,4 @@
-import type { HealthResponse } from './types';
-import { DAEMON_PORT } from './api';
+import { DAEMON_PORT, type HealthResponse } from './types';
 
 const LOCAL_DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`;
 

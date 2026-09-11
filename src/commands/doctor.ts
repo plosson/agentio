@@ -74,12 +74,12 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose vault, daemon, and profiles')
     .action(async () => {
       try {
-        const cfg = await loadConfig().catch(() => null);
-
-        const checks: Check[] = [
-          ...(await Promise.all([checkVault(), checkDaemon()])),
-          checkProfiles(cfg),
-        ];
+        const [cfg, vault, daemon] = await Promise.all([
+          loadConfig().catch(() => null),
+          checkVault(),
+          checkDaemon(),
+        ]);
+        const checks: Check[] = [vault, daemon, checkProfiles(cfg)];
 
         console.log(renderChecks(checks));
 

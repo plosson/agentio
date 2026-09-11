@@ -1,5 +1,5 @@
 import { startApiServer, stopApiServer } from './api';
-import { memoryOnlyProvider, setPassphraseProvider } from '../vault/passphrase';
+import { getPassphrase, memoryOnlyProvider, setPassphraseProvider } from '../vault/passphrase';
 import { unlockVault } from '../vault/vault';
 
 /**
@@ -23,14 +23,17 @@ export async function startDaemon(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+  // With the memory-only provider installed, getPassphrase() yields the
+  // env var or nothing. Once verified, the env var is dropped so the resident
+  // copy is the single source of lock state and lockVault() can undo it.
   setPassphraseProvider(memoryOnlyProvider());
-
-  const envPassphrase = process.env.AGENTIO_PASSPHRASE;
+  const envPassphrase = await getPassphrase();
   if (envPassphrase) {
     await unlockVault(envPassphrase);
+    delete process.env.AGENTIO_PASSPHRASE;
     console.log('Vault unlocked from AGENTIO_PASSPHRASE');
   } else {
-    console.log('Vault is locked; waiting for an unlock');
+    console.log('Vault is locked');
   }
 
   startApiServer();

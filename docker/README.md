@@ -41,7 +41,7 @@ The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), runs `ag
 | `AGENTIO_KEY` | Encryption key from `agentio vault export` |
 | `AGENTIO_CONFIG` | Encrypted config from `agentio vault export` |
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
-| `AGENTIO_PASSPHRASE` | Optional: vault passphrase. When set the daemon starts unlocked; otherwise it starts locked and waits for an unlock |
+| `AGENTIO_PASSPHRASE` | Optional: vault passphrase. When set the daemon starts unlocked; otherwise it starts locked (the admin UI that unlocks it is not shipped yet) |
 
 ## Volumes / health
 

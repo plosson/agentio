@@ -1,10 +1,6 @@
 import type { Server } from 'bun';
-import type { HealthResponse } from './types';
+import { DAEMON_HOST, DAEMON_PORT, type HealthResponse } from './types';
 import { isVaultUnlocked } from '../vault/vault';
-
-/** Fixed bind: the daemon runs in a container, so the port is mapped there. */
-export const DAEMON_HOST = '0.0.0.0';
-export const DAEMON_PORT = 7890;
 
 let server: Server<unknown> | null = null;
 let startTime: number = 0;
@@ -21,16 +17,17 @@ function json(body: unknown, status = 200): Response {
  * a locked container is not killed before anyone can unlock it.
  */
 function handleHealth(): Response {
+  const now = Date.now();
   const response: HealthResponse = {
     status: 'ok',
-    timestamp: Date.now(),
-    uptime: Date.now() - startTime,
+    timestamp: now,
+    uptime: now - startTime,
     locked: !isVaultUnlocked(),
   };
   return json(response);
 }
 
-async function handleRequest(request: Request): Promise<Response> {
+function handleRequest(request: Request): Response {
   const path = new URL(request.url).pathname;
 
   if (path === '/health' && request.method === 'GET') {

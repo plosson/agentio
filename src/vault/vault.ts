@@ -131,7 +131,9 @@ async function decryptPayload(
       throw new CliError(
         'AUTH_FAILED',
         'Wrong passphrase for vault',
-        'If you changed the passphrase elsewhere, run: agentio vault set <path>'
+        wipeStoredPassphrase
+          ? 'If you changed the passphrase elsewhere, run: agentio vault set <path>'
+          : 'Check the passphrase you supplied (AGENTIO_PASSPHRASE or the one you entered)'
       );
     }
     throw new CliError(
