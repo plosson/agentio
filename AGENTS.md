@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `src/` contains the TypeScript CLI implementation. Entry point is `src/index.ts`.
 - `src/commands/` holds subcommand registrations (e.g., `gmail`, `slack`, `jira`).
-- `src/services/`, `src/auth/`, `src/config/`, `src/daemon/`, `src/vault/`, `src/mcp/`, `src/utils/`, and `src/types/` group supporting logic by concern.
+- `src/services/`, `src/auth/`, `src/config/`, `src/daemon/`, `src/vault/`, `src/utils/`, and `src/types/` group supporting logic by concern.
 - `examples/` provides runnable workflow examples for CI/CD usage.
 - `docs/` and `site/` contain documentation and website assets.
 - `dist/` is build output (generated).

@@ -7,7 +7,7 @@ const FIXTURE_DIR = join(import.meta.dir, '../../../site/src/services');
 describe('loadServices', () => {
   it('loads at least the registered services', async () => {
     const services = await loadServices(FIXTURE_DIR);
-    expect(services.length).toBeGreaterThanOrEqual(18);
+    expect(services.length).toBeGreaterThanOrEqual(17);
     const slugs = services.map((s) => s.meta.slug);
     expect(slugs).toContain('gmail');
     expect(slugs).toContain('telegram');

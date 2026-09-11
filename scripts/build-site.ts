@@ -4,7 +4,6 @@ import { writePage } from './build-site/render';
 import { loadServices } from './build-site/services';
 import { renderMarkdown } from './build-site/markdown';
 import { renderCommandsHtml } from './build-site/commands';
-import { renderMcpToolsHtml } from './build-site/mcp-tools';
 import { SERVICE_SLUGS } from './build-site/register-all';
 import { listVersionTags, listCommitsBetween, listCommitsUpTo } from './build-site/git';
 import { groupReleases, type ParsedEntry } from './build-site/changelog';
@@ -90,14 +89,6 @@ async function main(): Promise<void> {
       ],
     },
     {
-      cmd: 'agentio mcp serve gmail:work slack:team',
-      output: [
-        'gmail:work — 28 tools',
-        'slack:team — 3 tools',
-        'Listening on stdio…',
-      ],
-    },
-    {
       cmd: 'agentio schedule list',
       output: [
         'id              folder                  next run',
@@ -122,7 +113,7 @@ async function main(): Promise<void> {
 
   await writePage(DIST, 'index.html', layout, {
     title: 'agentio — CLI for LLM agent workflows',
-    description: 'Run LLM agents against Gmail, Slack, JIRA, WhatsApp, and 14 more. MCP server, daemon, encrypted vault, GitHub Actions ready.',
+    description: 'Run LLM agents against Gmail, Slack, JIRA, WhatsApp, and 14 more. Daemon, encrypted vault, GitHub Actions ready.',
     path: '/',
     nav_services: navServicesHtml,
     slot: indexBody
@@ -139,7 +130,6 @@ async function main(): Promise<void> {
       .replaceAll('{{tagline}}', svc.meta.tagline)
       .replaceAll('{{intro_html}}', introHtml)
       .replaceAll('{{commands_html}}', renderCommandsHtml(svc.meta.slug))
-      .replaceAll('{{mcp_html}}', renderMcpToolsHtml(svc.meta.slug))
       .replaceAll('{{related_html}}', renderRelatedHtml(svc.meta.slug, allEntries));
 
     await writePage(DIST, `services/${svc.meta.slug}/index.html`, layout, {

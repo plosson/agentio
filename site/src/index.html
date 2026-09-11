@@ -1,7 +1,7 @@
 <section class="hero">
   <div class="eyebrow">agentio</div>
   <h1>Your agent reads email, posts to Slack, updates JIRA — one CLI.</h1>
-  <p class="tagline">Run agentic workflows against Gmail, Slack, JIRA, Telegram, and more — over stdio MCP, in GitHub Actions, or as a daemon. One binary, encrypted vault, no third-party servers.</p>
+  <p class="tagline">Run agentic workflows against Gmail, Slack, JIRA, Telegram, and more — in GitHub Actions or as a daemon. One binary, encrypted vault, no third-party servers.</p>
 </section>
 
 {{terminal_html}}
@@ -30,8 +30,8 @@
       <p>Credentials are AES-256-GCM-encrypted in <code>~/.config/agentio/vault.enc</code>. One binary, many identities per service.</p>
     </div>
     <div class="card">
-      <h3>MCP + CLI + Actions</h3>
-      <p>Same binary serves a stdio MCP server to Claude Code and other MCP clients, and runs unchanged inside GitHub Actions.</p>
+      <h3>CLI + GitHub Actions</h3>
+      <p>Same binary runs as a local CLI and unchanged inside GitHub Actions — cron your agents with secrets already in the vault.</p>
     </div>
   </div>
 </section>
@@ -42,16 +42,6 @@
   <div class="grid">
     {{services_grid}}
   </div>
-</section>
-
-<section class="section">
-  <div class="eyebrow">MCP integration</div>
-  <h2>Drop into Claude Code</h2>
-  <p>One command writes a <code>.mcp.json</code> that exposes your selected services as MCP tools over stdio — for Claude Code and other local MCP clients.</p>
-  <pre><code>$ agentio mcp install gmail:work slack:team rss
-Wrote .mcp.json
-
-MCP server command: agentio mcp serve gmail:work slack:team rss</code></pre>
 </section>
 
 <section class="section">
@@ -87,7 +77,7 @@ jobs:
   <h2>Common questions</h2>
   <details><summary>Is agentio free?</summary><p>Yes — MIT-licensed, self-hosted. No accounts, no telemetry.</p></details>
   <details><summary>Where are my credentials stored?</summary><p>In an encrypted vault at <code>~/.config/agentio/vault.enc</code>, AES-256-GCM. The passphrase is machine-bound by default; you can supply one via <code>AGENTIO_PASSPHRASE</code>.</p></details>
-  <details><summary>Do I need the daemon?</summary><p>Only for scheduled <code>.run.md</code> runs (and other persistent daemon needs). Everything else runs as a one-shot CLI invocation — including Telegram send and stdio MCP.</p></details>
+  <details><summary>Do I need the daemon?</summary><p>Only for scheduled <code>.run.md</code> runs (and other persistent daemon needs). Everything else runs as a one-shot CLI invocation — including Telegram send.</p></details>
   <details><summary>Can I use it without an LLM?</summary><p>Yes. It's a regular CLI — pipe its output into anything.</p></details>
   <details><summary>How is this different from Zapier?</summary><p>You own the credentials and the workflow definitions. Runs in your CI or on your machine; no third-party servers in the path.</p></details>
 </section>
