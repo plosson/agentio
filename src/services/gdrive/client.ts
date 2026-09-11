@@ -501,19 +501,25 @@ export class GDriveClient implements ServiceClient {
     const fileId = this.extractFileId(fileIdOrUrl);
     const role = options.role || 'reader';
 
+    // Google only accepts allowFileDiscovery on type=anyone (and rejects it for
+    // user/group with a 403 that otherwise looks like a generic permission error).
+    const requestBody: Record<string, unknown> = {
+      type: options.type,
+      role,
+      emailAddress: options.emailAddress,
+      domain: options.domain,
+    };
+    if (options.type === 'anyone') {
+      requestBody.allowFileDiscovery = options.allowFileDiscovery ?? false;
+    }
+
     try {
       const response = await this.drive.permissions.create({
         fileId,
         supportsAllDrives: true,
         sendNotificationEmail: options.sendNotificationEmail ?? false,
         emailMessage: options.emailMessage,
-        requestBody: {
-          type: options.type,
-          role,
-          emailAddress: options.emailAddress,
-          domain: options.domain,
-          allowFileDiscovery: options.allowFileDiscovery ?? false,
-        },
+        requestBody,
         fields: 'id,type,role,emailAddress,domain',
       });
 
@@ -645,12 +651,15 @@ export class GDriveClient implements ServiceClient {
   private getErrorMessage(err: unknown): string {
     if (err && typeof err === 'object') {
       const error = err as Record<string, unknown>;
+      // Prefer the API's own message when present (e.g. allowFileDiscovery rules).
+      if (error.message && typeof error.message === 'string' && error.message.trim()) {
+        return error.message;
+      }
       const code = error.code || error.status;
       if (code === 401) return 'OAuth token expired or invalid';
       if (code === 403) return 'Insufficient permissions to access this file';
       if (code === 404) return 'File not found';
       if (code === 429) return 'Rate limit exceeded, please try again later';
-      if (error.message && typeof error.message === 'string') return error.message;
     }
     return err instanceof Error ? err.message : String(err);
   }
