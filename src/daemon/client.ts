@@ -1,13 +1,9 @@
 import { loadConfig, getEnv } from '../config/config-manager';
 
-let cachedConfig: { url: string; apiKey: string } | null = null;
-
 /**
  * Get daemon URL and API key from config or environment
  */
 async function getDaemonConnection(): Promise<{ url: string; apiKey: string }> {
-  if (cachedConfig) return cachedConfig;
-
   // Check environment variables first.
   const envUrl =
     process.env.AGENTIO_DAEMON_URL || await getEnv('AGENTIO_DAEMON_URL');
@@ -15,8 +11,7 @@ async function getDaemonConnection(): Promise<{ url: string; apiKey: string }> {
     process.env.AGENTIO_DAEMON_API_KEY || await getEnv('AGENTIO_DAEMON_API_KEY');
 
   if (envUrl) {
-    cachedConfig = { url: envUrl, apiKey: envApiKey || '' };
-    return cachedConfig;
+    return { url: envUrl, apiKey: envApiKey || '' };
   }
 
   const daemonConfig = (await loadConfig()).daemon;
@@ -24,8 +19,7 @@ async function getDaemonConnection(): Promise<{ url: string; apiKey: string }> {
   // Construct URL from server host:port (local daemon)
   const host = daemonConfig?.server?.host ?? '127.0.0.1';
   const port = daemonConfig?.server?.port ?? 7890;
-  cachedConfig = { url: `http://${host}:${port}`, apiKey: daemonConfig?.apiKey ?? '' };
-  return cachedConfig;
+  return { url: `http://${host}:${port}`, apiKey: daemonConfig?.apiKey ?? '' };
 }
 
 /**

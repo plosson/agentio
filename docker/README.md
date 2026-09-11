@@ -1,6 +1,6 @@
 # Agentio daemon Docker
 
-Runs the shipped CLI daemon (`agentio daemon start --foreground`) for scheduled `.run.md` work and the local daemon API on port 7890.
+Runs the shipped CLI daemon (`agentio daemon start`), which serves the daemon API on port 7890. This image is the only supported way to run the daemon.
 
 ## Build
 

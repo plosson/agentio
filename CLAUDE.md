@@ -43,7 +43,7 @@ src/
 │   ├── rss.ts               # RSS feed commands
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
-│   ├── daemon.ts            # Daemon lifecycle (install/start/stop/status/logs)
+│   ├── daemon.ts            # Daemon commands (start/status)
 │   ├── vault-config.ts      # Vault contents: export/import/env/clear
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
@@ -130,7 +130,6 @@ agentio vault clear [--force]
 - Vault location defaults to `~/.config/agentio/vault.enc`; a pointer file at `~/.config/agentio/vault.path` tracks the current path.
 - Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location — the encrypted vault may be synced, the passphrase must not be.
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
-- Runtime files (`daemon.log`) remain plaintext under `~/.config/agentio/`.
 
 **Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
 
@@ -379,19 +378,12 @@ agentio sql profile add|list|remove
 
 ### Daemon
 
-The daemon is a long-lived background process that hosts a local HTTP API (`/health`, API-key auth). It is the future home for vault UI/API. Install as a LaunchAgent (macOS) or systemd unit (Linux).
+The daemon is a long-lived process that serves a local HTTP API with `Bun.serve` on port 7890 (`/health`, X-API-Key auth). It is the future home for vault UI/API. It runs in the foreground and logs to stdout; the Docker image under `docker/` is the supported way to run it.
 
 ```bash
-agentio daemon install           # macOS: LaunchAgent; Linux: systemd unit
-agentio daemon start [--foreground]
-agentio daemon stop
-agentio daemon restart
-agentio daemon status
-agentio daemon logs [--follow]
-agentio daemon uninstall
+agentio daemon start             # run in the foreground (Docker CMD)
+agentio daemon status            # probe /health
 ```
-
-The macOS LaunchAgent lives at `~/Library/LaunchAgents/me.agentio.daemon.plist` and runs as a user agent (no sudo).
 
 ### Utility Commands
 
@@ -411,11 +403,6 @@ Each service supports multiple named profiles. Config and credentials live toget
 - **Passphrase**: `~/.config/agentio/vault.passphrase` (mode 0600), or `AGENTIO_PASSPHRASE`
 - Legacy `config.json` / `tokens.enc` exist only for one-time `vault init` migration (machine-bound decrypt of old tokens)
 
-### Daemon Architecture
-
-The daemon provides:
-- **HTTP API**: Bun.serve on port 7890 with `/health` and X-API-Key auth (future vault UI/API)
-
 ### Security
 
 - **Passphrase-encrypted vault**: Config + credentials encrypted at rest; key derived from user passphrase via scrypt (portable across machines when the vault is synced and the passphrase is set locally)
@@ -429,7 +416,6 @@ The daemon provides:
 - **Passphrase vault**: Credentials travel with a synced vault file; passphrase stays local (not machine-bound hostname+username)
 - **Dynamic OAuth port**: Uses ports 3000-3010 for OAuth callback
 - **Stdin support**: Commands like `send` accept body via pipe
-- **Daemon shell**: Local HTTP daemon kept as the future home for vault UI/API
 
 ## Service Development Guidelines
 

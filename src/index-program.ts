@@ -133,11 +133,8 @@ export function createProgram(): Command {
     'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'rss', 'sql', 'revolut',
   ].forEach((n) => setGroup(n, 'Services'));
 
-  // Automation
-  ['daemon'].forEach((n) => setGroup(n, 'Automation'));
-
   // Advanced
-  ['profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['daemon', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

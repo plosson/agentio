@@ -30,8 +30,12 @@ function verifyAuth(request: Request): boolean {
  * Handle health check
  */
 function handleHealth(): Response {
-  const response: HealthResponse = { status: 'ok', timestamp: Date.now() };
-  return new Response(JSON.stringify({ ...response, uptime: Date.now() - startTime }), {
+  const response: HealthResponse = {
+    status: 'ok',
+    timestamp: Date.now(),
+    uptime: Date.now() - startTime,
+  };
+  return new Response(JSON.stringify(response), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -72,7 +76,7 @@ async function handleRequest(request: Request): Promise<Response> {
 /**
  * Start the API server
  */
-export function startApiServer(config: DaemonConfig): Server<unknown> {
+export function startApiServer(config: DaemonConfig): void {
   const port = config?.server?.port ?? 7890;
   const host = config?.server?.host ?? '0.0.0.0';
   apiKey = config?.apiKey ?? '';
@@ -85,7 +89,6 @@ export function startApiServer(config: DaemonConfig): Server<unknown> {
   });
 
   console.log(`Daemon API listening on http://${host}:${port}`);
-  return server;
 }
 
 /**
@@ -96,11 +99,4 @@ export function stopApiServer(): void {
     server.stop();
     server = null;
   }
-}
-
-/**
- * Check if server is running
- */
-export function isApiServerRunning(): boolean {
-  return server !== null;
 }

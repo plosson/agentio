@@ -5,7 +5,7 @@ describe('renderChecks', () => {
   test('formats ok/warn/error with leading symbols', () => {
     const checks: Check[] = [
       { name: 'Vault', status: 'ok', detail: 'configured at ~/.config/agentio/vault.enc' },
-      { name: 'Daemon', status: 'warn', detail: 'installed but not running' },
+      { name: 'Daemon', status: 'warn', detail: 'not running' },
       { name: 'Profiles', status: 'error', detail: 'no profiles configured', fix: 'agentio gmail profile add' },
     ];
     const out = renderChecks(checks);

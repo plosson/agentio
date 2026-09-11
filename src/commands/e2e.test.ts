@@ -72,7 +72,7 @@ describe('e2e: first-install → vault init → status → reset', () => {
   });
 });
 
-describe('e2e: daemon fails fast with VAULT_LOCKED when no passphrase source', () => {
+describe('e2e: headless command fails fast with VAULT_LOCKED when no passphrase source', () => {
   test('non-bypass command without store or env fails cleanly', async () => {
     // Create vault with passphrase written to passphrase store
     await runCli([
@@ -82,7 +82,7 @@ describe('e2e: daemon fails fast with VAULT_LOCKED when no passphrase source', (
     ]);
 
     // Run a non-bypass command (gmail list) with an EMPTY store file —
-    // simulates a subprocess with no cached passphrase (e.g. headless daemon).
+    // simulates a headless subprocess with no cached passphrase.
     const emptyStore = join(tempHome, 'empty-store.json');
     await Bun.write(emptyStore, '{}');
     const res = await runCli(['gmail', 'list'], {

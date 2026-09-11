@@ -4,7 +4,6 @@ import { vaultExists } from '../vault/vault';
 import { loadConfig } from '../config/config-manager';
 import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
-import { isDaemonInstalled } from '../utils/daemon-ensure';
 import { isDaemonAvailable } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
 
@@ -48,14 +47,10 @@ async function checkVault(): Promise<Check> {
   return { name: 'Vault', status: 'ok', detail: `at ${path}` };
 }
 
-async function checkDaemon(): Promise<Check> {
+export async function checkDaemon(): Promise<Check> {
   const healthy = await isDaemonAvailable();
   if (healthy) return { name: 'Daemon', status: 'ok', detail: 'running' };
-
-  if (isDaemonInstalled()) {
-    return { name: 'Daemon', status: 'warn', detail: 'installed but not running', fix: 'agentio daemon start' };
-  }
-  return { name: 'Daemon', status: 'warn', detail: 'not installed', fix: 'agentio daemon install' };
+  return { name: 'Daemon', status: 'warn', detail: 'not running', fix: 'agentio daemon start' };
 }
 
 function checkProfiles(cfg: Config | null): Check {
@@ -80,10 +75,10 @@ export function registerDoctorCommand(program: Command): void {
       try {
         const cfg = await loadConfig().catch(() => null);
 
-        const checks: Check[] = [];
-        checks.push(await checkVault());
-        checks.push(await checkDaemon());
-        checks.push(checkProfiles(cfg));
+        const checks: Check[] = [
+          ...(await Promise.all([checkVault(), checkDaemon()])),
+          checkProfiles(cfg),
+        ];
 
         console.log(renderChecks(checks));
 
