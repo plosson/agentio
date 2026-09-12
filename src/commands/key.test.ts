@@ -28,7 +28,7 @@ describe('agentio key', () => {
     expect(created.stderr).toContain('shown once');
 
     const listed = await runCli(['key', 'list']);
-    expect(listed.stdout).toContain(`${kid}  ci  gdrive/docs, read-only`);
+    expect(listed.stdout).toContain(`${kid}  ci  agio1.…${token.slice(-4)}  gdrive/docs, read-only`);
 
     const rotated = await runCli(['key', 'rotate', kid, '--url', 'https://vault.example.com']);
     expect(rotated.exitCode).toBe(0);
