@@ -184,7 +184,7 @@
       <h3>Hub</h3>
       <div class="setting"><div><strong>Address</strong><p>What tokens created here point agents at.</p></div><span class="mono" id="settings-origin"></span></div>
       <div class="setting"><div><strong>Version</strong><p>The agentio build running this hub.</p></div><span class="mono" id="settings-version"></span></div>
-      <div class="setting"><div><strong>Browser session</strong><p>Ends after 30 idle minutes. The vault itself stays unlocked.</p></div></div>
+      <div class="setting"><div><strong>Browser session</strong><p>Ends after 30 idle minutes, or now with Sign out. The vault itself stays unlocked.</p></div><button id="signout-btn">Sign out</button></div>
     </section>
     <section class="card danger">
       <h3>Danger zone</h3>
@@ -543,6 +543,11 @@
 
   $('refresh-btn').addEventListener('click', loadProfiles);
   $('test-btn').addEventListener('click', () => testProfiles([...document.querySelectorAll('#profiles-body tr[data-ref]:not([hidden])')]));
+
+  $('signout-btn').addEventListener('click', async () => {
+    await api('/ui/api/logout', { method: 'POST' });
+    show('unlock');
+  });
 
   $('lock-btn').addEventListener('click', async () => {
     const ok = await confirmDialog({

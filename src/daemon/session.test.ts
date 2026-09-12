@@ -4,6 +4,7 @@ import {
   SESSION_IDLE_MS,
   clearSessions,
   createSession,
+  deleteSession,
   expiredSessionCookie,
   hasSession,
   sessionCookie,
@@ -43,6 +44,15 @@ describe('sessions', () => {
     expect(hasSession(req, t0 + 3 * SESSION_IDLE_MS + 1)).toBe(false);
     // Once expired it stays expired even if asked again earlier in time.
     expect(hasSession(req, t0)).toBe(false);
+  });
+
+  test('deleteSession forgets only the request\'s own session', () => {
+    const a = createSession();
+    const b = createSession();
+    deleteSession(withCookie(`agentio_session=${a}`));
+    expect(hasSession(withCookie(`agentio_session=${a}`))).toBe(false);
+    expect(hasSession(withCookie(`agentio_session=${b}`))).toBe(true);
+    deleteSession(withCookie(null)); // nothing to forget, nothing thrown
   });
 
   test('clearSessions drops every session', () => {

@@ -9,6 +9,7 @@ import { RateLimiter } from './rate-limit';
 import {
   clearSessions,
   createSession,
+  deleteSession,
   expiredSessionCookie,
   hasSession,
   isSecureRequest,
@@ -40,10 +41,19 @@ async function handleUnlock(request: Request, ip: string): Promise<Response> {
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession(), isSecureRequest(request)) });
 }
 
+const signedOut = (request: Request) =>
+  new Response(null, { status: 204, headers: { 'Set-Cookie': expiredSessionCookie(isSecureRequest(request)) } });
+
 function handleLock(request: Request): Response {
   lockVault();
   clearSessions();
-  return new Response(null, { status: 204, headers: { 'Set-Cookie': expiredSessionCookie(isSecureRequest(request)) } });
+  return signedOut(request);
+}
+
+/** Ends this browser's session only; the vault and other sessions are untouched. */
+function handleLogout(request: Request): Response {
+  deleteSession(request);
+  return signedOut(request);
 }
 
 async function handleProfiles(): Promise<Response> {
@@ -125,6 +135,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (!hasSession(request)) throw new CliError('AUTH_FAILED', 'Unauthorized');
 
     if (method === 'POST' && pathname === '/ui/api/lock') return handleLock(request);
+    if (method === 'POST' && pathname === '/ui/api/logout') return handleLogout(request);
 
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked');
 
