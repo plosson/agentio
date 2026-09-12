@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { encodeToken } from './token';
-import { isRemoteMode, remoteProfiles, resetRemoteCache } from './remote';
+import { clearRemoteToken, hub, isRemoteMode, remoteProfiles, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from './remote';
 import { getCredentials, setCredentials } from './token-store';
 import { isProfileReadOnly, listProfileRefs, loadConfig, resolveProfile } from '../config/config-manager';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -55,6 +55,41 @@ afterEach(() => {
 });
 
 describe('remote mode', () => {
+  test('falls back to the token file, and the env var wins over it', async () => {
+    const { mkdtemp, rm } = await import('fs/promises');
+    const { tmpdir } = await import('os');
+    const { statSync } = await import('fs');
+    const home = await mkdtemp(`${tmpdir()}/agentio-token-test-`);
+    const savedHome = process.env.HOME;
+    process.env.HOME = home;
+    delete process.env.AGENTIO_TOKEN;
+    resetRemoteCache();
+    try {
+      expect(isRemoteMode()).toBe(false);
+      const fileToken = encodeToken({ url: 'https://file.example', kid: 'f', secret: 's' });
+      const path = await saveRemoteToken(fileToken);
+      expect(path).toBe(tokenFilePath());
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(isRemoteMode()).toBe(true);
+      expect(remoteToken()).toBe(fileToken);
+      expect(hub().url).toBe('https://file.example');
+
+      process.env.AGENTIO_TOKEN = encodeToken({ url: 'https://env.example', kid: 'e', secret: 's' });
+      resetRemoteCache();
+      expect(hub().url).toBe('https://env.example');
+      delete process.env.AGENTIO_TOKEN;
+      resetRemoteCache();
+
+      expect(await clearRemoteToken()).toBe(true);
+      expect(await clearRemoteToken()).toBe(false);
+      expect(isRemoteMode()).toBe(false);
+    } finally {
+      process.env.HOME = savedHome;
+      resetRemoteCache();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test('is on exactly when AGENTIO_TOKEN is set', () => {
     expect(isRemoteMode()).toBe(true);
     delete process.env.AGENTIO_TOKEN;

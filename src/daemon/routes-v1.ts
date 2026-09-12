@@ -6,7 +6,8 @@ import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, type ApiKeyView } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
-import { errorResponse, json, profilePath } from './http';
+import { errorResponse, json, profilePath, readJson } from './http';
+import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 
 /**
  * The credential API remote agents call with `Authorization: Bearer agio1.…`.
@@ -30,6 +31,24 @@ export const v1KeyLimiter = new RateLimiter(
   60_000,
   `More than ${V1_REQUESTS_PER_MINUTE} requests a minute for this key, try again in a minute`,
 );
+
+/**
+ * Login requests and polls per address. A polite client polls every 3 s
+ * (20 a minute); this leaves room for a retry without letting one address
+ * spin the store.
+ */
+export const deviceLimiter = new RateLimiter(40, 60_000, 'Too many login requests from this address, slow down');
+
+/** `agentio login` starts here: no token yet, so no bearer check, and the vault may still be locked. */
+async function handleDeviceStart(request: Request): Promise<Response> {
+  const { name } = await readJson<{ name?: unknown }>(request);
+  return json(startDeviceAuth(name), 201);
+}
+
+async function handleDevicePoll(request: Request): Promise<Response> {
+  const { deviceCode } = await readJson<{ deviceCode?: unknown }>(request);
+  return json(pollDeviceAuth(deviceCode));
+}
 
 async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const header = request.headers.get('authorization') ?? '';
@@ -113,6 +132,11 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
   if (!pathname.startsWith('/v1/')) return null;
 
   try {
+    if (method === 'POST' && (pathname === '/v1/device' || pathname === '/v1/device/token')) {
+      deviceLimiter.check(ip);
+      return pathname === '/v1/device' ? await handleDeviceStart(request) : await handleDevicePoll(request);
+    }
+
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked on the hub');
     const key = await authenticate(request, ip);
     v1KeyLimiter.check(key.id);

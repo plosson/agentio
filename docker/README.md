@@ -88,13 +88,13 @@ The token is printed once. Scope each key to what that agent needs; a read-only 
 Install the binary, then:
 
 ```bash
-export AGENTIO_TOKEN='agio1.…'
+agentio login https://<domain>   # prints a code; approve it in the hub UI, the token is stored in ~/.config/agentio/token
 agentio doctor          # reachability, token, lock state, in one line
 agentio status          # the profiles this token may use
 agentio gdrive list     # any service command, credentials served by the hub
 ```
 
-No vault, no passphrase, nothing written to disk. `vault`, `key`, `daemon`, `reauth`, and profile changes are refused here; they belong on the hub.
+`login` needs no browser on the agent machine: open the printed URL from anywhere, check the code matches, pick the profiles, approve. A key made with `agentio key create` works the same way through `export AGENTIO_TOKEN='agio1.…'`, which also overrides a stored login. No vault and no passphrase on this machine. `vault`, `key`, `daemon`, `reauth`, and profile changes are refused here; they belong on the hub.
 
 ### Day-to-day
 

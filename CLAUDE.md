@@ -378,7 +378,14 @@ agentio sql profile add|list|remove
 
 ### Remote mode
 
-An agent machine needs no vault. With `AGENTIO_TOKEN` set to a token from the hub (`src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes or writes. The seams are `profilesOf` in the config manager and `getCredentials` in the token store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+An agent machine needs no vault. With a token from the hub, either `AGENTIO_TOKEN` or the file `agentio login` stores at `~/.config/agentio/token` (env var wins; `src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes or writes. The seams are `profilesOf` in the config manager and `getCredentials` in the token store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+
+```bash
+agentio login <hub-url> [--name <n>] [--no-browser]   # prints a code, opens <hub>/ui#authorize=<code>, waits for approval, stores the token (0600)
+agentio logout                                         # deletes the stored token; the key stays on the hub until revoked there
+```
+
+`login` is the device flow in `src/auth/device-login.ts`: no callback server, so it works over SSH; the owner compares the code in the browser with the terminal before approving. Both commands bypass the vault check.
 
 ### API keys
 
@@ -404,6 +411,8 @@ agentio daemon status            # probe /health
 The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked from the admin UI at `/ui`, or at boot when `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. Once unlocked it stays so until Lock is pressed or the process restarts. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
 **Credential API** (`src/daemon/routes-v1.ts`): what remote agents call with `Authorization: Bearer agio1.…`. `GET /v1/profiles`, `GET /v1/profiles/:service/:name`, and `POST /v1/profiles/:service/:name/credentials`, which returns the credential object the local code expects, refreshed first, minus each refresher's `secretFields` (`src/auth/refresh.ts`). Error codes map to HTTP in `src/daemon/http.ts`. Two limits: five bad tokens a minute per address, and 120 requests a minute per key. Details: `docs/design/remote-vault.md`, sections HTTP API and What gets stripped. Deployment: `docker/README.md`, section Running the vault hub on a VPS.
+
+**Device login** (`src/daemon/device-auth.ts`): how `agentio login <hub>` gets a key without anyone pasting a token. `POST /v1/device {name}` (no bearer, vault may be locked) returns a `userCode` like `WDJB-MJHT` and a `deviceCode`; the CLI polls `POST /v1/device/token {deviceCode}` every 3 s and gets `pending`, `denied`, or `approved` with the token, once. The owner opens `/ui#authorize=<code>`, unlocks, checks the code against the terminal, sets name, scope and read-only, and approves (`POST /ui/api/authorize/:code`), which creates the key through `createApiKey`. Requests live in memory for 10 minutes, at most 100 at a time, 40 device calls a minute per address.
 
 **Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): a centred Unlock view, then three tabs. Profiles shows the same data as `agentio status --json` as one row per profile sorted by name, with the service's brand icon, a client-side filter on the profile name, and Test, a read-only toggle and Delete (profile and credentials) per row. API keys lists keys with their `agio1.…xxxx` hint, a Create panel, and a one-time token dialog. Settings holds the hub address and a danger zone with Lock. Destructive actions confirm in a `<dialog>`; results show as toasts. Details: `docs/design/remote-vault.md`, section Admin UI. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session; `POST /ui/api/logout` (Sign out on Settings) drops only the caller's. Add and reauth still happen with the CLI on the hub host.
 

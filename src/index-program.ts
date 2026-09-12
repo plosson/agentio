@@ -26,6 +26,7 @@ import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerKeyCommands } from './commands/key';
+import { registerLoginCommands } from './commands/login';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
@@ -86,6 +87,7 @@ export function createProgram(): Command {
   registerDaemonCommands(program);
   registerDoctorCommand(program);
   registerKeyCommands(program);
+  registerLoginCommands(program);
   registerProfileCommands(program);
   registerReauthCommand(program);
   registerSkillCommand(program);
@@ -111,7 +113,7 @@ export function createProgram(): Command {
       });
   }
 
-  const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault']);
+  const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout']);
   // Owner-only on the hub host: they touch the vault or the daemon.
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
@@ -144,7 +146,7 @@ export function createProgram(): Command {
   });
 
   // Setup
-  ['vault', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
+  ['vault', 'login', 'logout', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
 
   // Services
   [

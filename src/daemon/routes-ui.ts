@@ -16,6 +16,7 @@ import {
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
+import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
 
 export interface UiContext {
@@ -102,6 +103,22 @@ async function handleRevokeKey(id: string): Promise<Response> {
   return new Response(null, { status: 204 });
 }
 
+/** `/ui/api/authorize/<user-code>` → the code, or null. */
+function authorizeCode(pathname: string): string | null {
+  const m = pathname.match(/^\/ui\/api\/authorize\/([^/]+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Approve creates the key with the owner's chosen scope; deny just answers the CLI. */
+async function handleAuthorize(request: Request, code: string): Promise<Response> {
+  const body = await readJson<KeyBody & { approve?: unknown }>(request);
+  if (body.approve !== true) {
+    denyDeviceAuth(code);
+    return new Response(null, { status: 204 });
+  }
+  return json({ key: await approveDeviceAuth(code, body, body.url) }, 201);
+}
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
@@ -150,6 +167,10 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
+
+    const code = authorizeCode(pathname);
+    if (code && method === 'GET') return json(describeDeviceAuth(code));
+    if (code && method === 'POST') return await handleAuthorize(request, code);
 
     if (method === 'GET' && pathname === '/ui/api/keys') return json({ keys: await listApiKeys() });
     if (method === 'POST' && pathname === '/ui/api/keys') return await handleCreateKey(request);

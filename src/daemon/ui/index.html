@@ -91,6 +91,7 @@
   .setting:last-child { padding-bottom: 0; }
   .setting p { margin: 2px 0 0; color: var(--text-secondary); font-size: .875rem; }
   .setting strong { font-size: .9375rem; }
+  .code { font-size: 1.5rem; font-weight: 600; letter-spacing: .1em; }
   #view-unlock { max-width: 400px; margin: 10vh auto 0; text-align: center; }
   #view-unlock .icon { width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); display: flex; align-items: center; justify-content: center; }
   #view-unlock h2 { margin: 0 0 4px; font-size: 1.375rem; }
@@ -194,6 +195,31 @@
       </div>
     </section>
   </section>
+  <section id="view-authorize" hidden>
+    <div class="page-head"><div><h2>Sign-in request</h2><p>A machine running <span class="mono">agentio login</span> asks for a key to this hub.</p></div></div>
+    <section class="card" style="max-width:640px">
+      <div class="alert error" id="auth-error" hidden style="margin:0 0 16px"></div>
+      <div id="auth-request" hidden>
+        <div class="setting"><div><strong>Code shown in the terminal</strong><p>Approve only if it matches.</p></div><span class="mono code" id="auth-code"></span></div>
+        <div class="setting"><div><strong>Requested from</strong><p>The name the machine gave for itself.</p></div><span class="mono" id="auth-from"></span></div>
+        <form id="auth-form">
+          <div class="field"><label for="auth-name">Key name</label><input type="text" id="auth-name" required></div>
+          <div class="field">
+            <label>Scope</label>
+            <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
+            <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
+            <div class="choices" id="auth-profiles" hidden></div>
+          </div>
+          <div class="field"><label class="toggle"><input type="checkbox" id="auth-ro"> read-only on every profile this key can see</label></div>
+          <div class="row right"><button type="button" class="danger" id="auth-deny-btn">Deny</button><button class="primary" type="submit" id="auth-approve-btn">Approve</button></div>
+        </form>
+      </div>
+      <div id="auth-done" hidden>
+        <h3 id="auth-done-title"></h3>
+        <p class="note" id="auth-done-body" style="margin:4px 0 0"></p>
+      </div>
+    </section>
+  </section>
 </main>
 
 <dialog id="confirm-dialog">
@@ -215,7 +241,8 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys'), settings: $('view-settings') };
+  const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys'), settings: $('view-settings'), authorize: $('view-authorize') };
+  const TABS = ['profiles', 'keys', 'settings'];
   const lastTested = new Map(); // profile ref -> Date, kept for this page load only
 
   // Service id -> [display name, brand colour or null for the text colour, Simple Icons path (CC0)].
@@ -251,11 +278,18 @@
     $('nav').hidden = name === 'unlock';
     document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
     if (name === 'unlock') { $('passphrase').value = ''; $('passphrase').focus(); }
-    else history.replaceState(null, '', '#' + name);
+    else if (TABS.includes(name)) history.replaceState(null, '', '#' + name);
   }
 
-  const tabFromHash = () => (['profiles', 'keys', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'profiles');
-  window.addEventListener('hashchange', () => { if (views.unlock.hidden) show(tabFromHash()); });
+  // #profiles, #keys, #settings pick a tab; #authorize=<code> is the login approval page.
+  const authCodeFromHash = () => (location.hash.startsWith('#authorize=') ? decodeURIComponent(location.hash.slice('#authorize='.length)) : null);
+  const tabFromHash = () => (TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'profiles');
+  function openFromHash() {
+    const code = authCodeFromHash();
+    if (code) return openAuthorize(code);
+    show(tabFromHash());
+  }
+  window.addEventListener('hashchange', () => { if (views.unlock.hidden) openFromHash(); });
 
   async function api(path, options = {}) {
     const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -329,6 +363,7 @@
     });
     $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr>';
     $('key-profiles').innerHTML = choices.join('');
+    $('auth-profiles').innerHTML = choices.join('');
     applyFilter();
   }
 
@@ -446,9 +481,11 @@
     catch { $('copy-btn').textContent = 'Select and copy manually'; }
   });
 
-  const scopeIsSome = () => document.querySelector('input[name=scope]:checked').value === 'some';
-  const syncScope = () => { $('key-profiles').hidden = !scopeIsSome(); };
-  document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', syncScope));
+  // Both the Create key form and the sign-in approval carry the same scope fields.
+  const scopeIsSome = (form) => form.querySelector('input[name=scope]:checked').value === 'some';
+  const syncScope = (form) => { form.querySelector('.choices').hidden = !scopeIsSome(form); };
+  const scopeOf = (form) => (scopeIsSome(form) ? [...form.querySelectorAll('.choices input:checked')].map((i) => i.value) : '*');
+  document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', () => syncScope(r.form)));
   $('hub-origin').textContent = window.location.origin;
   $('settings-origin').textContent = window.location.origin;
   $('unlock-host').textContent = window.location.host;
@@ -457,20 +494,57 @@
     $('key-panel').hidden = !open;
     $('key-new-btn').hidden = open;
     if (open) $('key-name').focus();
-    else { $('key-form').reset(); syncScope(); $('key-error').hidden = true; }
+    else { $('key-form').reset(); syncScope($('key-form')); $('key-error').hidden = true; }
   }
   $('key-new-btn').addEventListener('click', () => toggleKeyPanel(true));
   $('key-cancel-btn').addEventListener('click', () => toggleKeyPanel(false));
 
   async function openVault() {
-    show(tabFromHash());
     await Promise.all([loadProfiles(), loadKeys()]);
+    await openFromHash();
   }
+
+  async function openAuthorize(code) {
+    show('authorize');
+    $('auth-error').hidden = true;
+    $('auth-request').hidden = true;
+    $('auth-done').hidden = true;
+    const res = await api('/ui/api/authorize/' + encodeURIComponent(code));
+    if (lostAccess(res)) return;
+    if (!res.ok) { $('auth-error').textContent = res.error; $('auth-error').hidden = false; return; }
+    $('auth-code').textContent = res.body.userCode;
+    $('auth-from').textContent = res.body.name;
+    $('auth-name').value = res.body.name;
+    $('auth-form').reset(); $('auth-name').value = res.body.name; syncScope($('auth-form'));
+    $('auth-request').hidden = false;
+  }
+
+  async function decideAuthorize(approve) {
+    const form = $('auth-form');
+    const body = approve
+      ? { approve: true, name: $('auth-name').value, allowedProfiles: scopeOf(form), readOnly: $('auth-ro').checked, url: window.location.origin }
+      : { approve: false };
+    $('auth-approve-btn').disabled = true; $('auth-deny-btn').disabled = true;
+    try {
+      const res = await api('/ui/api/authorize/' + encodeURIComponent($('auth-code').textContent), { method: 'POST', body: JSON.stringify(body) });
+      if (lostAccess(res)) return;
+      if (!res.ok) { $('auth-error').textContent = res.error; $('auth-error').hidden = false; return; }
+      $('auth-request').hidden = true;
+      $('auth-done-title').textContent = approve ? 'Approved' : 'Denied';
+      $('auth-done-body').textContent = approve
+        ? 'The terminal receives its token within a few seconds. You can close this page.'
+        : 'The terminal is told no. Nothing was created.';
+      $('auth-done').hidden = false;
+      if (approve) await loadKeys();
+    } finally { $('auth-approve-btn').disabled = false; $('auth-deny-btn').disabled = false; }
+  }
+  $('auth-form').addEventListener('submit', (ev) => { ev.preventDefault(); decideAuthorize(true); });
+  $('auth-deny-btn').addEventListener('click', () => decideAuthorize(false));
 
   $('key-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const err = $('key-error'); err.hidden = true;
-    const allowedProfiles = scopeIsSome() ? [...$('key-profiles').querySelectorAll('input:checked')].map((i) => i.value) : '*';
+    const allowedProfiles = scopeOf($('key-form'));
     $('key-create-btn').disabled = true;
     try {
       const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
