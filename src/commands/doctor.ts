@@ -1,11 +1,12 @@
 import { Command } from 'commander';
-import { handleError } from '../utils/errors';
+import { CliError, handleError } from '../utils/errors';
 import { vaultExists } from '../vault/vault';
 import { loadConfig } from '../config/config-manager';
 import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
 import { getDaemonHealth } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
+import { hub, isRemoteMode, remoteProfiles } from '../auth/remote';
 
 export interface Check {
   name: string;
@@ -47,6 +48,18 @@ async function checkVault(): Promise<Check> {
   return { name: 'Vault', status: 'ok', detail: `at ${path}` };
 }
 
+/** Remote mode: the hub is the vault. One call proves reachability, token, and lock state. */
+async function checkHub(): Promise<Check> {
+  const url = hub().url;
+  try {
+    const profiles = await remoteProfiles();
+    return { name: 'Hub', status: 'ok', detail: `${url}, ${profiles.length} profile(s) allowed for this token` };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { name: 'Hub', status: 'error', detail, fix: err instanceof CliError ? err.suggestion : undefined };
+  }
+}
+
 export async function checkDaemon(): Promise<Check> {
   const health = await getDaemonHealth();
   if (!health) return { name: 'Daemon', status: 'warn', detail: 'not running', fix: 'agentio daemon start' };
@@ -54,7 +67,8 @@ export async function checkDaemon(): Promise<Check> {
   return { name: 'Daemon', status: 'ok', detail: 'running' };
 }
 
-function checkProfiles(cfg: Config | null): Check {
+async function checkProfiles(): Promise<Check> {
+  const cfg = await loadConfig().catch(() => null);
   if (!cfg) return { name: 'Profiles', status: 'error', detail: 'cannot read config' };
   const total = Object.values(cfg.profiles).reduce((acc, arr) => acc + (arr ?? []).length, 0);
   if (total === 0) {
@@ -74,12 +88,9 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose vault, daemon, and profiles')
     .action(async () => {
       try {
-        const [cfg, vault, daemon] = await Promise.all([
-          loadConfig().catch(() => null),
-          checkVault(),
-          checkDaemon(),
-        ]);
-        const checks: Check[] = [vault, daemon, checkProfiles(cfg)];
+        const checks: Check[] = isRemoteMode()
+          ? [await checkHub()]
+          : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
 
         console.log(renderChecks(checks));
 

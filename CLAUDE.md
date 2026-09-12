@@ -376,6 +376,10 @@ agentio sql query [query] [--limit N] [--format table|json|csv]
 agentio sql profile add|list|remove
 ```
 
+### Remote mode
+
+An agent machine needs no vault. With `AGENTIO_TOKEN` set to a token from the hub (`src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes or writes. The seams are `profilesOf` in the config manager and `getCredentials` in the token store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+
 ### API keys
 
 Keys let remote agents read credentials from this vault hub. Create them here or in the admin UI; both call `src/auth/api-keys.ts`. Token format and the hub-URL rule: `docs/design/remote-vault.md`, section Token format.

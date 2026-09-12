@@ -1,4 +1,5 @@
 import { loadVault, updateVault } from '../vault/vault';
+import { isRemoteMode, remoteCredentials } from './remote';
 import type { StoredCredentials } from '../types/tokens';
 import type { ServiceName } from '../types/config';
 
@@ -6,6 +7,7 @@ export async function getCredentials<T = Record<string, unknown>>(
   service: ServiceName,
   profile: string
 ): Promise<T | null> {
+  if (isRemoteMode()) return remoteCredentials<T>(service, profile);
   const { credentials } = await loadVault();
   return (credentials[service]?.[profile] as T) || null;
 }
