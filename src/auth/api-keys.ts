@@ -39,6 +39,8 @@ function secretMatches(secret: string, storedHash: string): boolean {
 }
 
 const newSecret = () => randomBytes(32).toString('base64url');
+/** Enough to recognise a token an agent has in hand, far too little to guess it. */
+const hintOf = (secret: string) => secret.slice(-4);
 const newId = () => randomBytes(6).toString('base64url');
 const findKey = (config: Config, id: string) => config.apiKeys?.find((k) => k.id === id);
 const noKey = (id: string) => new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
@@ -111,7 +113,7 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
     const keys = (config.apiKeys ??= []);
     let id = newId();
     while (keys.some((k) => k.id === id)) id = newId();
-    const created: ApiKey = { id, name, secretHash: hashSecret(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
+    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
     keys.push(created);
     return created;
   });
@@ -134,6 +136,7 @@ export function rotateApiKey(id: string, hubUrl: unknown): Promise<IssuedKey> {
   return withKey(id, (key) => {
     const secret = newSecret();
     key.secretHash = hashSecret(secret);
+    key.hint = hintOf(secret);
     return { key: view(key), token: encodeToken({ url, kid: key.id, secret }) };
   });
 }

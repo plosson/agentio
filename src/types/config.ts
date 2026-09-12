@@ -14,6 +14,7 @@ export interface ApiKey {
   id: string;              // short id embedded in the token
   name: string;
   secretHash: string;      // sha256 hex of the 32-byte secret
+  hint?: string;           // last characters of the secret, to tell tokens apart
   allowedProfiles: ApiKeyScope;
   readOnly: boolean;       // forces read-only on every profile the key can see
   createdAt: string;       // ISO

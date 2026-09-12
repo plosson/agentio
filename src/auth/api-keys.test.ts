@@ -25,6 +25,8 @@ describe('api keys', () => {
     const { key, token } = await createApiKey({ name: 'agent', allowedProfiles: '*', readOnly: false }, HUB);
     expect(key).not.toHaveProperty('secretHash');
     expect(decodeToken(token)).toMatchObject({ url: HUB, kid: key.id });
+    // The hint tells tokens apart in a list; four base64url characters give nothing away.
+    expect(key.hint).toBe(token.slice(-4));
 
     const stored = (await loadVault()).config.apiKeys![0];
     expect(stored.secretHash).toMatch(/^[0-9a-f]{64}$/);

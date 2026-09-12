@@ -82,7 +82,7 @@ export function registerKeyCommands(program: Command): void {
           }
           for (const k of keys) {
             const used = k.lastUsedAt ? `last used ${k.lastUsedAt}` : 'never used';
-            console.log(`${k.id}  ${k.name}  ${describeKey(k)}  created ${k.createdAt}  ${used}`);
+            console.log(`${k.id}  ${k.name}  agio1.…${k.hint ?? "????"}  ${describeKey(k)}  created ${k.createdAt}  ${used}`);
           }
         } catch (error) {
           handleError(error);

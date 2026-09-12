@@ -8,139 +8,223 @@
   :root {
     --bg: #f8f9fa; --surface: #ffffff; --border: #d1d9e0; --border-light: #e8ecf0;
     --text: #1f2328; --text-secondary: #656d76; --text-muted: #8b949e;
-    --accent: #0969da; --accent-hover: #0860ca;
+    --accent: #0969da; --accent-hover: #0860ca; --accent-bg: #ddf4ff;
     --success: #1a7f37; --success-bg: #dafbe1; --warning: #9a6700; --warning-bg: #fff8c5;
     --error: #cf222e; --error-bg: #ffebe9; --code-bg: #f6f8fa;
-    --radius: 8px; --shadow: 0 1px 3px rgba(31,35,40,.04);
+    --radius: 8px; --shadow: 0 1px 3px rgba(31,35,40,.04); --shadow-lg: 0 8px 24px rgba(31,35,40,.12);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0d1117; --surface: #161b22; --border: #30363d; --border-light: #21262d;
       --text: #e6edf3; --text-secondary: #8b949e; --text-muted: #6e7681;
-      --accent: #58a6ff; --accent-hover: #79c0ff;
+      --accent: #58a6ff; --accent-hover: #79c0ff; --accent-bg: rgba(56,139,253,.15);
       --success: #3fb950; --success-bg: rgba(46,160,67,.15); --warning: #d29922; --warning-bg: rgba(187,128,9,.15);
       --error: #f85149; --error-bg: rgba(248,81,73,.15); --code-bg: #0d1117;
-      --shadow: 0 1px 3px rgba(0,0,0,.3);
+      --shadow: 0 1px 3px rgba(0,0,0,.3); --shadow-lg: 0 8px 24px rgba(0,0,0,.5);
     }
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "IBM Plex Sans", sans-serif; }
-  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
-  header h1 { margin: 0; font-size: 1.125rem; }
-  header .meta { color: var(--text-secondary); font-size: .8125rem; }
-  main { max-width: 960px; margin: 32px auto; padding: 0 24px; }
+  header { display: flex; align-items: center; gap: 32px; padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  header h1 { margin: 0; font-size: 1.125rem; padding: 14px 0; }
+  header .meta { margin-left: auto; color: var(--text-secondary); font-size: .8125rem; }
+  nav { display: flex; gap: 4px; align-self: stretch; }
+  nav a { display: flex; align-items: center; padding: 0 12px; font-size: .875rem; font-weight: 500; color: var(--text-secondary); text-decoration: none; border-bottom: 2px solid transparent; }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { max-width: 1040px; margin: 32px auto; padding: 0 24px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .page-head h2 { margin: 0; font-size: 1.75rem; line-height: 1.3; }
+  .page-head p { margin: 4px 0 0; color: var(--text-secondary); font-size: .875rem; }
+  .page-head .actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 6px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; }
-  .card h2 { margin: 0 0 16px; font-size: 1.375rem; line-height: 1.3; }
+  .card h3 { margin: 0 0 4px; font-size: 1.125rem; line-height: 1.3; }
+  .card + .card { margin-top: 24px; }
+  .card.table { padding: 0; overflow-x: auto; }
+  .card.danger { border-color: var(--error); }
+  .card.danger h3 { color: var(--error); }
   label { display: block; font-size: .875rem; font-weight: 500; margin-bottom: 6px; }
-  input[type=password] { width: 100%; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  input[type=password], input[type=text] { width: 100%; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
   input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
   .row.right { justify-content: flex-end; }
-  button { padding: 8px 14px; font-size: .875rem; font-weight: 600; line-height: 1; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+  button { padding: 8px 14px; font-size: .875rem; font-weight: 600; line-height: 1; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
+  button:hover { background: var(--code-bg); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.primary:hover { background: var(--accent-hover); }
+  button.danger { color: var(--error); border-color: var(--error); }
+  button.danger:hover { background: var(--error-bg); }
+  button.danger.solid { background: var(--error); color: #fff; }
+  button.danger.solid:hover { background: var(--error); opacity: .9; }
+  button.small { padding: 4px 10px; font-size: .8125rem; }
+  button.link { border: 0; background: none; color: var(--text-secondary); padding: 4px 6px; font-weight: 500; }
+  button.link:hover { color: var(--text); background: none; }
+  button.link.del:hover { color: var(--error); }
   button:disabled { opacity: .6; cursor: default; }
   .alert { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius); font-size: .875rem; }
   .alert.error { background: var(--error-bg); color: var(--error); }
   .alert.info { background: var(--code-bg); color: var(--text-secondary); }
   table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border-light); vertical-align: top; }
-  th { color: var(--text-secondary); font-weight: 500; font-size: .8125rem; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: .8125rem; white-space: nowrap; }
+  thead th { background: var(--code-bg); }
+  tr.group th { background: var(--bg); color: var(--text); font-weight: 600; font-size: .875rem; padding-top: 12px; }
+  tr.group th span { color: var(--text-muted); font-weight: 400; margin-left: 8px; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.empty { color: var(--text-secondary); padding: 32px 12px; text-align: center; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
   .badge.ok { background: var(--success-bg); color: var(--success); }
   .badge.invalid { background: var(--error-bg); color: var(--error); }
   .badge.no-creds { background: var(--warning-bg); color: var(--warning); }
   .badge.skipped { background: var(--code-bg); color: var(--text-muted); }
   .badge.testing { background: var(--accent-bg); color: var(--accent); }
-  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; }
-  button.small { padding: 4px 10px; font-size: .8125rem; }
-  button.danger { color: var(--error); border-color: var(--error); }
-  button.danger:hover { background: var(--error-bg); }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; font-weight: 400; }
   .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
   .muted { color: var(--text-secondary); }
   .note { color: var(--text-secondary); font-size: .8125rem; margin: 12px 0 0; }
-  .card + .card { margin-top: 24px; }
-  input[type=text] { width: 100%; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
   .field { margin-top: 12px; }
   .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; margin-top: 6px; font-size: .875rem; }
-  .token { margin-top: 16px; padding: 12px; border: 1px solid var(--warning); background: var(--warning-bg); border-radius: var(--radius); }
-  .token code { display: block; word-break: break-all; font-size: .8125rem; margin: 8px 0; }
-  .token .warn { color: var(--warning); font-weight: 600; font-size: .875rem; }
+  .setting { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 0; border-top: 1px solid var(--border-light); }
+  .setting:first-of-type { border-top: 0; padding-top: 8px; }
+  .setting:last-child { padding-bottom: 0; }
+  .setting p { margin: 2px 0 0; color: var(--text-secondary); font-size: .875rem; }
+  .setting strong { font-size: .9375rem; }
+  #view-unlock { max-width: 400px; margin: 10vh auto 0; text-align: center; }
+  #view-unlock .icon { width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+  #view-unlock h2 { margin: 0 0 4px; font-size: 1.375rem; }
+  #view-unlock p { margin: 0 0 20px; color: var(--text-secondary); font-size: .875rem; }
+  #view-unlock form { text-align: left; }
+  #view-unlock button { width: 100%; margin-top: 16px; padding: 10px; }
+  dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); padding: 24px; width: min(480px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h3 { margin: 0 0 8px; font-size: 1.125rem; }
+  dialog p { margin: 0; color: var(--text-secondary); font-size: .875rem; }
+  dialog .row { margin-top: 20px; }
+  .token-box { display: flex; gap: 8px; align-items: stretch; margin-top: 16px; }
+  .token-box code { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--code-bg); font-size: .8125rem; word-break: break-all; }
+  .warn-box { margin-top: 16px; padding: 10px 12px; border-radius: var(--radius); background: var(--warning-bg); color: var(--warning); font-size: .8125rem; font-weight: 500; }
+  #toasts { position: fixed; right: 24px; bottom: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+  .toast { padding: 10px 14px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: .875rem; box-shadow: var(--shadow-lg); max-width: 360px; }
+  .toast.error { background: var(--error); color: #fff; }
 </style>
 </head>
 <body>
 <header>
   <h1>agentio vault</h1>
+  <nav id="nav" hidden>
+    <a href="#profiles" data-view="profiles">Profiles</a>
+    <a href="#keys" data-view="keys">API keys</a>
+    <a href="#settings" data-view="settings">Settings</a>
+  </nav>
   <span class="meta" id="version"></span>
 </header>
 <main>
   <section class="card" id="view-unlock" hidden>
+    <div class="icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
     <h2>Unlock the vault</h2>
+    <p>on <span class="mono" id="unlock-host"></span></p>
     <form id="unlock-form">
       <label for="passphrase">Passphrase</label>
       <input type="password" id="passphrase" autocomplete="current-password" autofocus required>
-      <div class="row right">
-        <button class="primary" type="submit" id="unlock-btn">Unlock</button>
-      </div>
+      <button class="primary" type="submit" id="unlock-btn">Unlock</button>
       <div class="alert error" id="unlock-error" hidden></div>
     </form>
   </section>
 
-  <div id="view-vault" hidden>
-  <section class="card" id="view-profiles">
-    <h2>Profiles</h2>
-    <div class="alert info" id="profiles-msg" hidden></div>
-    <table>
-      <thead><tr><th>Service</th><th>Profile</th><th>Status</th><th>Details</th><th>Read-only</th><th></th></tr></thead>
-      <tbody id="profiles-body"></tbody>
-    </table>
+  <section id="view-profiles" hidden>
+    <div class="page-head">
+      <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent, grouped by service.</p></div>
+      <div class="actions"><button id="refresh-btn">Refresh</button><button class="primary" id="test-btn">Test all</button></div>
+    </div>
+    <div class="alert info" id="profiles-msg" hidden style="margin:0 0 16px"></div>
+    <div class="card table">
+      <table id="profiles-table">
+        <thead><tr><th>Profile</th><th>Status</th><th>Details</th><th>Last tested</th><th>Read-only</th><th></th></tr></thead>
+      </table>
+    </div>
     <p class="note">Add or reauthorise profiles with the CLI on this host: <span class="mono">agentio &lt;service&gt; profile add</span>.</p>
-    <div class="row right">
-      <button id="refresh-btn">Refresh</button>
-      <button id="test-btn">Test credentials</button>
-      <button id="lock-btn">Lock vault</button>
+  </section>
+
+  <section id="view-keys" hidden>
+    <div class="page-head">
+      <div><h2>API keys</h2><p>Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It reads the profiles it is scoped to and nothing else.</p></div>
+      <div class="actions"><button class="primary" id="key-new-btn">Create key</button></div>
+    </div>
+    <section class="card" id="key-panel" hidden style="margin-bottom:24px">
+      <form id="key-form">
+        <h3>New key</h3>
+        <p class="note" style="margin:0">Its token will point agents at <span class="mono" id="hub-origin"></span>.</p>
+        <div class="field"><label for="key-name">Name</label><input type="text" id="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
+        <div class="field">
+          <label>Scope</label>
+          <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
+          <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
+          <div class="choices" id="key-profiles" hidden></div>
+        </div>
+        <div class="field"><label class="toggle"><input type="checkbox" id="key-ro"> read-only on every profile this key can see</label></div>
+        <div class="alert error" id="key-error" hidden></div>
+        <div class="row right"><button type="button" id="key-cancel-btn">Cancel</button><button class="primary" type="submit" id="key-create-btn">Create key</button></div>
+      </form>
+    </section>
+    <div class="card table">
+      <table>
+        <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Read-only</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <tbody id="keys-body"></tbody>
+      </table>
     </div>
   </section>
 
-  <section class="card" id="view-keys">
-    <h2>API keys</h2>
-    <p class="note" style="margin:0 0 12px">Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It can read the profiles it is scoped to and nothing else.</p>
-    <table>
-      <thead><tr><th>Name</th><th>Scope</th><th>Read-only</th><th>Created</th><th>Last used</th><th></th></tr></thead>
-      <tbody id="keys-body"></tbody>
-    </table>
-    <div class="token" id="token-box" hidden>
-      <div class="warn">Copy this token now. It is shown once and cannot be recovered, only rotated.</div>
-      <code id="token-value"></code>
-      <button class="small" id="copy-btn" type="button">Copy</button>
-    </div>
-    <form id="key-form" style="margin-top:20px">
-      <h3 style="font-size:1rem;margin:0 0 4px">New key</h3>
-      <p class="note" style="margin:0">Tokens will point agents at <span class="mono" id="hub-origin"></span>.</p>
-      <div class="field"><label for="key-name">Name</label><input type="text" id="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
-      <div class="field">
-        <label>Scope</label>
-        <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
-        <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
-        <div class="choices" id="key-profiles" hidden></div>
+  <section id="view-settings" hidden>
+    <div class="page-head"><div><h2>Settings</h2><p>This hub, and the one action that affects every agent at once.</p></div></div>
+    <section class="card">
+      <h3>Hub</h3>
+      <div class="setting"><div><strong>Address</strong><p>What tokens created here point agents at.</p></div><span class="mono" id="settings-origin"></span></div>
+      <div class="setting"><div><strong>Version</strong><p>The agentio build running this hub.</p></div><span class="mono" id="settings-version"></span></div>
+      <div class="setting"><div><strong>Browser session</strong><p>Ends after 30 idle minutes. The vault itself stays unlocked.</p></div></div>
+    </section>
+    <section class="card danger">
+      <h3>Danger zone</h3>
+      <div class="setting">
+        <div><strong>Lock the vault</strong><p>Forgets the passphrase in memory. Every agent using this hub fails until someone unlocks it here again.</p></div>
+        <button class="danger" id="lock-btn">Lock vault</button>
       </div>
-      <div class="field"><label class="toggle"><input type="checkbox" id="key-ro"> read-only on every profile this key can see</label></div>
-      <div class="row right"><button class="primary" type="submit" id="key-create-btn">Create key</button></div>
-      <div class="alert error" id="key-error" hidden></div>
-    </form>
+    </section>
   </section>
-  </div>
 </main>
+
+<dialog id="confirm-dialog">
+  <h3 id="confirm-title"></h3>
+  <p id="confirm-body"></p>
+  <form method="dialog" class="row right"><button value="cancel">Cancel</button><button value="ok" class="danger solid" id="confirm-ok"></button></form>
+</dialog>
+
+<dialog id="token-dialog">
+  <h3>Keep this token safe</h3>
+  <p>Set it on the agent machine as <span class="mono">AGENTIO_TOKEN</span>.</p>
+  <div class="token-box"><code id="token-value"></code><button id="copy-btn" type="button">Copy</button></div>
+  <div class="warn-box">You won't be able to see it again. If it is lost, rotate the key.</div>
+  <form method="dialog" class="row right"><button class="primary" value="done">Done</button></form>
+</dialog>
+
+<div id="toasts"></div>
+
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const views = { unlock: $('view-unlock'), vault: $('view-vault') };
+  const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys'), settings: $('view-settings') };
+  const lastTested = new Map(); // profile ref -> Date, kept for this page load only
 
   function show(name) {
     for (const [key, el] of Object.entries(views)) el.hidden = key !== name;
+    $('nav').hidden = name === 'unlock';
+    document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === name));
     if (name === 'unlock') { $('passphrase').value = ''; $('passphrase').focus(); }
+    else history.replaceState(null, '', '#' + name);
   }
+
+  const tabFromHash = () => (['profiles', 'keys', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'profiles');
+  window.addEventListener('hashchange', () => { if (views.unlock.hidden) show(tabFromHash()); });
 
   async function api(path, options = {}) {
     const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -150,50 +234,88 @@
     return { ok: res.ok, status: res.status, body, error: (body && body.error) || 'Request failed' };
   }
 
+  /** An answer saying the session or the vault is gone sends the page back to Unlock. */
+  function lostAccess(res) {
+    if (res.status !== 401 && res.status !== 503) return false;
+    show('unlock');
+    return true;
+  }
+
   function escape(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  function toast(message, kind) {
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = message;
+    $('toasts').appendChild(el);
+    setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3500);
+  }
+
+  function confirmDialog({ title, body, action }) {
+    $('confirm-title').textContent = title;
+    $('confirm-body').textContent = body;
+    $('confirm-ok').textContent = action;
+    const dialog = $('confirm-dialog');
+    dialog.returnValue = '';
+    dialog.showModal();
+    return new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true }));
+  }
+
+  function fmtRelative(date) {
+    if (!date) return '—';
+    const d = date instanceof Date ? date : new Date(date);
+    const s = Math.round((Date.now() - d.getTime()) / 1000);
+    const text = s < 45 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : s < 7 * 86400 ? Math.round(s / 86400) + ' d ago' : d.toLocaleDateString();
+    return `<span title="${escape(d.toLocaleString())}">${text}</span>`;
+  }
+
+  const STATUS_LABEL = { ok: 'ok', invalid: 'invalid', 'no-creds': 'no credentials', skipped: 'not tested', testing: 'testing…' };
+  const badge = (status) => `<span class="badge ${escape(status)}">${STATUS_LABEL[status] || escape(status)}</span>`;
+
   function renderProfiles(data) {
-    $('version').textContent = data.version ? 'v' + data.version : '';
-    const rows = [];
+    const version = data.version ? 'v' + data.version : '';
+    $('version').textContent = version;
+    $('settings-version').textContent = version || '—';
+    const groups = [];
     const choices = [];
     for (const [service, profiles] of Object.entries(data.services)) {
-      for (const p of profiles) {
-        const details = p.error || p.info || '';
+      const rows = profiles.map((p) => {
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
         const label = escape(service + '/' + p.profile);
         choices.push(`<label class="toggle"><input type="checkbox" value="${label}"> ${label}</label>`);
-        rows.push(`<tr data-ref="${ref}" data-label="${escape(service)} / ${escape(p.profile)}">
-          <td class="mono">${escape(service)}</td>
+        return `<tr data-ref="${ref}" data-label="${label}">
           <td>${escape(p.profile)}</td>
-          <td><span class="badge ${escape(p.status)}">${escape(p.status)}</span></td>
-          <td class="muted">${escape(details)}</td>
+          <td>${badge(p.status)}</td>
+          <td class="muted details">${escape(p.error || p.info || '')}</td>
+          <td class="muted tested">${fmtRelative(lastTested.get(ref))}</td>
           <td><label class="toggle"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}> read-only</label></td>
-          <td><button class="small danger del" type="button">Delete</button></td>
-        </tr>`);
-      }
+          <td class="actions"><button class="link small test" type="button">Test</button> <button class="link small del" type="button">Delete</button></td>
+        </tr>`;
+      });
+      groups.push(`<tbody><tr class="group"><th colspan="6">${escape(service)}<span>${profiles.length}</span></th></tr>${rows.join('')}</tbody>`);
     }
-    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No profiles configured.</td></tr>';
+    const table = $('profiles-table');
+    table.querySelectorAll('tbody').forEach((b) => b.remove());
+    table.insertAdjacentHTML('beforeend', groups.join('') || '<tbody><tr><td colspan="6" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr></tbody>');
     $('key-profiles').innerHTML = choices.join('');
   }
 
-  async function loadProfiles(test) {
+  const busy = (on) => { $('test-btn').disabled = on; $('refresh-btn').disabled = on; };
+
+  async function loadProfiles() {
     const msg = $('profiles-msg');
     msg.hidden = false;
-    msg.textContent = test ? 'Testing credentials, this can take a moment…' : 'Loading…';
-    $('test-btn').disabled = true;
-    $('refresh-btn').disabled = true;
+    msg.textContent = 'Loading…';
+    busy(true);
     try {
-      const res = await api('/ui/api/status?test=' + (test ? 'true' : 'false'));
-      if (res.status === 401 || res.status === 503) { show('unlock'); return; }
+      const res = await api('/ui/api/status?test=false');
+      if (lostAccess(res)) return;
       if (!res.ok) { msg.textContent = res.error; return; }
       renderProfiles(res.body);
       msg.hidden = true;
-    } finally {
-      $('test-btn').disabled = false;
-      $('refresh-btn').disabled = false;
-    }
+    } finally { busy(false); }
   }
 
   $('unlock-form').addEventListener('submit', async (ev) => {
@@ -217,55 +339,65 @@
     }
   });
 
-  $('profiles-body').addEventListener('change', async (ev) => {
+  $('profiles-table').addEventListener('change', async (ev) => {
     const box = ev.target.closest('input.ro');
     if (!box) return;
     const row = box.closest('tr');
     box.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ readOnly: box.checked }) });
-    if (!res.ok) { box.checked = !box.checked; alert(res.error); }
+    if (lostAccess(res)) return;
+    if (res.ok) toast(row.dataset.label + (box.checked ? ' is now read-only' : ' can write again'));
+    else { box.checked = !box.checked; toast(res.error, 'error'); }
     box.disabled = false;
   });
 
-  $('profiles-body').addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('button.del');
+  $('profiles-table').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button');
     if (!btn) return;
     const row = btn.closest('tr');
-    if (!confirm('Delete ' + row.dataset.label + ' and its credentials? This cannot be undone.')) return;
+    if (btn.classList.contains('test')) { await testProfiles([row]); return; }
+    if (!btn.classList.contains('del')) return;
+    const ok = await confirmDialog({
+      title: 'Delete ' + row.dataset.label + '?',
+      body: 'The profile and its stored credentials are removed from the vault, and every key scoped to it loses access. Agents using it stop working. This cannot be undone.',
+      action: 'Delete profile',
+    });
+    if (!ok) return;
     btn.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
-    if (res.ok) { row.remove(); if (!$('profiles-body').children.length) renderProfiles({ services: {} }); }
-    else { btn.disabled = false; alert(res.error); }
+    if (lostAccess(res)) return;
+    if (res.ok) { toast('Deleted ' + row.dataset.label); await loadProfiles(); }
+    else { btn.disabled = false; toast(res.error, 'error'); }
   });
-
-  function fmtDate(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
 
   function renderKeys(keys) {
     const rows = keys.map((k) => {
       const scope = k.allowedProfiles === '*' ? 'all profiles' : (k.allowedProfiles.join(', ') || 'no profiles');
       return `<tr data-id="${escape(k.id)}" data-name="${escape(k.name)}">
         <td>${escape(k.name)}<div class="muted mono" style="font-size:.75rem">${escape(k.id)}</div></td>
+        <td class="mono muted">agio1.…${escape(k.hint || '')}</td>
         <td class="muted">${escape(scope)}</td>
         <td>${k.readOnly ? 'yes' : 'no'}</td>
-        <td class="muted">${escape(fmtDate(k.createdAt))}</td>
-        <td class="muted">${escape(fmtDate(k.lastUsedAt))}</td>
-        <td><button class="small rotate" type="button">Rotate</button> <button class="small danger revoke" type="button">Revoke</button></td>
+        <td class="muted">${fmtRelative(k.createdAt)}</td>
+        <td class="muted">${k.lastUsedAt ? fmtRelative(k.lastUsedAt) : 'never'}</td>
+        <td class="actions"><button class="link small rotate" type="button">Rotate</button> <button class="link small del revoke" type="button">Revoke</button></td>
       </tr>`;
     });
-    $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No keys yet.</td></tr>';
+    $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No keys yet. Create one to let an agent machine use this hub.</td></tr>';
   }
 
   async function loadKeys() {
     const res = await api('/ui/api/keys');
+    if (lostAccess(res)) return;
     if (res.ok) renderKeys(res.body.keys);
   }
 
   function showToken(token) {
     $('copy-btn').textContent = 'Copy';
     $('token-value').textContent = token;
-    $('token-box').hidden = false;
-    $('token-box').scrollIntoView({ block: 'nearest' });
+    $('token-dialog').showModal();
   }
+  $('token-dialog').addEventListener('close', () => { $('token-value').textContent = ''; });
 
   $('copy-btn').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText($('token-value').textContent); $('copy-btn').textContent = 'Copied'; }
@@ -276,10 +408,21 @@
   const syncScope = () => { $('key-profiles').hidden = !scopeIsSome(); };
   document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', syncScope));
   $('hub-origin').textContent = window.location.origin;
+  $('settings-origin').textContent = window.location.origin;
+  $('unlock-host').textContent = window.location.host;
+
+  function toggleKeyPanel(open) {
+    $('key-panel').hidden = !open;
+    $('key-new-btn').hidden = open;
+    if (open) $('key-name').focus();
+    else { $('key-form').reset(); syncScope(); $('key-error').hidden = true; }
+  }
+  $('key-new-btn').addEventListener('click', () => toggleKeyPanel(true));
+  $('key-cancel-btn').addEventListener('click', () => toggleKeyPanel(false));
 
   async function openVault() {
-    show('vault');
-    await Promise.all([loadProfiles(false), loadKeys()]);
+    show(tabFromHash());
+    await Promise.all([loadProfiles(), loadKeys()]);
   }
 
   $('key-form').addEventListener('submit', async (ev) => {
@@ -291,10 +434,11 @@
       const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
         name: $('key-name').value, allowedProfiles, readOnly: $('key-ro').checked, url: window.location.origin,
       }) });
+      if (lostAccess(res)) return;
       if (!res.ok) { err.textContent = res.error; err.hidden = false; return; }
-      $('key-form').reset(); syncScope();
-      showToken(res.body.token);
+      toggleKeyPanel(false);
       await loadKeys();
+      showToken(res.body.token);
     } finally { $('key-create-btn').disabled = false; }
   });
 
@@ -302,43 +446,48 @@
     const btn = ev.target.closest('button'); if (!btn) return;
     const row = btn.closest('tr'); const id = row.dataset.id; const name = row.dataset.name;
     if (btn.classList.contains('rotate')) {
-      if (!confirm('Rotate "' + name + '"? The current token stops working immediately.')) return;
+      const ok = await confirmDialog({ title: 'Rotate "' + name + '"?', body: 'A new token is issued and the current one stops working immediately. Update AGENTIO_TOKEN on every machine that uses this key.', action: 'Rotate key' });
+      if (!ok) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: JSON.stringify({ url: window.location.origin }) });
-      if (res.ok) showToken(res.body.token); else alert(res.error);
+      if (lostAccess(res)) return;
+      if (res.ok) { await loadKeys(); showToken(res.body.token); } else toast(res.error, 'error');
     } else if (btn.classList.contains('revoke')) {
-      if (!confirm('Revoke "' + name + '"? Its token stops working immediately.')) return;
+      const ok = await confirmDialog({ title: 'Revoke "' + name + '"?', body: 'Its token stops working immediately and the key is deleted. Agents using it fail until they get a new key.', action: 'Revoke key' });
+      if (!ok) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id), { method: 'DELETE' });
-      if (res.ok) await loadKeys(); else alert(res.error);
+      if (lostAccess(res)) return;
+      if (res.ok) { toast('Revoked "' + name + '"'); await loadKeys(); } else toast(res.error, 'error');
     }
   });
 
   function setRowStatus(row, status, details) {
-    const badge = row.querySelector('.badge');
-    badge.className = 'badge ' + status;
-    badge.textContent = status === 'testing' ? 'testing…' : status;
-    row.querySelector('td.muted').textContent = details || '';
+    row.querySelector('.badge').outerHTML = badge(status);
+    row.querySelector('td.details').textContent = details || '';
+    if (status !== 'testing') {
+      lastTested.set(row.dataset.ref, new Date());
+      row.querySelector('td.tested').innerHTML = fmtRelative(lastTested.get(row.dataset.ref));
+    }
   }
 
   // One request per profile, so each row reports as soon as its check finishes
   // and a slow service does not hide the others. The hub serialises any token
   // refresh, so running a few at once is safe.
-  async function testProfiles() {
-    const rows = [...document.querySelectorAll('#profiles-body tr[data-ref]')];
+  async function testProfiles(rows) {
     if (!rows.length) return;
     const msg = $('profiles-msg');
-    msg.hidden = false;
-    $('test-btn').disabled = true;
-    $('refresh-btn').disabled = true;
     const counts = { ok: 0, invalid: 0, 'no-creds': 0 };
     let done = 0;
-    const update = () => { msg.textContent = `Testing ${done}/${rows.length}… ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials`; };
+    const summary = () => `${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials`;
+    const update = () => { msg.textContent = `Testing ${done}/${rows.length}… ${summary()}`; };
     for (const row of rows) setRowStatus(row, 'testing', '');
+    msg.hidden = rows.length < 2;
     update();
+    busy(true);
     const queue = rows.slice();
     const worker = async () => {
       for (let row = queue.shift(); row; row = queue.shift()) {
         const res = await api('/ui/api/profiles/' + row.dataset.ref + '/status');
-        if (res.status === 401 || res.status === 503) { show('unlock'); return; }
+        if (lostAccess(res)) return;
         if (res.ok) { setRowStatus(row, res.body.status, res.body.error || res.body.info); counts[res.body.status] = (counts[res.body.status] || 0) + 1; }
         else setRowStatus(row, 'invalid', res.error);
         done += 1; update();
@@ -346,17 +495,22 @@
     };
     try {
       await Promise.all([worker(), worker(), worker()]);
-      msg.textContent = `Tested ${rows.length} profiles: ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials.`;
-    } finally {
-      $('test-btn').disabled = false;
-      $('refresh-btn').disabled = false;
-    }
+      if (rows.length > 1) msg.textContent = `Tested ${rows.length} profiles: ${summary()}.`;
+    } finally { busy(false); }
   }
 
-  $('refresh-btn').addEventListener('click', () => loadProfiles(false));
-  $('test-btn').addEventListener('click', testProfiles);
+  $('refresh-btn').addEventListener('click', loadProfiles);
+  $('test-btn').addEventListener('click', () => testProfiles([...document.querySelectorAll('#profiles-table tr[data-ref]')]));
+
   $('lock-btn').addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: 'Lock the vault?',
+      body: 'Every agent using this hub stops until someone unlocks it here again. Cron jobs and remote machines fail in the meantime. Use this if you think the hub is compromised, or before taking it down.',
+      action: 'Lock vault',
+    });
+    if (!ok) return;
     await api('/ui/api/lock', { method: 'POST' });
+    toast('Vault locked');
     show('unlock');
   });
 
