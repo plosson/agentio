@@ -1,8 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { getFreshCredentials } from './refresh';
-import { resolveProfile } from '../config/config-manager';
+import { requireProfile } from '../utils/client-factory';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
-import { CliError, multipleProfilesError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
 
@@ -10,58 +9,37 @@ export async function getValidTokens(
   service: ServiceName,
   profileName?: string
 ): Promise<{ tokens: OAuthTokens; profile: string }> {
-  const profileResult = await resolveProfile(service, profileName);
-
-  if (profileResult.profile === null) {
-    if (profileResult.error === 'none') {
-      if (profileName) {
-        throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for ${service}`, `Run: agentio ${service} profile add`);
-      }
-      throw new CliError('PROFILE_NOT_FOUND', `No ${service} profile configured`, `Run: agentio ${service} profile add`);
-    }
-    throw multipleProfilesError(service, profileResult.names);
-  }
-
-  const profile = profileResult.profile;
-
-
+  const profile = await requireProfile(service, profileName);
   const { credentials } = await getFreshCredentials<OAuthTokens>(service, profile);
   return { tokens: credentials, profile };
 }
 
+function newGoogleOAuthClient(): OAuth2Client {
+  return new OAuth2Client(GOOGLE_OAUTH_CONFIG.clientId, GOOGLE_OAUTH_CONFIG.clientSecret);
+}
+
 /**
- * Exchange a Google refresh token for a new access token. Pure: the caller
- * decides where the result is stored. Google normally keeps the refresh
- * token, so `refreshToken` is only set when a new one came back.
+ * Exchange the refresh token for a new access token. Pure: the caller decides
+ * where the result is stored. Google normally keeps the refresh token and
+ * scope, so the stored ones are kept when the response omits them.
  */
-export async function refreshGoogleAccessToken(refreshToken: string): Promise<{
-  accessToken: string;
-  refreshToken?: string;
-  expiryDate?: number;
-  tokenType: string;
-  scope?: string;
-}> {
-  const oauth2Client = new OAuth2Client(
-    GOOGLE_OAUTH_CONFIG.clientId,
-    GOOGLE_OAUTH_CONFIG.clientSecret
-  );
-  oauth2Client.setCredentials({ refresh_token: refreshToken });
+export async function refreshGoogleAccessToken(tokens: OAuthTokens): Promise<OAuthTokens> {
+  if (!tokens.refresh_token) throw new Error('no refresh token stored');
+  const oauth2Client = newGoogleOAuthClient();
+  oauth2Client.setCredentials({ refresh_token: tokens.refresh_token });
 
   const { credentials } = await oauth2Client.refreshAccessToken();
   return {
-    accessToken: credentials.access_token!,
-    refreshToken: credentials.refresh_token || undefined,
-    expiryDate: credentials.expiry_date || undefined,
-    tokenType: credentials.token_type || 'Bearer',
-    scope: credentials.scope || undefined,
+    access_token: credentials.access_token!,
+    refresh_token: credentials.refresh_token || tokens.refresh_token,
+    expiry_date: credentials.expiry_date || undefined,
+    token_type: credentials.token_type || 'Bearer',
+    scope: credentials.scope || tokens.scope,
   };
 }
 
 export function createGoogleAuth(tokens: OAuthTokens) {
-  const oauth2Client = new OAuth2Client(
-    GOOGLE_OAUTH_CONFIG.clientId,
-    GOOGLE_OAUTH_CONFIG.clientSecret
-  );
+  const oauth2Client = newGoogleOAuthClient();
 
   oauth2Client.setCredentials({
     access_token: tokens.access_token,

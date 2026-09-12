@@ -1,10 +1,11 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
-import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from '../auth/jira-oauth';
+import { createClientGetter } from '../utils/client-factory';
+import { performJiraOAuthFlow, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
-import { CliError, handleError, multipleProfilesError } from '../utils/errors';
+import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -19,69 +20,10 @@ import {
 } from '../utils/output';
 import type { JiraCredentials } from '../types/jira';
 
-async function ensureValidToken(credentials: JiraCredentials, profile: string): Promise<JiraCredentials> {
-  // Check if token is expired or about to expire (within 5 minutes)
-  const bufferTime = 5 * 60 * 1000;
-  if (credentials.expiryDate && Date.now() + bufferTime >= credentials.expiryDate) {
-    console.error('Access token expired, refreshing...');
-
-    try {
-      const refreshed = await refreshJiraToken(credentials.refreshToken);
-
-      const newCredentials: JiraCredentials = {
-        ...credentials,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        expiryDate: Date.now() + refreshed.expiresIn * 1000,
-      };
-
-      await setCredentials('jira', profile, newCredentials);
-      return newCredentials;
-    } catch (error) {
-      throw new CliError(
-        'AUTH_FAILED',
-        'Failed to refresh access token. Please re-authenticate.',
-        `Run: agentio jira profile add --profile ${profile}`
-      );
-    }
-  }
-
-  return credentials;
-}
-
-async function getJiraClient(profileName?: string): Promise<{ client: JiraClient; profile: string }> {
-  const profileResult = await resolveProfile('jira', profileName);
-
-  if (profileResult.profile === null) {
-    if (profileResult.error === 'none') {
-      if (profileName) {
-        throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for jira`, 'Run: agentio jira profile add');
-      }
-      throw new CliError('PROFILE_NOT_FOUND', 'No jira profile configured', 'Run: agentio jira profile add');
-    }
-    throw multipleProfilesError('jira', profileResult.names);
-  }
-
-  const profile = profileResult.profile;
-
-  let credentials = await getCredentials<JiraCredentials>('jira', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for jira profile "${profile}"`,
-      `Run: agentio jira profile add --profile ${profile}`
-    );
-  }
-
-  // Ensure token is valid
-  credentials = await ensureValidToken(credentials, profile);
-
-  return {
-    client: new JiraClient(credentials),
-    profile,
-  };
-}
+const getJiraClient = createClientGetter<JiraCredentials, JiraClient>({
+  service: 'jira',
+  createClient: (credentials) => new JiraClient(credentials),
+});
 
 export function registerJiraCommands(program: Command): void {
   const jira = program

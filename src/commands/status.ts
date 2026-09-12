@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { listProfiles, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
-import { canRefresh, getFreshCredentials } from '../auth/refresh';
+import { getFreshCredentials } from '../auth/refresh';
 import { CliError } from '../utils/errors';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
@@ -50,7 +50,7 @@ type GmailCredentials = OAuthTokens & { email?: string };
  * Creates a ServiceClient for the given service and credentials. Refresh is
  * not this function's job; callers pass credentials from getFreshCredentials.
  */
-function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient | null {
+function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient {
   switch (service) {
     case 'gmail': {
       const creds = credentials as GmailCredentials;
@@ -163,8 +163,10 @@ function createServiceClient(service: ServiceName, credentials: unknown): Servic
       return new SqlClient(creds);
     }
 
-    default:
-      return null;
+    default: {
+      const exhaustive: never = service;
+      throw new Error(`Unhandled service ${String(exhaustive)}`);
+    }
   }
 }
 
@@ -199,23 +201,11 @@ async function listProfileRefs(): Promise<ProfileRef[]> {
   return refs;
 }
 
-/** Refresh failures are reported as an invalid profile, not thrown. */
-function refreshFailure(err: unknown): ValidationResult {
-  if (err instanceof CliError && err.code === 'TOKEN_EXPIRED') {
-    return { valid: false, error: 'refresh token rejected, re-authenticate' };
-  }
-  throw err;
-}
-
-async function validateWith(service: ServiceName, credentials: unknown): Promise<ValidationResult> {
-  const client = createServiceClient(service, credentials);
-  return client ? client.validate() : { valid: true, info: 'unknown service' };
-}
-
 /**
- * Tests one profile. Stale tokens are refreshed first; a failed validation on
- * a refreshable service gets one forced refresh and a retry, since a token can
- * be rejected before its recorded expiry.
+ * Tests one profile. Stale tokens are refreshed first. A failed validation
+ * gets one forced refresh and a retry, since a token can be rejected before
+ * its recorded expiry; not when the client already diagnosed the refresh
+ * token itself, where a second exchange can only fail the same way.
  */
 async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
   if (!(await getCredentials(ref.service, ref.profile))) {
@@ -229,13 +219,14 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
   let result: ValidationResult;
   try {
     const { credentials } = await getFreshCredentials(ref.service, ref.profile);
-    result = await validateWith(ref.service, credentials);
-    if (!result.valid && canRefresh(ref.service)) {
+    result = await createServiceClient(ref.service, credentials).validate();
+    if (!result.valid && !result.error?.includes('re-authenticate')) {
       const forced = await getFreshCredentials(ref.service, ref.profile, { force: true });
-      result = await validateWith(ref.service, forced.credentials);
+      if (forced.refreshed) result = await createServiceClient(ref.service, forced.credentials).validate();
     }
   } catch (err) {
-    result = refreshFailure(err);
+    if (!(err instanceof CliError && err.code === 'TOKEN_EXPIRED')) throw err;
+    result = { valid: false, error: 'refresh token rejected, re-authenticate' };
   }
 
   return {

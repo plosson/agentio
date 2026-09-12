@@ -1,16 +1,16 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import {
   buildAuthorizeUrl,
   createPkcePair,
   exchangeCodeForTokens,
-  refreshDropboxToken,
-} from '../auth/dropbox-oauth';
+  } from '../auth/dropbox-oauth';
 import { launchBrowser } from '../auth/oauth-server';
 import { DropboxClient } from '../services/dropbox/client';
-import { CliError, handleError, multipleProfilesError } from '../utils/errors';
+import { CliError, handleError } from '../utils/errors';
 import { prompt, confirm } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
 import { addExamples } from '../utils/command-tree';
@@ -24,66 +24,10 @@ import {
 } from '../utils/output';
 import type { DropboxCredentials } from '../types/dropbox';
 
-const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
-
-/**
- * Dropbox access tokens live 4 hours and the refresh token is not rotated,
- * so only the access token is ever replaced.
- */
-async function ensureValidToken(
-  credentials: DropboxCredentials,
-  profile: string,
-): Promise<DropboxCredentials> {
-  if (credentials.expiryDate && Date.now() + TOKEN_EXPIRY_BUFFER_MS < credentials.expiryDate) {
-    return credentials;
-  }
-
-  try {
-    const refreshed = await refreshDropboxToken(credentials.appKey, credentials.refreshToken);
-    const newCredentials: DropboxCredentials = {
-      ...credentials,
-      accessToken: refreshed.accessToken,
-      expiryDate: Date.now() + refreshed.expiresIn * 1000,
-    };
-    await setCredentials('dropbox', profile, newCredentials);
-    return newCredentials;
-  } catch (error) {
-    const detail = error instanceof CliError ? ` (${error.message})` : '';
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to refresh the Dropbox access token${detail}`,
-      `Run: agentio dropbox profile add --profile ${profile}`,
-    );
-  }
-}
-
-async function getDropboxClient(profileName?: string): Promise<{ client: DropboxClient; profile: string }> {
-  const profileResult = await resolveProfile('dropbox', profileName);
-
-  if (profileResult.profile === null) {
-    if (profileResult.error === 'none') {
-      if (profileName) {
-        throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for dropbox`, 'Run: agentio dropbox profile add');
-      }
-      throw new CliError('PROFILE_NOT_FOUND', 'No dropbox profile configured', 'Run: agentio dropbox profile add');
-    }
-    throw multipleProfilesError('dropbox', profileResult.names);
-  }
-
-  const profile = profileResult.profile;
-  const stored = await getCredentials<DropboxCredentials>('dropbox', profile);
-
-  if (!stored) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for dropbox profile "${profile}"`,
-      `Run: agentio dropbox profile add --profile ${profile}`,
-    );
-  }
-
-  const credentials = await ensureValidToken(stored, profile);
-  return { client: new DropboxClient(credentials), profile };
-}
+const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
+  service: 'dropbox',
+  createClient: (credentials) => new DropboxClient(credentials),
+});
 
 function parseLimit(value: string): number {
   const limit = parseInt(value, 10);
