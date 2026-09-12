@@ -5,6 +5,8 @@ import { createRequestHandler, type PeerSource } from './api';
 import { clearSessions } from './session';
 import { getCredentials } from '../auth/token-store';
 import { unlockLimiter } from './routes-ui';
+import { deviceLimiter } from './routes-v1';
+import { resetDeviceAuth } from './device-auth';
 
 const PASSPHRASE = 'hub-passphrase-123';
 
@@ -44,6 +46,8 @@ beforeEach(() => {
   lockVault();
   clearSessions();
   unlockLimiter.reset();
+  deviceLimiter.reset();
+  resetDeviceAuth();
 });
 
 afterEach(() => clearSessions());
@@ -225,6 +229,61 @@ describe('daemon HTTP surface', () => {
     expect((await call(`/ui/api/keys/${key.id}`, { method: 'DELETE', headers: { cookie } })).status).toBe(204);
     expect((await call(`/ui/api/keys/${key.id}`, { method: 'DELETE', headers: { cookie } })).status).toBe(404);
     expect((await call('/ui/api/keys/nope/rotate', { method: 'POST', headers: { cookie }, body: '{"url":"https://h"}' })).status).toBe(404);
+  });
+
+  test('device login: start while locked, owner approves with a scope, poll gets the token once', async () => {
+    const start = await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'laptop' }), ip: '203.0.113.20' });
+    expect(start.status).toBe(201);
+    const { userCode, deviceCode, interval } = await start.json();
+    expect(userCode).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    expect(interval).toBe(3);
+
+    const poll = () => call('/v1/device/token', { method: 'POST', body: JSON.stringify({ deviceCode }), ip: '203.0.113.20' });
+    expect(await (await poll()).json()).toMatchObject({ status: 'pending' });
+
+    // The owner needs a session and an unlocked vault; the code is accepted however it was typed.
+    expect((await call(`/ui/api/authorize/${userCode}`)).status).toBe(401);
+    const cookie = await cookieFrom(await unlock());
+    const typed = userCode.toLowerCase().replace('-', ' ');
+    const shown = await call(`/ui/api/authorize/${encodeURIComponent(typed)}`, { headers: { cookie } });
+    expect(shown.status).toBe(200);
+    expect(await shown.json()).toMatchObject({ userCode, name: 'laptop' });
+    expect((await call('/ui/api/authorize/ZZZZ-ZZZZ', { headers: { cookie } })).status).toBe(404);
+
+    const approved = await call(`/ui/api/authorize/${userCode}`, {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ approve: true, name: 'laptop', allowedProfiles: ['telegram/bot'], readOnly: true, url: 'https://hub.example.com' }),
+    });
+    expect(approved.status).toBe(201);
+    const { key } = await approved.json();
+    expect(key).toMatchObject({ name: 'laptop', allowedProfiles: ['telegram/bot'], readOnly: true });
+
+    const got = await (await poll()).json();
+    expect(got.status).toBe('approved');
+    expect(got.token).toMatch(/^agio1\./);
+    expect(got.key.id).toBe(key.id);
+    // Handed out once: the request is gone, and so is the owner's page for it.
+    expect((await poll()).status).toBe(404);
+    expect((await call(`/ui/api/authorize/${userCode}`, { headers: { cookie } })).status).toBe(404);
+
+    const list = await (await call('/ui/api/keys', { headers: { cookie } })).json();
+    expect(list.keys.map((k: { id: string }) => k.id)).toContain(key.id);
+  });
+
+  test('device login: deny, bad input, and the address limit', async () => {
+    const start = await (await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'ci' }), ip: '203.0.113.21' })).json();
+    const cookie = await cookieFrom(await unlock());
+    const denied = await call(`/ui/api/authorize/${start.userCode}`, { method: 'POST', headers: { cookie }, body: JSON.stringify({ approve: false }) });
+    expect(denied.status).toBe(204);
+    const poll = await call('/v1/device/token', { method: 'POST', body: JSON.stringify({ deviceCode: start.deviceCode }), ip: '203.0.113.21' });
+    expect(await poll.json()).toEqual({ status: 'denied' });
+    expect((await call('/ui/api/keys', { headers: { cookie } })).status).toBe(200);
+    expect((await (await call('/ui/api/keys', { headers: { cookie } })).json()).keys).toEqual([]);
+
+    expect((await call('/v1/device', { method: 'POST', body: JSON.stringify({}), ip: '203.0.113.21' })).status).toBe(400);
+    expect((await call('/v1/device/token', { method: 'POST', body: JSON.stringify({ deviceCode: 'nope' }), ip: '203.0.113.21' })).status).toBe(404);
+    for (let i = 0; i < 40; i++) await call('/v1/device/token', { method: 'POST', body: '{}', ip: '203.0.113.22' });
+    expect((await call('/v1/device/token', { method: 'POST', body: '{}', ip: '203.0.113.22' })).status).toBe(429);
   });
 
   test('key routes need a session', async () => {
