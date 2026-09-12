@@ -2,6 +2,7 @@ import { CliError, type ErrorCode } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
+import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey } from '../auth/api-keys';
 import { ALL_SERVICES, type ServiceName } from '../types/config';
 import { getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
@@ -116,6 +117,49 @@ async function handlePatchProfile(request: Request, ref: { service: ServiceName;
   return json({ service: ref.service, name: ref.name, readOnly });
 }
 
+async function readJson<T>(request: Request): Promise<T | null> {
+  try {
+    return (await request.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+const badBody = () => json({ error: 'Body must be JSON', code: 'INVALID_PARAMS' }, 400);
+const noKey = (id: string) => json({ error: `No key with id ${id}`, code: 'NOT_FOUND' }, 404);
+
+async function handleCreateKey(request: Request): Promise<Response> {
+  const body = await readJson<{ name?: unknown; allowedProfiles?: unknown; readOnly?: unknown; url?: unknown }>(request);
+  if (!body) return badBody();
+  const issued = await createApiKey(
+    { name: body.name as string, allowedProfiles: body.allowedProfiles as never, readOnly: body.readOnly as boolean },
+    body.url as string,
+  );
+  return json(issued, 201);
+}
+
+async function handleUpdateKey(request: Request, id: string): Promise<Response> {
+  const body = await readJson<{ name?: unknown; allowedProfiles?: unknown; readOnly?: unknown }>(request);
+  if (!body) return badBody();
+  const updated = await updateApiKey(id, {
+    name: body.name as string | undefined,
+    allowedProfiles: body.allowedProfiles as never,
+    readOnly: body.readOnly as boolean | undefined,
+  });
+  return updated ? json(updated) : noKey(id);
+}
+
+async function handleRotateKey(request: Request, id: string): Promise<Response> {
+  const body = await readJson<{ url?: unknown }>(request);
+  if (!body) return badBody();
+  const issued = await rotateApiKey(id, body.url as string);
+  return issued ? json(issued) : noKey(id);
+}
+
+async function handleRevokeKey(id: string): Promise<Response> {
+  return (await revokeApiKey(id)) ? new Response(null, { status: 204 }) : noKey(id);
+}
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
@@ -158,6 +202,16 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     const ref = profileRef(pathname);
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
+
+    if (method === 'GET' && pathname === '/ui/api/keys') return json({ keys: await listApiKeys() });
+    if (method === 'POST' && pathname === '/ui/api/keys') return await handleCreateKey(request);
+    const keyMatch = pathname.match(/^\/ui\/api\/keys\/([^/]+)(\/rotate)?$/);
+    if (keyMatch) {
+      const id = decodeURIComponent(keyMatch[1]);
+      if (keyMatch[2] && method === 'POST') return await handleRotateKey(request, id);
+      if (!keyMatch[2] && method === 'PATCH') return await handleUpdateKey(request, id);
+      if (!keyMatch[2] && method === 'DELETE') return await handleRevokeKey(id);
+    }
 
     return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
   } catch (err) {

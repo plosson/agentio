@@ -25,6 +25,7 @@ import { registerClaudeCommands } from './commands/claude';
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
 import { registerDoctorCommand } from './commands/doctor';
+import { registerKeyCommands } from './commands/key';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
@@ -82,6 +83,7 @@ export function createProgram(): Command {
   registerDocsCommand(program);
   registerDaemonCommands(program);
   registerDoctorCommand(program);
+  registerKeyCommands(program);
   registerProfileCommands(program);
   registerReauthCommand(program);
   registerSkillCommand(program);
@@ -134,7 +136,7 @@ export function createProgram(): Command {
   ].forEach((n) => setGroup(n, 'Services'));
 
   // Advanced
-  ['daemon', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['daemon', 'key', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

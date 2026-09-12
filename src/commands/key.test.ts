@@ -1,0 +1,67 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { seedVault } from '../vault/test-helpers';
+import { clearVaultCache } from '../vault/vault';
+import { decodeToken } from '../auth/token';
+
+/** Subprocess tests for `agentio key`, the CLI twin of the UI's Keys card. */
+
+const PASSPHRASE = 'key-test-pw-1234';
+let tempHome = '';
+
+beforeEach(async () => {
+  tempHome = await mkdtemp(join(tmpdir(), 'agentio-key-test-'));
+  await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
+  process.env.HOME = tempHome;
+  await seedVault({ passphrase: PASSPHRASE, config: { profiles: { gdrive: [{ name: 'docs' }] } } });
+});
+
+afterEach(async () => {
+  delete process.env.AGENTIO_PASSPHRASE;
+  clearVaultCache();
+  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
+});
+
+async function runCli(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, HOME: tempHome, AGENTIO_PASSPHRASE: PASSPHRASE },
+  });
+  const exitCode = await proc.exited;
+  return { exitCode, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };
+}
+
+describe('agentio key', () => {
+  test('create prints the token alone on stdout; list, rotate, revoke follow', async () => {
+    const created = await runCli(['key', 'create', 'ci', '--url', 'https://vault.example.com', '--profiles', 'gdrive/docs', '--read-only']);
+    expect(created.exitCode).toBe(0);
+    const token = created.stdout.trim();
+    expect(token.split('\n')).toHaveLength(1);
+    const { kid, url } = decodeToken(token);
+    expect(url).toBe('https://vault.example.com');
+    expect(created.stderr).toContain('shown once');
+
+    const listed = await runCli(['key', 'list']);
+    expect(listed.stdout).toContain(`${kid}  ci [read-only]  gdrive/docs`);
+
+    const rotated = await runCli(['key', 'rotate', kid, '--url', 'https://vault.example.com']);
+    expect(rotated.exitCode).toBe(0);
+    expect(decodeToken(rotated.stdout.trim()).kid).toBe(kid);
+    expect(rotated.stdout.trim()).not.toBe(token);
+
+    const revoked = await runCli(['key', 'revoke', kid]);
+    expect(revoked.exitCode).toBe(0);
+    expect((await runCli(['key', 'list'])).stdout).toContain('No API keys');
+  });
+
+  test('create refuses a missing scope, an unknown profile, and a bad URL', async () => {
+    expect((await runCli(['key', 'create', 'x', '--url', 'https://h'])).exitCode).not.toBe(0);
+    const unknown = await runCli(['key', 'create', 'x', '--url', 'https://h', '--profiles', 'gmail/nope']);
+    expect(unknown.exitCode).not.toBe(0);
+    expect(unknown.stderr).toContain('gmail/nope');
+    expect((await runCli(['key', 'create', 'x', '--url', 'h', '--all'])).exitCode).not.toBe(0);
+  });
+});
