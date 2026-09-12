@@ -34,7 +34,7 @@ async function cookieFrom(res: Response): Promise<string> {
 
 withTempVault('agentio-api-test-', () => ({
   passphrase: PASSPHRASE,
-  config: { profiles: { telegram: [{ name: 'bot', readOnly: true }] } },
+  config: { profiles: { telegram: [{ name: 'bot', readOnly: true }], slack: [{ name: 'empty' }] } },
   credentials: { telegram: { bot: { botToken: 't', channelId: '1' } } },
 }));
 
@@ -101,15 +101,25 @@ describe('daemon HTTP surface', () => {
     const profiles = await call('/ui/api/profiles', { headers: { cookie } });
     expect(profiles.status).toBe(200);
     expect(await profiles.json()).toEqual({
-      profiles: [{ service: 'telegram', name: 'bot', readOnly: true }],
+      profiles: [{ service: 'slack', name: 'empty', readOnly: false }, { service: 'telegram', name: 'bot', readOnly: true }],
     });
 
     const status = await call('/ui/api/status?test=false', { headers: { cookie } });
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({
       version: 'test',
-      services: { telegram: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
+      services: { slack: [{ profile: 'empty', status: 'no-creds' }], telegram: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
     });
+  });
+
+  test('a single profile can be tested on demand', async () => {
+    const cookie = await cookieFrom(await unlock());
+    // No credentials stored: reported without any network call.
+    const empty = await call('/ui/api/profiles/slack/empty/status', { headers: { cookie } });
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ profile: 'empty', status: 'no-creds' });
+    expect((await call('/ui/api/profiles/slack/nope/status', { headers: { cookie } })).status).toBe(404);
+    expect((await call('/ui/api/profiles/slack/empty/status')).status).toBe(401);
   });
 
   test('lock forgets the vault and every session', async () => {
@@ -155,7 +165,7 @@ describe('daemon HTTP surface', () => {
     const gone = await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } });
     expect(gone.status).toBe(204);
     const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
-    expect(list.profiles).toEqual([]);
+    expect(list.profiles).toEqual([{ service: 'slack', name: 'empty', readOnly: false }]);
     expect(await getCredentials('telegram', 'bot')).toBeNull();
 
     expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } })).status).toBe(404);

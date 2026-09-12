@@ -4,7 +4,7 @@ import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
-import { getProfileStatuses, type ProfileStatus } from '../commands/status';
+import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
 import {
   clearSessions,
@@ -132,6 +132,10 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (method === 'GET' && pathname === '/ui/api/status') return await handleStatus(request, ctx);
 
     const ref = profilePath(pathname, '/ui/api/profiles');
+    if (ref?.action === 'status' && method === 'GET') {
+      const { service: _s, ...rest } = await getProfileStatus(ref.service, ref.name);
+      return json(rest);
+    }
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);

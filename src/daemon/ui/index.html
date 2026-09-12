@@ -52,6 +52,7 @@
   .badge.invalid { background: var(--error-bg); color: var(--error); }
   .badge.no-creds { background: var(--warning-bg); color: var(--warning); }
   .badge.skipped { background: var(--code-bg); color: var(--text-muted); }
+  .badge.testing { background: var(--accent-bg); color: var(--accent); }
   .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; }
   button.small { padding: 4px 10px; font-size: .8125rem; }
   button.danger { color: var(--error); border-color: var(--error); }
@@ -311,8 +312,49 @@
     }
   });
 
+  function setRowStatus(row, status, details) {
+    const badge = row.querySelector('.badge');
+    badge.className = 'badge ' + status;
+    badge.textContent = status === 'testing' ? 'testing…' : status;
+    row.querySelector('td.muted').textContent = details || '';
+  }
+
+  // One request per profile, so each row reports as soon as its check finishes
+  // and a slow service does not hide the others. The hub serialises any token
+  // refresh, so running a few at once is safe.
+  async function testProfiles() {
+    const rows = [...document.querySelectorAll('#profiles-body tr[data-ref]')];
+    if (!rows.length) return;
+    const msg = $('profiles-msg');
+    msg.hidden = false;
+    $('test-btn').disabled = true;
+    $('refresh-btn').disabled = true;
+    const counts = { ok: 0, invalid: 0, 'no-creds': 0 };
+    let done = 0;
+    const update = () => { msg.textContent = `Testing ${done}/${rows.length}… ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials`; };
+    for (const row of rows) setRowStatus(row, 'testing', '');
+    update();
+    const queue = rows.slice();
+    const worker = async () => {
+      for (let row = queue.shift(); row; row = queue.shift()) {
+        const res = await api('/ui/api/profiles/' + row.dataset.ref + '/status');
+        if (res.status === 401 || res.status === 503) { show('unlock'); return; }
+        if (res.ok) { setRowStatus(row, res.body.status, res.body.error || res.body.info); counts[res.body.status] = (counts[res.body.status] || 0) + 1; }
+        else setRowStatus(row, 'invalid', res.error);
+        done += 1; update();
+      }
+    };
+    try {
+      await Promise.all([worker(), worker(), worker()]);
+      msg.textContent = `Tested ${rows.length} profiles: ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials.`;
+    } finally {
+      $('test-btn').disabled = false;
+      $('refresh-btn').disabled = false;
+    }
+  }
+
   $('refresh-btn').addEventListener('click', () => loadProfiles(false));
-  $('test-btn').addEventListener('click', () => loadProfiles(true));
+  $('test-btn').addEventListener('click', testProfiles);
   $('lock-btn').addEventListener('click', async () => {
     await api('/ui/api/lock', { method: 'POST' });
     show('unlock');

@@ -3,7 +3,7 @@ import { listProfileRefs as listConfiguredProfiles, CONFIG_DIR } from '../config
 import { getCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { getFreshCredentials } from '../auth/refresh';
-import { CliError } from '../utils/errors';
+import { CliError, profileNotFoundError } from '../utils/errors';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -230,6 +230,13 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
     info: result.info,
     error: result.error,
   };
+}
+
+/** Test one configured profile now; PROFILE_NOT_FOUND when it is not configured. */
+export async function getProfileStatus(service: ServiceName, profile: string): Promise<ProfileStatus> {
+  const ref = (await listProfileRefs()).find((r) => r.service === service && r.profile === profile);
+  if (!ref) throw profileNotFoundError(service, profile);
+  return checkProfile(ref, true);
 }
 
 export async function getProfileStatuses(options?: { test?: boolean }): Promise<ProfileStatus[]> {
