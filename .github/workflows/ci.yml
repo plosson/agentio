@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # the site build tests read version tags
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

@@ -21,10 +21,15 @@ export const v1AuthLimiter = new RateLimiter(5, 60_000);
 /**
  * Requests a minute per key. An agent touches a handful of profiles per
  * command, so this is far above any honest use and only stops a leaked token
- * from being used to hammer the hub or the upstream token endpoints.
+ * from hammering the hub. Upstream token endpoints are protected separately,
+ * by the refresh buffer and the per-profile mutex.
  */
 export const V1_REQUESTS_PER_MINUTE = 120;
-export const v1KeyLimiter = new RateLimiter(V1_REQUESTS_PER_MINUTE, 60_000);
+export const v1KeyLimiter = new RateLimiter(
+  V1_REQUESTS_PER_MINUTE,
+  60_000,
+  `More than ${V1_REQUESTS_PER_MINUTE} requests a minute for this key, try again in a minute`,
+);
 
 async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const header = request.headers.get('authorization') ?? '';
@@ -110,7 +115,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
   try {
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked on the hub');
     const key = await authenticate(request, ip);
-    v1KeyLimiter.check(key.id, `More than ${V1_REQUESTS_PER_MINUTE} requests a minute for this key, try again in a minute`);
+    v1KeyLimiter.check(key.id);
     // Awaited: a write must never be left pending after the request is answered.
     await touchApiKey(key);
 

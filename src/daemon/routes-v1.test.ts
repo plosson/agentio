@@ -87,7 +87,7 @@ describe('/v1 credential API', () => {
     for (let i = 0; i < V1_REQUESTS_PER_MINUTE; i++) expect((await call('/v1/profiles', { token: scopedToken })).status).toBe(200);
     const over = await call('/v1/profiles', { token: scopedToken });
     expect(over.status).toBe(429);
-    expect(await over.json()).toMatchObject({ code: 'RATE_LIMITED', error: expect.stringContaining(`${V1_REQUESTS_PER_MINUTE}`) });
+    expect(await over.json()).toMatchObject({ code: 'RATE_LIMITED', error: expect.stringContaining(String(V1_REQUESTS_PER_MINUTE)) });
     expect((await call('/v1/profiles', { token: allToken })).status).toBe(200);
   });
 
