@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { pruneDanglingScopes } from '../auth/api-keys';
-import { loadVault, saveVault } from '../vault/vault';
+import { updateVault } from '../vault/vault';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
 
@@ -12,21 +12,17 @@ import type { ServiceName } from '../types/config';
  * cleaned up in that case).
  */
 export async function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
-  const vault = await loadVault();
-  const profiles = vault.config.profiles[service] ?? [];
-  const removed = profiles.some((p) => getProfileName(p) === profileName);
-  const hadCredentials = !!vault.credentials[service]?.[profileName];
-  if (!removed && !hadCredentials) return false;
+  let removed = false;
+  await updateVault((vault) => {
+    const profiles = vault.config.profiles[service] ?? [];
+    removed = profiles.some((p) => getProfileName(p) === profileName);
+    const hadCredentials = !!vault.credentials[service]?.[profileName];
+    if (!removed && !hadCredentials) return;
 
-  const config = {
-    ...vault.config,
-    profiles: { ...vault.config.profiles, [service]: profiles.filter((p) => getProfileName(p) !== profileName) },
-  };
-  pruneDanglingScopes(config);
-  const credentials = { ...vault.credentials, [service]: { ...vault.credentials[service] } };
-  delete credentials[service][profileName];
-
-  await saveVault({ ...vault, config, credentials });
+    vault.config.profiles[service] = profiles.filter((p) => getProfileName(p) !== profileName);
+    pruneDanglingScopes(vault.config);
+    delete vault.credentials[service]?.[profileName];
+  });
   return removed;
 }
 

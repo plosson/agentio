@@ -1,6 +1,7 @@
 import { readFile, writeFile, unlink, rename, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname } from 'path';
+import { tmpdir } from 'os';
 import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
@@ -9,6 +10,7 @@ import {
   readPointer,
   pointerExists,
   deletePointer,
+  pointerPath,
 } from './pointer';
 import {
   getPassphrase,
@@ -27,25 +29,30 @@ export interface VaultContents {
 }
 
 // The cache is keyed on the file's mtime so a long-lived process (the daemon)
-// notices writes made by another process; a hit costs one stat.
+// notices writes made by another process; a hit costs one stat. It is also
+// tied to the pointer file it was resolved through, so a process whose HOME
+// changes (tests do this) never serves one home's contents for another's.
 let cache: VaultContents | null = null;
 let cachePath: string | null = null;
+let cachePointer: string | null = null;
 let cacheMtimeMs = 0;
 
 export function clearVaultCache(): void {
   cache = null;
   cachePath = null;
+  cachePointer = null;
   cacheMtimeMs = 0;
 }
 
 async function setCache(contents: VaultContents, path: string): Promise<void> {
   cache = contents;
   cachePath = path;
+  cachePointer = pointerPath();
   cacheMtimeMs = (await stat(path)).mtimeMs;
 }
 
 async function cachedIfFresh(): Promise<VaultContents | null> {
-  if (!cache || !cachePath) return null;
+  if (!cache || !cachePath || cachePointer !== pointerPath()) return null;
   try {
     if ((await stat(cachePath)).mtimeMs === cacheMtimeMs) return cache;
   } catch {
@@ -179,8 +186,50 @@ export async function loadVault(): Promise<VaultContents> {
   return payload;
 }
 
-export async function saveVault(contents: VaultContents): Promise<void> {
-  const path = await requireVaultPath();
+// Writes are serialised within the process: two callers that each loaded,
+// changed, and saved would otherwise collide on the temp file and the second
+// save would drop the first one's change. The daemon has many concurrent
+// writers (refreshes, key touches, UI actions); updateVault is how they stay
+// atomic, and saveVault joins the same queue so nothing bypasses it.
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+function serializedWrite<T>(task: () => Promise<T>): Promise<T> {
+  const run = writeQueue.then(task, task);
+  writeQueue = run.catch(() => {});
+  return run;
+}
+
+/**
+ * Load the current contents, apply `mutate` (in place or by returning a new
+ * object), and write the result, all under the write lock. The path is
+ * resolved once, up front: what was loaded is what gets written, even if the
+ * pointer moves meanwhile. Returns what was written.
+ */
+export function updateVault(
+  mutate: (contents: VaultContents) => VaultContents | void | Promise<VaultContents | void>,
+): Promise<VaultContents> {
+  return serializedWrite(async () => {
+    const path = await requireExistingVaultPath();
+    const current = await loadVault();
+    const next = (await mutate(current)) ?? current;
+    await writeVault(next, path);
+    return next;
+  });
+}
+
+export function saveVault(contents: VaultContents): Promise<void> {
+  return serializedWrite(async () => writeVault(contents, await requireVaultPath()));
+}
+
+/** Under `bun test`, a vault may only ever be written inside the temp directory. */
+function assertWritablePath(path: string): void {
+  if (process.env.NODE_ENV === 'test' && !path.startsWith(tmpdir())) {
+    throw new Error(`Refusing to write a vault outside ${tmpdir()} during tests: ${path}`);
+  }
+}
+
+async function writeVault(contents: VaultContents, path: string): Promise<void> {
+  assertWritablePath(path);
   const pw = await resolvePassphraseOrThrow();
 
   const tmp = path + '.tmp';

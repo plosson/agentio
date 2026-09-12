@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { loadVault, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
+import { loadVault, updateVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import { ALL_SERVICES } from '../types/config';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
@@ -35,12 +35,16 @@ export async function loadConfig(): Promise<Config> {
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  const vault = await loadVault();
-  await saveVault({
-    version: CURRENT_VAULT_VERSION,
-    config,
-    credentials: vault.credentials,
+  await updateVault((vault) => ({ ...vault, config }));
+}
+
+/** Atomic read-modify-write of the config; `mutate` runs under the vault write lock. */
+export async function updateConfig<T>(mutate: (config: Config) => T | Promise<T>): Promise<T> {
+  let result!: T;
+  await updateVault(async (vault) => {
+    result = await mutate(vault.config);
   });
+  return result;
 }
 
 export async function getProfile(
@@ -181,32 +185,25 @@ export async function isProfileReadOnly(
 /**
  * Set the read-only status of a profile
  */
-export async function setProfileReadOnly(
+export function setProfileReadOnly(
   service: ServiceName,
   profileName: string,
   readOnly: boolean
 ): Promise<boolean> {
-  const config = await loadConfig();
-  const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles) {
-    return false;
-  }
+  return updateConfig((config) => {
+    const serviceProfiles = config.profiles[service];
+    const index = serviceProfiles?.findIndex((p) => getProfileName(p) === profileName) ?? -1;
+    if (!serviceProfiles || index === -1) return false;
 
-  const index = serviceProfiles.findIndex((p) => getProfileName(p) === profileName);
-  if (index === -1) {
-    return false;
-  }
-
-  const entry = normalizeProfile(serviceProfiles[index]);
-  if (readOnly) {
-    entry.readOnly = true;
-  } else {
-    delete entry.readOnly;
-  }
-  serviceProfiles[index] = entry;
-
-  await saveConfig(config);
-  return true;
+    const entry = normalizeProfile(serviceProfiles[index]);
+    if (readOnly) {
+      entry.readOnly = true;
+    } else {
+      delete entry.readOnly;
+    }
+    serviceProfiles[index] = entry;
+    return true;
+  });
 }
 
 export { CONFIG_DIR, CONFIG_FILE };

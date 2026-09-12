@@ -1,4 +1,4 @@
-import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
+import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
@@ -14,6 +14,7 @@ import {
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
+import { errorResponse, json, readJson } from './http';
 
 export interface UiContext {
   version: string;
@@ -22,46 +23,10 @@ export interface UiContext {
 /** Five wrong passphrases a minute per address, then 429 for the rest of it. */
 export const unlockLimiter = new RateLimiter(5, 60_000);
 
-const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
-  AUTH_FAILED: 401,
-  INVALID_PARAMS: 400,
-  NOT_FOUND: 404,
-  PROFILE_NOT_FOUND: 404,
-  RATE_LIMITED: 429,
-  VAULT_LOCKED: 503,
-};
-
-export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers },
-  });
-}
-
-function errorResponse(err: unknown): Response {
-  if (err instanceof CliError) {
-    return json(
-      { error: err.message, code: err.code, ...(err.suggestion ? { suggestion: err.suggestion } : {}) },
-      HTTP_STATUS[err.code] ?? 500,
-    );
-  }
-  const message = err instanceof Error ? err.message : 'Unexpected error';
-  return json({ error: message, code: 'API_ERROR' }, 500);
-}
-
 function page(): Response {
   return new Response(INDEX_HTML, {
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
   });
-}
-
-/** Parsed JSON body; a bad or missing body is INVALID_PARAMS like any other bad input. */
-async function readJson<T>(request: Request): Promise<T> {
-  try {
-    return (await request.json()) as T;
-  } catch {
-    throw new CliError('INVALID_PARAMS', 'Body must be JSON');
-  }
 }
 
 async function handleUnlock(request: Request, ip: string): Promise<Response> {

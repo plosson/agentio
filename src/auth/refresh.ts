@@ -13,6 +13,8 @@ import { refreshDropboxToken } from './dropbox-oauth';
 
 /** Refresh when the access token has less than this left. */
 export const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+/** The hub refreshes earlier than a CLI would, so a token it hands out is never one the client wants to refresh itself. */
+export const HUB_REFRESH_BUFFER_MS = 10 * 60 * 1000;
 
 export interface FreshCredentials<T = Record<string, unknown>> {
   credentials: T;
@@ -114,8 +116,9 @@ const REFRESHERS: Partial<Record<ServiceName, Refresher<unknown>>> = {
   gslides: googleCamel,
   gscript: googleCamel,
   gchat: googleCamel,
-  jira: atlassian(refreshJiraToken),
-  confluence: atlassian(refreshConfluenceToken),
+  // Late-bound so the exchange functions resolve through the module at call time.
+  jira: atlassian((t) => refreshJiraToken(t)),
+  confluence: atlassian((t) => refreshConfluenceToken(t)),
   revolut,
   dropbox,
 };

@@ -12,6 +12,7 @@ import {
   unlockVault,
   lockVault,
   isVaultUnlocked,
+  updateVault,
   CURRENT_VAULT_VERSION,
 } from './vault';
 import {
@@ -178,6 +179,42 @@ describe('vault', () => {
     await writeFile(vaultFile, encryptVault(JSON.stringify(external), 'pw'));
 
     expect(await loadVault()).toEqual(external);
+  });
+});
+
+describe('updateVault', () => {
+  test('concurrent read-modify-writes are serialised and both land', async () => {
+    process.env.AGENTIO_PASSPHRASE = 'pw';
+    await writePointer(vaultFile);
+    await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
+
+    await Promise.all([
+      updateVault((v) => { v.config.profiles.gmail = [{ name: 'a' }]; }),
+      updateVault((v) => { v.credentials.gmail = { a: { token: 't' } }; }),
+      updateVault((v) => ({ ...v, config: { ...v.config, profiles: { ...v.config.profiles, slack: [{ name: 's' }] } } })),
+    ]);
+
+    clearVaultCache();
+    const final = await loadVault();
+    expect(final.config.profiles).toEqual({ gmail: [{ name: 'a' }], slack: [{ name: 's' }] });
+    expect(final.credentials).toEqual({ gmail: { a: { token: 't' } } });
+  });
+
+  test('under bun test, a vault outside the temp directory is never written', async () => {
+    process.env.AGENTIO_PASSPHRASE = 'pw';
+    await writePointer('/Users/nobody/agentio/vault.enc');
+    await expect(saveVault({ version: 1, config: { profiles: {} }, credentials: {} })).rejects.toThrow(/Refusing to write/);
+    expect(existsSync('/Users/nobody/agentio/vault.enc')).toBe(false);
+  });
+
+  test('a mutator that throws writes nothing and does not block later writes', async () => {
+    process.env.AGENTIO_PASSPHRASE = 'pw';
+    await writePointer(vaultFile);
+    await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
+    await expect(updateVault(() => { throw new Error('nope'); })).rejects.toThrow('nope');
+    await updateVault((v) => { v.config.profiles.gmail = [{ name: 'after' }]; });
+    clearVaultCache();
+    expect((await loadVault()).config.profiles).toEqual({ gmail: [{ name: 'after' }] });
   });
 });
 

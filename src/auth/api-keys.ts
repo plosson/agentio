@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { getProfileName, loadConfig, saveConfig, listProfileRefs } from '../config/config-manager';
+import { getProfileName, loadConfig, updateConfig, listProfileRefs } from '../config/config-manager';
 import { CliError } from '../utils/errors';
 import type { ApiKey, ApiKeyScope, Config } from '../types/config';
 import { decodeToken, encodeToken } from './token';
@@ -87,14 +87,13 @@ async function validateScope(scope: unknown): Promise<ApiKeyScope> {
   return [...new Set(scope as string[])];
 }
 
-/** Load, find the key or throw NOT_FOUND, apply `mutate`, save. */
-async function withKey<T>(id: string, mutate: (key: ApiKey, config: Config) => T | Promise<T>): Promise<T> {
-  const config = await loadConfig();
-  const key = findKey(config, id);
-  if (!key) throw noKey(id);
-  const result = await mutate(key, config);
-  await saveConfig(config);
-  return result;
+/** Find the key or throw NOT_FOUND and apply `mutate`, atomically. */
+function withKey<T>(id: string, mutate: (key: ApiKey, config: Config) => T | Promise<T>): Promise<T> {
+  return updateConfig((config) => {
+    const key = findKey(config, id);
+    if (!key) throw noKey(id);
+    return mutate(key, config);
+  });
 }
 
 export async function listApiKeys(): Promise<ApiKeyView[]> {
@@ -107,16 +106,17 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
-  const config = await loadConfig();
-  const keys = (config.apiKeys ??= []);
-  let id = newId();
-  while (keys.some((k) => k.id === id)) id = newId();
   const secret = newSecret();
-  const key: ApiKey = { id, name, secretHash: hashSecret(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
-  keys.push(key);
-  await saveConfig(config);
+  const key = await updateConfig((config) => {
+    const keys = (config.apiKeys ??= []);
+    let id = newId();
+    while (keys.some((k) => k.id === id)) id = newId();
+    const created: ApiKey = { id, name, secretHash: hashSecret(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
+    keys.push(created);
+    return created;
+  });
 
-  return { key: view(key), token: encodeToken({ url, kid: id, secret }) };
+  return { key: view(key), token: encodeToken({ url, kid: key.id, secret }) };
 }
 
 export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView> {
@@ -194,10 +194,11 @@ export function effectiveReadOnly(key: ApiKeyView, profileReadOnly: boolean | un
 
 /** Record use. Skipped when the last record is recent, so a busy key costs one vault write a minute. */
 export async function touchApiKey(id: string, at = new Date()): Promise<void> {
-  const config = await loadConfig();
-  const key = findKey(config, id);
-  if (!key) return;
-  if (key.lastUsedAt && at.getTime() - Date.parse(key.lastUsedAt) < TOUCH_INTERVAL_MS) return;
-  key.lastUsedAt = at.toISOString();
-  await saveConfig(config);
+  // Cheap check outside the lock: most calls are inside the interval and write nothing.
+  const seen = findKey(await loadConfig(), id);
+  if (!seen || (seen.lastUsedAt && at.getTime() - Date.parse(seen.lastUsedAt) < TOUCH_INTERVAL_MS)) return;
+  await updateConfig((config) => {
+    const key = findKey(config, id);
+    if (key) key.lastUsedAt = at.toISOString();
+  });
 }
