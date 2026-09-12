@@ -49,7 +49,7 @@ export function launchBrowser(url: string): boolean {
 
   // A missing opener throws synchronously on macOS but not on Linux, where the
   // child simply fails to exec; resolving it on PATH first behaves the same on both.
-  if (!Bun.which(command[0])) return false;
+  if (!Bun.which(command[0], { PATH: process.env.PATH ?? '' })) return false;
   try {
     Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
     return true;
