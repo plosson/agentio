@@ -12,6 +12,7 @@ import {
   saveVault,
   resetVault,
   CURRENT_VAULT_VERSION,
+  type VaultContents,
 } from '../vault/vault';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
 import { detectLegacy, readLegacy, archiveLegacy, legacyPaths } from '../vault/migrate';
@@ -100,27 +101,47 @@ async function storePassphrase(passphrase: string): Promise<void> {
   }
 }
 
-async function doCreate(inputs: VaultInputs): Promise<void> {
+/** Write a brand-new vault holding `contents`, point at it, store the passphrase. */
+async function createVault(inputs: VaultInputs, contents: VaultContents): Promise<void> {
   const vaultPath = await prepareVaultPath(inputs);
 
   await writePointer(vaultPath);
   process.env.AGENTIO_PASSPHRASE = inputs.passphrase;
 
   try {
-    await saveVault({
-      version: CURRENT_VAULT_VERSION,
-      config: { profiles: {} },
-      credentials: {},
-    });
+    await saveVault(contents);
   } catch (err) {
-    // Roll back the pointer so the next init run starts clean.
+    // Roll back the pointer so the next run starts clean.
     await deletePointer().catch(() => {});
     throw err;
   }
 
   await storePassphrase(inputs.passphrase);
   console.log(`Vault created at ${vaultPath}`);
+}
+
+async function doCreate(inputs: VaultInputs): Promise<void> {
+  await createVault(inputs, {
+    version: CURRENT_VAULT_VERSION,
+    config: { profiles: {} },
+    credentials: {},
+  });
   await maybeNudgeFirstService();
+}
+
+/**
+ * Create a vault at the default path when a command needs one and none exists
+ * yet, e.g. `vault import` on a fresh machine or a container's first boot.
+ * Passphrase resolution matches `vault init`: flags, AGENTIO_PASSPHRASE, then
+ * a prompt on a TTY.
+ */
+export async function bootstrapVault(
+  options: PassphraseOptions,
+  contents: VaultContents,
+): Promise<void> {
+  const passphrase = await resolvePassphrase(options, promptNewPassphrase);
+  validatePassphrase(passphrase);
+  await createVault({ vaultPath: defaultVaultPath(), passphrase }, contents);
 }
 
 async function doMigrate(inputs: VaultInputs): Promise<void> {

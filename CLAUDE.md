@@ -122,7 +122,7 @@ agentio vault status                       # active path + profile count
 agentio vault passphrase [--passphrase <v> | --passphrase-stdin]   # change it
 agentio vault reset [--force]              # DELETES the vault file
 agentio vault export [--file <path>] [--all] [--key <hex>]
-agentio vault import [file] [--merge]
+agentio vault import [file] [--merge] [--passphrase <v> | --passphrase-stdin]   # creates the vault when none exists
 agentio vault clear [--force]
 ```
 

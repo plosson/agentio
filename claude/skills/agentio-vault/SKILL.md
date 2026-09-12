@@ -107,6 +107,8 @@ Options:
 
 - `--key <key>`: Encryption key (64 hex characters). Falls back to AGENTIO_KEY env var
 - `--merge`: Merge with existing configuration instead of replacing
+- `--passphrase <value>`: Passphrase for the vault created when none exists yet (visible in shell history and process list)
+- `--passphrase-stdin`: Read that passphrase from stdin
 
 ```
 Examples:
@@ -119,6 +121,10 @@ Examples:
 
   # merge into existing config (only adds missing profiles/credentials)
   agentio vault import ./agentio.enc --key 0123…cdef --merge
+
+When no vault exists yet, import creates one at the default path. The passphrase
+for it resolves like 'vault init': --passphrase-stdin, --passphrase, then
+AGENTIO_PASSPHRASE; off a TTY one of those is required.
 ```
 
 ## agentio vault clear
