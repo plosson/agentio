@@ -1,10 +1,23 @@
 import { readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { homedir, tmpdir } from 'os';
+import { join, dirname, isAbsolute, relative } from 'path';
 
 export function configDir(): string {
   return join(process.env.HOME || homedir(), '.config', 'agentio');
+}
+
+/**
+ * Under `bun test`, files in the config directory (vault, pointer, token) may
+ * only ever be written inside the OS temp directory. A test that forgets to
+ * point HOME at a temp dir must fail loudly, not touch the real, synced files.
+ */
+export function assertTestWritable(path: string, what: string): void {
+  if (process.env.NODE_ENV !== 'test') return;
+  const rel = relative(tmpdir(), path);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Refusing to write a ${what} outside ${tmpdir()} during tests: ${path}`);
+  }
 }
 
 export function pointerPath(): string {
@@ -23,6 +36,7 @@ export async function readPointer(): Promise<string | null> {
 }
 
 export async function writePointer(vaultPath: string): Promise<void> {
+  assertTestWritable(pointerPath(), 'vault pointer');
   const dir = dirname(pointerPath());
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true, mode: 0o700 });

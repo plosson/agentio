@@ -7,7 +7,7 @@ import {
   revokeApiKey,
   rotateApiKey,
   updateApiKey,
-  type ApiKeyView,
+  describeScope,
   type IssuedKey,
 } from '../auth/api-keys';
 import type { ApiKeyScope } from '../types/config';
@@ -21,15 +21,9 @@ function scopeFromOptions(opts: { profiles?: string; all?: boolean }): ApiKeySco
   return undefined;
 }
 
-/** "all profiles" or the list, plus the read-only flag. */
-function describeKey(key: ApiKeyView): string {
-  const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}`;
-}
-
 /** The token goes to stdout alone so it can be captured; everything else to stderr. */
 function printIssued({ key, token }: IssuedKey): void {
-  console.error(`Key "${key.name}" (${key.id}), ${describeKey(key)}`);
+  console.error(`Key "${key.name}" (${key.id}), ${describeScope(key)}`);
   console.error('This token is shown once. Set it on the agent machine as AGENTIO_TOKEN.');
   console.log(token);
 }
@@ -82,7 +76,7 @@ export function registerKeyCommands(program: Command): void {
           }
           for (const k of keys) {
             const used = k.lastUsedAt ? `last used ${k.lastUsedAt}` : 'never used';
-            console.log(`${k.id}  ${k.name}  agio1.…${k.hint ?? "????"}  ${describeKey(k)}  created ${k.createdAt}  ${used}`);
+            console.log(`${k.id}  ${k.name}  agio1.…${k.hint ?? ''}  ${describeScope(k)}  created ${k.createdAt}  ${used}`);
           }
         } catch (error) {
           handleError(error);
@@ -110,7 +104,7 @@ export function registerKeyCommands(program: Command): void {
             throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass --name, --profiles/--all, or --read-only/--no-read-only');
           }
           const updated = await updateApiKey(id, { name: opts.name, allowedProfiles: scope, readOnly: opts.readOnly });
-          console.log(`Updated "${updated.name}" (${updated.id}): ${describeKey(updated)}`);
+          console.log(`Updated "${updated.name}" (${updated.id}): ${describeScope(updated)}`);
         } catch (error) {
           handleError(error);
         }

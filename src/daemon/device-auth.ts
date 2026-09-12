@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'crypto';
 import { CliError } from '../utils/errors';
-import { createApiKey, type ApiKeyInput, type ApiKeyView, type IssuedKey } from '../auth/api-keys';
+import { createApiKey, validateName, type ApiKeyInput, type ApiKeyView, type IssuedKey } from '../auth/api-keys';
 
 /**
  * Device-style login: `agentio login <hub>` asks for a request, prints the
@@ -26,8 +26,9 @@ export interface DeviceRequestView {
   expiresAt: string;
 }
 
+/** What a poll answers; a request stores its own answer once decided. */
 export type DevicePollResult =
-  | { status: 'pending'; interval: number }
+  | { status: 'pending' }
   | { status: 'denied' }
   | ({ status: 'approved' } & IssuedKey);
 
@@ -36,22 +37,13 @@ interface PendingRequest {
   deviceCode: string;
   name: string;
   createdAt: number;
-  outcome: 'pending' | 'denied' | { issued: IssuedKey };
+  outcome: DevicePollResult;
 }
 
-const byUserCode = new Map<string, PendingRequest>();
-const byDeviceCode = new Map<string, PendingRequest>();
+/** Keyed by device code, the one looked up every few seconds; owner lookups scan at most MAX_PENDING entries. */
+const requests = new Map<string, PendingRequest>();
 
 const expired = (req: PendingRequest, now: number) => now - req.createdAt > DEVICE_AUTH_TTL_MS;
-
-function forget(req: PendingRequest): void {
-  byUserCode.delete(req.userCode);
-  byDeviceCode.delete(req.deviceCode);
-}
-
-function sweep(now: number): void {
-  for (const req of byUserCode.values()) if (expired(req, now)) forget(req);
-}
 
 function newUserCode(): string {
   const pick = () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
@@ -70,37 +62,36 @@ const unknownCode = () =>
 
 /** A request the owner can still act on, or NOT_FOUND. */
 function liveRequest(userCode: string, now: number): PendingRequest {
-  const req = byUserCode.get(normalizeUserCode(userCode));
-  if (!req || expired(req, now) || req.outcome !== 'pending') throw unknownCode();
-  return req;
+  const code = normalizeUserCode(userCode);
+  for (const req of requests.values()) {
+    if (req.userCode === code && !expired(req, now) && req.outcome.status === 'pending') return req;
+  }
+  throw unknownCode();
 }
 
 export function startDeviceAuth(name: unknown, now = Date.now()): { userCode: string; deviceCode: string; expiresIn: number; interval: number } {
-  if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > 64) {
-    throw new CliError('INVALID_PARAMS', 'name must be 1 to 64 characters');
-  }
-  sweep(now);
-  if (byUserCode.size >= MAX_PENDING) {
+  const machine = validateName(name);
+  for (const req of requests.values()) if (expired(req, now)) requests.delete(req.deviceCode);
+  if (requests.size >= MAX_PENDING) {
     throw new CliError('RATE_LIMITED', 'Too many logins waiting for approval, try again in a few minutes');
   }
+  const taken = new Set([...requests.values()].map((r) => r.userCode));
   let userCode = newUserCode();
-  while (byUserCode.has(userCode)) userCode = newUserCode();
-  const req: PendingRequest = { userCode, deviceCode: randomBytes(32).toString('base64url'), name: name.trim(), createdAt: now, outcome: 'pending' };
-  byUserCode.set(userCode, req);
-  byDeviceCode.set(req.deviceCode, req);
+  while (taken.has(userCode)) userCode = newUserCode();
+  const req: PendingRequest = { userCode, deviceCode: randomBytes(32).toString('base64url'), name: machine, createdAt: now, outcome: { status: 'pending' } };
+  requests.set(req.deviceCode, req);
   return { userCode, deviceCode: req.deviceCode, expiresIn: DEVICE_AUTH_TTL_MS / 1000, interval: DEVICE_POLL_INTERVAL_S };
 }
 
 /** What the CLI asks every few seconds. A decided request is handed out once and forgotten. */
 export function pollDeviceAuth(deviceCode: unknown, now = Date.now()): DevicePollResult {
-  const req = typeof deviceCode === 'string' ? byDeviceCode.get(deviceCode) : undefined;
+  const req = typeof deviceCode === 'string' ? requests.get(deviceCode) : undefined;
   if (!req || expired(req, now)) {
-    if (req) forget(req);
+    if (req) requests.delete(req.deviceCode);
     throw unknownCode();
   }
-  if (req.outcome === 'pending') return { status: 'pending', interval: DEVICE_POLL_INTERVAL_S };
-  forget(req);
-  return req.outcome === 'denied' ? { status: 'denied' } : { status: 'approved', ...req.outcome.issued };
+  if (req.outcome.status !== 'pending') requests.delete(req.deviceCode);
+  return req.outcome;
 }
 
 export function describeDeviceAuth(userCode: string, now = Date.now()): DeviceRequestView {
@@ -117,16 +108,15 @@ export function describeDeviceAuth(userCode: string, now = Date.now()): DeviceRe
 export async function approveDeviceAuth(userCode: string, input: ApiKeyInput, hubUrl: unknown, now = Date.now()): Promise<ApiKeyView> {
   const req = liveRequest(userCode, now);
   const issued = await createApiKey(input, hubUrl);
-  req.outcome = { issued };
+  req.outcome = { status: 'approved', ...issued };
   return issued.key;
 }
 
 export function denyDeviceAuth(userCode: string, now = Date.now()): void {
-  liveRequest(userCode, now).outcome = 'denied';
+  liveRequest(userCode, now).outcome = { status: 'denied' };
 }
 
 /** Tests only. */
 export function resetDeviceAuth(): void {
-  byUserCode.clear();
-  byDeviceCode.clear();
+  requests.clear();
 }

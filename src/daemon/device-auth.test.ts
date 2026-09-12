@@ -26,7 +26,7 @@ describe('device auth', () => {
     const t0 = 1_000_000;
     const { userCode, deviceCode } = startDeviceAuth('box', t0);
     expect(describeDeviceAuth(userCode, t0 + DEVICE_AUTH_TTL_MS)).toMatchObject({ name: 'box' });
-    expect(pollDeviceAuth(deviceCode, t0 + DEVICE_AUTH_TTL_MS)).toEqual({ status: 'pending', interval: 3 });
+    expect(pollDeviceAuth(deviceCode, t0 + DEVICE_AUTH_TTL_MS)).toEqual({ status: 'pending' });
     expect(() => describeDeviceAuth(userCode, t0 + DEVICE_AUTH_TTL_MS + 1)).toThrow('expired');
     expect(() => pollDeviceAuth(deviceCode, t0 + DEVICE_AUTH_TTL_MS + 1)).toThrow('expired');
     // Expired on poll means forgotten: a later, in-time call is not revived.

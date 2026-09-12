@@ -45,11 +45,20 @@ const newId = () => randomBytes(6).toString('base64url');
 const findKey = (config: Config, id: string) => config.apiKeys?.find((k) => k.id === id);
 const noKey = (id: string) => new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
 
-function validateName(name: unknown): string {
-  if (typeof name !== 'string' || name.trim().length === 0) {
-    throw new CliError('INVALID_PARAMS', 'A key needs a name');
+export const MAX_KEY_NAME = 64;
+
+/** Also the name a machine introduces itself with in `agentio login`. */
+export function validateName(name: unknown): string {
+  if (typeof name !== 'string' || name.trim().length === 0 || name.trim().length > MAX_KEY_NAME) {
+    throw new CliError('INVALID_PARAMS', `A key needs a name of 1 to ${MAX_KEY_NAME} characters`);
   }
   return name.trim();
+}
+
+/** "all profiles" or the list, plus the read-only flag: the one-line summary the CLI prints. */
+export function describeScope(key: ApiKeyView): string {
+  const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
+  return `${scope}${key.readOnly ? ', read-only' : ''}`;
 }
 
 function validateReadOnly(readOnly: unknown): boolean {
@@ -58,7 +67,7 @@ function validateReadOnly(readOnly: unknown): boolean {
 }
 
 /** The hub base URL that goes into the token, as the browser or --url saw it. */
-function validateHubUrl(url: unknown): string {
+export function validateHubUrl(url: unknown): string {
   let parsed: URL;
   try {
     parsed = new URL(String(url));

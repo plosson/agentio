@@ -1,9 +1,8 @@
 import { existsSync, readFileSync } from 'fs';
 import { mkdir, unlink, writeFile } from 'fs/promises';
-import { tmpdir } from 'os';
-import { isAbsolute, join, relative } from 'path';
+import { join } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
-import { configDir } from '../vault/pointer';
+import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef } from '../config/config-manager';
 import { decodeToken, type TokenParts } from './token';
@@ -32,29 +31,29 @@ function readTokenFile(): string | null {
   }
 }
 
+/** Where the token comes from, so commands can say so; null in local mode. */
+export function tokenSource(): 'env' | 'file' | null {
+  if (process.env.AGENTIO_TOKEN?.trim()) return 'env';
+  if (fileToken === undefined) fileToken = readTokenFile();
+  return fileToken === null ? null : 'file';
+}
+
 export function remoteToken(): string | null {
-  const env = process.env.AGENTIO_TOKEN?.trim();
-  if (env) return env;
-  return (fileToken ??= readTokenFile());
+  switch (tokenSource()) {
+    case 'env': return process.env.AGENTIO_TOKEN!.trim();
+    case 'file': return fileToken!;
+    default: return null;
+  }
 }
 
 export function isRemoteMode(): boolean {
-  return remoteToken() !== null;
-}
-
-/** Same guard as the vault: a test must never write to the real config directory. */
-function assertWritablePath(path: string): void {
-  if (process.env.NODE_ENV !== 'test') return;
-  const rel = relative(tmpdir(), path);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`Refusing to write a token outside ${tmpdir()} during tests: ${path}`);
-  }
+  return tokenSource() !== null;
 }
 
 /** Store a token for this user, readable by them alone. */
 export async function saveRemoteToken(token: string): Promise<string> {
   const path = tokenFilePath();
-  assertWritablePath(path);
+  assertTestWritable(path, 'token');
   await mkdir(configDir(), { recursive: true, mode: 0o700 });
   await writeFile(path, token + '\n', { mode: 0o600 });
   resetRemoteCache();
@@ -65,7 +64,7 @@ export async function saveRemoteToken(token: string): Promise<string> {
 export async function clearRemoteToken(): Promise<boolean> {
   const path = tokenFilePath();
   if (!existsSync(path)) return false;
-  assertWritablePath(path);
+  assertTestWritable(path, 'token');
   await unlink(path);
   resetRemoteCache();
   return true;
@@ -134,13 +133,29 @@ function hubError(status: number, body: { error?: string; code?: string; suggest
   }
 }
 
-async function hubRequest<T>(path: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
-  const { url } = hub();
+export interface HubCallOptions {
+  method?: 'GET' | 'POST';
+  /** JSON body; sets the content type. */
+  body?: unknown;
+  /** Bearer token; omitted for the public login routes. */
+  token?: string;
+}
+
+/**
+ * One JSON call to a hub. Transport failures are NETWORK_ERROR; an error
+ * answer keeps the hub's own code and suggestion (see hubError). Shared by
+ * the authenticated credential reads and the pre-token login flow.
+ */
+export async function hubCall<T>(url: string, path: string, { method = 'GET', body, token }: HubCallOptions = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${url}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${remoteToken()!}` },
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -149,11 +164,14 @@ async function hubRequest<T>(path: string, method: 'GET' | 'POST' = 'GET'): Prom
       'Check the network, and that the hub daemon is running');
   }
   const text = await response.text();
-  let body: unknown = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-  if (!response.ok) throw hubError(response.status, (body ?? {}) as { error?: string; code?: string; suggestion?: string }, url);
-  return body as T;
+  let answer: unknown = null;
+  try { answer = text ? JSON.parse(text) : null; } catch { answer = null; }
+  if (!response.ok) throw hubError(response.status, (answer ?? {}) as { error?: string; code?: string; suggestion?: string }, url);
+  return answer as T;
 }
+
+const hubRequest = <T>(path: string, method: 'GET' | 'POST' = 'GET') =>
+  hubCall<T>(hub().url, path, { method, token: remoteToken()! });
 
 /** The profiles this token may use. Fetched once per process. */
 export function remoteProfiles(): Promise<RemoteProfile[]> {
