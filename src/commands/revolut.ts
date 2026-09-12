@@ -3,19 +3,19 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import {
   buildConsentUrl,
   exchangeCodeForTokens,
   extractAuthorizationCode,
   issuerFromRedirectUri,
-  refreshRevolutToken,
-} from '../auth/revolut-oauth';
+  } from '../auth/revolut-oauth';
 import { launchBrowser } from '../auth/oauth-server';
 import { RevolutClient } from '../services/revolut/client';
-import { CliError, handleError, multipleProfilesError } from '../utils/errors';
+import { CliError, handleError } from '../utils/errors';
 import { prompt, confirm } from '../utils/stdin';
 import { enforceWriteAccess } from '../utils/read-only';
 import { addExamples } from '../utils/command-tree';
@@ -48,63 +48,10 @@ import type {
   RevolutEnvironment,
 } from '../types/revolut';
 
-const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
-
-/**
- * Revolut access tokens live 40 minutes, so most invocations refresh first.
- * The refresh token is not rotated, only the access token is replaced.
- */
-async function ensureValidToken(credentials: RevolutCredentials, profile: string): Promise<RevolutCredentials> {
-  if (credentials.expiryDate && Date.now() + TOKEN_EXPIRY_BUFFER_MS < credentials.expiryDate) {
-    return credentials;
-  }
-
-  try {
-    const refreshed = await refreshRevolutToken(credentials);
-    const newCredentials: RevolutCredentials = {
-      ...credentials,
-      accessToken: refreshed.accessToken,
-      expiryDate: Date.now() + refreshed.expiresIn * 1000,
-    };
-    await setCredentials('revolut', profile, newCredentials);
-    return newCredentials;
-  } catch (error) {
-    const detail = error instanceof CliError ? ` (${error.message})` : '';
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to refresh the Revolut access token${detail}`,
-      `Run: agentio revolut profile add --profile ${profile}`,
-    );
-  }
-}
-
-async function getRevolutClient(profileName?: string): Promise<{ client: RevolutClient; profile: string }> {
-  const profileResult = await resolveProfile('revolut', profileName);
-
-  if (profileResult.profile === null) {
-    if (profileResult.error === 'none') {
-      if (profileName) {
-        throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found for revolut`, 'Run: agentio revolut profile add');
-      }
-      throw new CliError('PROFILE_NOT_FOUND', 'No revolut profile configured', 'Run: agentio revolut profile add');
-    }
-    throw multipleProfilesError('revolut', profileResult.names);
-  }
-
-  const profile = profileResult.profile;
-  const stored = await getCredentials<RevolutCredentials>('revolut', profile);
-
-  if (!stored) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for revolut profile "${profile}"`,
-      `Run: agentio revolut profile add --profile ${profile}`,
-    );
-  }
-
-  const credentials = await ensureValidToken(stored, profile);
-  return { client: new RevolutClient(credentials), profile };
-}
+const getRevolutClient = createClientGetter<RevolutCredentials, RevolutClient>({
+  service: 'revolut',
+  createClient: (credentials) => new RevolutClient(credentials),
+});
 
 function expandPath(filePath: string): string {
   if (filePath === '~') return homedir();

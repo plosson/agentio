@@ -1,14 +1,14 @@
 import { Command } from 'commander';
-import { setCredentials, getCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { setCredentials } from '../auth/token-store';
+import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { createClientGetter } from '../utils/client-factory';
 import {
   performConfluenceOAuthFlow,
-  refreshConfluenceToken,
   type AtlassianSite,
 } from '../auth/confluence-oauth';
 import { ConfluenceClient } from '../services/confluence/client';
-import { CliError, handleError, multipleProfilesError } from '../utils/errors';
+import { CliError, handleError } from '../utils/errors';
 import { readStdin } from '../utils/stdin';
 import { interactiveSelect } from '../utils/interactive';
 import { enforceWriteAccess } from '../utils/read-only';
@@ -25,80 +25,10 @@ import {
 } from '../utils/output';
 import type { ConfluenceCredentials } from '../types/confluence';
 
-async function ensureValidToken(
-  credentials: ConfluenceCredentials,
-  profile: string
-): Promise<ConfluenceCredentials> {
-  const bufferTime = 5 * 60 * 1000;
-  if (credentials.expiryDate && Date.now() + bufferTime >= credentials.expiryDate) {
-    console.error('Access token expired, refreshing...');
-
-    try {
-      const refreshed = await refreshConfluenceToken(credentials.refreshToken);
-
-      const newCredentials: ConfluenceCredentials = {
-        ...credentials,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        expiryDate: Date.now() + refreshed.expiresIn * 1000,
-      };
-
-      await setCredentials('confluence', profile, newCredentials);
-      return newCredentials;
-    } catch {
-      throw new CliError(
-        'AUTH_FAILED',
-        'Failed to refresh access token. Please re-authenticate.',
-        `Run: agentio confluence profile add --profile ${profile}`
-      );
-    }
-  }
-
-  return credentials;
-}
-
-async function getConfluenceClient(
-  profileName?: string
-): Promise<{ client: ConfluenceClient; profile: string }> {
-  const profileResult = await resolveProfile('confluence', profileName);
-
-  if (profileResult.profile === null) {
-    if (profileResult.error === 'none') {
-      if (profileName) {
-        throw new CliError(
-          'PROFILE_NOT_FOUND',
-          `Profile "${profileName}" not found for confluence`,
-          'Run: agentio confluence profile add'
-        );
-      }
-      throw new CliError(
-        'PROFILE_NOT_FOUND',
-        'No confluence profile configured',
-        'Run: agentio confluence profile add'
-      );
-    }
-    throw multipleProfilesError('confluence', profileResult.names);
-  }
-
-  const profile = profileResult.profile;
-
-  let credentials = await getCredentials<ConfluenceCredentials>('confluence', profile);
-
-  if (!credentials) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No credentials found for confluence profile "${profile}"`,
-      `Run: agentio confluence profile add --profile ${profile}`
-    );
-  }
-
-  credentials = await ensureValidToken(credentials, profile);
-
-  return {
-    client: new ConfluenceClient(credentials),
-    profile,
-  };
-}
+const getConfluenceClient = createClientGetter<ConfluenceCredentials, ConfluenceClient>({
+  service: 'confluence',
+  createClient: (credentials) => new ConfluenceClient(credentials),
+});
 
 export function registerConfluenceCommands(program: Command): void {
   const confluence = program.command('confluence').description('Confluence operations');
