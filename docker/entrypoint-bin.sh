@@ -25,10 +25,15 @@ curl -fL "https://github.com/plosson/agentio/releases/download/v${VERSION}/agent
     -o "${BIN_DIR}/agentio"
 chmod +x "${BIN_DIR}/agentio"
 
-# Import vault credentials when CI/CD-style env vars are present
+# First boot only: seed the vault from CI/CD-style env vars. Once a vault
+# exists on the volume it is the source of truth and is never overwritten.
 if [ -n "$AGENTIO_KEY" ] && [ -n "$AGENTIO_CONFIG" ]; then
-  echo "Importing vault from AGENTIO_KEY / AGENTIO_CONFIG..."
-  agentio vault import
+  if [ -f "${HOME}/.config/agentio/vault.path" ]; then
+    echo "Vault already present; skipping import"
+  else
+    echo "Importing vault from AGENTIO_KEY / AGENTIO_CONFIG..."
+    agentio vault import
+  fi
 fi
 
 exec "$@"
