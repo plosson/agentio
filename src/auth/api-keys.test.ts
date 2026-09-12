@@ -10,13 +10,14 @@ import {
   createApiKey,
   keyAllows,
   listApiKeys,
+  pruneProfileFromKeys,
   revokeApiKey,
   rotateApiKey,
   touchApiKey,
   updateApiKey,
   validateHubUrl,
 } from './api-keys';
-import { decodeToken } from './token';
+import { decodeToken, encodeToken } from './token';
 
 const HUB = 'https://vault.example.com';
 let tempHome = '';
@@ -57,7 +58,6 @@ describe('api keys', () => {
   test('wrong secret, unknown id, and malformed tokens do not authenticate', async () => {
     const { key, token } = await createApiKey({ name: 'agent', allowedProfiles: '*', readOnly: false }, HUB);
     const parts = decodeToken(token);
-    const { encodeToken } = await import('./token');
     expect(await authenticateToken(encodeToken({ ...parts, secret: 'x'.repeat(43) }))).toBeNull();
     expect(await authenticateToken(encodeToken({ ...parts, kid: 'nope' }))).toBeNull();
     expect(await authenticateToken('garbage')).toBeNull();
@@ -78,7 +78,7 @@ describe('api keys', () => {
 
   test('name, readOnly, and hub URL are validated', async () => {
     await expect(createApiKey({ name: '  ', allowedProfiles: '*', readOnly: false }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' as never }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'vault.example.com')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'ftp://x')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     expect(validateHubUrl('https://vault.example.com/ui/?x=1')).toBe('https://vault.example.com');
@@ -89,30 +89,42 @@ describe('api keys', () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
     const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true });
     expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true });
-    expect(await updateApiKey('nope', { name: 'x' })).toBeNull();
+    await expect(updateApiKey('nope', { name: 'x' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   test('rotate keeps id and scope, invalidates the old token', async () => {
     const first = await createApiKey({ name: 'a', allowedProfiles: ['gdrive/docs'], readOnly: false }, HUB);
     const second = await rotateApiKey(first.key.id, 'http://localhost:7890');
-    expect(second!.key).toMatchObject({ id: first.key.id, allowedProfiles: ['gdrive/docs'] });
-    expect(decodeToken(second!.token).url).toBe('http://localhost:7890');
+    expect(second.key).toMatchObject({ id: first.key.id, allowedProfiles: ['gdrive/docs'] });
+    expect(decodeToken(second.token).url).toBe('http://localhost:7890');
     expect(await authenticateToken(first.token)).toBeNull();
-    expect(await authenticateToken(second!.token)).toEqual(second!.key);
-    expect(await rotateApiKey('nope', HUB)).toBeNull();
+    expect(await authenticateToken(second.token)).toEqual(second.key);
+    await expect(rotateApiKey('nope', HUB)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   test('revoke deletes the record and the token stops working', async () => {
     const { key, token } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    expect(await revokeApiKey(key.id)).toBe(true);
+    await revokeApiKey(key.id);
     expect(await listApiKeys()).toEqual([]);
     expect(await authenticateToken(token)).toBeNull();
-    expect(await revokeApiKey(key.id)).toBe(false);
+    await expect(revokeApiKey(key.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  test('touch records last use', async () => {
+  test('touch records last use, at most once a minute', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
     await touchApiKey(key.id, new Date('2026-09-12T10:00:00Z'));
+    await touchApiKey(key.id, new Date('2026-09-12T10:00:30Z'));
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:00:00.000Z');
+    await touchApiKey(key.id, new Date('2026-09-12T10:01:00Z'));
+    expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:01:00.000Z');
+  });
+
+  test('deleting a profile prunes it from key scopes; wildcard keys are untouched', async () => {
+    const scoped = await createApiKey({ name: 's', allowedProfiles: ['gdrive/docs', 'gmail/work'], readOnly: false }, HUB);
+    const all = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
+    await pruneProfileFromKeys('gmail', 'work');
+    const keys = await listApiKeys();
+    expect(keys.find((k) => k.id === scoped.key.id)!.allowedProfiles).toEqual(['gdrive/docs']);
+    expect(keys.find((k) => k.id === all.key.id)!.allowedProfiles).toBe('*');
   });
 });

@@ -159,6 +159,20 @@ export async function removeProfile(
   return true;
 }
 
+/** A configured profile, flattened. */
+export interface ProfileRef {
+  service: ServiceName;
+  name: string;
+  readOnly?: boolean;
+}
+
+/** Every configured profile, in ALL_SERVICES order. */
+export async function listProfileRefs(): Promise<ProfileRef[]> {
+  return (await listProfiles()).flatMap(({ service, profiles }) =>
+    profiles.map((p) => ({ service, name: p.name, readOnly: p.readOnly })),
+  );
+}
+
 export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
   profiles: ProfileEntry[];

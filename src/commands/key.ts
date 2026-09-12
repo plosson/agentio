@@ -8,6 +8,7 @@ import {
   rotateApiKey,
   updateApiKey,
   type ApiKeyView,
+  type IssuedKey,
 } from '../auth/api-keys';
 import type { ApiKeyScope } from '../types/config';
 
@@ -20,13 +21,15 @@ function scopeFromOptions(opts: { profiles?: string; all?: boolean }): ApiKeySco
   return undefined;
 }
 
-function scopeSummary(key: ApiKeyView): string {
-  return key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ');
+/** "all profiles" or the list, plus the read-only flag. */
+function describeKey(key: ApiKeyView): string {
+  const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
+  return `${scope}${key.readOnly ? ', read-only' : ''}`;
 }
 
 /** The token goes to stdout alone so it can be captured; everything else to stderr. */
-function printIssued(token: string, key: ApiKeyView): void {
-  console.error(`Key "${key.name}" (${key.id}), ${scopeSummary(key)}${key.readOnly ? ', read-only' : ''}`);
+function printIssued({ key, token }: IssuedKey): void {
+  console.error(`Key "${key.name}" (${key.id}), ${describeKey(key)}`);
   console.error('This token is shown once. Set it on the agent machine as AGENTIO_TOKEN.');
   console.log(token);
 }
@@ -49,8 +52,7 @@ export function registerKeyCommands(program: Command): void {
         try {
           const scope = scopeFromOptions(opts);
           if (!scope) throw new CliError('INVALID_PARAMS', 'Choose a scope', 'Pass --all or --profiles <service/name,...>');
-          const issued = await createApiKey({ name, allowedProfiles: scope, readOnly: opts.readOnly }, opts.url);
-          printIssued(issued.token, issued.key);
+          printIssued(await createApiKey({ name, allowedProfiles: scope, readOnly: opts.readOnly }, opts.url));
         } catch (error) {
           handleError(error);
         }
@@ -79,9 +81,8 @@ export function registerKeyCommands(program: Command): void {
             return;
           }
           for (const k of keys) {
-            const flags = k.readOnly ? ' [read-only]' : '';
             const used = k.lastUsedAt ? `last used ${k.lastUsedAt}` : 'never used';
-            console.log(`${k.id}  ${k.name}${flags}  ${scopeSummary(k)}  created ${k.createdAt}  ${used}`);
+            console.log(`${k.id}  ${k.name}  ${describeKey(k)}  created ${k.createdAt}  ${used}`);
           }
         } catch (error) {
           handleError(error);
@@ -109,8 +110,7 @@ export function registerKeyCommands(program: Command): void {
             throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass --name, --profiles/--all, or --read-only/--no-read-only');
           }
           const updated = await updateApiKey(id, { name: opts.name, allowedProfiles: scope, readOnly: opts.readOnly });
-          if (!updated) throw new CliError('NOT_FOUND', `No key with id ${id}`);
-          console.log(`Updated "${updated.name}" (${updated.id}): ${scopeSummary(updated)}${updated.readOnly ? ', read-only' : ''}`);
+          console.log(`Updated "${updated.name}" (${updated.id}): ${describeKey(updated)}`);
         } catch (error) {
           handleError(error);
         }
@@ -129,9 +129,7 @@ export function registerKeyCommands(program: Command): void {
       .requiredOption('--url <url>', 'Public base URL of this hub, embedded in the new token')
       .action(async (id: string, opts) => {
         try {
-          const issued = await rotateApiKey(id, opts.url);
-          if (!issued) throw new CliError('NOT_FOUND', `No key with id ${id}`);
-          printIssued(issued.token, issued.key);
+          printIssued(await rotateApiKey(id, opts.url));
         } catch (error) {
           handleError(error);
         }
@@ -148,7 +146,7 @@ export function registerKeyCommands(program: Command): void {
       .argument('<id>', 'Key id from `agentio key list`')
       .action(async (id: string) => {
         try {
-          if (!(await revokeApiKey(id))) throw new CliError('NOT_FOUND', `No key with id ${id}`);
+          await revokeApiKey(id);
           console.log(`Revoked ${id}`);
         } catch (error) {
           handleError(error);

@@ -376,7 +376,7 @@ agentio sql profile add|list|remove
 
 ### API keys
 
-Keys let remote agents read credentials from this vault hub (Phase B of the remote vault design). Create them here or in the admin UI; both call the same core in `src/auth/api-keys.ts`. The token is `agio1.<base64url({v,url,kid})>.<secret>`; only the SHA-256 of the secret is stored, revoking deletes the record, and the hub URL embedded in the token is whatever the caller passes (`--url` here, `window.location.origin` in the UI).
+Keys let remote agents read credentials from this vault hub. Create them here or in the admin UI; both call `src/auth/api-keys.ts`. Token format and the hub-URL rule: `docs/design/remote-vault.md`, section Token format.
 
 ```bash
 agentio key create <name> --url https://vault.example.com (--all | --profiles gdrive/docunit,gmail/work) [--read-only]   # prints the token once, on stdout alone
@@ -397,7 +397,7 @@ agentio daemon status            # probe /health
 
 The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked from the admin UI at `/ui`, or at boot when `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. Once unlocked it stays so until Lock is pressed or the process restarts. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
-**Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): Unlock view, then a Profiles view with the same data as `agentio status --json`, a read-only toggle, and Delete (profile and credentials) per row, and an API keys card with create (one-time token display), rotate, and revoke. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session. Add and reauth still happen with the CLI on the hub host.
+**Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): Unlock view, then a Profiles view with the same data as `agentio status --json`, a read-only toggle, and Delete (profile and credentials) per row, and an API keys card. Details: `docs/design/remote-vault.md`, section Admin UI. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session. Add and reauth still happen with the CLI on the hub host.
 
 ### Utility Commands
 

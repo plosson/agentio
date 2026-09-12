@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { listProfiles, removeProfile, setProfileReadOnly } from '../config/config-manager';
 import { removeCredentials, getCredentials } from '../auth/token-store';
+import { pruneProfileFromKeys } from '../auth/api-keys';
 import { handleError, CliError } from './errors';
 import type { ServiceName } from '../types/config';
 
@@ -8,6 +9,7 @@ import type { ServiceName } from '../types/config';
 export async function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
   const removed = await removeProfile(service, profileName);
   await removeCredentials(service, profileName);
+  await pruneProfileFromKeys(service, profileName);
   return removed;
 }
 

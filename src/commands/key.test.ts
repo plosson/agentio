@@ -10,8 +10,10 @@ import { decodeToken } from '../auth/token';
 
 const PASSPHRASE = 'key-test-pw-1234';
 let tempHome = '';
+let savedHome = '';
 
 beforeEach(async () => {
+  savedHome = process.env.HOME || '';
   tempHome = await mkdtemp(join(tmpdir(), 'agentio-key-test-'));
   await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
   process.env.HOME = tempHome;
@@ -19,6 +21,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  process.env.HOME = savedHome;
   delete process.env.AGENTIO_PASSPHRASE;
   clearVaultCache();
   await rm(tempHome, { recursive: true, force: true }).catch(() => {});
@@ -45,7 +48,7 @@ describe('agentio key', () => {
     expect(created.stderr).toContain('shown once');
 
     const listed = await runCli(['key', 'list']);
-    expect(listed.stdout).toContain(`${kid}  ci [read-only]  gdrive/docs`);
+    expect(listed.stdout).toContain(`${kid}  ci  gdrive/docs, read-only`);
 
     const rotated = await runCli(['key', 'rotate', kid, '--url', 'https://vault.example.com']);
     expect(rotated.exitCode).toBe(0);

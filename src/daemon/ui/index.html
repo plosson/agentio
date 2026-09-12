@@ -85,7 +85,8 @@
     </form>
   </section>
 
-  <section class="card" id="view-profiles" hidden>
+  <div id="view-vault" hidden>
+  <section class="card" id="view-profiles">
     <h2>Profiles</h2>
     <div class="alert info" id="profiles-msg" hidden></div>
     <table>
@@ -100,7 +101,7 @@
     </div>
   </section>
 
-  <section class="card" id="view-keys" hidden>
+  <section class="card" id="view-keys">
     <h2>API keys</h2>
     <p class="note" style="margin:0 0 12px">Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It can read the profiles it is scoped to and nothing else.</p>
     <table>
@@ -126,17 +127,15 @@
       <div class="alert error" id="key-error" hidden></div>
     </form>
   </section>
+  </div>
 </main>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys') };
+  const views = { unlock: $('view-unlock'), vault: $('view-vault') };
 
-  // 'unlock' alone, or 'profiles' together with the keys card.
   function show(name) {
-    views.unlock.hidden = name !== 'unlock';
-    views.profiles.hidden = name === 'unlock';
-    views.keys.hidden = name === 'unlock';
+    for (const [key, el] of Object.entries(views)) el.hidden = key !== name;
     if (name === 'unlock') { $('passphrase').value = ''; $('passphrase').focus(); }
   }
 
@@ -145,24 +144,22 @@
     if (res.status === 204) return { ok: true, status: 204, body: null };
     let body = null;
     try { body = await res.json(); } catch { /* no body */ }
-    return { ok: res.ok, status: res.status, body };
+    return { ok: res.ok, status: res.status, body, error: (body && body.error) || 'Request failed' };
   }
 
   function escape(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  let profileRefs = [];
-
   function renderProfiles(data) {
     $('version').textContent = data.version ? 'v' + data.version : '';
-    profileRefs = [];
     const rows = [];
+    const choices = [];
     for (const [service, profiles] of Object.entries(data.services)) {
       for (const p of profiles) {
         const details = p.error || p.info || '';
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
-        profileRefs.push(service + '/' + p.profile);
+        choices.push(`<label class="toggle"><input type="checkbox" value="${escape(service + '/' + p.profile)}"> ${escape(service + '/' + p.profile)}</label>`);
         rows.push(`<tr data-ref="${ref}" data-label="${escape(service)} / ${escape(p.profile)}">
           <td class="mono">${escape(service)}</td>
           <td>${escape(p.profile)}</td>
@@ -174,6 +171,7 @@
       }
     }
     $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No profiles configured.</td></tr>';
+    $('key-profiles').innerHTML = choices.join('');
   }
 
   async function loadProfiles(test) {
@@ -185,7 +183,7 @@
     try {
       const res = await api('/ui/api/status?test=' + (test ? 'true' : 'false'));
       if (res.status === 401 || res.status === 503) { show('unlock'); return; }
-      if (!res.ok) { msg.textContent = (res.body && res.body.error) || 'Request failed'; return; }
+      if (!res.ok) { msg.textContent = res.error; return; }
       renderProfiles(res.body);
       msg.hidden = true;
     } finally {
@@ -201,8 +199,8 @@
     $('unlock-btn').disabled = true;
     try {
       const res = await api('/ui/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase: $('passphrase').value }) });
-      if (res.ok) { show('profiles'); await Promise.all([loadProfiles(false), loadKeys()]); return; }
-      err.textContent = (res.body && res.body.error) || 'Unlock failed';
+      if (res.ok) { show('vault'); await Promise.all([loadProfiles(false), loadKeys()]); return; }
+      err.textContent = res.error;
       err.hidden = false;
     } finally {
       $('unlock-btn').disabled = false;
@@ -215,7 +213,7 @@
     const row = box.closest('tr');
     box.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ readOnly: box.checked }) });
-    if (!res.ok) { box.checked = !box.checked; alert((res.body && res.body.error) || 'Update failed'); }
+    if (!res.ok) { box.checked = !box.checked; alert(res.error); }
     box.disabled = false;
   });
 
@@ -227,7 +225,7 @@
     btn.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
     if (res.ok) { row.remove(); if (!$('profiles-body').children.length) renderProfiles({ services: {} }); }
-    else { btn.disabled = false; alert((res.body && res.body.error) || 'Delete failed'); }
+    else { btn.disabled = false; alert(res.error); }
   });
 
   function fmtDate(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
@@ -253,6 +251,7 @@
   }
 
   function showToken(token) {
+    $('copy-btn').textContent = 'Copy';
     $('token-value').textContent = token;
     $('token-box').hidden = false;
     $('token-box').scrollIntoView({ block: 'nearest' });
@@ -264,10 +263,7 @@
   });
 
   document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', () => {
-    const some = document.querySelector('input[name=scope]:checked').value === 'some';
-    const box = $('key-profiles');
-    box.hidden = !some;
-    if (some) box.innerHTML = profileRefs.map((ref) => `<label class="toggle"><input type="checkbox" value="${escape(ref)}"> ${escape(ref)}</label>`).join('');
+    $('key-profiles').hidden = document.querySelector('input[name=scope]:checked').value !== 'some';
   }));
 
   $('key-form').addEventListener('submit', async (ev) => {
@@ -280,9 +276,8 @@
       const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
         name: $('key-name').value, allowedProfiles, readOnly: $('key-ro').checked, url: window.location.origin,
       }) });
-      if (!res.ok) { err.textContent = (res.body && res.body.error) || 'Create failed'; err.hidden = false; return; }
+      if (!res.ok) { err.textContent = res.error; err.hidden = false; return; }
       $('key-form').reset(); $('key-profiles').hidden = true;
-      $('copy-btn').textContent = 'Copy';
       showToken(res.body.token);
       await loadKeys();
     } finally { $('key-create-btn').disabled = false; }
@@ -294,11 +289,11 @@
     if (btn.classList.contains('rotate')) {
       if (!confirm('Rotate "' + name + '"? The current token stops working immediately.')) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: JSON.stringify({ url: window.location.origin }) });
-      if (res.ok) { $('copy-btn').textContent = 'Copy'; showToken(res.body.token); } else alert((res.body && res.body.error) || 'Rotate failed');
+      if (res.ok) showToken(res.body.token); else alert(res.error);
     } else if (btn.classList.contains('revoke')) {
       if (!confirm('Revoke "' + name + '"? Its token stops working immediately.')) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id), { method: 'DELETE' });
-      if (res.ok) await loadKeys(); else alert((res.body && res.body.error) || 'Revoke failed');
+      if (res.ok) await loadKeys(); else alert(res.error);
     }
   });
 
@@ -311,7 +306,7 @@
 
   (async () => {
     const res = await api('/ui/api/session');
-    if (res.ok && res.body.authenticated && !res.body.locked) { show('profiles'); await Promise.all([loadProfiles(false), loadKeys()]); }
+    if (res.ok && res.body.authenticated && !res.body.locked) { show('vault'); await Promise.all([loadProfiles(false), loadKeys()]); }
     else show('unlock');
   })();
 })();
