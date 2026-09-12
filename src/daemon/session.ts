@@ -26,6 +26,12 @@ export function hasSession(request: Request, now = Date.now()): boolean {
   return true;
 }
 
+/** Forget the session this request carries, if any. Other browsers stay signed in. */
+export function deleteSession(request: Request): void {
+  const id = sessionIdFrom(request);
+  if (id) sessions.delete(id);
+}
+
 export function clearSessions(): void {
   sessions.clear();
 }

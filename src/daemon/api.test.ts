@@ -132,6 +132,19 @@ describe('daemon HTTP surface', () => {
     expect((await call('/ui/api/status', { headers: { cookie } })).status).toBe(401);
   });
 
+  test('logout ends only the calling session and leaves the vault unlocked', async () => {
+    const mine = await cookieFrom(await unlock());
+    const other = await cookieFrom(await unlock(PASSPHRASE, '198.51.100.9'));
+    const out = await call('/ui/api/logout', { method: 'POST', headers: { cookie: mine } });
+    expect(out.status).toBe(204);
+    expect(out.headers.get('set-cookie')).toContain('Max-Age=0');
+
+    expect((await call('/ui/api/profiles', { headers: { cookie: mine } })).status).toBe(401);
+    expect((await call('/ui/api/profiles', { headers: { cookie: other } })).status).toBe(200);
+    expect(await (await call('/health')).json()).toMatchObject({ locked: false });
+    expect((await call('/ui/api/logout', { method: 'POST' })).status).toBe(401);
+  });
+
   test('a session on a vault locked another way gets 503, not data', async () => {
     const cookie = await cookieFrom(await unlock());
     lockVault(); // e.g. a future Lock from a different client
