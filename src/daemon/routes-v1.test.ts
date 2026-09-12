@@ -9,7 +9,7 @@ mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRe
 
 const { createRequestHandler } = await import('./api');
 const { createApiKey, listApiKeys } = await import('../auth/api-keys');
-const { v1AuthLimiter } = await import('./routes-v1');
+const { v1AuthLimiter, v1KeyLimiter, V1_REQUESTS_PER_MINUTE } = await import('./routes-v1');
 
 const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
@@ -61,6 +61,7 @@ beforeEach(async () => {
   await unlockVault(PASSPHRASE);
   jiraRefresh.mockClear();
   v1AuthLimiter.reset();
+  v1KeyLimiter.reset();
 });
 
 describe('/v1 credential API', () => {
@@ -80,6 +81,14 @@ describe('/v1 credential API', () => {
     expect((await call('/v1/profiles', { token: wrongSecret, ip: '203.0.113.9' })).status).toBe(429);
     // A valid token from the same address is never limited.
     expect((await call('/v1/profiles', { token: allToken, ip: '203.0.113.9' })).status).toBe(200);
+  });
+
+  test('a key is capped per minute, independently of other keys', async () => {
+    for (let i = 0; i < V1_REQUESTS_PER_MINUTE; i++) expect((await call('/v1/profiles', { token: scopedToken })).status).toBe(200);
+    const over = await call('/v1/profiles', { token: scopedToken });
+    expect(over.status).toBe(429);
+    expect(await over.json()).toMatchObject({ code: 'RATE_LIMITED', error: expect.stringContaining(`${V1_REQUESTS_PER_MINUTE}`) });
+    expect((await call('/v1/profiles', { token: allToken })).status).toBe(200);
   });
 
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {

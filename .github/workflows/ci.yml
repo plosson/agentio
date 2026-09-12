@@ -8,7 +8,7 @@ on:
 
 jobs:
   check:
-    name: Typecheck
+    name: Typecheck and test
     runs-on: ubuntu-latest
 
     steps:
@@ -25,6 +25,9 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
+
+      - name: Test
+        run: bun test
 
       - name: Test CLI runs
         run: bun run dev --help

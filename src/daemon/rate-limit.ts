@@ -25,8 +25,8 @@ export class RateLimiter {
   }
 
   /** Records a hit and throws RATE_LIMITED when it is over the limit. */
-  check(key: string, now = Date.now()): void {
-    if (!this.allow(key, now)) throw new CliError('RATE_LIMITED', 'Too many attempts, try again in a minute');
+  check(key: string, message = 'Too many attempts, try again in a minute', now = Date.now()): void {
+    if (!this.allow(key, now)) throw new CliError('RATE_LIMITED', message);
   }
 
   reset(): void {

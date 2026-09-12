@@ -15,8 +15,16 @@ import { errorResponse, json, profilePath } from './http';
  * that would let the agent refresh on its own.
  */
 
-/** Five bad tokens a minute per address; a valid token is never limited. */
+/** Five bad tokens a minute per address; a valid token is never limited by address. */
 export const v1AuthLimiter = new RateLimiter(5, 60_000);
+
+/**
+ * Requests a minute per key. An agent touches a handful of profiles per
+ * command, so this is far above any honest use and only stops a leaked token
+ * from being used to hammer the hub or the upstream token endpoints.
+ */
+export const V1_REQUESTS_PER_MINUTE = 120;
+export const v1KeyLimiter = new RateLimiter(V1_REQUESTS_PER_MINUTE, 60_000);
 
 async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const header = request.headers.get('authorization') ?? '';
@@ -102,6 +110,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
   try {
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked on the hub');
     const key = await authenticate(request, ip);
+    v1KeyLimiter.check(key.id, `More than ${V1_REQUESTS_PER_MINUTE} requests a minute for this key, try again in a minute`);
     // Awaited: a write must never be left pending after the request is answered.
     await touchApiKey(key);
 
