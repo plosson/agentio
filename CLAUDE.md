@@ -131,6 +131,8 @@ agentio vault clear [--force]
 - Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location — the encrypted vault may be synced, the passphrase must not be.
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
 
+**Writes are atomic.** Anything that changes the vault goes through `updateVault(mutate)` or `updateConfig(mutate)`: load-mutate-save under an in-process write lock, no write when the mutator changed nothing. `saveVault` exists only to create a vault or re-encrypt it wholesale (`vault passphrase`). Under `bun test`, a vault write outside the OS temp directory throws; every test must run with `HOME` under a `mkdtemp` directory.
+
 **Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
 
 **init vs set** — `init` creates a new vault (and imports legacy config unless `--no-migrate`). `set` points at a vault that already exists, which is the multi-machine case: the encrypted vault is synced, the passphrase file is not. `set` verifies by decrypting *before* writing the pointer, so a wrong passphrase changes nothing, and it never moves or deletes either vault file. To relocate a vault, move the file yourself then `vault set` the new path.
@@ -396,6 +398,8 @@ agentio daemon status            # probe /health
 ```
 
 The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked from the admin UI at `/ui`, or at boot when `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. Once unlocked it stays so until Lock is pressed or the process restarts. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
+
+**Credential API** (`src/daemon/routes-v1.ts`): what remote agents call with `Authorization: Bearer agio1.…`. `GET /v1/profiles`, `GET /v1/profiles/:service/:name`, and `POST /v1/profiles/:service/:name/credentials`, which returns the credential object the local code expects, refreshed first, minus each refresher's `secretFields` (`src/auth/refresh.ts`). Error codes map to HTTP in `src/daemon/http.ts`. Details: `docs/design/remote-vault.md`, sections HTTP API and What gets stripped.
 
 **Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): Unlock view, then a Profiles view with the same data as `agentio status --json`, a read-only toggle and Delete (profile and credentials) per row, and an API keys card. Details: `docs/design/remote-vault.md`, section Admin UI. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session. Add and reauth still happen with the CLI on the hub host.
 

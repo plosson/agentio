@@ -84,7 +84,7 @@ export function registerVaultCommands(program: Command): void {
           // Verify before touching the pointer, so a bad passphrase changes nothing.
           let contents: VaultContents;
           try {
-            contents = JSON.parse(decryptVault(encoded.trim(), passphrase)) as VaultContents;
+            contents = JSON.parse(await decryptVault(encoded.trim(), passphrase)) as VaultContents;
           } catch {
             throw new CliError(
               'AUTH_FAILED',

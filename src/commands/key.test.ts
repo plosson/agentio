@@ -1,37 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { seedVault } from '../vault/test-helpers';
-import { clearVaultCache } from '../vault/vault';
+import { describe, expect, test } from 'bun:test';
+import { withTempVault } from '../vault/test-helpers';
 import { decodeToken } from '../auth/token';
 
 /** Subprocess tests for `agentio key`, the CLI twin of the UI's Keys card. */
 
 const PASSPHRASE = 'key-test-pw-1234';
-let tempHome = '';
-let savedHome = '';
-
-beforeEach(async () => {
-  savedHome = process.env.HOME || '';
-  tempHome = await mkdtemp(join(tmpdir(), 'agentio-key-test-'));
-  await mkdir(join(tempHome, '.config', 'agentio'), { recursive: true, mode: 0o700 });
-  process.env.HOME = tempHome;
-  await seedVault({ passphrase: PASSPHRASE, config: { profiles: { gdrive: [{ name: 'docs' }] } } });
-});
-
-afterEach(async () => {
-  process.env.HOME = savedHome;
-  delete process.env.AGENTIO_PASSPHRASE;
-  clearVaultCache();
-  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
-});
+const vault = withTempVault('agentio-key-test-', () => ({ passphrase: PASSPHRASE, config: { profiles: { gdrive: [{ name: 'docs' }] } } }));
 
 async function runCli(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, HOME: tempHome, AGENTIO_PASSPHRASE: PASSPHRASE },
+    env: { ...process.env, HOME: vault.home(), AGENTIO_PASSPHRASE: PASSPHRASE },
   });
   const exitCode = await proc.exited;
   return { exitCode, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };

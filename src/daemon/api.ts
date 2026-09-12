@@ -2,7 +2,9 @@ import type { Server } from 'bun';
 import { DAEMON_HOST, DAEMON_PORT, type HealthResponse } from './types';
 import { isVaultUnlocked } from '../vault/vault';
 import { clientIp } from './rate-limit';
-import { handleUiRequest, json, type UiContext } from './routes-ui';
+import { handleUiRequest, type UiContext } from './routes-ui';
+import { handleV1Request } from './routes-v1';
+import { json } from './http';
 
 /** The slice of Bun's Server the handler needs; tests pass a stub. */
 export interface PeerSource {
@@ -33,7 +35,10 @@ export function createRequestHandler(ctx: UiContext) {
 
     if (path === '/health' && request.method === 'GET') return handleHealth();
 
-    const ui = await handleUiRequest(request, clientIp(request, peer.requestIP(request)?.address ?? null), ctx);
+    const ip = clientIp(request, peer.requestIP(request)?.address ?? null);
+    const v1 = await handleV1Request(request, ip);
+    if (v1) return v1;
+    const ui = await handleUiRequest(request, ip, ctx);
     if (ui) return ui;
 
     return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);

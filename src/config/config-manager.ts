@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { loadVault, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
+import { loadVault, updateVault } from '../vault/vault';
 import { ALL_SERVICES } from '../types/config';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
@@ -34,13 +34,9 @@ export async function loadConfig(): Promise<Config> {
   return vault.config;
 }
 
-export async function saveConfig(config: Config): Promise<void> {
-  const vault = await loadVault();
-  await saveVault({
-    version: CURRENT_VAULT_VERSION,
-    config,
-    credentials: vault.credentials,
-  });
+/** Atomic read-modify-write of the config; `mutate` runs under the vault write lock. */
+export function updateConfig<T>(mutate: (config: Config) => T | Promise<T>): Promise<T> {
+  return updateVault((vault) => mutate(vault.config));
 }
 
 export async function getProfile(
@@ -105,34 +101,18 @@ export interface SetProfileOptions {
   readOnly?: boolean;
 }
 
-export async function setProfile(
+export function setProfile(
   service: ServiceName,
   profileName: string,
   options?: SetProfileOptions
 ): Promise<void> {
-  const config = await loadConfig();
-
-  if (!config.profiles[service]) {
-    config.profiles[service] = [];
-  }
-
-  const existingIndex = config.profiles[service]!.findIndex(
-    (p) => getProfileName(p) === profileName
-  );
-
-  const entry: ProfileEntry = {
-    name: profileName,
-    ...(options?.readOnly ? { readOnly: true } : {}),
-  };
-
-  if (existingIndex === -1) {
-    config.profiles[service]!.push(entry);
-  } else {
-    // Update existing profile
-    config.profiles[service]![existingIndex] = entry;
-  }
-
-  await saveConfig(config);
+  return updateConfig((config) => {
+    const profiles = (config.profiles[service] ??= []);
+    const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
+    const existingIndex = profiles.findIndex((p) => getProfileName(p) === profileName);
+    if (existingIndex === -1) profiles.push(entry);
+    else profiles[existingIndex] = entry;
+  });
 }
 
 /** A configured profile, flattened. */
@@ -181,32 +161,25 @@ export async function isProfileReadOnly(
 /**
  * Set the read-only status of a profile
  */
-export async function setProfileReadOnly(
+export function setProfileReadOnly(
   service: ServiceName,
   profileName: string,
   readOnly: boolean
 ): Promise<boolean> {
-  const config = await loadConfig();
-  const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles) {
-    return false;
-  }
+  return updateConfig((config) => {
+    const serviceProfiles = config.profiles[service];
+    const index = serviceProfiles?.findIndex((p) => getProfileName(p) === profileName) ?? -1;
+    if (!serviceProfiles || index === -1) return false;
 
-  const index = serviceProfiles.findIndex((p) => getProfileName(p) === profileName);
-  if (index === -1) {
-    return false;
-  }
-
-  const entry = normalizeProfile(serviceProfiles[index]);
-  if (readOnly) {
-    entry.readOnly = true;
-  } else {
-    delete entry.readOnly;
-  }
-  serviceProfiles[index] = entry;
-
-  await saveConfig(config);
-  return true;
+    const entry = normalizeProfile(serviceProfiles[index]);
+    if (readOnly) {
+      entry.readOnly = true;
+    } else {
+      delete entry.readOnly;
+    }
+    serviceProfiles[index] = entry;
+    return true;
+  });
 }
 
 export { CONFIG_DIR, CONFIG_FILE };

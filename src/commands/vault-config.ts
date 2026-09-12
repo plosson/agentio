@@ -3,9 +3,9 @@ import { randomBytes } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig } from '../config/config-manager';
+import { getProfileName, loadConfig } from '../config/config-manager';
 import { getAllCredentials } from '../auth/token-store';
-import { CURRENT_VAULT_VERSION, loadVault, saveVault, vaultExists, type VaultContents } from '../vault/vault';
+import { CURRENT_VAULT_VERSION, updateVault, vaultExists, type VaultContents } from '../vault/vault';
 import { pruneDanglingScopes } from '../auth/api-keys';
 import { bootstrapVault } from './vault-init';
 import { CliError, handleError } from '../utils/errors';
@@ -13,7 +13,7 @@ import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
 import { encryptVault, decryptVault } from '../vault/crypto';
 import { addExamples } from '../utils/command-tree';
-import type { Config, ServiceName, ProfileValue } from '../types/config';
+import type { Config, ServiceName } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
 interface ProfileSelection {
@@ -44,7 +44,7 @@ export async function generateExportData(): Promise<{ key: string; config: strin
     credentials,
   };
 
-  const encrypted = encryptVault(JSON.stringify(exportData), encryptionKey);
+  const encrypted = await encryptVault(JSON.stringify(exportData), encryptionKey);
 
   return {
     key: encryptionKey,
@@ -158,7 +158,7 @@ export function registerVaultConfigCommands(vault: Command): void {
         };
 
         // Encrypt the data
-        const encrypted = encryptVault(JSON.stringify(exportData), encryptionKey);
+        const encrypted = await encryptVault(JSON.stringify(exportData), encryptionKey);
 
         const profileCount = selectedProfiles.length;
         const profileText = profileCount === 1 ? 'profile' : 'profiles';
@@ -252,7 +252,7 @@ export function registerVaultConfigCommands(vault: Command): void {
         // Decrypt
         let exportData: ExportedData;
         try {
-          const decrypted = decryptVault(encrypted.trim(), key);
+          const decrypted = await decryptVault(encrypted.trim(), key);
           exportData = JSON.parse(decrypted);
         } catch {
           throw new CliError(
@@ -281,54 +281,33 @@ export function registerVaultConfigCommands(vault: Command): void {
           });
           console.log('Configuration imported successfully');
         } else if (options.merge) {
-          // Merge with existing config
-          const current = await loadVault();
-          const currentConfig = current.config;
-          const currentCredentials = current.credentials;
-
-          // Merge profiles
-          for (const [service, profiles] of Object.entries(exportData.config.profiles)) {
-            if (profiles) {
-              if (!currentConfig.profiles[service as keyof typeof currentConfig.profiles]) {
-                (currentConfig.profiles as Record<string, ProfileValue[]>)[service] = [];
-              }
+          // Merge with existing config: add what is missing, never overwrite.
+          await updateVault(({ config: currentConfig, credentials: currentCredentials }) => {
+            for (const [service, profiles] of Object.entries(exportData.config.profiles)) {
+              if (!profiles) continue;
+              const currentProfiles = (currentConfig.profiles[service as ServiceName] ??= []);
               for (const entry of profiles) {
-                const profileName = typeof entry === 'string' ? entry : entry.name;
-                const currentProfiles = (currentConfig.profiles as Record<string, ProfileValue[]>)[service];
-                const exists = currentProfiles.some((p) =>
-                  (typeof p === 'string' ? p : p.name) === profileName
-                );
-                if (!exists) {
-                  currentProfiles.push(entry);
-                }
+                if (!currentProfiles.some((p) => getProfileName(p) === getProfileName(entry))) currentProfiles.push(entry);
               }
             }
-          }
-
-          // Merge credentials
-          for (const [service, profiles] of Object.entries(exportData.credentials)) {
-            if (!currentCredentials[service]) {
-              currentCredentials[service] = {};
-            }
-            for (const [profile, creds] of Object.entries(profiles)) {
-              // Only add if not already exists
-              if (!currentCredentials[service][profile]) {
-                currentCredentials[service][profile] = creds;
+            for (const [service, profiles] of Object.entries(exportData.credentials)) {
+              const current = (currentCredentials[service] ??= {});
+              for (const [profile, creds] of Object.entries(profiles)) {
+                current[profile] ??= creds;
               }
             }
-          }
-
-          await saveVault({ ...current, config: currentConfig, credentials: currentCredentials });
+          });
           console.log('Configuration merged successfully');
         } else {
           // Replace profiles from the export, but PRESERVE any other
           // top-level fields. The export blob only contains `{profiles}` by
           // construction; everything else in the existing config is
           // per-machine state that the import has no business destroying.
-          const current = await loadVault();
-          const config = { ...current.config, profiles: exportData.config.profiles };
-          pruneDanglingScopes(config);
-          await saveVault({ ...current, config, credentials: exportData.credentials });
+          await updateVault((current) => {
+            current.config.profiles = exportData.config.profiles;
+            pruneDanglingScopes(current.config);
+            current.credentials = exportData.credentials;
+          });
           console.log('Configuration imported successfully');
         }
       } catch (error) {
@@ -370,9 +349,11 @@ AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
           }
         }
 
-        // Empty profiles and credentials in one write
-        const current = await loadVault();
-        await saveVault({ ...current, config: { profiles: {} }, credentials: {} });
+        // Empty profiles, credentials, and keys in one write
+        await updateVault((current) => {
+          current.config = { profiles: {} };
+          current.credentials = {};
+        });
 
         console.log('Configuration cleared');
       } catch (error) {

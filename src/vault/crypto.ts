@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const SALT_LEN = 32;
@@ -13,18 +13,20 @@ const SCRYPT_P = 1;
 
 export const CURRENT_VERSION = 1;
 
-function deriveKey(passphrase: string, salt: Buffer): Buffer {
-  return scryptSync(passphrase, salt, KEY_LEN, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
+// Key derivation runs on the thread pool so the daemon keeps serving requests
+// while a vault write or unlock is in flight; the derivation is ~15 ms of CPU.
+function deriveKey(passphrase: string, salt: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(passphrase, salt, KEY_LEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P }, (err, key) =>
+      err ? reject(err) : resolve(key),
+    );
   });
 }
 
-export function encryptVault(plaintext: string, passphrase: string): string {
+export async function encryptVault(plaintext: string, passphrase: string): Promise<string> {
   const salt = randomBytes(SALT_LEN);
   const iv = randomBytes(IV_LEN);
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
 
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const ciphertext = Buffer.concat([
@@ -36,7 +38,7 @@ export function encryptVault(plaintext: string, passphrase: string): string {
   return Buffer.concat([salt, iv, ciphertext, tag]).toString('base64');
 }
 
-export function decryptVault(encoded: string, passphrase: string): string {
+export async function decryptVault(encoded: string, passphrase: string): Promise<string> {
   const buf = Buffer.from(encoded, 'base64');
   if (buf.length < SALT_LEN + IV_LEN + TAG_LEN + 1) {
     throw new Error('vault: encoded payload too short');
@@ -47,7 +49,7 @@ export function decryptVault(encoded: string, passphrase: string): string {
   const tag = buf.subarray(buf.length - TAG_LEN);
   const ciphertext = buf.subarray(SALT_LEN + IV_LEN, buf.length - TAG_LEN);
 
-  const key = deriveKey(passphrase, salt);
+  const key = await deriveKey(passphrase, salt);
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
 

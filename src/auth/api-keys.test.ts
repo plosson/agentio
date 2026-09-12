@@ -1,11 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { seedVault } from '../vault/test-helpers';
-import { clearVaultCache, loadVault } from '../vault/vault';
+import { describe, expect, test } from 'bun:test';
+import { withTempVault } from '../vault/test-helpers';
+import { loadVault } from '../vault/vault';
 import { deleteProfile } from '../utils/profile-commands';
-import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
 import {
   authenticateToken,
   createApiKey,
@@ -19,26 +15,10 @@ import {
 import { decodeToken, encodeToken } from './token';
 
 const HUB = 'https://vault.example.com';
-let tempHome = '';
-let savedHome = '';
 
-beforeEach(async () => {
-  savedHome = process.env.HOME || '';
-  tempHome = await mkdtemp(join(tmpdir(), 'agentio-keys-test-'));
-  process.env.HOME = tempHome;
-  await seedVault({
-    config: { profiles: { gdrive: [{ name: 'docs' }], gmail: [{ name: 'work' }, { name: 'home' }] } },
-  });
-});
-
-afterEach(async () => {
-  process.env.HOME = savedHome;
-  delete process.env.AGENTIO_PASSPHRASE;
-  resetPassphraseProvider();
-  clearPassphraseCache();
-  clearVaultCache();
-  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
-});
+withTempVault('agentio-keys-test-', () => ({
+  config: { profiles: { gdrive: [{ name: 'docs' }], gmail: [{ name: 'work' }, { name: 'home' }] } },
+}));
 
 describe('api keys', () => {
   test('create stores only the hash and returns a token that authenticates', async () => {
@@ -110,10 +90,10 @@ describe('api keys', () => {
 
   test('touch records last use, at most once a minute', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    await touchApiKey(key.id, new Date('2026-09-12T10:00:00Z'));
-    await touchApiKey(key.id, new Date('2026-09-12T10:00:30Z'));
+    await touchApiKey(key, new Date('2026-09-12T10:00:00Z'));
+    await touchApiKey(key, new Date('2026-09-12T10:00:30Z'));
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:00:00.000Z');
-    await touchApiKey(key.id, new Date('2026-09-12T10:01:00Z'));
+    await touchApiKey(key, new Date('2026-09-12T10:01:00Z'));
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:01:00.000Z');
   });
 
