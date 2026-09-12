@@ -7,6 +7,7 @@ import { clearVaultCache, lockVault } from '../vault/vault';
 import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
 import { createRequestHandler, type PeerSource } from './api';
 import { clearSessions } from './session';
+import { getCredentials } from '../auth/token-store';
 import { unlockLimiter } from './routes-ui';
 
 const PASSPHRASE = 'hub-passphrase-123';
@@ -139,6 +140,43 @@ describe('daemon HTTP surface', () => {
     const res = await call('/ui/api/profiles', { headers: { cookie } });
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ code: 'VAULT_LOCKED' });
+  });
+
+  test('read-only can be toggled from the UI', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const off = await call('/ui/api/profiles/telegram/bot', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: false }),
+    });
+    expect(off.status).toBe(200);
+    expect(await off.json()).toEqual({ service: 'telegram', name: 'bot', readOnly: false });
+    const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
+    expect(list.profiles[0].readOnly).toBe(false);
+
+    const bad = await call('/ui/api/profiles/telegram/bot', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: 'yes' }),
+    });
+    expect(bad.status).toBe(400);
+    const missing = await call('/ui/api/profiles/telegram/nope', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: true }),
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  test('delete removes the profile and its credentials', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const gone = await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } });
+    expect(gone.status).toBe(204);
+    const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
+    expect(list.profiles).toEqual([]);
+    expect(await getCredentials('telegram', 'bot')).toBeNull();
+
+    expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } })).status).toBe(404);
+    expect((await call('/ui/api/profiles/notaservice/x', { method: 'DELETE', headers: { cookie } })).status).toBe(404);
+  });
+
+  test('mutations need a session too', async () => {
+    expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE' })).status).toBe(401);
+    expect((await call('/ui/api/profiles/telegram/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
   });
 
   test('unknown paths are 404 JSON', async () => {

@@ -384,7 +384,7 @@ agentio daemon status            # probe /health
 
 The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked from the admin UI at `/ui`, or at boot when `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. Once unlocked it stays so until Lock is pressed or the process restarts. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
-**Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): Unlock view, then a read-only Profiles view with the same data as `agentio status --json`. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session. Add and reauth still happen with the CLI on the hub host.
+**Admin UI** (`src/daemon/ui/index.html`, one file with inline style and script, embedded into the binary with a `text` import): Unlock view, then a Profiles view with the same data as `agentio status --json`, a read-only toggle, and Delete (profile and credentials) per row. Owner routes live under `/ui/api/*` behind an `httpOnly` session cookie that expires after 30 idle minutes; the vault itself does not re-lock. `POST /ui/api/unlock` is limited to 5 attempts a minute per address (`X-Forwarded-For` first, then the socket peer). Lock drops every session. Add and reauth still happen with the CLI on the hub host.
 
 ### Utility Commands
 
