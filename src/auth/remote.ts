@@ -1,4 +1,4 @@
-import { CliError } from '../utils/errors';
+import { CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef } from '../config/config-manager';
 import { decodeToken, type TokenParts } from './token';
@@ -14,8 +14,14 @@ export function isRemoteMode(): boolean {
   return Boolean(process.env.AGENTIO_TOKEN?.trim());
 }
 
+/** A profile as the hub lists it for this token. */
+export interface RemoteProfile extends ProfileRef {
+  readOnly: boolean;
+  hasCredentials: boolean;
+}
+
 let parsed: TokenParts | null = null;
-let profilesPromise: Promise<ProfileRef[]> | null = null;
+let profilesPromise: Promise<RemoteProfile[]> | null = null;
 
 /** Forget the parsed token and the cached profile list (tests change the env). */
 export function resetRemoteCache(): void {
@@ -27,54 +33,56 @@ export function hub(): TokenParts {
   return (parsed ??= decodeToken(process.env.AGENTIO_TOKEN!));
 }
 
-/** Throw the one error every write path raises when there is no vault here. */
-export function assertLocalMode(what: string): void {
-  if (!isRemoteMode()) return;
-  throw new CliError(
+/** The one error every owner-only path raises when there is no vault here. */
+export function remoteModeError(what: string): CliError {
+  return new CliError(
     'CONFIG_ERROR',
     `${what} is not available in remote mode`,
     `This machine uses the vault hub at ${hub().url}. Manage profiles and keys there.`,
   );
 }
 
-const REQUEST_TIMEOUT_MS = 15_000;
-
-interface HubError {
-  error?: string;
-  code?: string;
-  suggestion?: string;
+export function assertLocalMode(what: string): void {
+  if (isRemoteMode()) throw remoteModeError(what);
 }
 
-/** The hub's HTTP failures as the CLI's own errors, with hub-specific advice. */
-function hubError(status: number, body: HubError, url: string): CliError {
+const REQUEST_TIMEOUT_MS = 15_000;
+const KNOWN_CODES = new Set<string>([
+  'AUTH_FAILED', 'TOKEN_EXPIRED', 'PROFILE_NOT_FOUND', 'INVALID_PARAMS', 'API_ERROR', 'NETWORK_ERROR',
+  'PERMISSION_DENIED', 'RATE_LIMITED', 'NOT_FOUND', 'CONFIG_ERROR', 'VAULT_NOT_CONFIGURED', 'VAULT_LOCKED', 'VAULT_CORRUPT',
+]);
+
+/**
+ * The hub speaks this CLI's own error codes, so a failure keeps its code and
+ * suggestion. Two are re-read for the agent's situation: a refresh the hub
+ * could not do is an auth problem to fix on the hub, and a locked hub is
+ * configuration, not a locked local vault. A non-JSON body (a proxy page) falls
+ * back to the status.
+ */
+function hubError(status: number, body: { error?: string; code?: string; suggestion?: string }, url: string): CliError {
+  const code: ErrorCode = body.code && KNOWN_CODES.has(body.code) ? (body.code as ErrorCode) : httpStatusToErrorCode(status);
   const detail = body.error ?? `HTTP ${status}`;
-  switch (status) {
-    case 401:
+  switch (code) {
+    case 'AUTH_FAILED':
       return new CliError('AUTH_FAILED', `The vault hub rejected this token: ${detail}`,
         'Get a new token from the hub admin UI, or `agentio key create` on the hub host');
-    case 403:
-      return new CliError('PERMISSION_DENIED', detail, 'Widen the key\'s scope on the hub, or use another key');
-    case 404:
-      return new CliError('PROFILE_NOT_FOUND', detail, 'Run: agentio profile list');
-    case 409:
+    case 'TOKEN_EXPIRED':
       return new CliError('AUTH_FAILED', `Re-authentication is needed on the vault host: ${detail}`,
-        `Reauth the profile on the hub host, then retry`);
-    case 429:
-      return new CliError('RATE_LIMITED', detail);
-    case 503:
+        'Reauth the profile on the hub host, then retry');
+    case 'VAULT_LOCKED':
       return new CliError('CONFIG_ERROR', 'The vault is locked on the hub', `Unlock it at ${url}/ui`);
     default:
-      return new CliError('API_ERROR', `Vault hub error: ${detail}`);
+      return new CliError(code, detail, body.suggestion);
   }
 }
 
-async function hubRequest<T>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
-  const { url, secret: _secret } = hub();
+async function hubRequest<T>(path: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
+  const { url } = hub();
   let response: Response;
   try {
     response = await fetch(`${url}${path}`, {
-      ...init,
-      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${process.env.AGENTIO_TOKEN!.trim()}` },
+      method,
+      headers: { Authorization: `Bearer ${process.env.AGENTIO_TOKEN!.trim()}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -85,26 +93,23 @@ async function hubRequest<T>(path: string, init: RequestInit = {}): Promise<{ st
   const text = await response.text();
   let body: unknown = null;
   try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-  if (!response.ok) throw hubError(response.status, (body ?? {}) as HubError, url);
-  return { status: response.status, body: body as T };
+  if (!response.ok) throw hubError(response.status, (body ?? {}) as { error?: string; code?: string; suggestion?: string }, url);
+  return body as T;
 }
 
-/** The profiles this token may use, with the effective read-only flag. Fetched once per process. */
-export function remoteProfiles(): Promise<ProfileRef[]> {
-  return (profilesPromise ??= hubRequest<{ profiles: ProfileRef[] }>('/v1/profiles').then((r) => r.body.profiles).catch((err) => {
-    profilesPromise = null;
-    throw err;
-  }));
+/** The profiles this token may use. Fetched once per process. */
+export function remoteProfiles(): Promise<RemoteProfile[]> {
+  return (profilesPromise ??= hubRequest<{ profiles: RemoteProfile[] }>('/v1/profiles').then((r) => r.profiles));
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
 export async function remoteCredentials<T = Record<string, unknown>>(service: ServiceName, name: string): Promise<T | null> {
   const path = `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}/credentials`;
   try {
-    const { body } = await hubRequest<{ credentials: T }>(path, { method: 'POST' });
-    return body.credentials;
+    return (await hubRequest<{ credentials: T }>(path, 'POST')).credentials;
   } catch (err) {
-    if (err instanceof CliError && err.code === 'PROFILE_NOT_FOUND') return null;
+    // NOT_FOUND is "profile exists, nothing stored"; an unknown profile stays PROFILE_NOT_FOUND.
+    if (err instanceof CliError && err.code === 'NOT_FOUND') return null;
     throw err;
   }
 }

@@ -6,6 +6,7 @@ import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 import { encryptVault, decryptVault } from './crypto';
+import { assertLocalMode } from '../auth/remote';
 import {
   readPointer,
   pointerExists,
@@ -184,6 +185,7 @@ async function loadVaultAt(path: string): Promise<VaultContents> {
 }
 
 export async function loadVault(): Promise<VaultContents> {
+  assertLocalMode('Reading the vault');
   return loadVaultAt(await requireExistingVaultPath());
 }
 
@@ -208,6 +210,7 @@ function serializedWrite<T>(task: () => Promise<T>): Promise<T> {
  * clean; one that changes nothing costs no write. Returns the mutator's result.
  */
 export function updateVault<T>(mutate: (contents: VaultContents) => T | Promise<T>): Promise<T> {
+  assertLocalMode('Changing the vault');
   return serializedWrite(async () => {
     const path = await requireExistingVaultPath();
     const before = JSON.stringify(await loadVaultAt(path));

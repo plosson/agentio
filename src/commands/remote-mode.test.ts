@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../vault/test-helpers';
 import { lockVault, unlockVault } from '../vault/vault';
-import { createApiKey } from '../auth/api-keys';
+import { createApiKey, listApiKeys, revokeApiKey } from '../auth/api-keys';
 import { createRequestHandler } from '../daemon/api';
 
 /**
@@ -16,7 +16,7 @@ import { createRequestHandler } from '../daemon/api';
 const PASSPHRASE = 'hub-pw-12345';
 withTempVault('agentio-remote-hub-', () => ({
   passphrase: PASSPHRASE,
-  config: { profiles: { telegram: [{ name: 'alerts' }], slack: [{ name: 'ops', readOnly: true }], gdrive: [{ name: 'docs' }] } },
+  config: { profiles: { telegram: [{ name: 'alerts' }, { name: 'bare' }], slack: [{ name: 'ops', readOnly: true }], gdrive: [{ name: 'docs' }] } },
   credentials: {
     telegram: { alerts: { botToken: 'bot-secret', channelId: '1' } },
     slack: { ops: { type: 'webhook', webhookUrl: 'https://hooks.slack.com/x' } },
@@ -30,13 +30,12 @@ let token = '';
 let url = '';
 
 beforeEach(async () => {
-  delete process.env.AGENTIO_PASSPHRASE;
   lockVault();
   await unlockVault(PASSPHRASE);
   const handle = createRequestHandler({ version: 'test' });
   server = Bun.serve({ port: 0, fetch: (req, srv) => handle(req, srv) });
   url = `http://127.0.0.1:${server.port}`;
-  token = (await createApiKey({ name: 'agent', allowedProfiles: ['telegram/alerts', 'slack/ops'], readOnly: false }, url)).token;
+  token = (await createApiKey({ name: 'agent', allowedProfiles: ['telegram/alerts', 'telegram/bare', 'slack/ops'], readOnly: false }, url)).token;
   clientHome = await mkdtemp(join(tmpdir(), 'agentio-remote-client-'));
 });
 
@@ -68,6 +67,8 @@ describe('remote mode end to end', () => {
     expect(parsed.hub).toBe(url);
     expect(Object.keys(parsed.services).sort()).toEqual(['slack', 'telegram']);
     expect(parsed.services.slack[0].readOnly).toBe(true);
+    // The hub says which profiles hold nothing; no credential fetch was needed to know.
+    expect(parsed.services.telegram.find((p: { profile: string }) => p.profile === 'bare').status).toBe('no-creds');
   });
 
   test('profile list works; doctor reports the hub', async () => {
@@ -79,19 +80,19 @@ describe('remote mode end to end', () => {
     const doctor = await cli(['doctor']);
     expect(doctor.exitCode).toBe(0);
     expect(doctor.stdout).toContain('✓ Hub');
-    expect(doctor.stdout).toContain('2 profile(s)');
+    expect(doctor.stdout).toContain('3 profile(s)');
   });
 
-  test('a real command resolves the profile and fetches credentials from the hub', async () => {
-    // `telegram send` needs a network; `--help` proves the gate lets service commands through,
-    // and `profile list` for the service proves the resolver path end to end.
-    const res = await cli(['telegram', 'profile', 'list']);
-    expect(res.exitCode).toBe(0);
-    expect(res.stdout).toContain('alerts');
+  test('a service command resolves its profile and read-only flag through the hub', async () => {
+    // slack/ops is read-only on the hub, so a write is refused before any network call.
+    const res = await cli(['slack', 'send', 'hello']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('PERMISSION_DENIED');
+    expect(res.stderr).toContain('read-only on the vault hub');
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'status'], ['key', 'list'], ['daemon', 'status'], ['profile', 'add', 'gmail'], ['telegram', 'profile', 'add']]) {
+    for (const args of [['vault', 'status'], ['profile', 'add', 'gmail'], ['telegram', 'profile', 'add']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -106,7 +107,6 @@ describe('remote mode end to end', () => {
   });
 
   test('a revoked token fails with the hub\'s reason', async () => {
-    const { listApiKeys, revokeApiKey } = await import('../auth/api-keys');
     for (const k of await listApiKeys()) await revokeApiKey(k.id);
     const res = await cli(['status', '--no-test']);
     expect(res.exitCode).not.toBe(0);

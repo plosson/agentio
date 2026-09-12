@@ -43,7 +43,7 @@ import type { DropboxCredentials } from '../types/dropbox';
 import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
-import { hub, isRemoteMode } from '../auth/remote';
+import { hub, isRemoteMode, remoteProfiles } from '../auth/remote';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -193,12 +193,16 @@ async function listProfileRefs(): Promise<ProfileRef[]> {
  * its recorded expiry; not when the client already diagnosed the refresh
  * token itself, where a second exchange can only fail the same way.
  */
-async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
-  // Remote: a listing should not pull credentials from the hub (one POST and
-  // one audit line per profile); the hub only lists profiles it holds.
-  if (!shouldTest && isRemoteMode()) return { ...ref, status: 'skipped' };
+/** Whether anything is stored for the profile: the hub says so in its listing, so no fetch is needed there. */
+async function hasStoredCredentials(ref: ProfileRef): Promise<boolean> {
+  if (isRemoteMode()) {
+    return (await remoteProfiles()).some((p) => p.service === ref.service && p.name === ref.profile && p.hasCredentials);
+  }
+  return (await getCredentials(ref.service, ref.profile)) !== null;
+}
 
-  if (!(await getCredentials(ref.service, ref.profile))) {
+async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
+  if (!(await hasStoredCredentials(ref))) {
     return { ...ref, status: 'no-creds' };
   }
 
@@ -210,7 +214,8 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
   try {
     const { credentials } = await getFreshCredentials(ref.service, ref.profile);
     result = await createServiceClient(ref.service, credentials).validate();
-    if (!result.valid && !result.error?.includes('re-authenticate')) {
+    // A forced refresh cannot happen remotely: the hub keeps the refresh material.
+    if (!result.valid && !isRemoteMode() && !result.error?.includes('re-authenticate')) {
       const forced = await getFreshCredentials(ref.service, ref.profile, { force: true });
       if (forced.refreshed) result = await createServiceClient(ref.service, forced.credentials).validate();
     }

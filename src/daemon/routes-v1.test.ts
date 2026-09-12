@@ -85,13 +85,14 @@ describe('/v1 credential API', () => {
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {
     const scoped = await (await call('/v1/profiles', { token: scopedToken })).json();
     expect(scoped.profiles).toEqual([
-      { service: 'jira', name: 'fresh', readOnly: false },
-      { service: 'telegram', name: 'bot', readOnly: false },
+      { service: 'jira', name: 'fresh', readOnly: false, hasCredentials: true },
+      { service: 'telegram', name: 'bot', readOnly: false, hasCredentials: true },
     ]);
     const all = await (await call('/v1/profiles', { token: allToken })).json();
     expect(all.profiles).toHaveLength(6);
     // The key is read-only, so every profile is, including ones that are not themselves.
     expect(all.profiles.every((p: { readOnly: boolean }) => p.readOnly)).toBe(true);
+    expect(all.profiles.find((p: { service: string }) => p.service === 'slack').hasCredentials).toBe(false);
   });
 
   test('a profile outside the allow-list is 403, an unknown one 404', async () => {

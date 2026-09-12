@@ -1,5 +1,5 @@
 import { loadVault, updateVault } from '../vault/vault';
-import { assertLocalMode, isRemoteMode, remoteCredentials } from './remote';
+import { isRemoteMode, remoteCredentials } from './remote';
 import type { StoredCredentials } from '../types/tokens';
 import type { ServiceName } from '../types/config';
 
@@ -17,18 +17,15 @@ export async function setCredentials(
   profile: string,
   data: object
 ): Promise<void> {
-  assertLocalMode('Storing credentials');
   await updateVault(({ credentials }) => {
     (credentials[service] ??= {})[profile] = data as Record<string, unknown>;
   });
 }
 
 export async function getAllCredentials(): Promise<StoredCredentials> {
-  assertLocalMode('Reading every credential');
   return (await loadVault()).credentials;
 }
 
 export async function setAllCredentials(credentials: StoredCredentials): Promise<void> {
-  assertLocalMode('Replacing credentials');
   await updateVault((vault) => { vault.credentials = credentials; });
 }

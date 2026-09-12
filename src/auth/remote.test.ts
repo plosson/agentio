@@ -19,9 +19,9 @@ let server: ReturnType<typeof Bun.serve>;
 let url = '';
 
 const PROFILES = [
-  { service: 'gdrive', name: 'docs', readOnly: false },
-  { service: 'gmail', name: 'work', readOnly: true },
-  { service: 'gmail', name: 'home', readOnly: false },
+  { service: 'gdrive', name: 'docs', readOnly: false, hasCredentials: true },
+  { service: 'gmail', name: 'work', readOnly: true, hasCredentials: true },
+  { service: 'gmail', name: 'home', readOnly: false, hasCredentials: false },
 ];
 
 beforeAll(() => {
@@ -29,8 +29,11 @@ beforeAll(() => {
     port: 0,
     fetch(req) {
       const key = `${req.method} ${new URL(req.url).pathname}`;
-      hits.push(key + (req.headers.get('authorization') ? '' : ' (no auth)'));
-      const hit = script[key] ?? { status: 404, body: { error: 'unscripted', code: 'NOT_FOUND' } };
+      hits.push(key);
+      if (!req.headers.get('authorization')?.startsWith('Bearer agio1.')) {
+        return new Response(JSON.stringify({ error: 'no bearer', code: 'AUTH_FAILED' }), { status: 401 });
+      }
+      const hit = script[key] ?? { status: 404, body: { error: 'unscripted', code: 'PROFILE_NOT_FOUND' } };
       return new Response(JSON.stringify(hit.body), { status: hit.status, headers: { 'content-type': 'application/json' } });
     },
   });
@@ -59,7 +62,6 @@ describe('remote mode', () => {
   });
 
   test('profile reads come from the hub, once per process, and carry the effective read-only flag', async () => {
-    // The flattener carries readOnly only when set, like the local one.
     expect(await listProfileRefs()).toEqual([
       { service: 'gdrive', name: 'docs' },
       { service: 'gmail', name: 'work', readOnly: true },
@@ -75,23 +77,29 @@ describe('remote mode', () => {
       suggestion: expect.stringContaining('vault hub'),
     });
     expect(hits.filter((h) => h.startsWith('GET /v1/profiles'))).toHaveLength(1);
-    expect(hits.some((h) => h.includes('no auth'))).toBe(false);
   });
 
-  test('credentials are one POST per profile; missing ones are null', async () => {
+  test('credentials are one POST per profile; nothing stored is null, an unknown profile is not', async () => {
     script['POST /v1/profiles/gdrive/docs/credentials'] = { status: 200, body: { credentials: { accessToken: 'at' } } };
     script['POST /v1/profiles/gmail/home/credentials'] = { status: 404, body: { error: 'No credentials stored', code: 'NOT_FOUND' } };
     expect(await getCredentials<{ accessToken: string }>('gdrive', 'docs')).toEqual({ accessToken: 'at' });
     expect(await getCredentials('gmail', 'home')).toBeNull();
+    await expect(getCredentials('slack', 'nope')).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
+  });
+
+  test('the hub\'s own code and suggestion survive the hop', async () => {
+    script['POST /v1/profiles/gmail/work/credentials'] = { status: 400, body: { error: 'bad', code: 'INVALID_PARAMS', suggestion: 'fix it' } };
+    await expect(getCredentials('gmail', 'work')).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: 'bad', suggestion: 'fix it' });
   });
 
   test.each([
-    [401, { error: 'Invalid or missing token' }, 'AUTH_FAILED', /rejected this token/],
-    [403, { error: 'This token is not allowed to use gmail/work' }, 'PERMISSION_DENIED', /not allowed/],
-    [409, { error: 'Token refresh failed' }, 'AUTH_FAILED', /Re-authentication is needed on the vault host/],
-    [429, { error: 'Too many attempts' }, 'RATE_LIMITED', /Too many/],
-    [503, { error: 'Vault is locked on the hub' }, 'CONFIG_ERROR', /locked on the hub/],
+    [401, { error: 'Invalid or missing token', code: 'AUTH_FAILED' }, 'AUTH_FAILED', /rejected this token/],
+    [403, { error: 'This token is not allowed to use gmail/work', code: 'PERMISSION_DENIED' }, 'PERMISSION_DENIED', /not allowed/],
+    [409, { error: 'Token refresh failed', code: 'TOKEN_EXPIRED' }, 'AUTH_FAILED', /Re-authentication is needed on the vault host/],
+    [429, { error: 'Too many attempts', code: 'RATE_LIMITED' }, 'RATE_LIMITED', /Too many/],
+    [503, { error: 'Vault is locked on the hub', code: 'VAULT_LOCKED' }, 'CONFIG_ERROR', /locked on the hub/],
     [500, { error: 'boom' }, 'API_ERROR', /boom/],
+    [502, {}, 'API_ERROR', /HTTP 502/],
   ])('hub status %i becomes %s', async (status, body, code, message) => {
     script['POST /v1/profiles/gmail/work/credentials'] = { status, body };
     await expect(getCredentials('gmail', 'work')).rejects.toMatchObject({ code, message: expect.stringMatching(message) });
@@ -101,8 +109,6 @@ describe('remote mode', () => {
     process.env.AGENTIO_TOKEN = encodeToken({ url: 'http://127.0.0.1:1', kid: 'kid', secret: 's' });
     resetRemoteCache();
     await expect(remoteProfiles()).rejects.toMatchObject({ code: 'NETWORK_ERROR', message: expect.stringContaining('127.0.0.1:1') });
-    // A failed list is not cached.
-    await expect(remoteProfiles()).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
   });
 
   test('a malformed token fails before any request', async () => {

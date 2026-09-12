@@ -33,8 +33,8 @@ import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
-import { isRemoteMode, hub } from './auth/remote';
-import { CliError, handleError } from './utils/errors';
+import { isRemoteMode, remoteModeError } from './auth/remote';
+import { handleError } from './utils/errors';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -122,15 +122,11 @@ export function createProgram(): Command {
     if (isRemoteMode()) {
       const localOnly =
         LOCAL_ONLY_COMMANDS.has(name) ||
-        (parent !== undefined && LOCAL_ONLY_COMMANDS.has(parent)) ||
+        (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
         (parent === 'profile' && name !== 'list');
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
-        handleError(new CliError(
-          'CONFIG_ERROR',
-          `\`agentio ${full}\` is not available in remote mode`,
-          `This machine uses the vault hub at ${hub().url}. Manage profiles and keys there.`,
-        ));
+        handleError(remoteModeError(`\`agentio ${full}\``));
       }
       return;
     }

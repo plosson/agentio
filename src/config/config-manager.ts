@@ -3,7 +3,7 @@ import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { loadVault, updateVault } from '../vault/vault';
-import { assertLocalMode, isRemoteMode, remoteProfiles } from '../auth/remote';
+import { isRemoteMode, remoteProfiles } from '../auth/remote';
 import { ALL_SERVICES } from '../types/config';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
@@ -31,14 +31,12 @@ export async function ensureConfigDir(): Promise<void> {
 }
 
 export async function loadConfig(): Promise<Config> {
-  assertLocalMode('Reading the vault config');
   const vault = await loadVault();
   return vault.config;
 }
 
 /** Atomic read-modify-write of the config; `mutate` runs under the vault write lock. */
 export function updateConfig<T>(mutate: (config: Config) => T | Promise<T>): Promise<T> {
-  assertLocalMode('Changing the vault config');
   return updateVault((vault) => mutate(vault.config));
 }
 
@@ -51,7 +49,7 @@ async function profilesOf(service: ServiceName): Promise<ProfileEntry[]> {
   if (isRemoteMode()) {
     return (await remoteProfiles())
       .filter((r) => r.service === service)
-      .map((r) => ({ name: r.name, ...(r.readOnly ? { readOnly: true } : {}) }));
+      .map((r) => ({ name: r.name, readOnly: r.readOnly || undefined }));
   }
   const config = await loadConfig();
   return (config.profiles[service] || []).map(normalizeProfile);
@@ -61,8 +59,7 @@ export async function getProfile(
   service: ServiceName,
   profileName: string
 ): Promise<string | null> {
-  const found = (await profilesOf(service)).some((p) => p.name === profileName);
-  return found ? profileName : null;
+  return (await resolveProfile(service, profileName)).profile;
 }
 
 export type ResolveProfileResult =

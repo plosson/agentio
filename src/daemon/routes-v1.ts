@@ -1,6 +1,7 @@
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
 import { listProfileRefs, resolveProfile } from '../config/config-manager';
+import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, type ApiKeyView } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
@@ -48,19 +49,32 @@ const hubCredentials = (service: ServiceName, name: string) =>
   getFreshCredentials<Record<string, unknown>>(service, name, { bufferMs: HUB_REFRESH_BUFFER_MS });
 
 async function handleList(key: ApiKeyView): Promise<Response> {
+  const stored = await getAllCredentials();
   const profiles = (await listProfileRefs())
     .filter((r) => keyAllows(key, r.service, r.name))
-    .map((r) => ({ service: r.service, name: r.name, readOnly: effectiveReadOnly(key, r.readOnly) }));
+    .map((r) => ({
+      service: r.service,
+      name: r.name,
+      readOnly: effectiveReadOnly(key, r.readOnly),
+      hasCredentials: !!stored[r.service]?.[r.name],
+    }));
   return json({ profiles });
+}
+
+/** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
+async function requireStoredCredentials(service: ServiceName, name: string): Promise<void> {
+  if (!(await getCredentials(service, name))) {
+    throw new CliError('NOT_FOUND', `No credentials stored for ${service}/${name}`, 'Add them on the hub host');
+  }
 }
 
 async function handleStatus(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
+  if (!(await getCredentials(service, name))) return json({ status: 'no_creds', readOnly });
   try {
     await hubCredentials(service, name);
     return json({ status: 'ok', readOnly });
   } catch (err) {
-    if (err instanceof CliError && err.code === 'AUTH_FAILED') return json({ status: 'no_creds', readOnly });
     if (err instanceof CliError && err.code === 'TOKEN_EXPIRED') return json({ status: 'needs_reauth', readOnly });
     throw err;
   }
@@ -68,16 +82,13 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
 
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
+  await requireStoredCredentials(service, name);
   try {
     const { credentials, refreshed } = await hubCredentials(service, name);
     audit(key, service, name, 'ok', refreshed);
     return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
   } catch (err) {
     if (err instanceof CliError) audit(key, service, name, err.code.toLowerCase());
-    // No stored credentials is not an auth failure on the wire; 401 means "bad token".
-    if (err instanceof CliError && err.code === 'AUTH_FAILED') {
-      throw new CliError('NOT_FOUND', `No credentials stored for ${service}/${name}`, 'Add them on the hub host');
-    }
     throw err;
   }
 }

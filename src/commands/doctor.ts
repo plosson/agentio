@@ -56,7 +56,7 @@ async function checkHub(): Promise<Check> {
     return { name: 'Hub', status: 'ok', detail: `${url}, ${profiles.length} profile(s) allowed for this token` };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    return { name: 'Hub', status: 'error', detail, fix: err instanceof CliError && err.suggestion ? err.suggestion : undefined };
+    return { name: 'Hub', status: 'error', detail, fix: err instanceof CliError ? err.suggestion : undefined };
   }
 }
 
@@ -67,7 +67,8 @@ export async function checkDaemon(): Promise<Check> {
   return { name: 'Daemon', status: 'ok', detail: 'running' };
 }
 
-function checkProfiles(cfg: Config | null): Check {
+async function checkProfiles(): Promise<Check> {
+  const cfg = await loadConfig().catch(() => null);
   if (!cfg) return { name: 'Profiles', status: 'error', detail: 'cannot read config' };
   const total = Object.values(cfg.profiles).reduce((acc, arr) => acc + (arr ?? []).length, 0);
   if (total === 0) {
@@ -89,7 +90,7 @@ export function registerDoctorCommand(program: Command): void {
       try {
         const checks: Check[] = isRemoteMode()
           ? [await checkHub()]
-          : await Promise.all([checkVault(), checkDaemon(), loadConfig().catch(() => null).then(checkProfiles)]);
+          : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
 
         console.log(renderChecks(checks));
 
