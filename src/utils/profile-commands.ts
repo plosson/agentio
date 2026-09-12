@@ -4,13 +4,19 @@ import { removeCredentials, getCredentials } from '../auth/token-store';
 import { handleError, CliError } from './errors';
 import type { ServiceName } from '../types/config';
 
+/** Drop a profile and its credentials. False when no such profile existed. */
+export async function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
+  const removed = await removeProfile(service, profileName);
+  await removeCredentials(service, profileName);
+  return removed;
+}
+
 /**
  * Shared remove logic used both by the per-service `profile remove` command
  * and by the unified `agentio profile remove <service> <name>` command.
  */
 export async function removeProfileForService(service: ServiceName, profileName: string): Promise<void> {
-  const removed = await removeProfile(service, profileName);
-  await removeCredentials(service, profileName);
+  const removed = await deleteProfile(service, profileName);
 
   if (removed) {
     console.log(`Removed profile "${profileName}"`);

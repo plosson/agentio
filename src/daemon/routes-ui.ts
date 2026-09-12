@@ -1,6 +1,8 @@
 import { CliError, type ErrorCode } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
-import { listProfiles } from '../config/config-manager';
+import { listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { deleteProfile } from '../utils/profile-commands';
+import { ALL_SERVICES, type ServiceName } from '../types/config';
 import { getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
 import {
@@ -82,6 +84,38 @@ async function handleProfiles(): Promise<Response> {
   return json({ profiles });
 }
 
+/** `/ui/api/profiles/<service>/<name>` → the pair, or null when the path is not that shape. */
+function profileRef(pathname: string): { service: ServiceName; name: string } | null {
+  const m = pathname.match(/^\/ui\/api\/profiles\/([^/]+)\/([^/]+)$/);
+  if (!m) return null;
+  const service = decodeURIComponent(m[1]);
+  if (!(ALL_SERVICES as readonly string[]).includes(service)) return null;
+  return { service: service as ServiceName, name: decodeURIComponent(m[2]) };
+}
+
+async function handleDeleteProfile(ref: { service: ServiceName; name: string }): Promise<Response> {
+  if (!(await deleteProfile(ref.service, ref.name))) {
+    return json({ error: `No ${ref.service} profile "${ref.name}"`, code: 'NOT_FOUND' }, 404);
+  }
+  return new Response(null, { status: 204 });
+}
+
+async function handlePatchProfile(request: Request, ref: { service: ServiceName; name: string }): Promise<Response> {
+  let readOnly: unknown;
+  try {
+    readOnly = ((await request.json()) as { readOnly?: unknown }).readOnly;
+  } catch {
+    return json({ error: 'Body must be JSON', code: 'INVALID_PARAMS' }, 400);
+  }
+  if (typeof readOnly !== 'boolean') {
+    return json({ error: 'readOnly must be a boolean', code: 'INVALID_PARAMS' }, 400);
+  }
+  if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) {
+    return json({ error: `No ${ref.service} profile "${ref.name}"`, code: 'NOT_FOUND' }, 404);
+  }
+  return json({ service: ref.service, name: ref.name, readOnly });
+}
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
@@ -120,6 +154,10 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     if (method === 'GET' && pathname === '/ui/api/profiles') return await handleProfiles();
     if (method === 'GET' && pathname === '/ui/api/status') return await handleStatus(request, ctx);
+
+    const ref = profileRef(pathname);
+    if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
+    if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
 
     return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
   } catch (err) {

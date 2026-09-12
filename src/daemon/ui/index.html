@@ -51,7 +51,10 @@
   .badge.invalid { background: var(--error-bg); color: var(--error); }
   .badge.no-creds { background: var(--warning-bg); color: var(--warning); }
   .badge.skipped { background: var(--code-bg); color: var(--text-muted); }
-  .tag { font-size: .75rem; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; margin-left: 6px; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; }
+  button.small { padding: 4px 10px; font-size: .8125rem; }
+  button.danger { color: var(--error); border-color: var(--error); }
+  button.danger:hover { background: var(--error-bg); }
   .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
   .muted { color: var(--text-secondary); }
   .note { color: var(--text-secondary); font-size: .8125rem; margin: 12px 0 0; }
@@ -79,7 +82,7 @@
     <h2>Profiles</h2>
     <div class="alert info" id="profiles-msg" hidden></div>
     <table>
-      <thead><tr><th>Service</th><th>Profile</th><th>Status</th><th>Details</th></tr></thead>
+      <thead><tr><th>Service</th><th>Profile</th><th>Status</th><th>Details</th><th>Read-only</th><th></th></tr></thead>
       <tbody id="profiles-body"></tbody>
     </table>
     <p class="note">Add or reauthorise profiles with the CLI on this host: <span class="mono">agentio &lt;service&gt; profile add</span>.</p>
@@ -118,15 +121,18 @@
     for (const [service, profiles] of Object.entries(data.services)) {
       for (const p of profiles) {
         const details = p.error || p.info || '';
-        rows.push(`<tr>
+        const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
+        rows.push(`<tr data-ref="${ref}" data-label="${escape(service)} / ${escape(p.profile)}">
           <td class="mono">${escape(service)}</td>
-          <td>${escape(p.profile)}${p.readOnly ? '<span class="tag">read-only</span>' : ''}</td>
+          <td>${escape(p.profile)}</td>
           <td><span class="badge ${escape(p.status)}">${escape(p.status)}</span></td>
           <td class="muted">${escape(details)}</td>
+          <td><label class="toggle"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}> read-only</label></td>
+          <td><button class="small danger del" type="button">Delete</button></td>
         </tr>`);
       }
     }
-    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="4" class="muted">No profiles configured.</td></tr>';
+    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No profiles configured.</td></tr>';
   }
 
   async function loadProfiles(test) {
@@ -160,6 +166,27 @@
     } finally {
       $('unlock-btn').disabled = false;
     }
+  });
+
+  $('profiles-body').addEventListener('change', async (ev) => {
+    const box = ev.target.closest('input.ro');
+    if (!box) return;
+    const row = box.closest('tr');
+    box.disabled = true;
+    const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ readOnly: box.checked }) });
+    if (!res.ok) { box.checked = !box.checked; alert((res.body && res.body.error) || 'Update failed'); }
+    box.disabled = false;
+  });
+
+  $('profiles-body').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button.del');
+    if (!btn) return;
+    const row = btn.closest('tr');
+    if (!confirm('Delete ' + row.dataset.label + ' and its credentials? This cannot be undone.')) return;
+    btn.disabled = true;
+    const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
+    if (res.ok) { row.remove(); if (!$('profiles-body').children.length) renderProfiles({ services: {} }); }
+    else { btn.disabled = false; alert((res.body && res.body.error) || 'Delete failed'); }
   });
 
   $('refresh-btn').addEventListener('click', () => loadProfiles(false));
