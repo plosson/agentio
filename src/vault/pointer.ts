@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 
-function configDir(): string {
+export function configDir(): string {
   return join(process.env.HOME || homedir(), '.config', 'agentio');
 }
 

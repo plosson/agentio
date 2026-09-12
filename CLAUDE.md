@@ -378,7 +378,14 @@ agentio sql profile add|list|remove
 
 ### Remote mode
 
-An agent machine needs no vault. With `AGENTIO_TOKEN` set to a token from the hub (`src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes or writes. The seams are `profilesOf` in the config manager and `getCredentials` in the token store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+An agent machine needs no vault. With a token from the hub, either `AGENTIO_TOKEN` or the file `agentio login` stores at `~/.config/agentio/token` (env var wins; `src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes or writes. The seams are `profilesOf` in the config manager and `getCredentials` in the token store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+
+```bash
+agentio login <hub-url> [--name <n>] [--no-browser]   # prints a code, opens <hub>/ui#authorize=<code>, waits for approval, stores the token (0600)
+agentio logout                                         # deletes the stored token; the key stays on the hub until revoked there
+```
+
+`login` is the device flow in `src/auth/device-login.ts`: no callback server, so it works over SSH; the owner compares the code in the browser with the terminal before approving. Both commands bypass the vault check.
 
 ### API keys
 

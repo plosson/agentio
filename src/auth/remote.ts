@@ -1,17 +1,74 @@
+import { existsSync, readFileSync } from 'fs';
+import { mkdir, unlink, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { isAbsolute, join, relative } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
+import { configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef } from '../config/config-manager';
 import { decodeToken, type TokenParts } from './token';
 
 /**
- * Remote mode: this machine has no vault. AGENTIO_TOKEN names a hub and a key,
- * and every profile or credential read becomes one HTTPS call. Writes are not
+ * Remote mode: this machine has no vault. A token names a hub and a key, and
+ * every profile or credential read becomes one HTTPS call. Writes are not
  * possible here; the hub owns the vault. A CLI process is short-lived, so the
  * profile list is fetched once and credentials once per profile touched.
+ *
+ * The token comes from AGENTIO_TOKEN, else from the file `agentio login`
+ * writes. The env var wins so a script can override a stored login.
  */
 
+export function tokenFilePath(): string {
+  return join(configDir(), 'token');
+}
+
+let fileToken: string | null | undefined;
+
+function readTokenFile(): string | null {
+  try {
+    return readFileSync(tokenFilePath(), 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function remoteToken(): string | null {
+  const env = process.env.AGENTIO_TOKEN?.trim();
+  if (env) return env;
+  return (fileToken ??= readTokenFile());
+}
+
 export function isRemoteMode(): boolean {
-  return Boolean(process.env.AGENTIO_TOKEN?.trim());
+  return remoteToken() !== null;
+}
+
+/** Same guard as the vault: a test must never write to the real config directory. */
+function assertWritablePath(path: string): void {
+  if (process.env.NODE_ENV !== 'test') return;
+  const rel = relative(tmpdir(), path);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Refusing to write a token outside ${tmpdir()} during tests: ${path}`);
+  }
+}
+
+/** Store a token for this user, readable by them alone. */
+export async function saveRemoteToken(token: string): Promise<string> {
+  const path = tokenFilePath();
+  assertWritablePath(path);
+  await mkdir(configDir(), { recursive: true, mode: 0o700 });
+  await writeFile(path, token + '\n', { mode: 0o600 });
+  resetRemoteCache();
+  return path;
+}
+
+/** Forget the stored token; false when there was none. */
+export async function clearRemoteToken(): Promise<boolean> {
+  const path = tokenFilePath();
+  if (!existsSync(path)) return false;
+  assertWritablePath(path);
+  await unlink(path);
+  resetRemoteCache();
+  return true;
 }
 
 /** A profile as the hub lists it for this token. */
@@ -27,10 +84,11 @@ let profilesPromise: Promise<RemoteProfile[]> | null = null;
 export function resetRemoteCache(): void {
   parsed = null;
   profilesPromise = null;
+  fileToken = undefined;
 }
 
 export function hub(): TokenParts {
-  return (parsed ??= decodeToken(process.env.AGENTIO_TOKEN!));
+  return (parsed ??= decodeToken(remoteToken()!));
 }
 
 /** The one error every owner-only path raises when there is no vault here. */
@@ -82,7 +140,7 @@ async function hubRequest<T>(path: string, method: 'GET' | 'POST' = 'GET'): Prom
   try {
     response = await fetch(`${url}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${process.env.AGENTIO_TOKEN!.trim()}` },
+      headers: { Authorization: `Bearer ${remoteToken()!}` },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
