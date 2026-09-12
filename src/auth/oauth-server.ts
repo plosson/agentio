@@ -31,10 +31,9 @@ export async function findAvailablePort(): Promise<number> {
 /**
  * Open the default browser, best effort.
  *
- * A headless box has no opener at all - `xdg-open` is absent over SSH - and
- * spawning a missing executable throws. That must not take the OAuth flow down
- * with it: the URL has already been printed, and the caller can still finish
- * the flow by hand.
+ * A headless box has no opener at all - `xdg-open` is absent over SSH. That
+ * must not take the OAuth flow down with it: the URL has already been printed,
+ * and the caller can still finish the flow by hand.
  *
  * `start` on Windows is a shell builtin rather than an executable, so it has to
  * go through cmd. The empty argument after it is the window title, which cmd
@@ -47,6 +46,10 @@ export function launchBrowser(url: string): boolean {
                   process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] :
                   ['xdg-open', url];
 
+  // A missing opener throws synchronously on macOS but not on Linux, where the
+  // child simply fails to exec; resolving it on PATH first behaves the same on
+  // both. PATH is passed explicitly so a runtime change to it (tests) is seen.
+  if (!Bun.which(command[0], { PATH: process.env.PATH })) return false;
   try {
     Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
     return true;
