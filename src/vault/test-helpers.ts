@@ -1,6 +1,10 @@
+import { afterEach, beforeEach } from 'bun:test';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { writePointer } from './pointer';
-import { saveVault, CURRENT_VAULT_VERSION } from './vault';
-import { setPassphraseProvider, memoryOnlyProvider } from './passphrase';
+import { saveVault, clearVaultCache, CURRENT_VAULT_VERSION } from './vault';
+import { setPassphraseProvider, memoryOnlyProvider, clearPassphraseCache, resetPassphraseProvider } from './passphrase';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
@@ -46,4 +50,35 @@ export async function seedVault(options: {
   });
 
   return { passphrase, vaultPath };
+}
+
+type SeedOptions = Parameters<typeof seedVault>[0];
+
+/**
+ * Registers a beforeEach/afterEach pair: a fresh temp HOME with a seeded vault
+ * for every test, and full teardown (HOME restored, passphrase env and caches
+ * cleared, directory removed). Call at module level; register any extra hooks
+ * after it so they run once the vault exists.
+ */
+export function withTempVault(prefix: string, seed: () => SeedOptions): { home: () => string } {
+  let tempHome = '';
+  let savedHome = '';
+
+  beforeEach(async () => {
+    savedHome = process.env.HOME || '';
+    tempHome = await mkdtemp(join(tmpdir(), prefix));
+    process.env.HOME = tempHome;
+    await seedVault(seed());
+  });
+
+  afterEach(async () => {
+    process.env.HOME = savedHome;
+    delete process.env.AGENTIO_PASSPHRASE;
+    resetPassphraseProvider();
+    clearPassphraseCache();
+    clearVaultCache();
+    await rm(tempHome, { recursive: true, force: true }).catch(() => {});
+  });
+
+  return { home: () => tempHome };
 }

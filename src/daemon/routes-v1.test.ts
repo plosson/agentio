@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { seedVault } from '../vault/test-helpers';
-import { clearVaultCache, lockVault, unlockVault } from '../vault/vault';
-import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { withTempVault } from '../vault/test-helpers';
+import { lockVault, unlockVault } from '../vault/vault';
 
 // Only the Atlassian exchange is replaced; bun's module mocks are process-wide.
 const jiraRefresh = mock(async (refreshToken: string) => ({ accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600 }));
@@ -17,8 +13,6 @@ const { v1AuthLimiter } = await import('./routes-v1');
 
 const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
-let tempHome = '';
-let savedHome = '';
 let scopedToken = '';
 let allToken = '';
 
@@ -35,11 +29,7 @@ function call(path: string, init: RequestInit & { token?: string; ip?: string } 
 
 const creds = (path: string, token: string) => call(path, { method: 'POST', token });
 
-beforeEach(async () => {
-  savedHome = process.env.HOME || '';
-  tempHome = await mkdtemp(join(tmpdir(), 'agentio-v1-test-'));
-  process.env.HOME = tempHome;
-  await seedVault({
+withTempVault('agentio-v1-test-', () => ({
     passphrase: PASSPHRASE,
     config: {
       profiles: {
@@ -60,7 +50,9 @@ beforeEach(async () => {
       },
       revolut: { biz: { accessToken: 'r-at', refreshToken: 'r-rt', privateKey: 'PEM', clientId: 'id', redirectUri: 'u', environment: 'sandbox', expiryDate: Date.now() + HOUR } },
     },
-  });
+}));
+
+beforeEach(async () => {
   scopedToken = (await createApiKey({ name: 'scoped', allowedProfiles: ['telegram/bot', 'jira/fresh'], readOnly: false }, 'https://hub')).token;
   allToken = (await createApiKey({ name: 'all', allowedProfiles: '*', readOnly: true }, 'https://hub')).token;
   // Daemon posture: locked until unlocked, then stays so.
@@ -69,15 +61,6 @@ beforeEach(async () => {
   await unlockVault(PASSPHRASE);
   jiraRefresh.mockClear();
   v1AuthLimiter.reset();
-});
-
-afterEach(async () => {
-  process.env.HOME = savedHome;
-  delete process.env.AGENTIO_PASSPHRASE;
-  resetPassphraseProvider();
-  clearPassphraseCache();
-  clearVaultCache();
-  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
 });
 
 describe('/v1 credential API', () => {

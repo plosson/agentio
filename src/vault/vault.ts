@@ -30,8 +30,8 @@ export interface VaultContents {
 // The cache is keyed on the vault file it came from and that file's mtime, so
 // a long-lived process (the daemon) notices writes made by another process, and
 // a process whose pointer moves (HOME switched, `vault set` elsewhere) never
-// serves one vault's contents for another's. A hit costs one pointer read and
-// one stat.
+// serves one vault's contents for another's. A hit costs one stat; loadVault
+// adds the pointer read that resolves the path.
 let cache: VaultContents | null = null;
 let cachePath: string | null = null;
 let cacheMtimeMs = 0;
@@ -195,22 +195,23 @@ export async function loadVault(): Promise<VaultContents> {
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 function serializedWrite<T>(task: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(task, task);
+  const run = writeQueue.then(task);
   writeQueue = run.catch(() => {});
   return run;
 }
 
 /**
- * Load the current contents, apply `mutate` in place, and write the result,
- * all under the write lock. The path is resolved once, up front, so what was
- * loaded is what gets written even if the pointer moves meanwhile. A mutator
- * that changes nothing costs no write. Returns the mutator's result.
+ * Load the current contents, apply `mutate` in place to a copy, and write the
+ * result, all under the write lock. The path is resolved once, up front, so
+ * what was loaded is what gets written even if the pointer moves meanwhile.
+ * The mutator works on a copy, so one that throws halfway leaves the cache
+ * clean; one that changes nothing costs no write. Returns the mutator's result.
  */
 export function updateVault<T>(mutate: (contents: VaultContents) => T | Promise<T>): Promise<T> {
   return serializedWrite(async () => {
     const path = await requireExistingVaultPath();
-    const contents = await loadVaultAt(path);
-    const before = JSON.stringify(contents);
+    const before = JSON.stringify(await loadVaultAt(path));
+    const contents: VaultContents = JSON.parse(before);
     const result = await mutate(contents);
     const after = JSON.stringify(contents);
     if (after !== before) await writeVault(contents, path, after);

@@ -131,7 +131,7 @@ agentio vault clear [--force]
 - Passphrase is stored in `~/.config/agentio/vault.passphrase` (mode 0600). Commands read it silently. Keep this path off any cloud-synced location — the encrypted vault may be synced, the passphrase must not be.
 - `AGENTIO_PASSPHRASE` env var takes precedence over the file when set.
 
-**Writes are atomic.** Anything that changes the vault goes through `updateVault(mutate)` or `updateConfig(mutate)`: load-mutate-save under an in-process write lock, no write when the mutator changed nothing. `saveVault` exists only to create a vault. Under `bun test`, a vault write outside the OS temp directory throws; every test must run with `HOME` under a `mkdtemp` directory.
+**Writes are atomic.** Anything that changes the vault goes through `updateVault(mutate)` or `updateConfig(mutate)`: load-mutate-save under an in-process write lock, no write when the mutator changed nothing. `saveVault` exists only to create a vault or re-encrypt it wholesale (`vault passphrase`). Under `bun test`, a vault write outside the OS temp directory throws; every test must run with `HOME` under a `mkdtemp` directory.
 
 **Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
 

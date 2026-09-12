@@ -22,7 +22,7 @@ async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
   const key = token ? await authenticateToken(token) : null;
   if (!key) {
-    if (!v1AuthLimiter.allow(ip)) throw new CliError('RATE_LIMITED', 'Too many failed attempts, try again in a minute');
+    v1AuthLimiter.check(ip);
     throw new CliError('AUTH_FAILED', 'Invalid or missing token', 'Set AGENTIO_TOKEN to a token from the hub');
   }
   return key;
@@ -40,8 +40,12 @@ async function allowedProfile(key: ApiKeyView, service: ServiceName, name: strin
 
 function audit(key: ApiKeyView, service: string, name: string, outcome: string, refreshed?: boolean): void {
   const extra = refreshed === undefined ? '' : ` refreshed=${refreshed}`;
-  console.log(`${new Date().toISOString()} v1 credentials key=${key.name} profile=${service}/${name} outcome=${outcome}${extra}`);
+  console.log(`${new Date().toISOString()} v1 credentials key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
 }
+
+/** Credentials the way the hub hands them out: refreshed with the wider buffer. */
+const hubCredentials = (service: ServiceName, name: string) =>
+  getFreshCredentials<Record<string, unknown>>(service, name, { bufferMs: HUB_REFRESH_BUFFER_MS });
 
 async function handleList(key: ApiKeyView): Promise<Response> {
   const profiles = (await listProfileRefs())
@@ -53,7 +57,7 @@ async function handleList(key: ApiKeyView): Promise<Response> {
 async function handleStatus(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   try {
-    await getFreshCredentials(service, name, { bufferMs: HUB_REFRESH_BUFFER_MS });
+    await hubCredentials(service, name);
     return json({ status: 'ok', readOnly });
   } catch (err) {
     if (err instanceof CliError && err.code === 'AUTH_FAILED') return json({ status: 'no_creds', readOnly });
@@ -65,9 +69,7 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   try {
-    const { credentials, refreshed } = await getFreshCredentials<Record<string, unknown>>(service, name, {
-      bufferMs: HUB_REFRESH_BUFFER_MS,
-    });
+    const { credentials, refreshed } = await hubCredentials(service, name);
     audit(key, service, name, 'ok', refreshed);
     return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
   } catch (err) {
@@ -86,7 +88,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked on the hub');
     const key = await authenticate(request, ip);
     // Awaited: a write must never be left pending after the request is answered.
-    await touchApiKey(key.id);
+    await touchApiKey(key);
 
     if (method === 'GET' && pathname === '/v1/profiles') return await handleList(key);
 

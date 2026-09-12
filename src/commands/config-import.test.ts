@@ -273,11 +273,9 @@ const FRESH_BLOB = await encryptVault(
 );
 
 describe('config import on a machine with no vault', () => {
-  const KEY = FRESH_KEY;
-  const blob = FRESH_BLOB;
 
   test('creates the vault at the default path from AGENTIO_PASSPHRASE', async () => {
-    const res = await runCli(['vault', 'import'], { AGENTIO_KEY: KEY, AGENTIO_CONFIG: blob });
+    const res = await runCli(['vault', 'import'], { AGENTIO_KEY: FRESH_KEY, AGENTIO_CONFIG: FRESH_BLOB });
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toContain('Vault created at');
 
@@ -288,8 +286,8 @@ describe('config import on a machine with no vault', () => {
 
   test('fails cleanly off a TTY when no passphrase source is given', async () => {
     const res = await runCli(['vault', 'import'], {
-      AGENTIO_KEY: KEY,
-      AGENTIO_CONFIG: blob,
+      AGENTIO_KEY: FRESH_KEY,
+      AGENTIO_CONFIG: FRESH_BLOB,
       AGENTIO_PASSPHRASE: '',
     });
     expect(res.exitCode).not.toBe(0);

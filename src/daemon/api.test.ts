@@ -1,18 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { seedVault } from '../vault/test-helpers';
-import { clearVaultCache, lockVault } from '../vault/vault';
-import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
+import { withTempVault } from '../vault/test-helpers';
+import { lockVault } from '../vault/vault';
 import { createRequestHandler, type PeerSource } from './api';
 import { clearSessions } from './session';
 import { getCredentials } from '../auth/token-store';
 import { unlockLimiter } from './routes-ui';
 
 const PASSPHRASE = 'hub-passphrase-123';
-let tempHome = '';
-let savedHome = '';
 
 const peer: PeerSource = { requestIP: () => ({ address: '10.0.0.5' }) };
 const handle = createRequestHandler({ version: 'test' });
@@ -38,15 +32,13 @@ async function cookieFrom(res: Response): Promise<string> {
   return set.split(';')[0];
 }
 
-beforeEach(async () => {
-  savedHome = process.env.HOME || '';
-  tempHome = await mkdtemp(join(tmpdir(), 'agentio-api-test-'));
-  process.env.HOME = tempHome;
-  await seedVault({
-    passphrase: PASSPHRASE,
-    config: { profiles: { telegram: [{ name: 'bot', readOnly: true }] } },
-    credentials: { telegram: { bot: { botToken: 't', channelId: '1' } } },
-  });
+withTempVault('agentio-api-test-', () => ({
+  passphrase: PASSPHRASE,
+  config: { profiles: { telegram: [{ name: 'bot', readOnly: true }] } },
+  credentials: { telegram: { bot: { botToken: 't', channelId: '1' } } },
+}));
+
+beforeEach(() => {
   // seedVault leaves the vault unlocked through the env var; the daemon starts locked.
   delete process.env.AGENTIO_PASSPHRASE;
   lockVault();
@@ -54,15 +46,7 @@ beforeEach(async () => {
   unlockLimiter.reset();
 });
 
-afterEach(async () => {
-  process.env.HOME = savedHome;
-  delete process.env.AGENTIO_PASSPHRASE;
-  resetPassphraseProvider();
-  clearPassphraseCache();
-  clearVaultCache();
-  clearSessions();
-  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
-});
+afterEach(() => clearSessions());
 
 describe('daemon HTTP surface', () => {
   test('/health is public and reports the lock state', async () => {

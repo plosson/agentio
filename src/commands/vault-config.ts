@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig } from '../config/config-manager';
+import { getProfileName, loadConfig } from '../config/config-manager';
 import { getAllCredentials } from '../auth/token-store';
 import { CURRENT_VAULT_VERSION, updateVault, vaultExists, type VaultContents } from '../vault/vault';
 import { pruneDanglingScopes } from '../auth/api-keys';
@@ -13,7 +13,7 @@ import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
 import { encryptVault, decryptVault } from '../vault/crypto';
 import { addExamples } from '../utils/command-tree';
-import type { Config, ServiceName, ProfileValue } from '../types/config';
+import type { Config, ServiceName } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
 interface ProfileSelection {
@@ -285,12 +285,9 @@ export function registerVaultConfigCommands(vault: Command): void {
           await updateVault(({ config: currentConfig, credentials: currentCredentials }) => {
             for (const [service, profiles] of Object.entries(exportData.config.profiles)) {
               if (!profiles) continue;
-              const currentProfiles = ((currentConfig.profiles as Record<string, ProfileValue[]>)[service] ??= []);
+              const currentProfiles = (currentConfig.profiles[service as ServiceName] ??= []);
               for (const entry of profiles) {
-                const profileName = typeof entry === 'string' ? entry : entry.name;
-                if (!currentProfiles.some((p) => (typeof p === 'string' ? p : p.name) === profileName)) {
-                  currentProfiles.push(entry);
-                }
+                if (!currentProfiles.some((p) => getProfileName(p) === getProfileName(entry))) currentProfiles.push(entry);
               }
             }
             for (const [service, profiles] of Object.entries(exportData.credentials)) {

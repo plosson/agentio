@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile, readFile, stat } from 'fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -203,12 +203,20 @@ describe('updateVault', () => {
   });
 
   test('returns the mutator result and skips the write when nothing changed', async () => {
-    const mtimeBefore = (await stat(vaultFile)).mtimeMs;
-    await new Promise((r) => setTimeout(r, 10));
+    // Encryption is randomised, so the ciphertext changes on every real write.
+    const onDisk = await readFile(vaultFile, 'utf-8');
     expect(await updateVault((v) => Object.keys(v.config.profiles).length)).toBe(0);
-    expect((await stat(vaultFile)).mtimeMs).toBe(mtimeBefore);
+    expect(await readFile(vaultFile, 'utf-8')).toBe(onDisk);
     expect(await updateVault((v) => { v.config.profiles.gmail = [{ name: 'a' }]; return 'written'; })).toBe('written');
-    expect((await stat(vaultFile)).mtimeMs).not.toBe(mtimeBefore);
+    expect(await readFile(vaultFile, 'utf-8')).not.toBe(onDisk);
+  });
+
+  test('a mutator that throws after changing things leaves the cache clean', async () => {
+    await expect(updateVault((v) => { v.config.profiles.gmail = [{ name: 'half' }]; throw new Error('boom'); })).rejects.toThrow('boom');
+    expect((await loadVault()).config.profiles).toEqual({});
+    await updateVault((v) => { v.credentials.x = {}; });
+    clearVaultCache();
+    expect((await loadVault()).config.profiles).toEqual({});
   });
 
   test('under bun test, a vault outside the temp directory is never written', async () => {

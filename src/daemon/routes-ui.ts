@@ -30,9 +30,7 @@ function page(): Response {
 }
 
 async function handleUnlock(request: Request, ip: string): Promise<Response> {
-  if (!unlockLimiter.allow(ip)) {
-    throw new CliError('RATE_LIMITED', 'Too many attempts, try again in a minute');
-  }
+  unlockLimiter.check(ip);
   const { passphrase } = await readJson<{ passphrase?: unknown }>(request);
   if (typeof passphrase !== 'string' || passphrase.length === 0) {
     throw new CliError('INVALID_PARAMS', 'passphrase is required');

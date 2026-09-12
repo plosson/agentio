@@ -1,3 +1,5 @@
+import { CliError } from '../utils/errors';
+
 /**
  * Fixed-window counter per key. Good enough to blunt passphrase guessing on
  * a public host; not a fairness scheduler.
@@ -20,6 +22,11 @@ export class RateLimiter {
     }
     entry.count += 1;
     return entry.count <= this.limit;
+  }
+
+  /** Records a hit and throws RATE_LIMITED when it is over the limit. */
+  check(key: string, now = Date.now()): void {
+    if (!this.allow(key, now)) throw new CliError('RATE_LIMITED', 'Too many attempts, try again in a minute');
   }
 
   reset(): void {

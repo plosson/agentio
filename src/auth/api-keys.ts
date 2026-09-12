@@ -192,13 +192,18 @@ export function effectiveReadOnly(key: ApiKeyView, profileReadOnly: boolean | un
   return key.readOnly || !!profileReadOnly;
 }
 
-/** Record use. Skipped when the last record is recent, so a busy key costs one vault write a minute. */
-export async function touchApiKey(id: string, at = new Date()): Promise<void> {
-  // Cheap check outside the lock: most calls are inside the interval and write nothing.
-  const seen = findKey(await loadConfig(), id);
-  if (!seen || (seen.lastUsedAt && at.getTime() - Date.parse(seen.lastUsedAt) < TOUCH_INTERVAL_MS)) return;
+const touchDue = (key: { lastUsedAt?: string }, at: Date) =>
+  !key.lastUsedAt || at.getTime() - Date.parse(key.lastUsedAt) >= TOUCH_INTERVAL_MS;
+
+/**
+ * Record use. `key` is the view the caller already authenticated, so the
+ * common case (touched within the interval) costs no vault access at all;
+ * the check is repeated under the lock so concurrent first touches write once.
+ */
+export async function touchApiKey(key: ApiKeyView, at = new Date()): Promise<void> {
+  if (!touchDue(key, at)) return;
   await updateConfig((config) => {
-    const key = findKey(config, id);
-    if (key) key.lastUsedAt = at.toISOString();
+    const stored = findKey(config, key.id);
+    if (stored && touchDue(stored, at)) stored.lastUsedAt = at.toISOString();
   });
 }

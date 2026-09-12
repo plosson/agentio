@@ -1,10 +1,5 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { seedVault } from '../vault/test-helpers';
-import { clearVaultCache } from '../vault/vault';
-import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { withTempVault } from '../vault/test-helpers';
 import { getCredentials } from './token-store';
 
 // Replace only the network calls, before the module under test is loaded.
@@ -23,16 +18,8 @@ mock.module('./revolut-oauth', () => ({ ...realRevolut, refreshRevolutToken: rev
 const { getFreshCredentials, REFRESH_BUFFER_MS } = await import('./refresh');
 
 const HOUR = 60 * 60 * 1000;
-let tempHome = '';
-let savedHome = '';
 
-beforeEach(async () => {
-  savedHome = process.env.HOME || '';
-  tempHome = await mkdtemp(join(tmpdir(), 'agentio-refresh-test-'));
-  process.env.HOME = tempHome;
-  jiraRefresh.mockClear();
-  revolutRefresh.mockClear();
-  await seedVault({
+withTempVault('agentio-refresh-test-', () => ({
     config: { profiles: { jira: [{ name: 'stale' }, { name: 'fresh' }], revolut: [{ name: 'noexp' }], telegram: [{ name: 'bot' }], gchat: [{ name: 'hook' }] } },
     credentials: {
       jira: {
@@ -43,16 +30,11 @@ beforeEach(async () => {
       telegram: { bot: { botToken: 't', channelId: '1' } },
       gchat: { hook: { type: 'webhook', webhookUrl: 'https://chat.example/hook' } },
     },
-  });
-});
+}));
 
-afterEach(async () => {
-  process.env.HOME = savedHome;
-  delete process.env.AGENTIO_PASSPHRASE;
-  resetPassphraseProvider();
-  clearPassphraseCache();
-  clearVaultCache();
-  await rm(tempHome, { recursive: true, force: true }).catch(() => {});
+beforeEach(() => {
+  jiraRefresh.mockClear();
+  revolutRefresh.mockClear();
 });
 
 describe('getFreshCredentials', () => {

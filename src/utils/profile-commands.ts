@@ -13,10 +13,12 @@ import type { ServiceName } from '../types/config';
  */
 export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
   return updateVault((vault) => {
-    const profiles = vault.config.profiles[service] ?? [];
-    const removed = profiles.some((p) => getProfileName(p) === profileName);
-    vault.config.profiles[service] = profiles.filter((p) => getProfileName(p) !== profileName);
-    pruneDanglingScopes(vault.config);
+    const profiles = vault.config.profiles[service];
+    const removed = !!profiles?.some((p) => getProfileName(p) === profileName);
+    if (removed) {
+      vault.config.profiles[service] = profiles!.filter((p) => getProfileName(p) !== profileName);
+      pruneDanglingScopes(vault.config);
+    }
     delete vault.credentials[service]?.[profileName];
     return removed;
   });
