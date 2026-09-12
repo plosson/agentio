@@ -43,6 +43,7 @@ import type { DropboxCredentials } from '../types/dropbox';
 import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
+import { hub, isRemoteMode } from '../auth/remote';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -193,6 +194,10 @@ async function listProfileRefs(): Promise<ProfileRef[]> {
  * token itself, where a second exchange can only fail the same way.
  */
 async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
+  // Remote: a listing should not pull credentials from the hub (one POST and
+  // one audit line per profile); the hub only lists profiles it holds.
+  if (!shouldTest && isRemoteMode()) return { ...ref, status: 'skipped' };
+
   if (!(await getCredentials(ref.service, ref.profile))) {
     return { ...ref, status: 'no-creds' };
   }
@@ -324,7 +329,7 @@ export function registerStatusCommand(program: Command): void {
           }
           const output = {
             version,
-            configDir: CONFIG_DIR,
+            ...(isRemoteMode() ? { hub: hub().url } : { configDir: CONFIG_DIR }),
             services,
           };
           console.log(JSON.stringify(output, null, 2));
@@ -333,7 +338,7 @@ export function registerStatusCommand(program: Command): void {
 
         // Human-readable output
         console.log(`agentio v${version}`);
-        console.log(`Config: ${CONFIG_DIR}\n`);
+        console.log(isRemoteMode() ? `Hub: ${hub().url}\n` : `Config: ${CONFIG_DIR}\n`);
 
         const refs = await listProfileRefs();
 

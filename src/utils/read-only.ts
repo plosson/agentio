@@ -1,5 +1,6 @@
 import { CliError } from './errors';
 import { isProfileReadOnly } from '../config/config-manager';
+import { isRemoteMode } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 
 /**
@@ -16,7 +17,9 @@ export async function enforceWriteAccess(
     throw new CliError(
       'PERMISSION_DENIED',
       `Cannot ${operation}: profile "${profile}" is read-only`,
-      `To modify this profile's access: agentio ${service} profile update --profile ${profile} --no-read-only`
+      isRemoteMode()
+        ? 'The profile or the key is read-only on the vault hub; change it there'
+        : `To modify this profile's access: agentio ${service} profile update --profile ${profile} --no-read-only`
     );
   }
 }

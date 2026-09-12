@@ -74,6 +74,10 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
     return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
   } catch (err) {
     if (err instanceof CliError) audit(key, service, name, err.code.toLowerCase());
+    // No stored credentials is not an auth failure on the wire; 401 means "bad token".
+    if (err instanceof CliError && err.code === 'AUTH_FAILED') {
+      throw new CliError('NOT_FOUND', `No credentials stored for ${service}/${name}`, 'Add them on the hub host');
+    }
     throw err;
   }
 }

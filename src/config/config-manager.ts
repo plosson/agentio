@@ -3,6 +3,7 @@ import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { loadVault, updateVault } from '../vault/vault';
+import { assertLocalMode, isRemoteMode, remoteProfiles } from '../auth/remote';
 import { ALL_SERVICES } from '../types/config';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
@@ -30,28 +31,38 @@ export async function ensureConfigDir(): Promise<void> {
 }
 
 export async function loadConfig(): Promise<Config> {
+  assertLocalMode('Reading the vault config');
   const vault = await loadVault();
   return vault.config;
 }
 
 /** Atomic read-modify-write of the config; `mutate` runs under the vault write lock. */
 export function updateConfig<T>(mutate: (config: Config) => T | Promise<T>): Promise<T> {
+  assertLocalMode('Changing the vault config');
   return updateVault((vault) => mutate(vault.config));
+}
+
+/**
+ * The profiles of one service as `ProfileEntry`s, from the vault or, in remote
+ * mode, from the hub's allow-listed view (whose readOnly already folds in the
+ * key's flag). Every profile read below goes through here.
+ */
+async function profilesOf(service: ServiceName): Promise<ProfileEntry[]> {
+  if (isRemoteMode()) {
+    return (await remoteProfiles())
+      .filter((r) => r.service === service)
+      .map((r) => ({ name: r.name, ...(r.readOnly ? { readOnly: true } : {}) }));
+  }
+  const config = await loadConfig();
+  return (config.profiles[service] || []).map(normalizeProfile);
 }
 
 export async function getProfile(
   service: ServiceName,
   profileName: string
 ): Promise<string | null> {
-  const config = await loadConfig();
-
-  const serviceProfiles = config.profiles[service] || [];
-  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
-  if (!found) {
-    return null;
-  }
-
-  return profileName;
+  const found = (await profilesOf(service)).some((p) => p.name === profileName);
+  return found ? profileName : null;
 }
 
 export type ResolveProfileResult =
@@ -70,31 +81,22 @@ export async function resolveProfile(
   service: ServiceName,
   profileName?: string
 ): Promise<ResolveProfileResult> {
-  const config = await loadConfig();
-  const serviceProfiles = config.profiles[service] || [];
+  const serviceProfiles = await profilesOf(service);
 
   if (profileName) {
     // Explicit profile requested - validate it exists
-    const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
-    if (!found) {
-      return { profile: null, error: 'none' };
-    }
-    const entry = normalizeProfile(found);
-    return { profile: entry.name, readOnly: entry.readOnly };
+    const entry = serviceProfiles.find((p) => p.name === profileName);
+    return entry ? { profile: entry.name, readOnly: entry.readOnly } : { profile: null, error: 'none' };
   }
 
   // No profile specified - check if we can auto-select
-  if (serviceProfiles.length === 0) {
-    return { profile: null, error: 'none' };
-  }
-
+  if (serviceProfiles.length === 0) return { profile: null, error: 'none' };
   if (serviceProfiles.length === 1) {
-    const entry = normalizeProfile(serviceProfiles[0]);
-    return { profile: entry.name, readOnly: entry.readOnly };
+    return { profile: serviceProfiles[0].name, readOnly: serviceProfiles[0].readOnly };
   }
 
   // Multiple profiles exist - user must specify
-  return { profile: null, error: 'multiple', names: serviceProfiles.map(getProfileName) };
+  return { profile: null, error: 'multiple', names: serviceProfiles.map((p) => p.name) };
 }
 
 export interface SetProfileOptions {
@@ -133,13 +135,8 @@ export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
   profiles: ProfileEntry[];
 }[]> {
-  const config = await loadConfig();
   const services = service ? [service] : ALL_SERVICES;
-
-  return services.map((svc) => ({
-    service: svc,
-    profiles: (config.profiles[svc] || []).map(normalizeProfile),
-  }));
+  return Promise.all(services.map(async (svc) => ({ service: svc, profiles: await profilesOf(svc) })));
 }
 
 /**
@@ -149,13 +146,7 @@ export async function isProfileReadOnly(
   service: ServiceName,
   profileName: string
 ): Promise<boolean> {
-  const config = await loadConfig();
-  const serviceProfiles = config.profiles[service] || [];
-  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
-  if (!found) {
-    return false;
-  }
-  return normalizeProfile(found).readOnly === true;
+  return (await profilesOf(service)).find((p) => p.name === profileName)?.readOnly === true;
 }
 
 /**
