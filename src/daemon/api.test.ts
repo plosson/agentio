@@ -92,6 +92,10 @@ describe('daemon HTTP surface', () => {
     expect(res.status).toBe(200);
     const cookie = await cookieFrom(res);
     expect(cookie).toMatch(/^agentio_session=/);
+    // Plain http here, so the cookie must not be Secure or the browser would drop it.
+    expect(res.headers.get('set-cookie')).not.toContain('Secure');
+    const viaProxy = await call('/ui/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase: PASSPHRASE }), headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' }, ip: '198.51.100.2' });
+    expect(viaProxy.headers.get('set-cookie')).toContain('Secure');
     expect(await (await call('/health')).json()).toMatchObject({ locked: false });
 
     const profiles = await call('/ui/api/profiles', { headers: { cookie } });

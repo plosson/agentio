@@ -55,8 +55,8 @@ export function startApiServer(ctx: UiContext): void {
     fetch: (request, srv) => handle(request, srv),
   });
 
-  console.log(`Daemon API listening on http://${DAEMON_HOST}:${DAEMON_PORT}`);
-  console.log(`Admin UI at http://${DAEMON_HOST}:${DAEMON_PORT}/ui`);
+  console.log(`Daemon API listening on ${DAEMON_HOST}:${DAEMON_PORT}`);
+  console.log(`Admin UI at http://127.0.0.1:${DAEMON_PORT}/ui`);
 }
 
 export function stopApiServer(): void {

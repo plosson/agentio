@@ -202,7 +202,13 @@
     $('unlock-btn').disabled = true;
     try {
       const res = await api('/ui/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase: $('passphrase').value }) });
-      if (res.ok) { await openVault(); return; }
+      if (res.ok) {
+        const probe = await api('/ui/api/session');
+        if (probe.ok && probe.body.authenticated) { await openVault(); return; }
+        err.textContent = 'Unlocked, but the browser did not keep the session cookie. Open the UI at http://127.0.0.1:7890/ui or over HTTPS.';
+        err.hidden = false;
+        return;
+      }
       err.textContent = res.error;
       err.hidden = false;
     } finally {
