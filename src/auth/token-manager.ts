@@ -1,12 +1,10 @@
 import { OAuth2Client } from 'google-auth-library';
-import { getCredentials, setCredentials } from './token-store';
+import { getFreshCredentials } from './refresh';
 import { resolveProfile } from '../config/config-manager';
 import { GOOGLE_OAUTH_CONFIG } from '../config/credentials';
 import { CliError, multipleProfilesError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import type { OAuthTokens } from '../types/tokens';
-
-const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function getValidTokens(
   service: ServiceName,
@@ -26,68 +24,37 @@ export async function getValidTokens(
 
   const profile = profileResult.profile;
 
-  const tokens = await getCredentials<OAuthTokens>(service, profile);
 
-  if (!tokens) {
-    throw new CliError(
-      'AUTH_FAILED',
-      `No tokens found for ${service} profile "${profile}"`,
-      `Run: agentio ${service} profile add --profile ${profile}`
-    );
-  }
-
-  // Check if token needs refresh
-  if (tokens.expiry_date && Date.now() > tokens.expiry_date - TOKEN_EXPIRY_BUFFER_MS) {
-    if (!tokens.refresh_token) {
-      throw new CliError(
-        'TOKEN_EXPIRED',
-        'Access token expired and no refresh token available',
-        `Run: agentio ${service} profile add --profile ${profile}`
-      );
-    }
-
-    const refreshed = await refreshTokens(service, profile, tokens);
-    return { tokens: refreshed, profile };
-  }
-
-  return { tokens, profile };
+  const { credentials } = await getFreshCredentials<OAuthTokens>(service, profile);
+  return { tokens: credentials, profile };
 }
 
-async function refreshTokens(
-  service: ServiceName,
-  profileName: string,
-  tokens: OAuthTokens
-): Promise<OAuthTokens> {
+/**
+ * Exchange a Google refresh token for a new access token. Pure: the caller
+ * decides where the result is stored. Google normally keeps the refresh
+ * token, so `refreshToken` is only set when a new one came back.
+ */
+export async function refreshGoogleAccessToken(refreshToken: string): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  expiryDate?: number;
+  tokenType: string;
+  scope?: string;
+}> {
   const oauth2Client = new OAuth2Client(
     GOOGLE_OAUTH_CONFIG.clientId,
     GOOGLE_OAUTH_CONFIG.clientSecret
   );
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
 
-  oauth2Client.setCredentials({
-    refresh_token: tokens.refresh_token,
-  });
-
-  try {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-
-    const newTokens: OAuthTokens = {
-      access_token: credentials.access_token!,
-      refresh_token: credentials.refresh_token || tokens.refresh_token,
-      expiry_date: credentials.expiry_date || undefined,
-      token_type: credentials.token_type || 'Bearer',
-      scope: credentials.scope || tokens.scope,
-    };
-
-    await setCredentials(service, profileName, newTokens);
-    return newTokens;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    throw new CliError(
-      'TOKEN_EXPIRED',
-      `Failed to refresh access token: ${message}`,
-      `Run: agentio ${service} profile add --profile ${profileName}`
-    );
-  }
+  const { credentials } = await oauth2Client.refreshAccessToken();
+  return {
+    accessToken: credentials.access_token!,
+    refreshToken: credentials.refresh_token || undefined,
+    expiryDate: credentials.expiry_date || undefined,
+    tokenType: credentials.token_type || 'Bearer',
+    scope: credentials.scope || undefined,
+  };
 }
 
 export function createGoogleAuth(tokens: OAuthTokens) {

@@ -1,11 +1,9 @@
 import { Command } from 'commander';
 import { listProfiles, CONFIG_DIR } from '../config/config-manager';
-import { getCredentials, setCredentials } from '../auth/token-store';
+import { getCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
-import { refreshJiraToken } from '../auth/jira-oauth';
-import { refreshConfluenceToken } from '../auth/confluence-oauth';
-import { refreshRevolutToken } from '../auth/revolut-oauth';
-import { refreshDropboxToken } from '../auth/dropbox-oauth';
+import { canRefresh, getFreshCredentials } from '../auth/refresh';
+import { CliError } from '../utils/errors';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -49,14 +47,10 @@ import { addExamples } from '../utils/command-tree';
 type GmailCredentials = OAuthTokens & { email?: string };
 
 /**
- * Creates a ServiceClient for the given service and credentials.
- * Handles token refresh for OAuth services before creating the client.
+ * Creates a ServiceClient for the given service and credentials. Refresh is
+ * not this function's job; callers pass credentials from getFreshCredentials.
  */
-async function createServiceClient(
-  service: ServiceName,
-  credentials: unknown,
-  profileName: string
-): Promise<ServiceClient | null> {
+function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient | null {
   switch (service) {
     case 'gmail': {
       const creds = credentials as GmailCredentials;
@@ -130,118 +124,13 @@ async function createServiceClient(
     }
 
     case 'jira': {
-      let creds = credentials as JiraCredentials;
-
-      // Helper to refresh token
-      const tryRefresh = async (): Promise<JiraCredentials | null> => {
-        try {
-          const refreshed = await refreshJiraToken(creds.refreshToken);
-          const newCreds = {
-            ...creds,
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken,
-            expiryDate: Date.now() + refreshed.expiresIn * 1000,
-          };
-          await setCredentials('jira', profileName, newCreds);
-          return newCreds;
-        } catch {
-          return null;
-        }
-      };
-
-      // Refresh token if expired or about to expire
-      const bufferTime = 5 * 60 * 1000;
-      if (creds.expiryDate && Date.now() + bufferTime >= creds.expiryDate) {
-        const refreshedCreds = await tryRefresh();
-        if (!refreshedCreds) {
-          return {
-            validate: async () => ({
-              valid: false,
-              error: 'refresh token expired, re-authenticate',
-            }),
-          };
-        }
-        creds = refreshedCreds;
-      }
-
-      // Create client and return a wrapper that attempts refresh on validation failure
-      const client = new JiraClient(creds);
-      return {
-        validate: async () => {
-          const result = await client.validate();
-          if (result.valid) {
-            return result;
-          }
-
-          // Validation failed - try to refresh token and retry
-          const refreshedCreds = await tryRefresh();
-          if (!refreshedCreds) {
-            return {
-              valid: false,
-              error: 'refresh token expired, re-authenticate',
-            };
-          }
-
-          // Retry validation with refreshed credentials
-          const refreshedClient = new JiraClient(refreshedCreds);
-          return refreshedClient.validate();
-        },
-      };
+      const creds = credentials as JiraCredentials;
+      return new JiraClient(creds);
     }
 
     case 'confluence': {
-      let creds = credentials as ConfluenceCredentials;
-
-      const tryRefresh = async (): Promise<ConfluenceCredentials | null> => {
-        try {
-          const refreshed = await refreshConfluenceToken(creds.refreshToken);
-          const newCreds = {
-            ...creds,
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken,
-            expiryDate: Date.now() + refreshed.expiresIn * 1000,
-          };
-          await setCredentials('confluence', profileName, newCreds);
-          return newCreds;
-        } catch {
-          return null;
-        }
-      };
-
-      const bufferTime = 5 * 60 * 1000;
-      if (creds.expiryDate && Date.now() + bufferTime >= creds.expiryDate) {
-        const refreshedCreds = await tryRefresh();
-        if (!refreshedCreds) {
-          return {
-            validate: async () => ({
-              valid: false,
-              error: 'refresh token expired, re-authenticate',
-            }),
-          };
-        }
-        creds = refreshedCreds;
-      }
-
-      const client = new ConfluenceClient(creds);
-      return {
-        validate: async () => {
-          const result = await client.validate();
-          if (result.valid) {
-            return result;
-          }
-
-          const refreshedCreds = await tryRefresh();
-          if (!refreshedCreds) {
-            return {
-              valid: false,
-              error: 'refresh token expired, re-authenticate',
-            };
-          }
-
-          const refreshedClient = new ConfluenceClient(refreshedCreds);
-          return refreshedClient.validate();
-        },
-      };
+      const creds = credentials as ConfluenceCredentials;
+      return new ConfluenceClient(creds);
     }
 
     case 'gchat': {
@@ -260,56 +149,12 @@ async function createServiceClient(
     }
 
     case 'revolut': {
-      let creds = credentials as RevolutCredentials;
-
-      // Access tokens live 40 minutes, so status almost always refreshes first.
-      const bufferTime = 5 * 60 * 1000;
-      if (!creds.expiryDate || Date.now() + bufferTime >= creds.expiryDate) {
-        try {
-          const refreshed = await refreshRevolutToken(creds);
-          creds = {
-            ...creds,
-            accessToken: refreshed.accessToken,
-            expiryDate: Date.now() + refreshed.expiresIn * 1000,
-          };
-          await setCredentials('revolut', profileName, creds);
-        } catch {
-          return {
-            validate: async () => ({
-              valid: false,
-              error: 'refresh token rejected, re-authenticate',
-            }),
-          };
-        }
-      }
-
+      const creds = credentials as RevolutCredentials;
       return new RevolutClient(creds);
     }
 
     case 'dropbox': {
-      let creds = credentials as DropboxCredentials;
-
-      // Access tokens live 4 hours, so status often refreshes first.
-      const bufferTime = 5 * 60 * 1000;
-      if (!creds.expiryDate || Date.now() + bufferTime >= creds.expiryDate) {
-        try {
-          const refreshed = await refreshDropboxToken(creds.appKey, creds.refreshToken);
-          creds = {
-            ...creds,
-            accessToken: refreshed.accessToken,
-            expiryDate: Date.now() + refreshed.expiresIn * 1000,
-          };
-          await setCredentials('dropbox', profileName, creds);
-        } catch {
-          return {
-            validate: async () => ({
-              valid: false,
-              error: 'refresh token rejected, re-authenticate',
-            }),
-          };
-        }
-      }
-
+      const creds = credentials as DropboxCredentials;
       return new DropboxClient(creds);
     }
 
@@ -354,14 +199,26 @@ async function listProfileRefs(): Promise<ProfileRef[]> {
   return refs;
 }
 
+/** Refresh failures are reported as an invalid profile, not thrown. */
+function refreshFailure(err: unknown): ValidationResult {
+  if (err instanceof CliError && err.code === 'TOKEN_EXPIRED') {
+    return { valid: false, error: 'refresh token rejected, re-authenticate' };
+  }
+  throw err;
+}
+
+async function validateWith(service: ServiceName, credentials: unknown): Promise<ValidationResult> {
+  const client = createServiceClient(service, credentials);
+  return client ? client.validate() : { valid: true, info: 'unknown service' };
+}
+
 /**
- * Tests one profile. Kept sequential by callers: refreshing a token writes the
- * new credentials back to the vault, and concurrent writes would clobber it.
+ * Tests one profile. Stale tokens are refreshed first; a failed validation on
+ * a refreshable service gets one forced refresh and a retry, since a token can
+ * be rejected before its recorded expiry.
  */
 async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
-  const credentials = await getCredentials(ref.service, ref.profile);
-
-  if (!credentials) {
+  if (!(await getCredentials(ref.service, ref.profile))) {
     return { ...ref, status: 'no-creds' };
   }
 
@@ -369,10 +226,17 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
     return { ...ref, status: 'skipped' };
   }
 
-  const client = await createServiceClient(ref.service, credentials, ref.profile);
-  const result: ValidationResult = client
-    ? await client.validate()
-    : { valid: true, info: 'unknown service' };
+  let result: ValidationResult;
+  try {
+    const { credentials } = await getFreshCredentials(ref.service, ref.profile);
+    result = await validateWith(ref.service, credentials);
+    if (!result.valid && canRefresh(ref.service)) {
+      const forced = await getFreshCredentials(ref.service, ref.profile, { force: true });
+      result = await validateWith(ref.service, forced.credentials);
+    }
+  } catch (err) {
+    result = refreshFailure(err);
+  }
 
   return {
     ...ref,
