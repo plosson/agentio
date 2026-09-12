@@ -42,7 +42,7 @@ The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), then sta
 | `AGENTIO_KEY` | Encryption key from `agentio vault export`, used on first boot only |
 | `AGENTIO_CONFIG` | Encrypted config from `agentio vault export`, used on first boot only |
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
-| `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot to create the vault; afterwards optional: when set the daemon starts unlocked, otherwise it starts locked (the admin UI that unlocks it is not shipped yet) |
+| `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot to create the vault; afterwards optional: when set the daemon starts unlocked, otherwise it starts locked until someone unlocks it at `/ui` |
 
 ## Volumes / health
 
@@ -51,6 +51,8 @@ The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), then sta
 | `/data` | Vault + daemon state (`HOME` / `XDG_CONFIG_HOME`) |
 
 Health check: `GET http://localhost:7890/health`. It answers 200 whether the vault is locked or not, and the body carries `locked`.
+
+Admin UI: `http://localhost:7890/ui`. Put TLS in front before exposing it; the passphrase travels in the unlock request.
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' agentio

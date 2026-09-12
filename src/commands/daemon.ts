@@ -14,7 +14,7 @@ export function registerDaemonCommands(program: Command): void {
     .description('Run the daemon in the foreground')
     .action(async () => {
       try {
-        await startDaemon();
+        await startDaemon({ version: program.version() ?? 'unknown' });
       } catch (error) {
         handleError(error);
       }

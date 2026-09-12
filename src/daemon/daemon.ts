@@ -11,7 +11,7 @@ import { unlockVault } from '../vault/vault';
  * AGENTIO_PASSPHRASE is set, in which case the passphrase is verified
  * against the vault before the server comes up.
  */
-export async function startDaemon(): Promise<void> {
+export async function startDaemon(options: { version: string }): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);
 
   const shutdown = (signal: string) => {
@@ -36,7 +36,7 @@ export async function startDaemon(): Promise<void> {
     console.log('Vault is locked');
   }
 
-  startApiServer();
+  startApiServer({ version: options.version });
 
   console.log('Daemon ready');
 }
