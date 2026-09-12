@@ -69,9 +69,9 @@
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
   th { color: var(--text-secondary); font-weight: 500; font-size: .8125rem; white-space: nowrap; }
   thead th { background: var(--code-bg); }
-  tr.group th { background: var(--bg); color: var(--text); font-weight: 600; font-size: .875rem; padding-top: 12px; }
-  tr.group th span { color: var(--text-muted); font-weight: 400; margin-left: 8px; }
   .svc-icon { width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; }
+  td.service { white-space: nowrap; }
+  input[type=search] { width: 220px; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
   td.actions { text-align: right; white-space: nowrap; }
   td.empty { color: var(--text-secondary); padding: 32px 12px; text-align: center; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
@@ -135,15 +135,17 @@
 
   <section id="view-profiles" hidden>
     <div class="page-head">
-      <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent, grouped by service.</p></div>
-      <div class="actions"><button id="refresh-btn">Refresh</button><button class="primary" id="test-btn">Test all</button></div>
+      <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent. The same profile name usually spans several services.</p></div>
+      <div class="actions"><input type="search" id="profile-filter" placeholder="Filter by profile name" autocomplete="off"><button id="refresh-btn">Refresh</button><button class="primary" id="test-btn">Test all</button></div>
     </div>
     <div class="alert info" id="profiles-msg" hidden style="margin:0 0 16px"></div>
     <div class="card table">
       <table id="profiles-table">
-        <thead><tr><th>Profile</th><th>Status</th><th>Details</th><th>Last tested</th><th>Read-only</th><th></th></tr></thead>
+        <thead><tr><th>Profile</th><th>Service</th><th>Status</th><th>Details</th><th>Last tested</th><th>Read-only</th><th></th></tr></thead>
+        <tbody id="profiles-body"></tbody>
       </table>
     </div>
+    <p class="note" id="filter-empty" hidden>No profile name matches the filter.</p>
     <p class="note">Add or reauthorise profiles with the CLI on this host: <span class="mono">agentio &lt;service&gt; profile add</span>.</p>
   </section>
 
@@ -307,29 +309,40 @@
     const version = data.version ? 'v' + data.version : '';
     $('version').textContent = version;
     $('settings-version').textContent = version || '—';
-    const groups = [];
+    const entries = Object.entries(data.services).flatMap(([service, profiles]) => profiles.map((p) => ({ service, ...p })));
+    entries.sort((a, b) => a.profile.localeCompare(b.profile) || a.service.localeCompare(b.service));
     const choices = [];
-    for (const [service, profiles] of Object.entries(data.services)) {
-      const rows = profiles.map((p) => {
+    const rows = entries.map((p) => {
+        const service = p.service;
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
         const label = escape(service + '/' + p.profile);
         choices.push(`<label class="toggle"><input type="checkbox" value="${label}"> ${label}</label>`);
-        return `<tr data-ref="${ref}" data-label="${label}">
+        return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}">
           <td>${escape(p.profile)}</td>
+          <td class="service" title="${escape(service)}">${serviceLabel(service)}</td>
           <td>${badge(p.status)}</td>
           <td class="muted details">${escape(p.error || p.info || '')}</td>
           <td class="muted tested">${fmtRelative(lastTested.get(ref))}</td>
           <td><label class="toggle"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}> read-only</label></td>
           <td class="actions"><button class="link small test" type="button">Test</button> <button class="link small del" type="button">Delete</button></td>
         </tr>`;
-      });
-      groups.push(`<tbody><tr class="group"><th colspan="6" title="${escape(service)}">${serviceLabel(service)}<span>${profiles.length}</span></th></tr>${rows.join('')}</tbody>`);
-    }
-    const table = $('profiles-table');
-    table.querySelectorAll('tbody').forEach((b) => b.remove());
-    table.insertAdjacentHTML('beforeend', groups.join('') || '<tbody><tr><td colspan="6" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr></tbody>');
+    });
+    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr>';
     $('key-profiles').innerHTML = choices.join('');
+    applyFilter();
   }
+
+  /** Client-side, on the profile name only; hidden rows are left out of Test all. */
+  function applyFilter() {
+    const needle = $('profile-filter').value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of document.querySelectorAll('#profiles-body tr[data-ref]')) {
+      row.hidden = needle !== '' && !row.dataset.profile.includes(needle);
+      if (!row.hidden) shown += 1;
+    }
+    $('filter-empty').hidden = shown > 0 || !needle;
+  }
+  $('profile-filter').addEventListener('input', applyFilter);
 
   const busy = (on) => { $('test-btn').disabled = on; $('refresh-btn').disabled = on; };
 
@@ -529,7 +542,7 @@
   }
 
   $('refresh-btn').addEventListener('click', loadProfiles);
-  $('test-btn').addEventListener('click', () => testProfiles([...document.querySelectorAll('#profiles-table tr[data-ref]')]));
+  $('test-btn').addEventListener('click', () => testProfiles([...document.querySelectorAll('#profiles-body tr[data-ref]:not([hidden])')]));
 
   $('lock-btn').addEventListener('click', async () => {
     const ok = await confirmDialog({
