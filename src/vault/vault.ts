@@ -1,17 +1,12 @@
 import { readFile, writeFile, unlink, rename, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { dirname, relative, isAbsolute } from 'path';
-import { tmpdir } from 'os';
+import { dirname } from 'path';
 import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 import { encryptVault, decryptVault } from './crypto';
 import { assertLocalMode } from '../auth/remote';
-import {
-  readPointer,
-  pointerExists,
-  deletePointer,
-} from './pointer';
+import { readPointer, pointerExists, deletePointer, assertTestWritable } from './pointer';
 import {
   getPassphrase,
   clearPassphrase,
@@ -227,17 +222,8 @@ export function saveVault(contents: VaultContents): Promise<void> {
   return serializedWrite(async () => writeVault(contents, await requireVaultPath(), JSON.stringify(contents)));
 }
 
-/** Under `bun test`, a vault may only ever be written inside the OS temp directory. */
-function assertWritablePath(path: string): void {
-  if (process.env.NODE_ENV !== 'test') return;
-  const rel = relative(tmpdir(), path);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`Refusing to write a vault outside ${tmpdir()} during tests: ${path}`);
-  }
-}
-
 async function writeVault(contents: VaultContents, path: string, plaintext: string): Promise<void> {
-  assertWritablePath(path);
+  assertTestWritable(path, 'vault');
   const pw = await resolvePassphraseOrThrow();
 
   const tmp = path + '.tmp';

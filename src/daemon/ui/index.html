@@ -40,7 +40,7 @@
   .page-head .actions { display: flex; gap: 8px; flex-shrink: 0; padding-top: 6px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; }
   .card h3 { margin: 0 0 4px; font-size: 1.125rem; line-height: 1.3; }
-  .card + .card { margin-top: 24px; }
+  .card:not([hidden]) + .card { margin-top: 24px; }
   .card.table { padding: 0; overflow-x: auto; }
   .card.danger { border-color: var(--error); }
   .card.danger h3 { color: var(--error); }
@@ -57,14 +57,14 @@
   button.danger:hover { background: var(--error-bg); }
   button.danger.solid { background: var(--error); color: #fff; }
   button.danger.solid:hover { background: var(--error); opacity: .9; }
-  button.small { padding: 4px 10px; font-size: .8125rem; }
-  button.link { border: 0; background: none; color: var(--text-secondary); padding: 4px 6px; font-weight: 500; }
+  button.link { border: 0; background: none; color: var(--text-secondary); padding: 4px 6px; font-size: .8125rem; font-weight: 500; }
   button.link:hover { color: var(--text); background: none; }
   button.link.del:hover { color: var(--error); }
   button:disabled { opacity: .6; cursor: default; }
   .alert { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius); font-size: .875rem; }
   .alert.error { background: var(--error-bg); color: var(--error); }
   .alert.info { background: var(--code-bg); color: var(--text-secondary); }
+  .alert.top { margin: 0 0 16px; }
   table { width: 100%; border-collapse: collapse; font-size: .875rem; }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
   th { color: var(--text-secondary); font-weight: 500; font-size: .8125rem; white-space: nowrap; }
@@ -139,7 +139,7 @@
       <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent. The same profile name usually spans several services.</p></div>
       <div class="actions"><input type="search" id="profile-filter" placeholder="Filter by profile name" autocomplete="off"><button id="refresh-btn">Refresh</button><button class="primary" id="test-btn">Test all</button></div>
     </div>
-    <div class="alert info" id="profiles-msg" hidden style="margin:0 0 16px"></div>
+    <div class="alert info top" id="profiles-msg" hidden></div>
     <div class="card table">
       <table id="profiles-table">
         <thead><tr><th>Profile</th><th>Service</th><th>Status</th><th>Details</th><th>Last tested</th><th>Read-only</th><th></th></tr></thead>
@@ -155,18 +155,11 @@
       <div><h2>API keys</h2><p>Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It reads the profiles it is scoped to and nothing else.</p></div>
       <div class="actions"><button class="primary" id="key-new-btn">Create key</button></div>
     </div>
-    <section class="card" id="key-panel" hidden style="margin-bottom:24px">
+    <section class="card" id="key-panel" hidden>
       <form id="key-form">
         <h3>New key</h3>
         <p class="note" style="margin:0">Its token will point agents at <span class="mono" id="hub-origin"></span>.</p>
-        <div class="field"><label for="key-name">Name</label><input type="text" id="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
-        <div class="field">
-          <label>Scope</label>
-          <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
-          <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
-          <div class="choices" id="key-profiles" hidden></div>
-        </div>
-        <div class="field"><label class="toggle"><input type="checkbox" id="key-ro"> read-only on every profile this key can see</label></div>
+        <div class="key-fields"></div>
         <div class="alert error" id="key-error" hidden></div>
         <div class="row right"><button type="button" id="key-cancel-btn">Cancel</button><button class="primary" type="submit" id="key-create-btn">Create key</button></div>
       </form>
@@ -198,19 +191,12 @@
   <section id="view-authorize" hidden>
     <div class="page-head"><div><h2>Sign-in request</h2><p>A machine running <span class="mono">agentio login</span> asks for a key to this hub.</p></div></div>
     <section class="card" style="max-width:640px">
-      <div class="alert error" id="auth-error" hidden style="margin:0 0 16px"></div>
+      <div class="alert error top" id="auth-error" hidden></div>
       <div id="auth-request" hidden>
         <div class="setting"><div><strong>Code shown in the terminal</strong><p>Approve only if it matches.</p></div><span class="mono code" id="auth-code"></span></div>
         <div class="setting"><div><strong>Requested from</strong><p>The name the machine gave for itself.</p></div><span class="mono" id="auth-from"></span></div>
         <form id="auth-form">
-          <div class="field"><label for="auth-name">Key name</label><input type="text" id="auth-name" required></div>
-          <div class="field">
-            <label>Scope</label>
-            <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
-            <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
-            <div class="choices" id="auth-profiles" hidden></div>
-          </div>
-          <div class="field"><label class="toggle"><input type="checkbox" id="auth-ro"> read-only on every profile this key can see</label></div>
+          <div class="key-fields"></div>
           <div class="row right"><button type="button" class="danger" id="auth-deny-btn">Deny</button><button class="primary" type="submit" id="auth-approve-btn">Approve</button></div>
         </form>
       </div>
@@ -221,6 +207,18 @@
     </section>
   </section>
 </main>
+
+<!-- The fields a key is made of, shared by Create key and the sign-in approval. -->
+<template id="key-fields-template">
+  <div class="field"><label>Name</label><input type="text" class="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
+  <div class="field">
+    <label>Scope</label>
+    <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
+    <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
+    <div class="choices" hidden></div>
+  </div>
+  <div class="field"><label class="toggle"><input type="checkbox" class="key-ro"> read-only on every profile this key can see</label></div>
+</template>
 
 <dialog id="confirm-dialog">
   <h3 id="confirm-title"></h3>
@@ -242,8 +240,10 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys'), settings: $('view-settings'), authorize: $('view-authorize') };
-  const TABS = ['profiles', 'keys', 'settings'];
-  const lastTested = new Map(); // profile ref -> Date, kept for this page load only
+  const TABS = [...document.querySelectorAll('#nav a')].map((a) => a.dataset.view);
+  // profile ref -> { status, details, at }: the last test result, kept across Refresh for this page load
+  const lastResult = new Map();
+  document.querySelectorAll('.key-fields').forEach((slot) => slot.replaceWith($('key-fields-template').content.cloneNode(true)));
 
   // Service id -> [display name, brand colour or null for the text colour, Simple Icons path (CC0)].
   const SERVICES = {
@@ -282,28 +282,25 @@
   }
 
   // #profiles, #keys, #settings pick a tab; #authorize=<code> is the login approval page.
-  const authCodeFromHash = () => (location.hash.startsWith('#authorize=') ? decodeURIComponent(location.hash.slice('#authorize='.length)) : null);
-  const tabFromHash = () => (TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'profiles');
   function openFromHash() {
-    const code = authCodeFromHash();
-    if (code) return openAuthorize(code);
-    show(tabFromHash());
+    const hash = decodeURIComponent(location.hash.slice(1));
+    if (hash.startsWith('authorize=')) return openAuthorize(hash.slice('authorize='.length));
+    show(TABS.includes(hash) ? hash : 'profiles');
   }
   window.addEventListener('hashchange', () => { if (views.unlock.hidden) openFromHash(); });
 
+  /**
+   * One call to the owner API. An answer saying the session or the vault is
+   * gone sends the page back to Unlock by itself and comes back as `lost`, so
+   * a caller that forgets to check still lands on the right page.
+   */
   async function api(path, options = {}) {
     const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
-    if (res.status === 204) return { ok: true, status: 204, body: null };
     let body = null;
-    try { body = await res.json(); } catch { /* no body */ }
-    return { ok: res.ok, status: res.status, body, error: (body && body.error) || 'Request failed' };
-  }
-
-  /** An answer saying the session or the vault is gone sends the page back to Unlock. */
-  function lostAccess(res) {
-    if (res.status !== 401 && res.status !== 503) return false;
-    show('unlock');
-    return true;
+    if (res.status !== 204) { try { body = await res.json(); } catch { /* no body */ } }
+    const lost = (res.status === 401 || res.status === 503) && views.unlock.hidden;
+    if (lost) show('unlock');
+    return { ok: res.ok, status: res.status, body, lost, error: (body && body.error) || 'Request failed' };
   }
 
   function escape(s) {
@@ -351,19 +348,22 @@
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
         const label = escape(service + '/' + p.profile);
         choices.push(`<label class="toggle"><input type="checkbox" value="${label}"> ${label}</label>`);
+        // A plain reload says "skipped"; show what the last test found instead, and when.
+        const last = lastResult.get(ref);
+        const shown = last && p.status === 'skipped' ? last : { status: p.status, details: p.error || p.info || '' };
         return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}">
           <td>${escape(p.profile)}</td>
           <td class="service" title="${escape(service)}">${serviceLabel(service)}</td>
-          <td>${badge(p.status)}</td>
-          <td class="muted details">${escape(p.error || p.info || '')}</td>
-          <td class="muted tested">${fmtRelative(lastTested.get(ref))}</td>
+          <td>${badge(shown.status)}</td>
+          <td class="muted details">${escape(shown.details)}</td>
+          <td class="muted tested">${fmtRelative(last && last.at)}</td>
           <td><label class="toggle"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}> read-only</label></td>
-          <td class="actions"><button class="link small test" type="button">Test</button> <button class="link small del" type="button">Delete</button></td>
+          <td class="actions"><button class="link test" type="button">Test</button> <button class="link del" type="button">Delete</button></td>
         </tr>`;
     });
     $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr>';
-    $('key-profiles').innerHTML = choices.join('');
-    $('auth-profiles').innerHTML = choices.join('');
+    const choiceHtml = choices.join('');
+    document.querySelectorAll('.choices').forEach((el) => { el.innerHTML = choiceHtml; });
     applyFilter();
   }
 
@@ -388,7 +388,7 @@
     busy(true);
     try {
       const res = await api('/ui/api/status?test=false');
-      if (lostAccess(res)) return;
+      if (res.lost) return;
       if (!res.ok) { msg.textContent = res.error; return; }
       renderProfiles(res.body);
       msg.hidden = true;
@@ -422,7 +422,7 @@
     const row = box.closest('tr');
     box.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ readOnly: box.checked }) });
-    if (lostAccess(res)) return;
+    if (res.lost) return;
     if (res.ok) toast(row.dataset.label + (box.checked ? ' is now read-only' : ' can write again'));
     else { box.checked = !box.checked; toast(res.error, 'error'); }
     box.disabled = false;
@@ -442,8 +442,8 @@
     if (!ok) return;
     btn.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
-    if (lostAccess(res)) return;
-    if (res.ok) { toast('Deleted ' + row.dataset.label); await loadProfiles(); }
+    if (res.lost) return;
+    if (res.ok) { toast('Deleted ' + row.dataset.label); loadProfiles(); }
     else { btn.disabled = false; toast(res.error, 'error'); }
   });
 
@@ -457,7 +457,7 @@
         <td>${k.readOnly ? 'yes' : 'no'}</td>
         <td class="muted">${fmtRelative(k.createdAt)}</td>
         <td class="muted">${k.lastUsedAt ? fmtRelative(k.lastUsedAt) : 'never'}</td>
-        <td class="actions"><button class="link small rotate" type="button">Rotate</button> <button class="link small del revoke" type="button">Revoke</button></td>
+        <td class="actions"><button class="link rotate" type="button">Rotate</button> <button class="link del" type="button">Revoke</button></td>
       </tr>`;
     });
     $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No keys yet. Create one to let an agent machine use this hub.</td></tr>';
@@ -465,7 +465,7 @@
 
   async function loadKeys() {
     const res = await api('/ui/api/keys');
-    if (lostAccess(res)) return;
+    if (res.lost) return;
     if (res.ok) renderKeys(res.body.keys);
   }
 
@@ -481,10 +481,17 @@
     catch { $('copy-btn').textContent = 'Select and copy manually'; }
   });
 
-  // Both the Create key form and the sign-in approval carry the same scope fields.
+  // The Create key form and the sign-in approval share the key fields (see the template).
   const scopeIsSome = (form) => form.querySelector('input[name=scope]:checked').value === 'some';
   const syncScope = (form) => { form.querySelector('.choices').hidden = !scopeIsSome(form); };
-  const scopeOf = (form) => (scopeIsSome(form) ? [...form.querySelectorAll('.choices input:checked')].map((i) => i.value) : '*');
+  const keyBody = (form) => ({
+    name: form.querySelector('.key-name').value,
+    allowedProfiles: scopeIsSome(form) ? [...form.querySelectorAll('.choices input:checked')].map((i) => i.value) : '*',
+    readOnly: form.querySelector('.key-ro').checked,
+    url: window.location.origin,
+  });
+  const resetForm = (form) => { form.reset(); syncScope(form); };
+  const busyForm = (form, on) => form.querySelectorAll('button').forEach((b) => { b.disabled = on; });
   document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', () => syncScope(r.form)));
   $('hub-origin').textContent = window.location.origin;
   $('settings-origin').textContent = window.location.origin;
@@ -493,15 +500,14 @@
   function toggleKeyPanel(open) {
     $('key-panel').hidden = !open;
     $('key-new-btn').hidden = open;
-    if (open) $('key-name').focus();
-    else { $('key-form').reset(); syncScope($('key-form')); $('key-error').hidden = true; }
+    if (open) $('key-form').querySelector('.key-name').focus();
+    else { resetForm($('key-form')); $('key-error').hidden = true; }
   }
   $('key-new-btn').addEventListener('click', () => toggleKeyPanel(true));
   $('key-cancel-btn').addEventListener('click', () => toggleKeyPanel(false));
 
   async function openVault() {
-    await Promise.all([loadProfiles(), loadKeys()]);
-    await openFromHash();
+    await Promise.all([openFromHash(), loadProfiles(), loadKeys()]);
   }
 
   async function openAuthorize(code) {
@@ -510,24 +516,22 @@
     $('auth-request').hidden = true;
     $('auth-done').hidden = true;
     const res = await api('/ui/api/authorize/' + encodeURIComponent(code));
-    if (lostAccess(res)) return;
+    if (res.lost) return;
     if (!res.ok) { $('auth-error').textContent = res.error; $('auth-error').hidden = false; return; }
     $('auth-code').textContent = res.body.userCode;
     $('auth-from').textContent = res.body.name;
-    $('auth-name').value = res.body.name;
-    $('auth-form').reset(); $('auth-name').value = res.body.name; syncScope($('auth-form'));
+    resetForm($('auth-form'));
+    $('auth-form').querySelector('.key-name').value = res.body.name;
     $('auth-request').hidden = false;
   }
 
   async function decideAuthorize(approve) {
     const form = $('auth-form');
-    const body = approve
-      ? { approve: true, name: $('auth-name').value, allowedProfiles: scopeOf(form), readOnly: $('auth-ro').checked, url: window.location.origin }
-      : { approve: false };
-    $('auth-approve-btn').disabled = true; $('auth-deny-btn').disabled = true;
+    const body = approve ? { approve: true, ...keyBody(form) } : { approve: false };
+    busyForm(form, true);
     try {
       const res = await api('/ui/api/authorize/' + encodeURIComponent($('auth-code').textContent), { method: 'POST', body: JSON.stringify(body) });
-      if (lostAccess(res)) return;
+      if (res.lost) return;
       if (!res.ok) { $('auth-error').textContent = res.error; $('auth-error').hidden = false; return; }
       $('auth-request').hidden = true;
       $('auth-done-title').textContent = approve ? 'Approved' : 'Denied';
@@ -535,8 +539,8 @@
         ? 'The terminal receives its token within a few seconds. You can close this page.'
         : 'The terminal is told no. Nothing was created.';
       $('auth-done').hidden = false;
-      if (approve) await loadKeys();
-    } finally { $('auth-approve-btn').disabled = false; $('auth-deny-btn').disabled = false; }
+      if (approve) loadKeys();
+    } finally { busyForm(form, false); }
   }
   $('auth-form').addEventListener('submit', (ev) => { ev.preventDefault(); decideAuthorize(true); });
   $('auth-deny-btn').addEventListener('click', () => decideAuthorize(false));
@@ -544,18 +548,16 @@
   $('key-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const err = $('key-error'); err.hidden = true;
-    const allowedProfiles = scopeOf($('key-form'));
-    $('key-create-btn').disabled = true;
+    const form = $('key-form');
+    busyForm(form, true);
     try {
-      const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
-        name: $('key-name').value, allowedProfiles, readOnly: $('key-ro').checked, url: window.location.origin,
-      }) });
-      if (lostAccess(res)) return;
+      const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify(keyBody(form)) });
+      if (res.lost) return;
       if (!res.ok) { err.textContent = res.error; err.hidden = false; return; }
       toggleKeyPanel(false);
-      await loadKeys();
       showToken(res.body.token);
-    } finally { $('key-create-btn').disabled = false; }
+      loadKeys();
+    } finally { busyForm(form, false); }
   });
 
   $('keys-body').addEventListener('click', async (ev) => {
@@ -565,13 +567,13 @@
       const ok = await confirmDialog({ title: 'Rotate "' + name + '"?', body: 'A new token is issued and the current one stops working immediately. Update AGENTIO_TOKEN on every machine that uses this key.', action: 'Rotate key' });
       if (!ok) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: JSON.stringify({ url: window.location.origin }) });
-      if (lostAccess(res)) return;
-      if (res.ok) { await loadKeys(); showToken(res.body.token); } else toast(res.error, 'error');
-    } else if (btn.classList.contains('revoke')) {
+      if (res.lost) return;
+      if (res.ok) { showToken(res.body.token); loadKeys(); } else toast(res.error, 'error');
+    } else if (btn.classList.contains('del')) {
       const ok = await confirmDialog({ title: 'Revoke "' + name + '"?', body: 'Its token stops working immediately and the key is deleted. Agents using it fail until they get a new key.', action: 'Revoke key' });
       if (!ok) return;
       const res = await api('/ui/api/keys/' + encodeURIComponent(id), { method: 'DELETE' });
-      if (lostAccess(res)) return;
+      if (res.lost) return;
       if (res.ok) { toast('Revoked "' + name + '"'); await loadKeys(); } else toast(res.error, 'error');
     }
   });
@@ -580,8 +582,9 @@
     row.querySelector('.badge').outerHTML = badge(status);
     row.querySelector('td.details').textContent = details || '';
     if (status !== 'testing') {
-      lastTested.set(row.dataset.ref, new Date());
-      row.querySelector('td.tested').innerHTML = fmtRelative(lastTested.get(row.dataset.ref));
+      const at = new Date();
+      lastResult.set(row.dataset.ref, { status, details: details || '', at });
+      row.querySelector('td.tested').innerHTML = fmtRelative(at);
     }
   }
 
@@ -593,25 +596,24 @@
     const msg = $('profiles-msg');
     const counts = { ok: 0, invalid: 0, 'no-creds': 0 };
     let done = 0;
-    const summary = () => `${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials`;
-    const update = () => { msg.textContent = `Testing ${done}/${rows.length}… ${summary()}`; };
+    const report = (prefix) => { msg.textContent = `${prefix} ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials.`; };
     for (const row of rows) setRowStatus(row, 'testing', '');
     msg.hidden = rows.length < 2;
-    update();
+    report(`Testing ${done}/${rows.length}…`);
     busy(true);
     const queue = rows.slice();
     const worker = async () => {
       for (let row = queue.shift(); row; row = queue.shift()) {
         const res = await api('/ui/api/profiles/' + row.dataset.ref + '/status');
-        if (lostAccess(res)) return;
+        if (res.lost) return;
         if (res.ok) { setRowStatus(row, res.body.status, res.body.error || res.body.info); counts[res.body.status] = (counts[res.body.status] || 0) + 1; }
         else setRowStatus(row, 'invalid', res.error);
-        done += 1; update();
+        done += 1; report(`Testing ${done}/${rows.length}…`);
       }
     };
     try {
       await Promise.all([worker(), worker(), worker()]);
-      if (rows.length > 1) msg.textContent = `Tested ${rows.length} profiles: ${summary()}.`;
+      if (rows.length > 1) report(`Tested ${rows.length} profiles:`);
     } finally { busy(false); }
   }
 

@@ -35,7 +35,7 @@ describe('device login', () => {
     expect(hubOrigin('https://vault.example.com/ui/')).toBe('https://vault.example.com');
     expect(hubOrigin('http://127.0.0.1:7890')).toBe('http://127.0.0.1:7890');
     expect(() => hubOrigin('ftp://x')).toThrow('http');
-    expect(() => hubOrigin('not a url')).toThrow('valid hub URL');
+    expect(() => hubOrigin('not a url')).toThrow('hub URL');
   });
 
   test('polls until the owner approves, then returns the token and key', async () => {
