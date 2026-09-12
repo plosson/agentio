@@ -30,12 +30,24 @@ export function clearSessions(): void {
   sessions.clear();
 }
 
-export function sessionCookie(id: string): string {
-  return `${COOKIE_NAME}=${id}; HttpOnly; Secure; SameSite=Strict; Path=/`;
+/**
+ * `Secure` only when the request itself came over HTTPS: browsers accept a
+ * Secure cookie over plain HTTP for localhost and 127.0.0.1 but drop it for any
+ * other host, which would make an unlock over http://0.0.0.0 or a LAN address
+ * silently fail. Behind the TLS proxy the forwarded protocol says https.
+ */
+export function isSecureRequest(request: Request): boolean {
+  return request.headers.get('x-forwarded-proto') === 'https' || new URL(request.url).protocol === 'https:';
 }
 
-export function expiredSessionCookie(): string {
-  return `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
+const cookieAttributes = (secure: boolean) => `HttpOnly; ${secure ? 'Secure; ' : ''}SameSite=Strict; Path=/`;
+
+export function sessionCookie(id: string, secure: boolean): string {
+  return `${COOKIE_NAME}=${id}; ${cookieAttributes(secure)}`;
+}
+
+export function expiredSessionCookie(secure: boolean): string {
+  return `${COOKIE_NAME}=; ${cookieAttributes(secure)}; Max-Age=0`;
 }
 
 function sessionIdFrom(request: Request): string | null {

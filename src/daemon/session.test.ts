@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
+  isSecureRequest,
   SESSION_IDLE_MS,
   clearSessions,
   createSession,
@@ -17,9 +18,11 @@ beforeEach(() => clearSessions());
 describe('sessions', () => {
   test('a fresh session is accepted via its cookie', () => {
     const id = createSession();
-    const cookie = sessionCookie(id);
+    const cookie = sessionCookie(id, true);
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Strict');
+    expect(cookie).toContain('Secure');
+    expect(sessionCookie(id, false)).not.toContain('Secure');
     expect(hasSession(withCookie(`agentio_session=${id}`))).toBe(true);
   });
 
@@ -48,7 +51,13 @@ describe('sessions', () => {
     expect(hasSession(withCookie(`agentio_session=${id}`))).toBe(false);
   });
 
+  test('a request is secure over https or behind a proxy that says so', () => {
+    expect(isSecureRequest(new Request('http://hub/ui'))).toBe(false);
+    expect(isSecureRequest(new Request('https://hub/ui'))).toBe(true);
+    expect(isSecureRequest(new Request('http://hub/ui', { headers: { 'x-forwarded-proto': 'https' } }))).toBe(true);
+  });
+
   test('expired cookie clears the browser copy', () => {
-    expect(expiredSessionCookie()).toContain('Max-Age=0');
+    expect(expiredSessionCookie(false)).toContain('Max-Age=0');
   });
 });

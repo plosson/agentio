@@ -11,6 +11,7 @@ import {
   createSession,
   expiredSessionCookie,
   hasSession,
+  isSecureRequest,
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
@@ -36,13 +37,13 @@ async function handleUnlock(request: Request, ip: string): Promise<Response> {
     throw new CliError('INVALID_PARAMS', 'passphrase is required');
   }
   await unlockVault(passphrase);
-  return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession()) });
+  return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession(), isSecureRequest(request)) });
 }
 
-function handleLock(): Response {
+function handleLock(request: Request): Response {
   lockVault();
   clearSessions();
-  return new Response(null, { status: 204, headers: { 'Set-Cookie': expiredSessionCookie() } });
+  return new Response(null, { status: 204, headers: { 'Set-Cookie': expiredSessionCookie(isSecureRequest(request)) } });
 }
 
 async function handleProfiles(): Promise<Response> {
@@ -123,7 +124,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     if (!hasSession(request)) throw new CliError('AUTH_FAILED', 'Unauthorized');
 
-    if (method === 'POST' && pathname === '/ui/api/lock') return handleLock();
+    if (method === 'POST' && pathname === '/ui/api/lock') return handleLock(request);
 
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked');
 
