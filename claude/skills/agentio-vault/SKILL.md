@@ -121,33 +121,6 @@ Examples:
   agentio vault import ./agentio.enc --key 0123…cdef --merge
 ```
 
-## agentio vault env set <key> <value>
-
-Set an environment variable
-
-```
-Examples:
-
-  # point the CLI at a remote daemon
-  agentio vault env set AGENTIO_DAEMON_URL http://box.local:7890
-  agentio vault env set AGENTIO_DAEMON_API_KEY secret
-
-Stored variables are read by agentio itself, NOT exported to your shell or to
-processes agentio spawns. Only AGENTIO_DAEMON_URL and AGENTIO_DAEMON_API_KEY are consulted
-today; other keys are carried by 'vault export'/'import' but nothing reads them.
-```
-
-## agentio vault env unset <key>
-
-Remove an environment variable
-
-```
-Examples:
-
-  # remove a previously-set variable
-  agentio vault env unset OPENAI_API_KEY
-```
-
 ## agentio vault clear
 
 Clear all configuration and credentials
@@ -204,3 +177,4 @@ Examples:
 Only the pointer and the stored passphrase change - neither vault file is
 moved, written to, or deleted. Run 'agentio doctor' to see the active vault.
 ```
+

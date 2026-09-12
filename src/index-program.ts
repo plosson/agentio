@@ -94,7 +94,7 @@ export function createProgram(): Command {
   // commander's generic "unknown command" noise.
   for (const [removed, replacement] of [
     ['setup', 'agentio vault init'],
-    ['config', 'agentio vault export | import | env | clear'],
+    ['config', 'agentio vault export | import | clear'],
   ]) {
     program
       .command(removed, { hidden: true })

@@ -1,14 +1,3 @@
-export interface DaemonServerConfig {
-  // Server binding for the local daemon HTTP API
-  port?: number;          // Port to bind (default: 7890)
-  host?: string;          // Host to bind (default: 0.0.0.0)
-}
-
-export interface DaemonConfig {
-  apiKey?: string;                 // API key for authentication
-  server?: DaemonServerConfig;     // Server binding settings
-}
-
 export interface ProfileEntry {
   name: string;
   readOnly?: boolean;
@@ -38,8 +27,6 @@ export interface Config {
     sql?: ProfileValue[];
     revolut?: ProfileValue[];
   };
-  env?: Record<string, string>;
-  daemon?: DaemonConfig;
 }
 
 export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut';

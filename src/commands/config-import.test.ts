@@ -8,7 +8,7 @@ import { loadVault, clearVaultCache } from '../vault/vault';
 /**
  * Subprocess tests for `agentio config import` — specifically the fix
  * that makes import preserve top-level config fields the export blob
- * doesn't contain (server, gateway/daemon).
+ * doesn't contain (unknown top-level fields from older versions).
  *
  * Why subprocess: config import touches the real config-manager and
  * credential store (vault-backed). Each test runs in an isolated
@@ -119,55 +119,33 @@ async function exportCurrentConfig(): Promise<{
   return { key: keyMatch[1], blob: configMatch[1] };
 }
 
-interface ServerStateLike {
-  apiKey: string;
-  tokens: Array<Record<string, unknown>>;
-  clients: Array<Record<string, unknown>>;
-}
-
-const SAMPLE_SERVER: ServerStateLike = {
-  apiKey: 'srv_preserved_key_for_test_xxxx',
-  tokens: [
-    {
-      token: 'preserved-bearer-token-value',
-      clientId: 'cli_preserved_x',
-      scope: 'mcp',
-      issuedAt: 1700000000000,
-      // Far in the future so findToken doesn't treat it as expired.
-      expiresAt: Number.MAX_SAFE_INTEGER,
-    },
-  ],
-  clients: [
-    {
-      clientId: 'cli_preserved_x',
-      clientName: 'Preserved Test Client',
-      redirectUris: ['http://localhost/cb'],
-      createdAt: 1700000000000,
-    },
-  ],
-};
+/**
+ * An unknown top-level config field. Older vaults may carry sections this
+ * version knows nothing about; import must leave them untouched.
+ */
+const LEGACY = { apiKey: 'srv_preserved_key_for_test_xxxx', note: 'opaque to this version' };
 
 /* ------------------------------------------------------------------ */
-/* replace mode preserves config.server                               */
+/* replace mode preserves unknown top-level fields                    */
 /* ------------------------------------------------------------------ */
 
-describe('config import (replace mode) — preserves config.server', () => {
-  test('preserves apiKey, tokens, and clients across import', async () => {
-    // 1. Seed: existing config with profiles + server.*
+describe('config import (replace mode) — preserves unknown top-level fields', () => {
+  test('preserves an unknown field across import', async () => {
+    // 1. Seed: existing config with profiles + an unknown field
     await writeConfig({
       profiles: { gmail: [{ name: 'work' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
 
     // 2. Snapshot the current state via export.
     const { key, blob } = await exportCurrentConfig();
 
-    // 3. Mutate the saved config (different profiles) but keep server.*
-    //    so we can assert the IMPORT preserves the still-current
-    //    server, not just whatever was at export time.
+    // 3. Mutate the saved config (different profiles) but keep the unknown
+    //    field so we can assert the IMPORT preserves the still-current
+    //    value, not just whatever was at export time.
     await writeConfig({
       profiles: { gchat: [{ name: 'irrelevant' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
 
     // 4. Run import — replace mode (no --merge).
@@ -177,22 +155,18 @@ describe('config import (replace mode) — preserves config.server', () => {
     });
     expect(importRes.exitCode).toBe(0);
 
-    // 5. Assert: profiles came from the export, server.* preserved.
+    // 5. Assert: profiles came from the export, the unknown field preserved.
     const final = await readConfig();
     expect(profileNames(final, 'gmail')).toEqual(['work']);
     expect(profileNames(final, 'gchat')).toEqual([]);
 
-    const server = final.server as Record<string, unknown>;
-    expect(server).toBeDefined();
-    expect(server.apiKey).toBe(SAMPLE_SERVER.apiKey);
-    expect(server.tokens).toEqual(SAMPLE_SERVER.tokens);
-    expect(server.clients).toEqual(SAMPLE_SERVER.clients);
+    expect(final.legacy).toEqual(LEGACY);
   });
 
   test('replace still REPLACES profiles (not merge)', async () => {
     await writeConfig({
       profiles: { gmail: [{ name: 'p1' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const { key, blob } = await exportCurrentConfig();
 
@@ -201,7 +175,7 @@ describe('config import (replace mode) — preserves config.server', () => {
     // accumulate.
     await writeConfig({
       profiles: { jira: [{ name: 'tickets' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const importRes = await runCli(['vault', 'import'], {
       AGENTIO_KEY: key,
@@ -214,51 +188,23 @@ describe('config import (replace mode) — preserves config.server', () => {
     // jira is gone — replace, not merge.
     expect(profileNames(final, 'jira')).toEqual([]);
   });
-
-  test('replace replaces env vars too', async () => {
-    await writeConfig({
-      profiles: { gmail: [{ name: 'p1' }] },
-      env: { OLD_VAR: 'old' },
-      server: SAMPLE_SERVER,
-    });
-    const { key, blob } = await exportCurrentConfig();
-
-    // Mutate to new env, then import the snapshot — env should revert
-    // to the snapshot's env.
-    await writeConfig({
-      profiles: {},
-      env: { NEW_VAR: 'new' },
-      server: SAMPLE_SERVER,
-    });
-    const importRes = await runCli(['vault', 'import'], {
-      AGENTIO_KEY: key,
-      AGENTIO_CONFIG: blob,
-    });
-    expect(importRes.exitCode).toBe(0);
-
-    const final = await readConfig();
-    const env = final.env as Record<string, unknown>;
-    expect(env).toBeDefined();
-    expect(env.OLD_VAR).toBe('old');
-    expect(env.NEW_VAR).toBeUndefined();
-  });
 });
 
 /* ------------------------------------------------------------------ */
 /* merge mode keeps working                                            */
 /* ------------------------------------------------------------------ */
 
-describe('config import (merge mode) — preserves server + adds profiles', () => {
+describe('config import (merge mode) — preserves unknown fields + adds profiles', () => {
   test('--merge adds new profiles without removing existing ones', async () => {
     await writeConfig({
       profiles: { gmail: [{ name: 'p1' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const { key, blob } = await exportCurrentConfig();
 
     await writeConfig({
       profiles: { jira: [{ name: 'tickets' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const importRes = await runCli(['vault', 'import', '--merge'], {
       AGENTIO_KEY: key,
@@ -272,16 +218,16 @@ describe('config import (merge mode) — preserves server + adds profiles', () =
     expect(profileNames(final, 'gmail')).toContain('p1');
   });
 
-  test('--merge preserves config.server (matching replace behavior)', async () => {
+  test('--merge preserves unknown fields (matching replace behavior)', async () => {
     await writeConfig({
       profiles: { gmail: [{ name: 'p1' }] },
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const { key, blob } = await exportCurrentConfig();
 
     await writeConfig({
       profiles: {},
-      server: SAMPLE_SERVER,
+      legacy: LEGACY,
     });
     const importRes = await runCli(['vault', 'import', '--merge'], {
       AGENTIO_KEY: key,
@@ -290,6 +236,6 @@ describe('config import (merge mode) — preserves server + adds profiles', () =
     expect(importRes.exitCode).toBe(0);
 
     const final = await readConfig();
-    expect(final.server).toEqual(SAMPLE_SERVER);
+    expect(final.legacy).toEqual(LEGACY);
   });
 });

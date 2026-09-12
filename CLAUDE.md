@@ -44,7 +44,7 @@ src/
 │   ├── discourse.ts         # Discourse forum commands
 │   ├── sql.ts               # SQL database commands
 │   ├── daemon.ts            # Daemon commands (start/status)
-│   ├── vault-config.ts      # Vault contents: export/import/env/clear
+│   ├── vault-config.ts      # Vault contents: export/import/clear
 │   ├── status.ts            # Profile status display
 │   ├── update.ts            # CLI self-update
 │   ├── vault.ts             # Vault group: set/status + registers the two below
@@ -123,7 +123,6 @@ agentio vault passphrase [--passphrase <v> | --passphrase-stdin]   # change it
 agentio vault reset [--force]              # DELETES the vault file
 agentio vault export [--file <path>] [--all] [--key <hex>]
 agentio vault import [file] [--merge]
-agentio vault env [set <k> <v> | unset <k>]
 agentio vault clear [--force]
 ```
 
@@ -134,8 +133,6 @@ agentio vault clear [--force]
 **Non-interactive passphrase** — every passphrase-taking command resolves in this order: `--passphrase-stdin` > `--passphrase` > `AGENTIO_PASSPHRASE` > interactive prompt. Off a TTY with none of the first three, they error rather than hang. Prefer `--passphrase-stdin` in scripts; `--passphrase` lands in shell history and is visible in `ps`.
 
 **init vs set** — `init` creates a new vault (and imports legacy config unless `--no-migrate`). `set` points at a vault that already exists, which is the multi-machine case: the encrypted vault is synced, the passphrase file is not. `set` verifies by decrypting *before* writing the pointer, so a wrong passphrase changes nothing, and it never moves or deletes either vault file. To relocate a vault, move the file yourself then `vault set` the new path.
-
-**`vault env` is not a general env-var store.** Only `AGENTIO_DAEMON_URL` and `AGENTIO_DAEMON_API_KEY` are ever read (by `daemon/client.ts`). Stored values are *not* exported to your shell or injected into processes agentio spawns. Other keys are carried by `vault export`/`import` but nothing reads them.
 
 ### Gmail
 
@@ -378,12 +375,14 @@ agentio sql profile add|list|remove
 
 ### Daemon
 
-The daemon is a long-lived process that serves a local HTTP API with `Bun.serve` on port 7890 (`/health`, X-API-Key auth). It is the future home for vault UI/API. It runs in the foreground and logs to stdout; the Docker image under `docker/` is the supported way to run it.
+The daemon is a long-lived process that serves an HTTP API with `Bun.serve` on `0.0.0.0:7890`. It is the future home for vault UI/API. It runs in the foreground and logs to stdout; the Docker image under `docker/` is the supported way to run it.
 
 ```bash
 agentio daemon start             # run in the foreground (Docker CMD)
 agentio daemon status            # probe /health
 ```
+
+The daemon never reads `vault.passphrase`. It starts **locked**; until the admin UI ships, `AGENTIO_PASSPHRASE` is the only way to unlock it. When set, the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
 ### Utility Commands
 

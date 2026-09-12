@@ -1,99 +1,54 @@
 import type { Server } from 'bun';
-import type { HealthResponse } from './types';
-import type { DaemonConfig } from '../types/config';
+import { DAEMON_HOST, DAEMON_PORT, type HealthResponse } from './types';
+import { isVaultUnlocked } from '../vault/vault';
 
 let server: Server<unknown> | null = null;
-let apiKey: string = '';
 let startTime: number = 0;
 
-/**
- * JSON error response helper
- */
-function jsonError(message: string, status: number = 400): Response {
-  return new Response(JSON.stringify({ error: message }), {
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
 
 /**
- * Verify X-API-Key header
- */
-function verifyAuth(request: Request): boolean {
-  if (!apiKey) return true; // No auth configured
-
-  const key = request.headers.get('X-API-Key');
-  return key === apiKey;
-}
-
-/**
- * Handle health check
+ * Liveness. Unauthenticated, and 200 whether or not the vault is unlocked so
+ * a locked container is not killed before anyone can unlock it.
  */
 function handleHealth(): Response {
+  const now = Date.now();
   const response: HealthResponse = {
     status: 'ok',
-    timestamp: Date.now(),
-    uptime: Date.now() - startTime,
+    timestamp: now,
+    uptime: now - startTime,
+    locked: !isVaultUnlocked(),
   };
-  return new Response(JSON.stringify(response), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return json(response);
 }
 
-/**
- * Main request handler
- */
-async function handleRequest(request: Request): Promise<Response> {
-  const url = new URL(request.url);
-  const path = url.pathname;
+function handleRequest(request: Request): Response {
+  const path = new URL(request.url).pathname;
 
-  // CORS preflight
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      },
-    });
-  }
-
-  // Health check doesn't require auth
   if (path === '/health' && request.method === 'GET') {
     return handleHealth();
   }
 
-  // All other endpoints require auth
-  if (!verifyAuth(request)) {
-    return jsonError('Unauthorized', 401);
-  }
-
-  return jsonError('Not found', 404);
+  return json({ error: 'Not found' }, 404);
 }
 
-/**
- * Start the API server
- */
-export function startApiServer(config: DaemonConfig): void {
-  const port = config?.server?.port ?? 7890;
-  const host = config?.server?.host ?? '0.0.0.0';
-  apiKey = config?.apiKey ?? '';
+export function startApiServer(): void {
   startTime = Date.now();
 
   server = Bun.serve({
-    port,
-    hostname: host,
+    port: DAEMON_PORT,
+    hostname: DAEMON_HOST,
     fetch: handleRequest,
   });
 
-  console.log(`Daemon API listening on http://${host}:${port}`);
+  console.log(`Daemon API listening on http://${DAEMON_HOST}:${DAEMON_PORT}`);
 }
 
-/**
- * Stop the API server
- */
 export function stopApiServer(): void {
   if (server) {
     server.stop();
