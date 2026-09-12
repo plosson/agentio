@@ -4,6 +4,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { seedVault } from '../vault/test-helpers';
 import { loadVault, clearVaultCache } from '../vault/vault';
+import { encryptVault } from '../vault/crypto';
+import { existsSync } from 'fs';
 
 /**
  * Subprocess tests for `agentio config import` — specifically the fix
@@ -237,5 +239,42 @@ describe('config import (merge mode) — preserves unknown fields + adds profile
 
     const final = await readConfig();
     expect(final.legacy).toEqual(LEGACY);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* no vault yet: import creates one                                    */
+/* ------------------------------------------------------------------ */
+
+describe('config import on a machine with no vault', () => {
+  const KEY = 'ab'.repeat(32);
+  const blob = encryptVault(
+    JSON.stringify({
+      version: 1,
+      config: { profiles: { gmail: [{ name: 'seeded' }] } },
+      credentials: { gmail: { seeded: { token: 't' } } },
+    }),
+    KEY,
+  );
+
+  test('creates the vault at the default path from AGENTIO_PASSPHRASE', async () => {
+    const res = await runCli(['vault', 'import'], { AGENTIO_KEY: KEY, AGENTIO_CONFIG: blob });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain('Vault created at');
+
+    expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.enc'))).toBe(true);
+    const final = await readConfig();
+    expect(profileNames(final, 'gmail')).toEqual(['seeded']);
+  });
+
+  test('fails cleanly off a TTY when no passphrase source is given', async () => {
+    const res = await runCli(['vault', 'import'], {
+      AGENTIO_KEY: KEY,
+      AGENTIO_CONFIG: blob,
+      AGENTIO_PASSPHRASE: '',
+    });
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stderr).toContain('INVALID_PARAMS');
+    expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
   });
 });

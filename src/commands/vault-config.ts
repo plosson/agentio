@@ -5,7 +5,8 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { loadConfig } from '../config/config-manager';
 import { getAllCredentials } from '../auth/token-store';
-import { loadVault, saveVault, type VaultContents } from '../vault/vault';
+import { CURRENT_VAULT_VERSION, loadVault, saveVault, vaultExists, type VaultContents } from '../vault/vault';
+import { bootstrapVault } from './vault-init';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
@@ -201,6 +202,8 @@ export function registerVaultConfigCommands(vault: Command): void {
     .argument('[file]', 'Path to the encrypted configuration file (optional if AGENTIO_CONFIG env var is set)')
     .option('--key <key>', 'Encryption key (64 hex characters). Falls back to AGENTIO_KEY env var')
     .option('--merge', 'Merge with existing configuration instead of replacing')
+    .option('--passphrase <value>', 'Passphrase for the vault created when none exists yet (visible in shell history and process list)')
+    .option('--passphrase-stdin', 'Read that passphrase from stdin')
     .action(async (file, options) => {
       try {
         // Get key from option or environment variable
@@ -267,7 +270,16 @@ export function registerVaultConfigCommands(vault: Command): void {
           );
         }
 
-        if (options.merge) {
+        if (!(await vaultExists())) {
+          // Fresh machine or a container's first boot: there is nothing to
+          // merge into or replace, so the export becomes the vault.
+          await bootstrapVault(options, {
+            version: CURRENT_VAULT_VERSION,
+            config: exportData.config,
+            credentials: exportData.credentials,
+          });
+          console.log('Configuration imported successfully');
+        } else if (options.merge) {
           // Merge with existing config
           const current = await loadVault();
           const currentConfig = current.config;
@@ -336,7 +348,11 @@ export function registerVaultConfigCommands(vault: Command): void {
   AGENTIO_KEY=… AGENTIO_CONFIG=… agentio vault import
 
   # merge into existing config (only adds missing profiles/credentials)
-  agentio vault import ./agentio.enc --key 0123…cdef --merge`,
+  agentio vault import ./agentio.enc --key 0123…cdef --merge
+
+When no vault exists yet, import creates one at the default path. The passphrase
+for it resolves like 'vault init': --passphrase-stdin, --passphrase, then
+AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
   );
 
   const clearCmd = vault

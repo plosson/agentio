@@ -26,22 +26,23 @@ docker run -d \
   --name agentio \
   -e AGENTIO_KEY=your_key_here \
   -e AGENTIO_CONFIG=your_config_here \
+  -e AGENTIO_PASSPHRASE=your_vault_passphrase \
   -p 7890:7890 \
   -v agentio-data:/data \
   --restart unless-stopped \
   agentio
 ```
 
-The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), runs `agentio vault import` when those env vars are set, then starts the daemon.
+The entrypoint fetches the agentio binary (pin with `AGENTIO_VERSION`), then starts the daemon. On the **first boot** of a volume, when `AGENTIO_KEY` and `AGENTIO_CONFIG` are set, it runs `agentio vault import` to create the vault from them; that needs `AGENTIO_PASSPHRASE` because there is no terminal to prompt. Once a vault exists on the volume it is never overwritten by the env vars.
 
 ## Environment
 
 | Variable | Description |
 |----------|-------------|
-| `AGENTIO_KEY` | Encryption key from `agentio vault export` |
-| `AGENTIO_CONFIG` | Encrypted config from `agentio vault export` |
+| `AGENTIO_KEY` | Encryption key from `agentio vault export`, used on first boot only |
+| `AGENTIO_CONFIG` | Encrypted config from `agentio vault export`, used on first boot only |
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
-| `AGENTIO_PASSPHRASE` | Optional: vault passphrase. When set the daemon starts unlocked; otherwise it starts locked (the admin UI that unlocks it is not shipped yet) |
+| `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot to create the vault; afterwards optional: when set the daemon starts unlocked, otherwise it starts locked (the admin UI that unlocks it is not shipped yet) |
 
 ## Volumes / health
 
