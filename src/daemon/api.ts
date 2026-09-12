@@ -1,16 +1,16 @@
 import type { Server } from 'bun';
 import { DAEMON_HOST, DAEMON_PORT, type HealthResponse } from './types';
 import { isVaultUnlocked } from '../vault/vault';
+import { clientIp } from './rate-limit';
+import { handleUiRequest, json, type UiContext } from './routes-ui';
+
+/** The slice of Bun's Server the handler needs; tests pass a stub. */
+export interface PeerSource {
+  requestIP(request: Request): { address: string } | null;
+}
 
 let server: Server<unknown> | null = null;
 let startTime: number = 0;
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 /**
  * Liveness. Unauthenticated, and 200 whether or not the vault is unlocked so
@@ -27,26 +27,31 @@ function handleHealth(): Response {
   return json(response);
 }
 
-function handleRequest(request: Request): Response {
-  const path = new URL(request.url).pathname;
+export function createRequestHandler(ctx: UiContext) {
+  return async (request: Request, peer: PeerSource): Promise<Response> => {
+    const path = new URL(request.url).pathname;
 
-  if (path === '/health' && request.method === 'GET') {
-    return handleHealth();
-  }
+    if (path === '/health' && request.method === 'GET') return handleHealth();
 
-  return json({ error: 'Not found' }, 404);
+    const ui = await handleUiRequest(request, clientIp(request, peer.requestIP(request)?.address ?? null), ctx);
+    if (ui) return ui;
+
+    return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
+  };
 }
 
-export function startApiServer(): void {
+export function startApiServer(ctx: UiContext): void {
   startTime = Date.now();
+  const handle = createRequestHandler(ctx);
 
   server = Bun.serve({
     port: DAEMON_PORT,
     hostname: DAEMON_HOST,
-    fetch: handleRequest,
+    fetch: (request, srv) => handle(request, srv),
   });
 
   console.log(`Daemon API listening on http://${DAEMON_HOST}:${DAEMON_PORT}`);
+  console.log(`Admin UI at http://${DAEMON_HOST}:${DAEMON_PORT}/ui`);
 }
 
 export function stopApiServer(): void {
