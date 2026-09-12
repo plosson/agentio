@@ -1,15 +1,32 @@
 import { Command } from 'commander';
-import { listProfiles, removeProfile, setProfileReadOnly } from '../config/config-manager';
-import { removeCredentials, getCredentials } from '../auth/token-store';
-import { pruneProfileFromKeys } from '../auth/api-keys';
-import { handleError, CliError } from './errors';
+import { getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { getCredentials } from '../auth/token-store';
+import { pruneDanglingScopes } from '../auth/api-keys';
+import { loadVault, saveVault } from '../vault/vault';
+import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
 
-/** Drop a profile and its credentials. False when no such profile existed. */
+/**
+ * Drop a profile, its credentials, and its entry in every key's scope, in one
+ * vault write. False when no such profile existed (stray credentials are still
+ * cleaned up in that case).
+ */
 export async function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
-  const removed = await removeProfile(service, profileName);
-  await removeCredentials(service, profileName);
-  await pruneProfileFromKeys(service, profileName);
+  const vault = await loadVault();
+  const profiles = vault.config.profiles[service] ?? [];
+  const removed = profiles.some((p) => getProfileName(p) === profileName);
+  const hadCredentials = !!vault.credentials[service]?.[profileName];
+  if (!removed && !hadCredentials) return false;
+
+  const config = {
+    ...vault.config,
+    profiles: { ...vault.config.profiles, [service]: profiles.filter((p) => getProfileName(p) !== profileName) },
+  };
+  pruneDanglingScopes(config);
+  const credentials = { ...vault.credentials, [service]: { ...vault.credentials[service] } };
+  delete credentials[service][profileName];
+
+  await saveVault({ ...vault, config, credentials });
   return removed;
 }
 
@@ -82,9 +99,8 @@ export function createProfileCommands<T>(
           throw new CliError('INVALID_PARAMS', 'No update specified', 'Use --read-only or --no-read-only');
         }
 
-        const updated = await setProfileReadOnly(service, profileName, opts.readOnly);
-        if (!updated) {
-          throw new CliError('PROFILE_NOT_FOUND', `Profile "${profileName}" not found`);
+        if (!(await setProfileReadOnly(service, profileName, opts.readOnly))) {
+          throw profileNotFoundError(service, profileName);
         }
 
         if (opts.readOnly) {

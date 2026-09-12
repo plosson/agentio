@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { loadConfig, saveConfig, listProfileRefs } from '../config/config-manager';
+import { getProfileName, loadConfig, saveConfig, listProfileRefs } from '../config/config-manager';
 import { CliError } from '../utils/errors';
-import type { ApiKey, ApiKeyScope, ServiceName } from '../types/config';
+import type { ApiKey, ApiKeyScope, Config } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
 /** What callers may see: everything but the hash. */
@@ -9,9 +9,9 @@ export type ApiKeyView = Omit<ApiKey, 'secretHash'>;
 
 /** Raw caller input; every field is validated here, so routes pass JSON through untouched. */
 export interface ApiKeyInput {
-  name: unknown;
-  allowedProfiles: unknown;
-  readOnly: unknown;
+  name?: unknown;
+  allowedProfiles?: unknown;
+  readOnly?: unknown;
 }
 
 export interface IssuedKey {
@@ -39,6 +39,9 @@ function secretMatches(secret: string, storedHash: string): boolean {
 }
 
 const newSecret = () => randomBytes(32).toString('base64url');
+const newId = () => randomBytes(6).toString('base64url');
+const findKey = (config: Config, id: string) => config.apiKeys?.find((k) => k.id === id);
+const noKey = (id: string) => new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
 
 function validateName(name: unknown): string {
   if (typeof name !== 'string' || name.trim().length === 0) {
@@ -53,7 +56,7 @@ function validateReadOnly(readOnly: unknown): boolean {
 }
 
 /** The hub base URL that goes into the token, as the browser or --url saw it. */
-export function validateHubUrl(url: unknown): string {
+function validateHubUrl(url: unknown): string {
   let parsed: URL;
   try {
     parsed = new URL(String(url));
@@ -85,11 +88,11 @@ async function validateScope(scope: unknown): Promise<ApiKeyScope> {
 }
 
 /** Load, find the key or throw NOT_FOUND, apply `mutate`, save. */
-async function withKey<T>(id: string, mutate: (key: ApiKey) => T | Promise<T>): Promise<T> {
+async function withKey<T>(id: string, mutate: (key: ApiKey, config: Config) => T | Promise<T>): Promise<T> {
   const config = await loadConfig();
-  const key = config.apiKeys?.find((k) => k.id === id);
-  if (!key) throw new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
-  const result = await mutate(key);
+  const key = findKey(config, id);
+  if (!key) throw noKey(id);
+  const result = await mutate(key, config);
   await saveConfig(config);
   return result;
 }
@@ -100,23 +103,23 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
 
 export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
   const name = validateName(input.name);
-  const allowedProfiles = await validateScope(input.allowedProfiles);
   const readOnly = validateReadOnly(input.readOnly);
   const url = validateHubUrl(hubUrl);
+  const allowedProfiles = await validateScope(input.allowedProfiles);
 
   const config = await loadConfig();
-  const keys = config.apiKeys ?? [];
-  let id = randomBytes(6).toString('base64url');
-  while (keys.some((k) => k.id === id)) id = randomBytes(6).toString('base64url');
+  const keys = (config.apiKeys ??= []);
+  let id = newId();
+  while (keys.some((k) => k.id === id)) id = newId();
   const secret = newSecret();
   const key: ApiKey = { id, name, secretHash: hashSecret(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
-  config.apiKeys = [...keys, key];
+  keys.push(key);
   await saveConfig(config);
 
   return { key: view(key), token: encodeToken({ url, kid: id, secret }) };
 }
 
-export function updateApiKey(id: string, patch: Partial<ApiKeyInput>): Promise<ApiKeyView> {
+export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView> {
   return withKey(id, async (key) => {
     if (patch.name !== undefined) key.name = validateName(patch.name);
     if (patch.allowedProfiles !== undefined) key.allowedProfiles = await validateScope(patch.allowedProfiles);
@@ -136,29 +139,34 @@ export function rotateApiKey(id: string, hubUrl: unknown): Promise<IssuedKey> {
 }
 
 /** Revoking deletes the record; there is no revoked state to keep or prune. */
-export async function revokeApiKey(id: string): Promise<void> {
-  const config = await loadConfig();
-  const keys = config.apiKeys ?? [];
-  if (!keys.some((k) => k.id === id)) throw new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
-  config.apiKeys = keys.filter((k) => k.id !== id);
-  await saveConfig(config);
+export function revokeApiKey(id: string): Promise<void> {
+  return withKey(id, (key, config) => {
+    config.apiKeys = config.apiKeys!.filter((k) => k !== key);
+  });
 }
 
 /**
- * Drop `service/name` from every key's allow-list when that profile is deleted,
- * so re-adding a profile under the same name does not silently re-grant access.
- * `*` keys are untouched.
+ * Drop scope entries that no longer name a profile in `config`, in place.
+ * Called wherever profiles disappear (a delete, a replace-mode import), so
+ * re-adding a profile under the same name does not silently re-grant access.
+ * `*` keys are untouched. Returns whether anything changed.
  */
-export async function pruneProfileFromKeys(service: ServiceName, name: string): Promise<void> {
-  const config = await loadConfig();
-  const ref = `${service}/${name}`;
+export function pruneDanglingScopes(config: Config): boolean {
+  const known = new Set(
+    Object.entries(config.profiles).flatMap(([service, profiles]) =>
+      (profiles ?? []).map((p) => `${service}/${getProfileName(p)}`),
+    ),
+  );
   let changed = false;
   for (const key of config.apiKeys ?? []) {
-    if (key.allowedProfiles === '*' || !key.allowedProfiles.includes(ref)) continue;
-    key.allowedProfiles = key.allowedProfiles.filter((p) => p !== ref);
-    changed = true;
+    if (key.allowedProfiles === '*') continue;
+    const kept = key.allowedProfiles.filter((ref) => known.has(ref));
+    if (kept.length !== key.allowedProfiles.length) {
+      key.allowedProfiles = kept;
+      changed = true;
+    }
   }
-  if (changed) await saveConfig(config);
+  return changed;
 }
 
 /** The key a token proves possession of, or null. Malformed tokens are null too. */
@@ -169,7 +177,7 @@ export async function authenticateToken(token: string): Promise<ApiKeyView | nul
   } catch {
     return null;
   }
-  const key = (await loadConfig()).apiKeys?.find((k) => k.id === parts.kid);
+  const key = findKey(await loadConfig(), parts.kid);
   if (!key || !secretMatches(parts.secret, key.secretHash)) return null;
   return view(key);
 }
@@ -187,7 +195,7 @@ export function effectiveReadOnly(key: ApiKeyView, profileReadOnly: boolean | un
 /** Record use. Skipped when the last record is recent, so a busy key costs one vault write a minute. */
 export async function touchApiKey(id: string, at = new Date()): Promise<void> {
   const config = await loadConfig();
-  const key = config.apiKeys?.find((k) => k.id === id);
+  const key = findKey(config, id);
   if (!key) return;
   if (key.lastUsedAt && at.getTime() - Date.parse(key.lastUsedAt) < TOUCH_INTERVAL_MS) return;
   key.lastUsedAt = at.toISOString();

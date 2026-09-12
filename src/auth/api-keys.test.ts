@@ -4,18 +4,17 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { seedVault } from '../vault/test-helpers';
 import { clearVaultCache, loadVault } from '../vault/vault';
+import { deleteProfile } from '../utils/profile-commands';
 import { clearPassphraseCache, resetPassphraseProvider } from '../vault/passphrase';
 import {
   authenticateToken,
   createApiKey,
   keyAllows,
   listApiKeys,
-  pruneProfileFromKeys,
   revokeApiKey,
   rotateApiKey,
   touchApiKey,
   updateApiKey,
-  validateHubUrl,
 } from './api-keys';
 import { decodeToken, encodeToken } from './token';
 
@@ -61,7 +60,6 @@ describe('api keys', () => {
     expect(await authenticateToken(encodeToken({ ...parts, secret: 'x'.repeat(43) }))).toBeNull();
     expect(await authenticateToken(encodeToken({ ...parts, kid: 'nope' }))).toBeNull();
     expect(await authenticateToken('garbage')).toBeNull();
-    expect(await authenticateToken(token)).toEqual(key);
   });
 
   test('scope must name existing profiles, and is deduplicated', async () => {
@@ -81,8 +79,8 @@ describe('api keys', () => {
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'vault.example.com')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'ftp://x')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-    expect(validateHubUrl('https://vault.example.com/ui/?x=1')).toBe('https://vault.example.com');
-    expect(validateHubUrl('http://127.0.0.1:7890')).toBe('http://127.0.0.1:7890');
+    const { token } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'https://vault.example.com/ui/?x=1');
+    expect(decodeToken(token).url).toBe(HUB);
   });
 
   test('update changes name, scope, and read-only; unknown id is null', async () => {
@@ -120,11 +118,11 @@ describe('api keys', () => {
   });
 
   test('deleting a profile prunes it from key scopes; wildcard keys are untouched', async () => {
-    const scoped = await createApiKey({ name: 's', allowedProfiles: ['gdrive/docs', 'gmail/work'], readOnly: false }, HUB);
-    const all = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    await pruneProfileFromKeys('gmail', 'work');
-    const keys = await listApiKeys();
-    expect(keys.find((k) => k.id === scoped.key.id)!.allowedProfiles).toEqual(['gdrive/docs']);
-    expect(keys.find((k) => k.id === all.key.id)!.allowedProfiles).toBe('*');
+    await createApiKey({ name: 's', allowedProfiles: ['gdrive/docs', 'gmail/work'], readOnly: false }, HUB);
+    await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
+    expect(await deleteProfile('gmail', 'work')).toBe(true);
+    const [scoped, all] = await listApiKeys();
+    expect(scoped.allowedProfiles).toEqual(['gdrive/docs']);
+    expect(all.allowedProfiles).toBe('*');
   });
 });

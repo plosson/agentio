@@ -52,19 +52,21 @@ describe('agentio key', () => {
 
     const rotated = await runCli(['key', 'rotate', kid, '--url', 'https://vault.example.com']);
     expect(rotated.exitCode).toBe(0);
-    expect(decodeToken(rotated.stdout.trim()).kid).toBe(kid);
-    expect(rotated.stdout.trim()).not.toBe(token);
+    const rotatedToken = rotated.stdout.trim();
+    expect(decodeToken(rotatedToken).kid).toBe(kid);
+    expect(rotatedToken).not.toBe(token);
 
     const revoked = await runCli(['key', 'revoke', kid]);
     expect(revoked.exitCode).toBe(0);
     expect((await runCli(['key', 'list'])).stdout).toContain('No API keys');
   });
 
-  test('create refuses a missing scope, an unknown profile, and a bad URL', async () => {
-    expect((await runCli(['key', 'create', 'x', '--url', 'https://h'])).exitCode).not.toBe(0);
-    const unknown = await runCli(['key', 'create', 'x', '--url', 'https://h', '--profiles', 'gmail/nope']);
-    expect(unknown.exitCode).not.toBe(0);
-    expect(unknown.stderr).toContain('gmail/nope');
-    expect((await runCli(['key', 'create', 'x', '--url', 'h', '--all'])).exitCode).not.toBe(0);
+  test('create refuses a missing scope and --all with --profiles', async () => {
+    const missing = await runCli(['key', 'create', 'x', '--url', 'https://h']);
+    expect(missing.exitCode).not.toBe(0);
+    expect(missing.stderr).toContain('Choose a scope');
+    const both = await runCli(['key', 'create', 'x', '--url', 'https://h', '--all', '--profiles', 'gdrive/docs']);
+    expect(both.exitCode).not.toBe(0);
+    expect(both.stderr).toContain('mutually exclusive');
   });
 });

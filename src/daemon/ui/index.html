@@ -24,6 +24,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "IBM Plex Sans", sans-serif; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
   header h1 { margin: 0; font-size: 1.125rem; }
@@ -115,6 +116,7 @@
     </div>
     <form id="key-form" style="margin-top:20px">
       <h3 style="font-size:1rem;margin:0 0 4px">New key</h3>
+      <p class="note" style="margin:0">Tokens will point agents at <span class="mono" id="hub-origin"></span>.</p>
       <div class="field"><label for="key-name">Name</label><input type="text" id="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
       <div class="field">
         <label>Scope</label>
@@ -159,7 +161,8 @@
       for (const p of profiles) {
         const details = p.error || p.info || '';
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
-        choices.push(`<label class="toggle"><input type="checkbox" value="${escape(service + '/' + p.profile)}"> ${escape(service + '/' + p.profile)}</label>`);
+        const label = escape(service + '/' + p.profile);
+        choices.push(`<label class="toggle"><input type="checkbox" value="${label}"> ${label}</label>`);
         rows.push(`<tr data-ref="${ref}" data-label="${escape(service)} / ${escape(p.profile)}">
           <td class="mono">${escape(service)}</td>
           <td>${escape(p.profile)}</td>
@@ -199,7 +202,7 @@
     $('unlock-btn').disabled = true;
     try {
       const res = await api('/ui/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase: $('passphrase').value }) });
-      if (res.ok) { show('vault'); await Promise.all([loadProfiles(false), loadKeys()]); return; }
+      if (res.ok) { await openVault(); return; }
       err.textContent = res.error;
       err.hidden = false;
     } finally {
@@ -232,7 +235,7 @@
 
   function renderKeys(keys) {
     const rows = keys.map((k) => {
-      const scope = k.allowedProfiles === '*' ? 'all profiles' : k.allowedProfiles.join(', ');
+      const scope = k.allowedProfiles === '*' ? 'all profiles' : (k.allowedProfiles.join(', ') || 'no profiles');
       return `<tr data-id="${escape(k.id)}" data-name="${escape(k.name)}">
         <td>${escape(k.name)}<div class="muted mono" style="font-size:.75rem">${escape(k.id)}</div></td>
         <td class="muted">${escape(scope)}</td>
@@ -262,22 +265,27 @@
     catch { $('copy-btn').textContent = 'Select and copy manually'; }
   });
 
-  document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', () => {
-    $('key-profiles').hidden = document.querySelector('input[name=scope]:checked').value !== 'some';
-  }));
+  const scopeIsSome = () => document.querySelector('input[name=scope]:checked').value === 'some';
+  const syncScope = () => { $('key-profiles').hidden = !scopeIsSome(); };
+  document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', syncScope));
+  $('hub-origin').textContent = window.location.origin;
+
+  async function openVault() {
+    show('vault');
+    await Promise.all([loadProfiles(false), loadKeys()]);
+  }
 
   $('key-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const err = $('key-error'); err.hidden = true;
-    const some = document.querySelector('input[name=scope]:checked').value === 'some';
-    const allowedProfiles = some ? [...$('key-profiles').querySelectorAll('input:checked')].map((i) => i.value) : '*';
+    const allowedProfiles = scopeIsSome() ? [...$('key-profiles').querySelectorAll('input:checked')].map((i) => i.value) : '*';
     $('key-create-btn').disabled = true;
     try {
       const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
         name: $('key-name').value, allowedProfiles, readOnly: $('key-ro').checked, url: window.location.origin,
       }) });
       if (!res.ok) { err.textContent = res.error; err.hidden = false; return; }
-      $('key-form').reset(); $('key-profiles').hidden = true;
+      $('key-form').reset(); syncScope();
       showToken(res.body.token);
       await loadKeys();
     } finally { $('key-create-btn').disabled = false; }
@@ -306,7 +314,7 @@
 
   (async () => {
     const res = await api('/ui/api/session');
-    if (res.ok && res.body.authenticated && !res.body.locked) { show('vault'); await Promise.all([loadProfiles(false), loadKeys()]); }
+    if (res.ok && res.body.authenticated && !res.body.locked) await openVault();
     else show('unlock');
   })();
 })();

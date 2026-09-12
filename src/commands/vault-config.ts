@@ -6,6 +6,7 @@ import { join } from 'path';
 import { loadConfig } from '../config/config-manager';
 import { getAllCredentials } from '../auth/token-store';
 import { CURRENT_VAULT_VERSION, loadVault, saveVault, vaultExists, type VaultContents } from '../vault/vault';
+import { pruneDanglingScopes } from '../auth/api-keys';
 import { bootstrapVault } from './vault-init';
 import { CliError, handleError } from '../utils/errors';
 import { confirm } from '../utils/stdin';
@@ -325,11 +326,9 @@ export function registerVaultConfigCommands(vault: Command): void {
           // construction; everything else in the existing config is
           // per-machine state that the import has no business destroying.
           const current = await loadVault();
-          await saveVault({
-            ...current,
-            config: { ...current.config, profiles: exportData.config.profiles },
-            credentials: exportData.credentials,
-          });
+          const config = { ...current.config, profiles: exportData.config.profiles };
+          pruneDanglingScopes(config);
+          await saveVault({ ...current, config, credentials: exportData.credentials });
           console.log('Configuration imported successfully');
         }
       } catch (error) {
@@ -363,7 +362,7 @@ AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
       try {
         if (!options.force) {
           const confirmed = await confirm(
-            'This will delete all profiles and credentials. Are you sure?'
+            'This will delete all profiles, credentials, and API keys. Are you sure?'
           );
           if (!confirmed) {
             console.error('Aborted');

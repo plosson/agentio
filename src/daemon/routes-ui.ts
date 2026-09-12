@@ -1,4 +1,4 @@
-import { CliError, type ErrorCode } from '../utils/errors';
+import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
@@ -26,6 +26,7 @@ const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
   AUTH_FAILED: 401,
   INVALID_PARAMS: 400,
   NOT_FOUND: 404,
+  PROFILE_NOT_FOUND: 404,
   RATE_LIMITED: 429,
   VAULT_LOCKED: 503,
 };
@@ -95,8 +96,7 @@ function profileRef(pathname: string): { service: ServiceName; name: string } | 
   return { service: service as ServiceName, name: decodeURIComponent(m[2]) };
 }
 
-const noProfile = (ref: { service: ServiceName; name: string }) =>
-  new CliError('NOT_FOUND', `No ${ref.service} profile "${ref.name}"`);
+const noProfile = (ref: { service: ServiceName; name: string }) => profileNotFoundError(ref.service, ref.name);
 
 async function handleDeleteProfile(ref: { service: ServiceName; name: string }): Promise<Response> {
   if (!(await deleteProfile(ref.service, ref.name))) throw noProfile(ref);
@@ -116,11 +116,15 @@ function keyRef(pathname: string): { id: string; rotate: boolean } | null {
   return m ? { id: decodeURIComponent(m[1]), rotate: !!m[2] } : null;
 }
 
-type KeyBody = Partial<ApiKeyInput> & { url?: unknown };
+type KeyBody = ApiKeyInput & { url?: unknown };
 
 async function handleCreateKey(request: Request): Promise<Response> {
   const body = await readJson<KeyBody>(request);
-  return json(await createApiKey({ name: body.name, allowedProfiles: body.allowedProfiles, readOnly: body.readOnly }, body.url), 201);
+  return json(await createApiKey(body, body.url), 201);
+}
+
+async function handleUpdateKey(request: Request, id: string): Promise<Response> {
+  return json(await updateApiKey(id, await readJson<KeyBody>(request)));
 }
 
 async function handleRotateKey(request: Request, id: string): Promise<Response> {
@@ -180,7 +184,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (method === 'POST' && pathname === '/ui/api/keys') return await handleCreateKey(request);
     const key = keyRef(pathname);
     if (key?.rotate && method === 'POST') return await handleRotateKey(request, key.id);
-    if (key && !key.rotate && method === 'PATCH') return json(await updateApiKey(key.id, await readJson<KeyBody>(request)));
+    if (key && !key.rotate && method === 'PATCH') return await handleUpdateKey(request, key.id);
     if (key && !key.rotate && method === 'DELETE') return await handleRevokeKey(key.id);
 
     throw new CliError('NOT_FOUND', 'Not found');

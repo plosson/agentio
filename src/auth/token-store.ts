@@ -35,17 +35,6 @@ export async function setCredentials(
   await saveCredentials(credentials);
 }
 
-export async function removeCredentials(
-  service: ServiceName,
-  profile: string
-): Promise<boolean> {
-  const credentials = await loadCredentials();
-  if (!credentials[service]?.[profile]) return false;
-  delete credentials[service][profile];
-  await saveCredentials(credentials);
-  return true;
-}
-
 export async function hasCredentials(
   service: ServiceName,
   profile: string
