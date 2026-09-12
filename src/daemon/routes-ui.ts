@@ -3,7 +3,7 @@ import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput } from '../auth/api-keys';
-import { ALL_SERVICES, type ServiceName } from '../types/config';
+import type { ServiceName } from '../types/config';
 import { getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
 import {
@@ -14,7 +14,7 @@ import {
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
-import { errorResponse, json, readJson } from './http';
+import { errorResponse, json, profilePath, readJson } from './http';
 
 export interface UiContext {
   version: string;
@@ -50,15 +50,6 @@ function handleLock(): Response {
 async function handleProfiles(): Promise<Response> {
   const profiles = (await listProfileRefs()).map((r) => ({ ...r, readOnly: r.readOnly ?? false }));
   return json({ profiles });
-}
-
-/** `/ui/api/profiles/<service>/<name>` → the pair, or null when the path is not that shape. */
-function profileRef(pathname: string): { service: ServiceName; name: string } | null {
-  const m = pathname.match(/^\/ui\/api\/profiles\/([^/]+)\/([^/]+)$/);
-  if (!m) return null;
-  const service = decodeURIComponent(m[1]);
-  if (!(ALL_SERVICES as readonly string[]).includes(service)) return null;
-  return { service: service as ServiceName, name: decodeURIComponent(m[2]) };
 }
 
 const noProfile = (ref: { service: ServiceName; name: string }) => profileNotFoundError(ref.service, ref.name);
@@ -141,7 +132,8 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (method === 'GET' && pathname === '/ui/api/profiles') return await handleProfiles();
     if (method === 'GET' && pathname === '/ui/api/status') return await handleStatus(request, ctx);
 
-    const ref = profileRef(pathname);
+    const ref = profilePath(pathname, '/ui/api/profiles');
+    if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
 

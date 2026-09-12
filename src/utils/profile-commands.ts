@@ -11,19 +11,15 @@ import type { ServiceName } from '../types/config';
  * vault write. False when no such profile existed (stray credentials are still
  * cleaned up in that case).
  */
-export async function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
-  let removed = false;
-  await updateVault((vault) => {
+export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
+  return updateVault((vault) => {
     const profiles = vault.config.profiles[service] ?? [];
-    removed = profiles.some((p) => getProfileName(p) === profileName);
-    const hadCredentials = !!vault.credentials[service]?.[profileName];
-    if (!removed && !hadCredentials) return;
-
+    const removed = profiles.some((p) => getProfileName(p) === profileName);
     vault.config.profiles[service] = profiles.filter((p) => getProfileName(p) !== profileName);
     pruneDanglingScopes(vault.config);
     delete vault.credentials[service]?.[profileName];
+    return removed;
   });
-  return removed;
 }
 
 /**

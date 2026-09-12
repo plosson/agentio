@@ -1,12 +1,11 @@
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
-import { listProfileRefs, type ProfileRef } from '../config/config-manager';
-import { getCredentials } from '../auth/token-store';
-import { HUB_REFRESH_BUFFER_MS, getFreshCredentials } from '../auth/refresh';
+import { listProfileRefs, resolveProfile } from '../config/config-manager';
+import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, type ApiKeyView } from '../auth/api-keys';
-import { ALL_SERVICES, type ServiceName } from '../types/config';
+import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
-import { errorResponse, json } from './http';
+import { errorResponse, json, profilePath } from './http';
 
 /**
  * The credential API remote agents call with `Authorization: Bearer agio1.…`.
@@ -17,15 +16,6 @@ import { errorResponse, json } from './http';
 
 /** Five bad tokens a minute per address; a valid token is never limited. */
 export const v1AuthLimiter = new RateLimiter(5, 60_000);
-
-/** Never leaves the hub, whatever the service. */
-const REFRESH_SECRETS = ['refresh_token', 'refreshToken', 'privateKey'] as const;
-
-function stripRefreshSecrets(credentials: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...credentials };
-  for (const field of REFRESH_SECRETS) delete out[field];
-  return out;
-}
 
 async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const header = request.headers.get('authorization') ?? '';
@@ -38,22 +28,14 @@ async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   return key;
 }
 
-function profilePath(pathname: string): { service: ServiceName; name: string; action: string | null } | null {
-  const m = pathname.match(/^\/v1\/profiles\/([^/]+)\/([^/]+)(?:\/([^/]+))?$/);
-  if (!m) return null;
-  const service = decodeURIComponent(m[1]);
-  if (!(ALL_SERVICES as readonly string[]).includes(service)) return null;
-  return { service: service as ServiceName, name: decodeURIComponent(m[2]), action: m[3] ?? null };
-}
-
-/** The profile as this key sees it: it must exist and be on the allow-list. */
-async function allowedProfile(key: ApiKeyView, service: ServiceName, name: string): Promise<ProfileRef> {
-  const ref = (await listProfileRefs()).find((r) => r.service === service && r.name === name);
-  if (!ref) throw profileNotFoundError(service, name);
+/** The profile must exist and be on the key's allow-list; returns its effective read-only flag. */
+async function allowedProfile(key: ApiKeyView, service: ServiceName, name: string): Promise<boolean> {
+  const resolved = await resolveProfile(service, name);
+  if (resolved.profile === null) throw profileNotFoundError(service, name);
   if (!keyAllows(key, service, name)) {
     throw new CliError('PERMISSION_DENIED', `This token is not allowed to use ${service}/${name}`);
   }
-  return ref;
+  return effectiveReadOnly(key, resolved.readOnly);
 }
 
 function audit(key: ApiKeyView, service: string, name: string, outcome: string, refreshed?: boolean): void {
@@ -69,32 +51,25 @@ async function handleList(key: ApiKeyView): Promise<Response> {
 }
 
 async function handleStatus(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
-  const ref = await allowedProfile(key, service, name);
-  const readOnly = effectiveReadOnly(key, ref.readOnly);
-  if (!(await getCredentials(service, name))) return json({ status: 'no_creds', readOnly });
+  const readOnly = await allowedProfile(key, service, name);
   try {
     await getFreshCredentials(service, name, { bufferMs: HUB_REFRESH_BUFFER_MS });
     return json({ status: 'ok', readOnly });
   } catch (err) {
+    if (err instanceof CliError && err.code === 'AUTH_FAILED') return json({ status: 'no_creds', readOnly });
     if (err instanceof CliError && err.code === 'TOKEN_EXPIRED') return json({ status: 'needs_reauth', readOnly });
     throw err;
   }
 }
 
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
-  const ref = await allowedProfile(key, service, name);
+  const readOnly = await allowedProfile(key, service, name);
   try {
     const { credentials, refreshed } = await getFreshCredentials<Record<string, unknown>>(service, name, {
       bufferMs: HUB_REFRESH_BUFFER_MS,
     });
     audit(key, service, name, 'ok', refreshed);
-    return json({
-      service,
-      name,
-      readOnly: effectiveReadOnly(key, ref.readOnly),
-      refreshed,
-      credentials: stripRefreshSecrets(credentials),
-    });
+    return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
   } catch (err) {
     if (err instanceof CliError) audit(key, service, name, err.code.toLowerCase());
     throw err;
@@ -115,7 +90,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
 
     if (method === 'GET' && pathname === '/v1/profiles') return await handleList(key);
 
-    const ref = profilePath(pathname);
+    const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
     if (ref && ref.action === 'credentials' && method === 'POST') return await handleCredentials(key, ref.service, ref.name);
 

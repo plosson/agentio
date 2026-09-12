@@ -20,17 +20,10 @@ export async function setCredentials(
   });
 }
 
-export async function hasCredentials(
-  service: ServiceName,
-  profile: string
-): Promise<boolean> {
-  return (await getCredentials(service, profile)) !== null;
-}
-
 export async function getAllCredentials(): Promise<StoredCredentials> {
   return (await loadVault()).credentials;
 }
 
 export async function setAllCredentials(credentials: StoredCredentials): Promise<void> {
-  await updateVault((vault) => ({ ...vault, credentials }));
+  await updateVault((vault) => { vault.credentials = credentials; });
 }

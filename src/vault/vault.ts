@@ -1,6 +1,6 @@
 import { readFile, writeFile, unlink, rename, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, relative, isAbsolute } from 'path';
 import { tmpdir } from 'os';
 import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
@@ -10,7 +10,6 @@ import {
   readPointer,
   pointerExists,
   deletePointer,
-  pointerPath,
 } from './pointer';
 import {
   getPassphrase,
@@ -28,33 +27,31 @@ export interface VaultContents {
   credentials: StoredCredentials;
 }
 
-// The cache is keyed on the file's mtime so a long-lived process (the daemon)
-// notices writes made by another process; a hit costs one stat. It is also
-// tied to the pointer file it was resolved through, so a process whose HOME
-// changes (tests do this) never serves one home's contents for another's.
+// The cache is keyed on the vault file it came from and that file's mtime, so
+// a long-lived process (the daemon) notices writes made by another process, and
+// a process whose pointer moves (HOME switched, `vault set` elsewhere) never
+// serves one vault's contents for another's. A hit costs one pointer read and
+// one stat.
 let cache: VaultContents | null = null;
 let cachePath: string | null = null;
-let cachePointer: string | null = null;
 let cacheMtimeMs = 0;
 
 export function clearVaultCache(): void {
   cache = null;
   cachePath = null;
-  cachePointer = null;
   cacheMtimeMs = 0;
 }
 
 async function setCache(contents: VaultContents, path: string): Promise<void> {
   cache = contents;
   cachePath = path;
-  cachePointer = pointerPath();
   cacheMtimeMs = (await stat(path)).mtimeMs;
 }
 
-async function cachedIfFresh(): Promise<VaultContents | null> {
-  if (!cache || !cachePath || cachePointer !== pointerPath()) return null;
+async function cachedIfFresh(path: string): Promise<VaultContents | null> {
+  if (!cache || cachePath !== path) return null;
   try {
-    if ((await stat(cachePath)).mtimeMs === cacheMtimeMs) return cache;
+    if ((await stat(path)).mtimeMs === cacheMtimeMs) return cache;
   } catch {
     // File gone or unreadable: fall through to a full load, which reports it.
   }
@@ -117,7 +114,7 @@ async function decryptPayload(
 ): Promise<VaultContents> {
   let plaintext: string;
   try {
-    plaintext = decryptVault(encoded.trim(), pw);
+    plaintext = await decryptVault(encoded.trim(), pw);
   } catch {
     // Wrong passphrase or corrupt file. Distinguish by trying to parse the
     // on-disk structure: if base64-decode works and sizes look plausible,
@@ -172,11 +169,11 @@ async function decryptPayload(
   return payload;
 }
 
-export async function loadVault(): Promise<VaultContents> {
-  const fresh = await cachedIfFresh();
+/** The contents of the vault at `path`, from cache when fresh. */
+async function loadVaultAt(path: string): Promise<VaultContents> {
+  const fresh = await cachedIfFresh(path);
   if (fresh) return fresh;
 
-  const path = await requireExistingVaultPath();
   const pw = await resolvePassphraseOrThrow();
   const passphraseFromEnv = !!process.env.AGENTIO_PASSPHRASE;
   const encoded = await readFile(path, 'utf-8');
@@ -184,6 +181,10 @@ export async function loadVault(): Promise<VaultContents> {
   const payload = await decryptPayload(encoded, pw, !passphraseFromEnv);
   await setCache(payload, path);
   return payload;
+}
+
+export async function loadVault(): Promise<VaultContents> {
+  return loadVaultAt(await requireExistingVaultPath());
 }
 
 // Writes are serialised within the process: two callers that each loaded,
@@ -200,40 +201,43 @@ function serializedWrite<T>(task: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Load the current contents, apply `mutate` (in place or by returning a new
- * object), and write the result, all under the write lock. The path is
- * resolved once, up front: what was loaded is what gets written, even if the
- * pointer moves meanwhile. Returns what was written.
+ * Load the current contents, apply `mutate` in place, and write the result,
+ * all under the write lock. The path is resolved once, up front, so what was
+ * loaded is what gets written even if the pointer moves meanwhile. A mutator
+ * that changes nothing costs no write. Returns the mutator's result.
  */
-export function updateVault(
-  mutate: (contents: VaultContents) => VaultContents | void | Promise<VaultContents | void>,
-): Promise<VaultContents> {
+export function updateVault<T>(mutate: (contents: VaultContents) => T | Promise<T>): Promise<T> {
   return serializedWrite(async () => {
     const path = await requireExistingVaultPath();
-    const current = await loadVault();
-    const next = (await mutate(current)) ?? current;
-    await writeVault(next, path);
-    return next;
+    const contents = await loadVaultAt(path);
+    const before = JSON.stringify(contents);
+    const result = await mutate(contents);
+    const after = JSON.stringify(contents);
+    if (after !== before) await writeVault(contents, path, after);
+    return result;
   });
 }
 
+/** Write whole contents; for creating a vault or replacing one wholesale. */
 export function saveVault(contents: VaultContents): Promise<void> {
-  return serializedWrite(async () => writeVault(contents, await requireVaultPath()));
+  return serializedWrite(async () => writeVault(contents, await requireVaultPath(), JSON.stringify(contents)));
 }
 
-/** Under `bun test`, a vault may only ever be written inside the temp directory. */
+/** Under `bun test`, a vault may only ever be written inside the OS temp directory. */
 function assertWritablePath(path: string): void {
-  if (process.env.NODE_ENV === 'test' && !path.startsWith(tmpdir())) {
+  if (process.env.NODE_ENV !== 'test') return;
+  const rel = relative(tmpdir(), path);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`Refusing to write a vault outside ${tmpdir()} during tests: ${path}`);
   }
 }
 
-async function writeVault(contents: VaultContents, path: string): Promise<void> {
+async function writeVault(contents: VaultContents, path: string, plaintext: string): Promise<void> {
   assertWritablePath(path);
   const pw = await resolvePassphraseOrThrow();
 
   const tmp = path + '.tmp';
-  const encoded = encryptVault(JSON.stringify(contents), pw);
+  const encoded = await encryptVault(plaintext, pw);
 
   const dir = dirname(path);
   if (!existsSync(dir)) {

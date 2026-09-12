@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile, readFile } from 'fs/promises';
+import { mkdtemp, rm, writeFile, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -102,7 +102,7 @@ describe('vault', () => {
 
   test('loadVault throws VAULT_LOCKED when no passphrase', async () => {
     await writePointer(vaultFile);
-    const encoded = encryptVault(
+    const encoded = await encryptVault(
       JSON.stringify({ version: 1, config: { profiles: {} }, credentials: {} }),
       'pw'
     );
@@ -116,7 +116,7 @@ describe('vault', () => {
     await mem.set('vault', 'wrong-pw');
 
     await writePointer(vaultFile);
-    const encoded = encryptVault(
+    const encoded = await encryptVault(
       JSON.stringify({ version: 1, config: { profiles: {} }, credentials: {} }),
       'right-pw'
     );
@@ -137,7 +137,7 @@ describe('vault', () => {
   test('loadVault throws VAULT_CORRUPT on version mismatch', async () => {
     process.env.AGENTIO_PASSPHRASE = 'pw';
     await writePointer(vaultFile);
-    const encoded = encryptVault(
+    const encoded = await encryptVault(
       JSON.stringify({ version: 999, config: { profiles: {} }, credentials: {} }),
       'pw'
     );
@@ -176,22 +176,24 @@ describe('vault', () => {
     // Another process writes new contents (and a new mtime).
     const external = { version: 1, config: { profiles: { gmail: [{ name: 'ext' }] } }, credentials: {} };
     await new Promise((r) => setTimeout(r, 10));
-    await writeFile(vaultFile, encryptVault(JSON.stringify(external), 'pw'));
+    await writeFile(vaultFile, await encryptVault(JSON.stringify(external), 'pw'));
 
     expect(await loadVault()).toEqual(external);
   });
 });
 
 describe('updateVault', () => {
-  test('concurrent read-modify-writes are serialised and both land', async () => {
+  beforeEach(async () => {
     process.env.AGENTIO_PASSPHRASE = 'pw';
     await writePointer(vaultFile);
     await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
+  });
 
+  test('concurrent read-modify-writes are serialised and all land', async () => {
     await Promise.all([
       updateVault((v) => { v.config.profiles.gmail = [{ name: 'a' }]; }),
       updateVault((v) => { v.credentials.gmail = { a: { token: 't' } }; }),
-      updateVault((v) => ({ ...v, config: { ...v.config, profiles: { ...v.config.profiles, slack: [{ name: 's' }] } } })),
+      updateVault((v) => { v.config.profiles.slack = [{ name: 's' }]; }),
     ]);
 
     clearVaultCache();
@@ -200,17 +202,22 @@ describe('updateVault', () => {
     expect(final.credentials).toEqual({ gmail: { a: { token: 't' } } });
   });
 
+  test('returns the mutator result and skips the write when nothing changed', async () => {
+    const mtimeBefore = (await stat(vaultFile)).mtimeMs;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await updateVault((v) => Object.keys(v.config.profiles).length)).toBe(0);
+    expect((await stat(vaultFile)).mtimeMs).toBe(mtimeBefore);
+    expect(await updateVault((v) => { v.config.profiles.gmail = [{ name: 'a' }]; return 'written'; })).toBe('written');
+    expect((await stat(vaultFile)).mtimeMs).not.toBe(mtimeBefore);
+  });
+
   test('under bun test, a vault outside the temp directory is never written', async () => {
-    process.env.AGENTIO_PASSPHRASE = 'pw';
     await writePointer('/Users/nobody/agentio/vault.enc');
     await expect(saveVault({ version: 1, config: { profiles: {} }, credentials: {} })).rejects.toThrow(/Refusing to write/);
     expect(existsSync('/Users/nobody/agentio/vault.enc')).toBe(false);
   });
 
   test('a mutator that throws writes nothing and does not block later writes', async () => {
-    process.env.AGENTIO_PASSPHRASE = 'pw';
-    await writePointer(vaultFile);
-    await saveVault({ version: 1, config: { profiles: {} }, credentials: {} });
     await expect(updateVault(() => { throw new Error('nope'); })).rejects.toThrow('nope');
     await updateVault((v) => { v.config.profiles.gmail = [{ name: 'after' }]; });
     clearVaultCache();
@@ -224,7 +231,7 @@ describe('vault lock state', () => {
   beforeEach(async () => {
     setPassphraseProvider(memoryOnlyProvider());
     await writePointer(vaultFile);
-    await writeFile(vaultFile, encryptVault(JSON.stringify(payload), 'right-pw'));
+    await writeFile(vaultFile, await encryptVault(JSON.stringify(payload), 'right-pw'));
   });
 
   test('starts locked when neither env nor memory holds a passphrase', async () => {

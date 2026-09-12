@@ -57,7 +57,7 @@ async function writeVault(path: string, passphrase: string, profileCount = 0): P
     },
     credentials: {},
   };
-  await writeFile(path, encryptVault(JSON.stringify(contents), passphrase), { mode: 0o600 });
+  await writeFile(path, await encryptVault(JSON.stringify(contents), passphrase), { mode: 0o600 });
 }
 
 function pointerPath(): string {

@@ -30,6 +30,8 @@ export interface RefreshOptions {
 }
 
 interface Refresher<T> {
+  /** Fields a remote agent must never receive: what would let it refresh on its own. */
+  secretFields: readonly string[];
   /** Whether these particular credentials can be refreshed at all. */
   applies(creds: T): boolean;
   /** Whether the stored credentials are within `bufferMs` of expiring. */
@@ -46,6 +48,7 @@ const shortLived = (expiry: number | undefined, now: number, buffer: number) =>
   expiry === undefined || now + buffer >= expiry;
 
 const googleSnake: Refresher<OAuthTokens> = {
+  secretFields: ['refresh_token'],
   applies: (c) => !!c.refresh_token,
   isStale: (c, now, buffer) => expiring(c.expiry_date, now, buffer),
   refresh: (c) => refreshGoogleAccessToken(c),
@@ -53,6 +56,7 @@ const googleSnake: Refresher<OAuthTokens> = {
 
 /** Same exchange as googleSnake; only the stored field names differ. */
 const googleCamel: Refresher<GoogleCamelTokens> = {
+  secretFields: ['refreshToken'],
   applies: (c) => !!c.refreshToken,
   isStale: (c, now, buffer) => expiring(c.expiryDate, now, buffer),
   async refresh(c) {
@@ -79,6 +83,7 @@ function atlassian(
   call: (refreshToken: string) => Promise<{ accessToken: string; refreshToken: string; expiresIn: number }>,
 ): Refresher<JiraCredentials> {
   return {
+    secretFields: ['refreshToken'],
     applies: (c) => !!c.refreshToken,
     isStale: (c, now, buffer) => expiring(c.expiryDate, now, buffer),
     async refresh(c) {
@@ -89,6 +94,7 @@ function atlassian(
 }
 
 const revolut: Refresher<RevolutCredentials> = {
+  secretFields: ['refreshToken', 'privateKey'],
   applies: (c) => !!c.refreshToken,
   isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
   async refresh(c) {
@@ -98,6 +104,7 @@ const revolut: Refresher<RevolutCredentials> = {
 };
 
 const dropbox: Refresher<DropboxCredentials> = {
+  secretFields: ['refreshToken'],
   applies: (c) => !!c.refreshToken,
   isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
   async refresh(c) {
@@ -122,6 +129,19 @@ const REFRESHERS: Partial<Record<ServiceName, Refresher<unknown>>> = {
   revolut,
   dropbox,
 };
+
+/**
+ * The credentials as a remote agent may see them: the refresh material stays on
+ * the hub. Services without a refresher hold static secrets, which the hub
+ * hands over whole; it is a transparent vault for those.
+ */
+export function redactForRemote(service: ServiceName, credentials: Record<string, unknown>): Record<string, unknown> {
+  const refresher = REFRESHERS[service];
+  if (!refresher) return credentials;
+  const out = { ...credentials };
+  for (const field of refresher.secretFields) delete out[field];
+  return out;
+}
 
 // One chain per profile: concurrent callers for the same profile wait for the
 // refresh in flight instead of each refreshing and clobbering the vault.

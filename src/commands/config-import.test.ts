@@ -262,16 +262,19 @@ describe('config import (replace mode) — reconciles key scopes', () => {
 /* no vault yet: import creates one                                    */
 /* ------------------------------------------------------------------ */
 
+const FRESH_KEY = 'ab'.repeat(32);
+const FRESH_BLOB = await encryptVault(
+  JSON.stringify({
+    version: 1,
+    config: { profiles: { gmail: [{ name: 'seeded' }] } },
+    credentials: { gmail: { seeded: { token: 't' } } },
+  }),
+  FRESH_KEY,
+);
+
 describe('config import on a machine with no vault', () => {
-  const KEY = 'ab'.repeat(32);
-  const blob = encryptVault(
-    JSON.stringify({
-      version: 1,
-      config: { profiles: { gmail: [{ name: 'seeded' }] } },
-      credentials: { gmail: { seeded: { token: 't' } } },
-    }),
-    KEY,
-  );
+  const KEY = FRESH_KEY;
+  const blob = FRESH_BLOB;
 
   test('creates the vault at the default path from AGENTIO_PASSPHRASE', async () => {
     const res = await runCli(['vault', 'import'], { AGENTIO_KEY: KEY, AGENTIO_CONFIG: blob });

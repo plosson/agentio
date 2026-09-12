@@ -14,7 +14,6 @@ mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRe
 const { createRequestHandler } = await import('./api');
 const { createApiKey, listApiKeys } = await import('../auth/api-keys');
 const { v1AuthLimiter } = await import('./routes-v1');
-const { REFRESH_BUFFER_MS } = await import('../auth/refresh');
 
 const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
@@ -56,7 +55,8 @@ beforeEach(async () => {
       gmail: { work: { access_token: 'g-at', refresh_token: 'g-rt', expiry_date: Date.now() + HOUR, token_type: 'Bearer' } },
       jira: {
         fresh: { accessToken: 'j-at', refreshToken: 'j-rt', expiryDate: Date.now() + HOUR, cloudId: 'c', siteUrl: 's' },
-        stale: { accessToken: 'j-old', refreshToken: 'j-rt2', expiryDate: Date.now() + 60_000, cloudId: 'c', siteUrl: 's' },
+        // Fresh for the CLI's 5-minute buffer, stale for the hub's 10-minute one.
+        stale: { accessToken: 'j-old', refreshToken: 'j-rt2', expiryDate: Date.now() + 7 * 60_000, cloudId: 'c', siteUrl: 's' },
       },
       revolut: { biz: { accessToken: 'r-at', refreshToken: 'r-rt', privateKey: 'PEM', clientId: 'id', redirectUri: 'u', environment: 'sandbox', expiryDate: Date.now() + HOUR } },
     },
@@ -139,7 +139,6 @@ describe('/v1 credential API', () => {
   });
 
   test('the hub refreshes with a wider buffer than the CLI, writes back, and says so', async () => {
-    // Fresh for the CLI's 5-minute buffer, stale for the hub's 10-minute one.
     const res = await creds('/v1/profiles/jira/stale/credentials', allToken);
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -147,7 +146,6 @@ describe('/v1 credential API', () => {
     expect(body.credentials.accessToken).toBe('jira-new');
     expect(body.credentials).not.toHaveProperty('refreshToken');
     expect(jiraRefresh).toHaveBeenCalledTimes(1);
-    expect(60_000).toBeLessThan(REFRESH_BUFFER_MS); // sanity on the fixture
 
     const again = await (await creds('/v1/profiles/jira/stale/credentials', allToken)).json();
     expect(again.refreshed).toBe(false);

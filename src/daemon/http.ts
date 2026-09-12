@@ -1,7 +1,8 @@
 import { CliError, type ErrorCode } from '../utils/errors';
+import { ALL_SERVICES, type ServiceName } from '../types/config';
 
 /** How the CLI's error codes surface over HTTP. Anything unlisted is a 500. */
-export const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
+const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
   AUTH_FAILED: 401,
   PERMISSION_DENIED: 403,
   INVALID_PARAMS: 400,
@@ -28,6 +29,22 @@ export function errorResponse(err: unknown): Response {
   }
   const message = err instanceof Error ? err.message : 'Unexpected error';
   return json({ error: message, code: 'API_ERROR' }, 500);
+}
+
+/**
+ * `<prefix>/<service>/<name>[/<action>]` → the parts, or null when the path is
+ * not that shape or names a service that does not exist.
+ */
+export function profilePath(
+  pathname: string,
+  prefix: string,
+): { service: ServiceName; name: string; action: string | null } | null {
+  if (!pathname.startsWith(prefix + '/')) return null;
+  const parts = pathname.slice(prefix.length + 1).split('/');
+  if (parts.length < 2 || parts.length > 3 || parts.some((p) => p === '')) return null;
+  const service = decodeURIComponent(parts[0]);
+  if (!(ALL_SERVICES as readonly string[]).includes(service)) return null;
+  return { service: service as ServiceName, name: decodeURIComponent(parts[1]), action: parts[2] ?? null };
 }
 
 /** Parsed JSON body; a bad or missing body is INVALID_PARAMS like any other bad input. */
