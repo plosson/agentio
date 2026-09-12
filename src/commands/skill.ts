@@ -21,6 +21,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   dropbox: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
   sql: 'Use when running SQL queries via the agentio CLI.',
   daemon: 'Use to manage the agentio daemon (HTTP API server for health and future vault UI/API).',
+  key: 'Use to manage the API keys that let remote agents read credentials from this vault hub - create, list, update, rotate, revoke.',
 };
 
 function formatOption(opt: { flags: string; description: string; defaultValue?: string }): string {

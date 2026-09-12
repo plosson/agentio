@@ -70,6 +70,10 @@ export function multipleProfilesError(service: ServiceName, names: string[]): Cl
   );
 }
 
+export function profileNotFoundError(service: ServiceName, profile: string): CliError {
+  return new CliError('PROFILE_NOT_FOUND', `No ${service} profile "${profile}"`, `Run: agentio ${service} profile list`);
+}
+
 export function noCredentialsError(service: ServiceName, profile: string): CliError {
   return new CliError(
     'AUTH_FAILED',

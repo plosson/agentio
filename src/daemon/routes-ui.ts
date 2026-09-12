@@ -1,7 +1,8 @@
-import { CliError, type ErrorCode } from '../utils/errors';
+import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
-import { listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../utils/profile-commands';
+import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput } from '../auth/api-keys';
 import { ALL_SERVICES, type ServiceName } from '../types/config';
 import { getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
@@ -25,6 +26,7 @@ const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
   AUTH_FAILED: 401,
   INVALID_PARAMS: 400,
   NOT_FOUND: 404,
+  PROFILE_NOT_FOUND: 404,
   RATE_LIMITED: 429,
   VAULT_LOCKED: 503,
 };
@@ -53,18 +55,22 @@ function page(): Response {
   });
 }
 
+/** Parsed JSON body; a bad or missing body is INVALID_PARAMS like any other bad input. */
+async function readJson<T>(request: Request): Promise<T> {
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw new CliError('INVALID_PARAMS', 'Body must be JSON');
+  }
+}
+
 async function handleUnlock(request: Request, ip: string): Promise<Response> {
   if (!unlockLimiter.allow(ip)) {
-    return json({ error: 'Too many attempts, try again in a minute', code: 'RATE_LIMITED' }, 429);
+    throw new CliError('RATE_LIMITED', 'Too many attempts, try again in a minute');
   }
-  let passphrase: unknown;
-  try {
-    passphrase = ((await request.json()) as { passphrase?: unknown }).passphrase;
-  } catch {
-    return json({ error: 'Body must be JSON', code: 'INVALID_PARAMS' }, 400);
-  }
+  const { passphrase } = await readJson<{ passphrase?: unknown }>(request);
   if (typeof passphrase !== 'string' || passphrase.length === 0) {
-    return json({ error: 'passphrase is required', code: 'INVALID_PARAMS' }, 400);
+    throw new CliError('INVALID_PARAMS', 'passphrase is required');
   }
   await unlockVault(passphrase);
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession()) });
@@ -77,10 +83,7 @@ function handleLock(): Response {
 }
 
 async function handleProfiles(): Promise<Response> {
-  const services = await listProfiles();
-  const profiles = services.flatMap(({ service, profiles }) =>
-    profiles.map((p) => ({ service, name: p.name, readOnly: p.readOnly ?? false })),
-  );
+  const profiles = (await listProfileRefs()).map((r) => ({ ...r, readOnly: r.readOnly ?? false }));
   return json({ profiles });
 }
 
@@ -93,27 +96,45 @@ function profileRef(pathname: string): { service: ServiceName; name: string } | 
   return { service: service as ServiceName, name: decodeURIComponent(m[2]) };
 }
 
+const noProfile = (ref: { service: ServiceName; name: string }) => profileNotFoundError(ref.service, ref.name);
+
 async function handleDeleteProfile(ref: { service: ServiceName; name: string }): Promise<Response> {
-  if (!(await deleteProfile(ref.service, ref.name))) {
-    return json({ error: `No ${ref.service} profile "${ref.name}"`, code: 'NOT_FOUND' }, 404);
-  }
+  if (!(await deleteProfile(ref.service, ref.name))) throw noProfile(ref);
   return new Response(null, { status: 204 });
 }
 
 async function handlePatchProfile(request: Request, ref: { service: ServiceName; name: string }): Promise<Response> {
-  let readOnly: unknown;
-  try {
-    readOnly = ((await request.json()) as { readOnly?: unknown }).readOnly;
-  } catch {
-    return json({ error: 'Body must be JSON', code: 'INVALID_PARAMS' }, 400);
-  }
-  if (typeof readOnly !== 'boolean') {
-    return json({ error: 'readOnly must be a boolean', code: 'INVALID_PARAMS' }, 400);
-  }
-  if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) {
-    return json({ error: `No ${ref.service} profile "${ref.name}"`, code: 'NOT_FOUND' }, 404);
-  }
+  const { readOnly } = await readJson<{ readOnly?: unknown }>(request);
+  if (typeof readOnly !== 'boolean') throw new CliError('INVALID_PARAMS', 'readOnly must be a boolean');
+  if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) throw noProfile(ref);
   return json({ service: ref.service, name: ref.name, readOnly });
+}
+
+/** `/ui/api/keys/<id>[/rotate]` → the id and whether the action is rotate, or null. */
+function keyRef(pathname: string): { id: string; rotate: boolean } | null {
+  const m = pathname.match(/^\/ui\/api\/keys\/([^/]+)(\/rotate)?$/);
+  return m ? { id: decodeURIComponent(m[1]), rotate: !!m[2] } : null;
+}
+
+type KeyBody = ApiKeyInput & { url?: unknown };
+
+async function handleCreateKey(request: Request): Promise<Response> {
+  const body = await readJson<KeyBody>(request);
+  return json(await createApiKey(body, body.url), 201);
+}
+
+async function handleUpdateKey(request: Request, id: string): Promise<Response> {
+  return json(await updateApiKey(id, await readJson<KeyBody>(request)));
+}
+
+async function handleRotateKey(request: Request, id: string): Promise<Response> {
+  const body = await readJson<KeyBody>(request);
+  return json(await rotateApiKey(id, body.url));
+}
+
+async function handleRevokeKey(id: string): Promise<Response> {
+  await revokeApiKey(id);
+  return new Response(null, { status: 204 });
 }
 
 /** Same payload as `agentio status --json`. */
@@ -146,11 +167,11 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     }
     if (method === 'POST' && pathname === '/ui/api/unlock') return await handleUnlock(request, ip);
 
-    if (!hasSession(request)) return json({ error: 'Unauthorized', code: 'AUTH_FAILED' }, 401);
+    if (!hasSession(request)) throw new CliError('AUTH_FAILED', 'Unauthorized');
 
     if (method === 'POST' && pathname === '/ui/api/lock') return handleLock();
 
-    if (!isVaultUnlocked()) return json({ error: 'Vault is locked', code: 'VAULT_LOCKED' }, 503);
+    if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked');
 
     if (method === 'GET' && pathname === '/ui/api/profiles') return await handleProfiles();
     if (method === 'GET' && pathname === '/ui/api/status') return await handleStatus(request, ctx);
@@ -159,7 +180,14 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
 
-    return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
+    if (method === 'GET' && pathname === '/ui/api/keys') return json({ keys: await listApiKeys() });
+    if (method === 'POST' && pathname === '/ui/api/keys') return await handleCreateKey(request);
+    const key = keyRef(pathname);
+    if (key?.rotate && method === 'POST') return await handleRotateKey(request, key.id);
+    if (key && !key.rotate && method === 'PATCH') return await handleUpdateKey(request, key.id);
+    if (key && !key.rotate && method === 'DELETE') return await handleRevokeKey(key.id);
+
+    throw new CliError('NOT_FOUND', 'Not found');
   } catch (err) {
     return errorResponse(err);
   }

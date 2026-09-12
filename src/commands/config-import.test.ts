@@ -242,6 +242,22 @@ describe('config import (merge mode) — preserves unknown fields + adds profile
   });
 });
 
+describe('config import (replace mode) — reconciles key scopes', () => {
+  test('a key scoped to a profile the import drops loses that entry', async () => {
+    // A blob that only knows gmail/work...
+    await writeConfig({ profiles: { gmail: [{ name: 'work' }] } });
+    const gmailOnly = await exportCurrentConfig();
+    // ...imported over a vault whose key is scoped to gmail/work and gdrive/docs.
+    await writeConfig({
+      profiles: { gmail: [{ name: 'work' }], gdrive: [{ name: 'docs' }] },
+      apiKeys: [{ id: 'k1', name: 'k', secretHash: 'ab'.repeat(32), allowedProfiles: ['gmail/work', 'gdrive/docs'], readOnly: false, createdAt: 'x' }],
+    });
+    expect((await runCli(['vault', 'import'], { AGENTIO_KEY: gmailOnly.key, AGENTIO_CONFIG: gmailOnly.blob })).exitCode).toBe(0);
+    const final = await readConfig();
+    expect((final.apiKeys as Array<{ allowedProfiles: unknown }>)[0].allowedProfiles).toEqual(['gmail/work']);
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* no vault yet: import creates one                                    */
 /* ------------------------------------------------------------------ */

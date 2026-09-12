@@ -19,7 +19,7 @@ function normalizeProfile(entry: ProfileValue): ProfileEntry {
 /**
  * Get the profile name from a ProfileValue
  */
-function getProfileName(entry: ProfileValue): string {
+export function getProfileName(entry: ProfileValue): string {
   return typeof entry === 'string' ? entry : entry.name;
 }
 
@@ -135,28 +135,18 @@ export async function setProfile(
   await saveConfig(config);
 }
 
-export async function removeProfile(
-  service: ServiceName,
-  profileName: string
-): Promise<boolean> {
-  const config = await loadConfig();
+/** A configured profile, flattened. */
+export interface ProfileRef {
+  service: ServiceName;
+  name: string;
+  readOnly?: boolean;
+}
 
-  const serviceProfiles = config.profiles[service];
-  if (!serviceProfiles) {
-    return false;
-  }
-
-  const found = serviceProfiles.find((p) => getProfileName(p) === profileName);
-  if (!found) {
-    return false;
-  }
-
-  config.profiles[service] = serviceProfiles.filter(
-    (p) => getProfileName(p) !== profileName
+/** Every configured profile, in ALL_SERVICES order. */
+export async function listProfileRefs(): Promise<ProfileRef[]> {
+  return (await listProfiles()).flatMap(({ service, profiles }) =>
+    profiles.map((p) => ({ service, name: p.name, readOnly: p.readOnly })),
   );
-
-  await saveConfig(config);
-  return true;
 }
 
 export async function listProfiles(service?: ServiceName): Promise<{

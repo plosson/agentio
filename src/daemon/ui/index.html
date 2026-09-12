@@ -24,6 +24,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "IBM Plex Sans", sans-serif; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
   header h1 { margin: 0; font-size: 1.125rem; }
@@ -58,6 +59,13 @@
   .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
   .muted { color: var(--text-secondary); }
   .note { color: var(--text-secondary); font-size: .8125rem; margin: 12px 0 0; }
+  .card + .card { margin-top: 24px; }
+  input[type=text] { width: 100%; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  .field { margin-top: 12px; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; margin-top: 6px; font-size: .875rem; }
+  .token { margin-top: 16px; padding: 12px; border: 1px solid var(--warning); background: var(--warning-bg); border-radius: var(--radius); }
+  .token code { display: block; word-break: break-all; font-size: .8125rem; margin: 8px 0; }
+  .token .warn { color: var(--warning); font-weight: 600; font-size: .875rem; }
 </style>
 </head>
 <body>
@@ -78,7 +86,8 @@
     </form>
   </section>
 
-  <section class="card" id="view-profiles" hidden>
+  <div id="view-vault" hidden>
+  <section class="card" id="view-profiles">
     <h2>Profiles</h2>
     <div class="alert info" id="profiles-msg" hidden></div>
     <table>
@@ -92,11 +101,40 @@
       <button id="lock-btn">Lock vault</button>
     </div>
   </section>
+
+  <section class="card" id="view-keys">
+    <h2>API keys</h2>
+    <p class="note" style="margin:0 0 12px">Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It can read the profiles it is scoped to and nothing else.</p>
+    <table>
+      <thead><tr><th>Name</th><th>Scope</th><th>Read-only</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody id="keys-body"></tbody>
+    </table>
+    <div class="token" id="token-box" hidden>
+      <div class="warn">Copy this token now. It is shown once and cannot be recovered, only rotated.</div>
+      <code id="token-value"></code>
+      <button class="small" id="copy-btn" type="button">Copy</button>
+    </div>
+    <form id="key-form" style="margin-top:20px">
+      <h3 style="font-size:1rem;margin:0 0 4px">New key</h3>
+      <p class="note" style="margin:0">Tokens will point agents at <span class="mono" id="hub-origin"></span>.</p>
+      <div class="field"><label for="key-name">Name</label><input type="text" id="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
+      <div class="field">
+        <label>Scope</label>
+        <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
+        <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
+        <div class="choices" id="key-profiles" hidden></div>
+      </div>
+      <div class="field"><label class="toggle"><input type="checkbox" id="key-ro"> read-only on every profile this key can see</label></div>
+      <div class="row right"><button class="primary" type="submit" id="key-create-btn">Create key</button></div>
+      <div class="alert error" id="key-error" hidden></div>
+    </form>
+  </section>
+  </div>
 </main>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const views = { unlock: $('view-unlock'), profiles: $('view-profiles') };
+  const views = { unlock: $('view-unlock'), vault: $('view-vault') };
 
   function show(name) {
     for (const [key, el] of Object.entries(views)) el.hidden = key !== name;
@@ -108,7 +146,7 @@
     if (res.status === 204) return { ok: true, status: 204, body: null };
     let body = null;
     try { body = await res.json(); } catch { /* no body */ }
-    return { ok: res.ok, status: res.status, body };
+    return { ok: res.ok, status: res.status, body, error: (body && body.error) || 'Request failed' };
   }
 
   function escape(s) {
@@ -118,10 +156,13 @@
   function renderProfiles(data) {
     $('version').textContent = data.version ? 'v' + data.version : '';
     const rows = [];
+    const choices = [];
     for (const [service, profiles] of Object.entries(data.services)) {
       for (const p of profiles) {
         const details = p.error || p.info || '';
         const ref = encodeURIComponent(service) + '/' + encodeURIComponent(p.profile);
+        const label = escape(service + '/' + p.profile);
+        choices.push(`<label class="toggle"><input type="checkbox" value="${label}"> ${label}</label>`);
         rows.push(`<tr data-ref="${ref}" data-label="${escape(service)} / ${escape(p.profile)}">
           <td class="mono">${escape(service)}</td>
           <td>${escape(p.profile)}</td>
@@ -133,6 +174,7 @@
       }
     }
     $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No profiles configured.</td></tr>';
+    $('key-profiles').innerHTML = choices.join('');
   }
 
   async function loadProfiles(test) {
@@ -144,7 +186,7 @@
     try {
       const res = await api('/ui/api/status?test=' + (test ? 'true' : 'false'));
       if (res.status === 401 || res.status === 503) { show('unlock'); return; }
-      if (!res.ok) { msg.textContent = (res.body && res.body.error) || 'Request failed'; return; }
+      if (!res.ok) { msg.textContent = res.error; return; }
       renderProfiles(res.body);
       msg.hidden = true;
     } finally {
@@ -160,8 +202,8 @@
     $('unlock-btn').disabled = true;
     try {
       const res = await api('/ui/api/unlock', { method: 'POST', body: JSON.stringify({ passphrase: $('passphrase').value }) });
-      if (res.ok) { show('profiles'); await loadProfiles(false); return; }
-      err.textContent = (res.body && res.body.error) || 'Unlock failed';
+      if (res.ok) { await openVault(); return; }
+      err.textContent = res.error;
       err.hidden = false;
     } finally {
       $('unlock-btn').disabled = false;
@@ -174,7 +216,7 @@
     const row = box.closest('tr');
     box.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ readOnly: box.checked }) });
-    if (!res.ok) { box.checked = !box.checked; alert((res.body && res.body.error) || 'Update failed'); }
+    if (!res.ok) { box.checked = !box.checked; alert(res.error); }
     box.disabled = false;
   });
 
@@ -186,7 +228,81 @@
     btn.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
     if (res.ok) { row.remove(); if (!$('profiles-body').children.length) renderProfiles({ services: {} }); }
-    else { btn.disabled = false; alert((res.body && res.body.error) || 'Delete failed'); }
+    else { btn.disabled = false; alert(res.error); }
+  });
+
+  function fmtDate(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
+
+  function renderKeys(keys) {
+    const rows = keys.map((k) => {
+      const scope = k.allowedProfiles === '*' ? 'all profiles' : (k.allowedProfiles.join(', ') || 'no profiles');
+      return `<tr data-id="${escape(k.id)}" data-name="${escape(k.name)}">
+        <td>${escape(k.name)}<div class="muted mono" style="font-size:.75rem">${escape(k.id)}</div></td>
+        <td class="muted">${escape(scope)}</td>
+        <td>${k.readOnly ? 'yes' : 'no'}</td>
+        <td class="muted">${escape(fmtDate(k.createdAt))}</td>
+        <td class="muted">${escape(fmtDate(k.lastUsedAt))}</td>
+        <td><button class="small rotate" type="button">Rotate</button> <button class="small danger revoke" type="button">Revoke</button></td>
+      </tr>`;
+    });
+    $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No keys yet.</td></tr>';
+  }
+
+  async function loadKeys() {
+    const res = await api('/ui/api/keys');
+    if (res.ok) renderKeys(res.body.keys);
+  }
+
+  function showToken(token) {
+    $('copy-btn').textContent = 'Copy';
+    $('token-value').textContent = token;
+    $('token-box').hidden = false;
+    $('token-box').scrollIntoView({ block: 'nearest' });
+  }
+
+  $('copy-btn').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('token-value').textContent); $('copy-btn').textContent = 'Copied'; }
+    catch { $('copy-btn').textContent = 'Select and copy manually'; }
+  });
+
+  const scopeIsSome = () => document.querySelector('input[name=scope]:checked').value === 'some';
+  const syncScope = () => { $('key-profiles').hidden = !scopeIsSome(); };
+  document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', syncScope));
+  $('hub-origin').textContent = window.location.origin;
+
+  async function openVault() {
+    show('vault');
+    await Promise.all([loadProfiles(false), loadKeys()]);
+  }
+
+  $('key-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const err = $('key-error'); err.hidden = true;
+    const allowedProfiles = scopeIsSome() ? [...$('key-profiles').querySelectorAll('input:checked')].map((i) => i.value) : '*';
+    $('key-create-btn').disabled = true;
+    try {
+      const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({
+        name: $('key-name').value, allowedProfiles, readOnly: $('key-ro').checked, url: window.location.origin,
+      }) });
+      if (!res.ok) { err.textContent = res.error; err.hidden = false; return; }
+      $('key-form').reset(); syncScope();
+      showToken(res.body.token);
+      await loadKeys();
+    } finally { $('key-create-btn').disabled = false; }
+  });
+
+  $('keys-body').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button'); if (!btn) return;
+    const row = btn.closest('tr'); const id = row.dataset.id; const name = row.dataset.name;
+    if (btn.classList.contains('rotate')) {
+      if (!confirm('Rotate "' + name + '"? The current token stops working immediately.')) return;
+      const res = await api('/ui/api/keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST', body: JSON.stringify({ url: window.location.origin }) });
+      if (res.ok) showToken(res.body.token); else alert(res.error);
+    } else if (btn.classList.contains('revoke')) {
+      if (!confirm('Revoke "' + name + '"? Its token stops working immediately.')) return;
+      const res = await api('/ui/api/keys/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (res.ok) await loadKeys(); else alert(res.error);
+    }
   });
 
   $('refresh-btn').addEventListener('click', () => loadProfiles(false));
@@ -198,7 +314,7 @@
 
   (async () => {
     const res = await api('/ui/api/session');
-    if (res.ok && res.body.authenticated && !res.body.locked) { show('profiles'); await loadProfiles(false); }
+    if (res.ok && res.body.authenticated && !res.body.locked) await openVault();
     else show('unlock');
   })();
 })();

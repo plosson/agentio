@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { listProfiles, CONFIG_DIR } from '../config/config-manager';
+import { listProfileRefs as listConfiguredProfiles, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { getFreshCredentials } from '../auth/refresh';
@@ -179,26 +179,11 @@ export interface ProfileStatus {
   error?: string;
 }
 
-interface ProfileRef {
-  service: ServiceName;
-  profile: string;
-  readOnly?: boolean;
-}
+/** The reported shape: `profile` is the wire field name in `status --json`. */
+type ProfileRef = Pick<ProfileStatus, 'service' | 'profile' | 'readOnly'>;
 
-/**
- * Flattens the configured profiles into the order they are reported in.
- */
 async function listProfileRefs(): Promise<ProfileRef[]> {
-  const allProfiles = await listProfiles();
-  const refs: ProfileRef[] = [];
-
-  for (const { service, profiles } of allProfiles) {
-    for (const entry of profiles) {
-      refs.push({ service, profile: entry.name, readOnly: entry.readOnly });
-    }
-  }
-
-  return refs;
+  return (await listConfiguredProfiles()).map(({ service, name, readOnly }) => ({ service, profile: name, readOnly }));
 }
 
 /**

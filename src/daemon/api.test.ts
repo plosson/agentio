@@ -179,6 +179,48 @@ describe('daemon HTTP surface', () => {
     expect((await call('/ui/api/profiles/telegram/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
   });
 
+  test('keys: create returns the token once, list hides hashes, rotate and revoke', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const created = await call('/ui/api/keys', {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, url: 'https://hub.example.com' }),
+    });
+    expect(created.status).toBe(201);
+    const { key, token } = await created.json();
+    expect(token).toMatch(/^agio1\./);
+    expect(key).not.toHaveProperty('secretHash');
+
+    const list = await (await call('/ui/api/keys', { headers: { cookie } })).json();
+    expect(list.keys).toEqual([key]);
+    expect(JSON.stringify(list)).not.toContain('secretHash');
+
+    const bad = await call('/ui/api/keys', {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ name: 'x', allowedProfiles: ['nope/nope'], readOnly: false, url: 'https://hub.example.com' }),
+    });
+    expect(bad.status).toBe(400);
+
+    const patched = await call(`/ui/api/keys/${key.id}`, {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'renamed', readOnly: false }),
+    });
+    expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false });
+
+    const rotated = await call(`/ui/api/keys/${key.id}/rotate`, {
+      method: 'POST', headers: { cookie }, body: JSON.stringify({ url: 'https://hub.example.com' }),
+    });
+    expect(rotated.status).toBe(200);
+    expect((await rotated.json()).token).not.toBe(token);
+
+    expect((await call(`/ui/api/keys/${key.id}`, { method: 'DELETE', headers: { cookie } })).status).toBe(204);
+    expect((await call(`/ui/api/keys/${key.id}`, { method: 'DELETE', headers: { cookie } })).status).toBe(404);
+    expect((await call('/ui/api/keys/nope/rotate', { method: 'POST', headers: { cookie }, body: '{"url":"https://h"}' })).status).toBe(404);
+  });
+
+  test('key routes need a session', async () => {
+    expect((await call('/ui/api/keys')).status).toBe(401);
+    expect((await call('/ui/api/keys', { method: 'POST', body: '{}' })).status).toBe(401);
+  });
+
   test('unknown paths are 404 JSON', async () => {
     expect((await call('/nope')).status).toBe(404);
     const cookie = await cookieFrom(await unlock());

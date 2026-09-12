@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { ServiceName } from '../types/config';
 import { ALL_SERVICES } from '../types/config';
-import { listProfiles, removeProfile, resolveProfile } from '../config/config-manager';
+import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/config-manager';
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
@@ -24,11 +24,7 @@ import { dropboxProfileAdd } from './dropbox';
 import { revolutProfileAdd } from './revolut';
 import { sqlProfileAdd } from './sql';
 
-export interface ProfileSummary {
-  service: ServiceName;
-  name: string;
-  readOnly?: boolean;
-}
+export type ProfileSummary = ProfileRef;
 
 export function formatProfileList(summaries: ProfileSummary[]): string {
   if (summaries.length === 0) {
@@ -98,14 +94,8 @@ export function registerProfileCommands(program: Command): void {
     .action(async (service?: string) => {
       try {
         if (service) assertKnownService(service);
-        const result = await listProfiles(service as ServiceName | undefined);
-        const summaries: ProfileSummary[] = [];
-        for (const r of result) {
-          for (const p of r.profiles) {
-            summaries.push({ service: r.service, name: p.name, readOnly: p.readOnly });
-          }
-        }
-        console.log(formatProfileList(summaries));
+        const refs = await listProfileRefs();
+        console.log(formatProfileList(service ? refs.filter((r) => r.service === service) : refs));
       } catch (e) {
         handleError(e);
       }
