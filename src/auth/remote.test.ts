@@ -143,7 +143,7 @@ describe('remote mode', () => {
   test.each([
     [401, { error: 'Invalid or missing token', code: 'AUTH_FAILED' }, 'AUTH_FAILED', /rejected this token/],
     [403, { error: 'This token is not allowed to use gmail/work', code: 'PERMISSION_DENIED' }, 'PERMISSION_DENIED', /not allowed/],
-    [409, { error: 'Token refresh failed', code: 'TOKEN_EXPIRED' }, 'AUTH_FAILED', /Re-authentication is needed on the vault host/],
+    [409, { error: 'Token refresh failed', code: 'TOKEN_EXPIRED' }, 'TOKEN_EXPIRED', /Re-authentication is needed on the vault host/],
     [429, { error: 'Too many attempts', code: 'RATE_LIMITED' }, 'RATE_LIMITED', /Too many/],
     [503, { error: 'Vault is locked on the hub', code: 'VAULT_LOCKED' }, 'CONFIG_ERROR', /locked on the hub/],
     [500, { error: 'boom' }, 'API_ERROR', /boom/],

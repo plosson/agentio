@@ -13,6 +13,18 @@ const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
   VAULT_LOCKED: 503,
 };
 
+/**
+ * One line of operator-facing log, as `<iso> <subsystem> k=v …`. The runbook
+ * promises this shape for `docker logs`, so it is built in one place rather
+ * than assembled at each site. Undefined fields are dropped.
+ */
+export function daemonLog(subsystem: string, fields: Record<string, string | number | boolean | undefined>): void {
+  const pairs = Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${value}`);
+  console.log(`${new Date().toISOString()} ${subsystem} ${pairs.join(' ')}`);
+}
+
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,

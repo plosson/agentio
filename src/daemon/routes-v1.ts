@@ -1,14 +1,14 @@
 import { cannotManageProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
 import { isProfileReadOnly, listProfileRefs, resolveProfile } from '../config/config-manager';
-import { getAllCredentials, getCredentials } from '../auth/token-store';
+import { getAllCredentials, getCredentials, hasStored } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
 import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
 import type { RemoteAddBody, RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
-import { errorResponse, json, profilePath, readJson } from './http';
+import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 
 /**
@@ -74,8 +74,7 @@ async function allowedProfile(key: ApiKeyView, service: ServiceName, name: strin
 }
 
 function audit(key: ApiKeyView, action: string, service: string, name: string, outcome: string, refreshed?: boolean): void {
-  const extra = refreshed === undefined ? '' : ` refreshed=${refreshed}`;
-  console.log(`${new Date().toISOString()} v1 ${action} key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
+  daemonLog('v1', { action, key: `${key.id} (${key.name})`, profile: `${service}/${name}`, outcome, refreshed });
 }
 
 /** Run `work` and write its outcome to the audit log, the error code when it is a CliError. */
@@ -105,7 +104,7 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       service: r.service,
       name: r.name,
       readOnly: effectiveReadOnly(key, r.readOnly),
-      hasCredentials: !!stored[r.service]?.[r.name],
+      hasCredentials: hasStored(stored, r.service, r.name),
     }));
   // The key's own managing right rides along so a client can refuse a profile write before any OAuth dance.
   return json({ profiles, canManageProfiles: key.canManageProfiles });

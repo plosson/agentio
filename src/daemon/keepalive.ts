@@ -1,6 +1,7 @@
 import { listProfileRefs } from '../config/config-manager';
 import { getFreshCredentials } from '../auth/refresh';
-import { getAllCredentials } from '../auth/token-store';
+import { getAllCredentials, hasStored } from '../auth/token-store';
+import { daemonLog } from './http';
 import { isVaultUnlocked } from '../vault/vault';
 import { CliError } from '../utils/errors';
 
@@ -62,7 +63,7 @@ export function intervalHours(raw = process.env.AGENTIO_REFRESH_HOURS): number {
 export async function runRefreshPass(): Promise<PassResult> {
   const result: PassResult = { refreshed: 0, fresh: 0, skipped: 0, failed: 0 };
   if (!isVaultUnlocked()) {
-    console.log(`${new Date().toISOString()} keepalive skipped: vault is locked`);
+    daemonLog('keepalive', { outcome: 'skipped', reason: 'vault is locked' });
     return result;
   }
 
@@ -71,7 +72,7 @@ export async function runRefreshPass(): Promise<PassResult> {
   // pass for as long as it exists, so it is passed over instead.
   const stored = await getAllCredentials();
   for (const ref of await listProfileRefs()) {
-    if (!stored[ref.service]?.[ref.name]) {
+    if (!hasStored(stored, ref.service, ref.name)) {
       result.skipped++;
       continue;
     }
@@ -82,14 +83,11 @@ export async function runRefreshPass(): Promise<PassResult> {
     } catch (err) {
       result.failed++;
       const reason = err instanceof CliError ? err.code : err instanceof Error ? err.message : String(err);
-      console.log(`${new Date().toISOString()} keepalive profile=${ref.service}/${ref.name} outcome=failed reason=${reason}`);
+      daemonLog('keepalive', { profile: `${ref.service}/${ref.name}`, outcome: 'failed', reason });
     }
   }
 
-  const { refreshed, fresh, skipped, failed } = result;
-  console.log(
-    `${new Date().toISOString()} keepalive pass refreshed=${refreshed} fresh=${fresh} skipped=${skipped} failed=${failed}`,
-  );
+  daemonLog('keepalive', { outcome: 'pass', ...result });
   return result;
 }
 

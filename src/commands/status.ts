@@ -3,7 +3,7 @@ import { listProfileRefs as listConfiguredProfiles, CONFIG_DIR } from '../config
 import { getCredentials } from '../auth/token-store';
 import { createGoogleAuth } from '../auth/token-manager';
 import { getFreshCredentials } from '../auth/refresh';
-import { CliError, profileNotFoundError } from '../utils/errors';
+import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
 import { TelegramClient } from '../services/telegram/client';
 import { GmailClient } from '../services/gmail/client';
 import { GDocsClient } from '../services/gdocs/client';
@@ -201,6 +201,25 @@ async function hasStoredCredentials(ref: ProfileRef): Promise<boolean> {
   return (await getCredentials(ref.service, ref.profile)) !== null;
 }
 
+/**
+ * Codes that say the run itself cannot continue rather than that one profile
+ * is unhealthy: the hub rejected the token, the network is down, the vault is
+ * locked or missing. Anything else is the profile's own problem and belongs in
+ * its row, so a single expired credential cannot hide the other twenty.
+ */
+const SESSION_FAILURES = new Set<ErrorCode>([
+  'AUTH_FAILED', 'NETWORK_ERROR', 'CONFIG_ERROR', 'RATE_LIMITED',
+  'VAULT_LOCKED', 'VAULT_NOT_CONFIGURED', 'VAULT_CORRUPT',
+]);
+
+/** How a per-profile failure reads in its row. */
+function failureText(err: unknown): string {
+  if (err instanceof CliError) {
+    return err.code === 'TOKEN_EXPIRED' ? 'refresh token rejected, re-authenticate' : err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
   if (!(await hasStoredCredentials(ref))) {
     return { ...ref, status: 'no-creds' };
@@ -220,8 +239,8 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
       if (forced.refreshed) result = await createServiceClient(ref.service, forced.credentials).validate();
     }
   } catch (err) {
-    if (!(err instanceof CliError && err.code === 'TOKEN_EXPIRED')) throw err;
-    result = { valid: false, error: 'refresh token rejected, re-authenticate' };
+    if (err instanceof CliError && SESSION_FAILURES.has(err.code)) throw err;
+    result = { valid: false, error: failureText(err) };
   }
 
   return {
