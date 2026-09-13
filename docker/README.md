@@ -44,7 +44,8 @@ The port is published on loopback because the daemon speaks plain HTTP and the p
 | `AGENTIO_KEY` | Encryption key from `agentio vault export`, used on first boot only |
 | `AGENTIO_CONFIG` | Encrypted config from `agentio vault export`, used on first boot only |
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
-| `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot, since there is no terminal to prompt. Afterwards optional: when set, every restart comes up unlocked; when unset, the daemon starts locked and someone unlocks it at `/ui` |
+| `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot, since there is no terminal to prompt. Afterwards optional: when set, every restart comes up unlocked; when unset, the daemon starts locked and someone unlocks it at `/ui`. Anyone who can run the siteio or docker CLI on the host can read it back, so weigh that against unlocking by hand |
+| `AGENTIO_KEEPALIVE_HOURS` | Hours between token keepalive passes (default: 168, one week; clamped to 1-336). `0` turns the loop off |
 
 ## Volumes / health
 
@@ -104,6 +105,8 @@ agentio gdrive list     # any service command, credentials served by the hub
 - **Reauth** happens on the host with the CLI (`docker exec agentio agentio profile reauth <service> [name]`); the paste-back OAuth flow works without a browser there.
 - **Profiles** are added, renamed and removed on the host (`profile add <service>`, `profile rename <service> <old> <new>`, `profile remove <service> <name>`), or from an agent machine whose key has `--can-manage-profiles`: the OAuth or token dance runs there and the result is stored here. Such a key reaches exactly the profiles its allow-list names, plus any new name it creates; anything else answers "not found" and is left alone.
 - **Audit**: every credential call and every remote save, rename or delete is one line on the container's stdout (`docker logs`), naming the key and profile.
+- **Token keepalive**: once a week the daemon refreshes every profile whose access token has lapsed, so a refresh token nobody uses does not expire of disuse (Google drops one after six months idle, Atlassian after about ninety days). Unlocking the vault starts the loop and passes at once; locking stops it, so a hub left locked is not protected. One `keepalive pass` line per run says how many were refreshed, fresh, skipped and failed; a failure means that profile needs reauthenticating on the host. It does not defeat an absolute lifetime or a revocation.
+- **Take care with the CLI on the host while the daemon is up.** Atlassian rotates its refresh token on every exchange, so a CLI command that touches an Atlassian profile can race a keepalive pass and leave one of the two tokens dead. The daemon serialises its own work; a second process is outside that. For hands-on work on the host, set `AGENTIO_KEEPALIVE_HOURS=0` and redeploy first, or press Lock in the UI for the duration.
 - **Back up the vault file, not the env vars**: the file on the volume carries refreshed tokens and the keys, the env vars only the first-boot snapshot. Keep dated copies; a wrong write is undone by restoring the previous one and restarting.
 
   ```bash

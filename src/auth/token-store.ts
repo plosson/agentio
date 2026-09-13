@@ -25,6 +25,11 @@ export async function setCredentials(
   await updateVault(({ credentials }) => putCredentials(credentials, service, profile, data));
 }
 
+/** Whether an already-loaded store holds anything for a profile. */
+export function hasStored(store: StoredCredentials, service: ServiceName, profile: string): boolean {
+  return !!store[service]?.[profile];
+}
+
 export async function getAllCredentials(): Promise<StoredCredentials> {
   return (await loadVault()).credentials;
 }

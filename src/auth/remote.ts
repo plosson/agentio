@@ -146,8 +146,11 @@ function hubError(status: number, body: { error?: string; code?: string; suggest
     case 'AUTH_FAILED':
       return new CliError('AUTH_FAILED', `The vault hub rejected this token: ${detail}`,
         'Get a new token from the hub admin UI, or `agentio key create` on the hub host');
+    // Kept as TOKEN_EXPIRED, not widened to AUTH_FAILED: callers tell one
+    // expired profile apart from a token the hub rejects outright, and only
+    // the latter should abandon a run over every profile.
     case 'TOKEN_EXPIRED':
-      return new CliError('AUTH_FAILED', `Re-authentication is needed on the vault host: ${detail}`,
+      return new CliError('TOKEN_EXPIRED', `Re-authentication is needed on the vault host: ${detail}`,
         'Reauth the profile on the hub host, then retry');
     case 'VAULT_LOCKED':
       return new CliError('CONFIG_ERROR', 'The vault is locked on the hub', `Unlock it at ${url}/ui`);
