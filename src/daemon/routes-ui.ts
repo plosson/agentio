@@ -1,7 +1,7 @@
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
-import { deleteProfile, renameProfile } from '../config/profile-store';
+import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
@@ -74,11 +74,9 @@ async function handlePatchProfile(request: Request, ref: { service: ServiceName;
   const body = await readJson<{ readOnly?: unknown; name?: unknown }>(request);
   if (body.name !== undefined) {
     if (typeof body.name !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
-    switch (await renameProfile(ref.service, ref.name, body.name)) {
-      case 'not-found': throw noProfile(ref);
-      case 'taken': throw new CliError('INVALID_PARAMS', `Profile ${ref.service}/${body.name} already exists`);
-      case 'renamed': return json({ service: ref.service, name: body.name });
-    }
+    const failure = writeFailure(await renameProfile(ref.service, ref.name, body.name), ref.service, ref.name, body.name);
+    if (failure) throw failure;
+    return json({ service: ref.service, name: body.name });
   }
   const readOnly = validateFlag('readOnly', body.readOnly);
   if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) throw noProfile(ref);

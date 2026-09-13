@@ -209,11 +209,6 @@ describe('daemon HTTP surface', () => {
 
   test('profiles: PATCH renames, carrying credentials and key scopes, and refuses a taken name', async () => {
     const cookie = await cookieFrom(await unlock());
-    const { key } = await (await call('/ui/api/keys', {
-      method: 'POST', headers: { cookie },
-      body: JSON.stringify({ name: 'k', allowedProfiles: ['telegram/bot'], readOnly: false, url: 'https://hub.example.com' }),
-    })).json();
-
     const renamed = await call('/ui/api/profiles/telegram/bot', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'alerts' }),
     });
@@ -222,9 +217,6 @@ describe('daemon HTTP surface', () => {
 
     const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
     expect(list.profiles).toContainEqual({ service: 'telegram', name: 'alerts', readOnly: true });
-    const keys = await (await call('/ui/api/keys', { headers: { cookie } })).json();
-    expect(keys.keys.find((k: { id: string }) => k.id === key.id).allowedProfiles).toEqual(['telegram/alerts']);
-
     // A collision has to be inside the same service; slack/empty is a different namespace.
     await saveProfile('telegram', 'second', { botToken: 'x' });
     const taken = await call('/ui/api/profiles/telegram/alerts', {

@@ -229,13 +229,32 @@ describe('managing profiles over /v1', () => {
     expect((await call('/v1/profiles/telegram/newbot', { token: allToken })).status).toBe(404);
   });
 
-  test('a profile the key cannot reach reads as absent, whatever the verb', async () => {
-    // gmail/work exists, but this key's list does not name it: 404, and nothing is written.
-    expect((await put('/v1/profiles/gmail/work', addToken, { credentials: { access_token: 'hijack' } })).status).toBe(404);
-    expect((await patch('/v1/profiles/gmail/work', addToken, { name: 'stolen' })).status).toBe(404);
-    expect((await del('/v1/profiles/gmail/work', addToken)).status).toBe(404);
+  test('a profile outside the key\'s list is 403 on every verb, as it is on a read, and nothing is written', async () => {
+    for (const res of [
+      await put('/v1/profiles/gmail/work', addToken, { credentials: { access_token: 'hijack' } }),
+      await patch('/v1/profiles/gmail/work', addToken, { name: 'stolen' }),
+      await del('/v1/profiles/gmail/work', addToken),
+      await creds('/v1/profiles/gmail/work/credentials', addToken),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+    }
     const kept = await (await creds('/v1/profiles/gmail/work/credentials', allToken)).json();
     expect(kept.credentials).toMatchObject({ access_token: 'g-at' });
+  });
+
+  test('a name nothing holds is 404 on rename and delete, and free to create', async () => {
+    expect((await patch('/v1/profiles/telegram/ghost', addToken, { name: 'x' })).status).toBe(404);
+    expect((await del('/v1/profiles/telegram/ghost', addToken)).status).toBe(404);
+    expect((await put('/v1/profiles/telegram/ghost', addToken, { credentials: { botToken: 'g' } })).status).toBe(201);
+  });
+
+  test('a replace keeps the read-only flag the owner set unless the write states one', async () => {
+    const wide = (await createApiKey({ name: 'wide2', allowedProfiles: '*', canManageProfiles: true }, 'https://hub')).token;
+    // gmail/work is read-only in the fixture; a repair sends credentials only.
+    expect((await put('/v1/profiles/gmail/work', wide, { credentials: { access_token: 'fresh' } })).status).toBe(201);
+    const listed = await (await call('/v1/profiles', { token: wide })).json();
+    expect(listed.profiles.find((p: { name: string }) => p.name === 'work').readOnly).toBe(true);
   });
 
   test('a rename onto a name taken in the same service is 400, and changes nothing', async () => {

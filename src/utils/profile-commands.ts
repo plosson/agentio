@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
-import { deleteProfile, renameProfile } from '../config/profile-store';
+import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
 
@@ -10,13 +10,10 @@ import type { ServiceName } from '../types/config';
  * and by the unified `agentio profile remove <service> <name>` command.
  */
 export async function removeProfileForService(service: ServiceName, profileName: string): Promise<void> {
-  const removed = await deleteProfile(service, profileName);
-
-  if (removed) {
-    console.log(`Removed profile "${profileName}"`);
-  } else {
-    console.error(`Profile "${profileName}" not found`);
-  }
+  // Nothing removed has to fail: remotely it also covers a profile the key
+  // cannot reach, and a script must not read that as a removal.
+  if (!(await deleteProfile(service, profileName))) throw profileNotFoundError(service, profileName);
+  console.log(`Removed profile "${profileName}"`);
 }
 
 /**
@@ -24,15 +21,9 @@ export async function removeProfileForService(service: ServiceName, profileName:
  * per-service one. The credentials and every key scope follow the new name.
  */
 export async function renameProfileForService(service: ServiceName, from: string, to: string): Promise<void> {
-  switch (await renameProfile(service, from, to)) {
-    case 'renamed':
-      console.log(`Renamed profile "${from}" to "${to}"`);
-      return;
-    case 'taken':
-      throw new CliError('INVALID_PARAMS', `Profile "${to}" already exists for ${service}`, 'Choose another name');
-    case 'not-found':
-      throw profileNotFoundError(service, from);
-  }
+  const failure = writeFailure(await renameProfile(service, from, to), service, from, to);
+  if (failure) throw failure;
+  console.log(`Renamed profile "${from}" to "${to}"`);
 }
 
 export interface ProfileCommandsOptions<T> {

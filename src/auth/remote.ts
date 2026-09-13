@@ -5,6 +5,7 @@ import { cannotManageProfilesError, CliError, httpStatusToErrorCode, type ErrorC
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
+import type { WriteOutcome } from '../config/profile-store';
 import { decodeToken, type TokenParts } from './token';
 
 /**
@@ -220,28 +221,32 @@ export type RemoteRenameBody = { name: string };
 
 /** A `profile add` finished on this machine, handed to the hub to store. Replaces what the key already reaches. */
 export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
-  const body: RemoteAddBody = { ...options, credentials };
+  const body: RemoteAddBody = { ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }), credentials };
   await hubRequest(profileRoute(service, name), 'PUT', body);
 }
 
-/** Rename a profile on the hub. False when the hub does not hold it for this key. */
-export async function remoteRenameProfile(service: ServiceName, from: string, to: string): Promise<boolean> {
+/** Rename a profile on the hub. */
+export function remoteRenameProfile(service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
   const body: RemoteRenameBody = { name: to };
-  return notFoundAsFalse(hubRequest(profileRoute(service, from), 'PATCH', body));
+  return absentAsOutcome(hubRequest(profileRoute(service, from), 'PATCH', body));
 }
 
-/** Drop a profile on the hub. False when the hub does not hold it for this key. */
-export async function remoteDeleteProfile(service: ServiceName, name: string): Promise<boolean> {
-  return notFoundAsFalse(hubRequest(profileRoute(service, name), 'DELETE'));
+/** Drop a profile on the hub. */
+export function remoteDeleteProfile(service: ServiceName, name: string): Promise<WriteOutcome> {
+  return absentAsOutcome(hubRequest(profileRoute(service, name), 'DELETE'));
 }
 
-/** The hub answers 404 both for a profile it does not hold and one this key cannot reach; either way, nothing happened. */
-async function notFoundAsFalse(call: Promise<unknown>): Promise<boolean> {
+/**
+ * A profile the hub does not hold is an outcome, not a failure: the caller
+ * reports it the way the local path does. Everything else, a refusal or a
+ * taken name included, keeps the hub's own error and wording.
+ */
+async function absentAsOutcome(call: Promise<unknown>): Promise<WriteOutcome> {
   try {
     await call;
-    return true;
+    return 'ok';
   } catch (err) {
-    if (err instanceof CliError && (err.code === 'NOT_FOUND' || err.code === 'PROFILE_NOT_FOUND')) return false;
+    if (err instanceof CliError && err.code === 'PROFILE_NOT_FOUND') return 'absent';
     throw err;
   }
 }

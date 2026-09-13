@@ -114,6 +114,11 @@ function withKey<T>(id: string, mutate: (key: ApiKey, config: Config) => T | Pro
   return updateConfig((config) => {
     const key = findKey(config, id);
     if (!key) throw noKey(id);
+    // Any touch is a chance to leave 2.4.0's spelling behind, so the fallback in view() can go one day.
+    if (key.canAddProfiles !== undefined) {
+      key.canManageProfiles ??= key.canAddProfiles;
+      delete key.canAddProfiles;
+    }
     return mutate(key, config);
   });
 }

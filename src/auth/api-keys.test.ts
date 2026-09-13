@@ -70,13 +70,18 @@ describe('api keys', () => {
     expect(describeScope(key)).toBe('gmail/home, read-only, can manage profiles');
   });
 
-  test('a key minted by 2.4.0 keeps its right under the older spelling', async () => {
+  test('a key minted by 2.4.0 keeps its right, and the next touch migrates the spelling away', async () => {
     const { key } = await createApiKey({ name: 'old', allowedProfiles: '*' }, HUB);
     await updateConfig((config) => {
       delete config.apiKeys![0].canManageProfiles;
       config.apiKeys![0].canAddProfiles = true;
     });
     expect(await listApiKeys()).toEqual([{ ...key, canManageProfiles: true }]);
+
+    await updateApiKey(key.id, { name: 'renamed' });
+    const stored = (await loadVault()).config.apiKeys![0];
+    expect(stored).not.toHaveProperty('canAddProfiles');
+    expect(stored.canManageProfiles).toBe(true);
   });
 
   test('a key stored before canManageProfiles existed lists as false', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
-import { createApiKey, listApiKeys } from '../auth/api-keys';
+import { createApiKey, listApiKeys, revokeApiKey } from '../auth/api-keys';
 import { chooseProfileName, deleteProfile, deleteProfileForKey, renameProfile, renameProfileForKey, saveProfile, saveProfileForKey } from './profile-store';
 
 withTempVault('agentio-profile-store-test-', () => ({
@@ -66,7 +66,7 @@ describe('the keyed operations', () => {
 
   test('save creates a free name and grants it to the key in one write', async () => {
     const key = await keyFor(['gmail/me@example.com']);
-    expect(await saveProfileForKey(key, 'telegram', 'bot', { botToken: 't' }, { readOnly: true })).toBe(true);
+    expect(await saveProfileForKey(key, 'telegram', 'bot', { botToken: 't' }, { readOnly: true })).toBe('ok');
     const vault = await loadVault();
     expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
     expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't' } });
@@ -75,28 +75,48 @@ describe('the keyed operations', () => {
 
   test('save replaces a name the key reaches, and refuses one it does not', async () => {
     const key = await keyFor(['gmail/me@example.com']);
-    expect(await saveProfileForKey(key, 'gmail', 'me@example.com', { access_token: 'fresh' }, {})).toBe(true);
+    expect(await saveProfileForKey(key, 'gmail', 'me@example.com', { access_token: 'fresh' }, {})).toBe('ok');
     expect((await loadVault()).credentials.gmail).toEqual({ 'me@example.com': { access_token: 'fresh' } });
 
     // github/octocat exists but is outside the key's list, so nothing is written.
-    expect(await saveProfileForKey(key, 'github', 'octocat', { accessToken: 'x' }, {})).toBe(false);
+    expect(await saveProfileForKey(key, 'github', 'octocat', { accessToken: 'x' }, {})).toBe('denied');
     expect((await loadVault()).credentials.github).toBeUndefined();
   });
 
-  test('delete and rename reach exactly what the key reaches, and a rename carries the scope with it', async () => {
+  test('a replace keeps the read-only flag the owner set, unless the write states one', async () => {
+    await saveProfile('slack', 'ops', { webhookUrl: 'a' }, { readOnly: true });
+    const key = await keyFor(['slack/ops']);
+    // The repair case: fresh credentials, nothing said about the flag.
+    expect(await saveProfileForKey(key, 'slack', 'ops', { webhookUrl: 'b' }, {})).toBe('ok');
+    expect((await loadVault()).config.profiles.slack).toEqual([{ name: 'ops', readOnly: true }]);
+
+    expect(await saveProfileForKey(key, 'slack', 'ops', { webhookUrl: 'c' }, { readOnly: false })).toBe('ok');
+    expect((await loadVault()).config.profiles.slack).toEqual([{ name: 'ops' }]);
+  });
+
+  test('delete and rename say denied for what the key cannot reach, and a rename carries the scope with it', async () => {
     const key = await keyFor(['gmail/me@example.com']);
-    expect(await deleteProfileForKey(key, 'github', 'octocat')).toBe(false);
-    expect(await renameProfileForKey(key, 'github', 'octocat', 'someone')).toBe('not-found');
+    expect(await deleteProfileForKey(key, 'github', 'octocat')).toBe('denied');
+    expect(await renameProfileForKey(key, 'github', 'octocat', 'someone')).toBe('denied');
     expect((await loadVault()).config.profiles.github).toEqual(['octocat']);
 
-    expect(await renameProfileForKey(key, 'gmail', 'me@example.com', 'work')).toBe('renamed');
-    expect(await deleteProfileForKey(key, 'gmail', 'work')).toBe(true);
+    // A name nothing holds is absent, which is a different answer from denied.
+    expect(await deleteProfileForKey(key, 'gmail', 'nope')).toBe('absent');
+
+    expect(await renameProfileForKey(key, 'gmail', 'me@example.com', 'work')).toBe('ok');
+    expect(await deleteProfileForKey(key, 'gmail', 'work')).toBe('ok');
   });
 
   test('a wildcard key reaches everything', async () => {
     const key = await keyFor('*');
-    expect(await saveProfileForKey(key, 'github', 'octocat', { accessToken: 'x' }, {})).toBe(true);
-    expect(await deleteProfileForKey(key, 'github', 'octocat')).toBe(true);
+    expect(await saveProfileForKey(key, 'github', 'octocat', { accessToken: 'x' }, {})).toBe('ok');
+    expect(await deleteProfileForKey(key, 'github', 'octocat')).toBe('ok');
+  });
+
+  test('a revoked key stops reaching, even mid-request', async () => {
+    const key = await keyFor(['gmail/me@example.com']);
+    await revokeApiKey(key);
+    expect(await deleteProfileForKey(key, 'gmail', 'me@example.com')).toBe('denied');
   });
 });
 
@@ -106,7 +126,7 @@ describe('renameProfile', () => {
     const { key } = await createApiKey({ name: 'scoped', allowedProfiles: ['gmail/me@example.com', 'github/octocat'] }, 'https://hub');
     const { key: star } = await createApiKey({ name: 'star', allowedProfiles: '*' }, 'https://hub');
 
-    expect(await renameProfile('gmail', 'me@example.com', 'work')).toBe('renamed');
+    expect(await renameProfile('gmail', 'me@example.com', 'work')).toBe('ok');
     const vault = await loadVault();
     expect(vault.config.profiles.gmail).toEqual([{ name: 'work', readOnly: true }]);
     expect(vault.credentials.gmail).toEqual({ work: { access_token: 'a' } });
@@ -117,20 +137,24 @@ describe('renameProfile', () => {
   });
 
   test('an unknown source, a taken target, and an invalid name each leave the vault alone', async () => {
-    expect(await renameProfile('gmail', 'nope', 'work')).toBe('not-found');
+    expect(await renameProfile('gmail', 'nope', 'work')).toBe('absent');
     await saveProfile('gmail', 'other@example.com', { access_token: 'b' });
     expect(await renameProfile('gmail', 'other@example.com', 'me@example.com')).toBe('taken');
     await expect(renameProfile('gmail', 'other@example.com', 'a/b')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     expect((await loadVault()).credentials.gmail?.['other@example.com']).toEqual({ access_token: 'b' });
   });
 
-  test('renaming to the same name is a no-op that still reports the profile exists', async () => {
-    expect(await renameProfile('gmail', 'me@example.com', 'me@example.com')).toBe('renamed');
-    expect(await renameProfile('gmail', 'nope', 'nope')).toBe('not-found');
+  test('renaming to the same name keeps the credentials and is not a collision', async () => {
+    await saveProfile('gmail', 'me@example.com', { access_token: 'a' }, { readOnly: true });
+    expect(await renameProfile('gmail', 'me@example.com', 'me@example.com')).toBe('ok');
+    const vault = await loadVault();
+    expect(vault.credentials.gmail).toEqual({ 'me@example.com': { access_token: 'a' } });
+    expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com', readOnly: true }]);
+    expect(await renameProfile('gmail', 'nope', 'nope')).toBe('absent');
   });
 
   test('a profile with no credentials stored still renames', async () => {
-    expect(await renameProfile('github', 'octocat', 'hubber')).toBe('renamed');
+    expect(await renameProfile('github', 'octocat', 'hubber')).toBe('ok');
     const vault = await loadVault();
     expect(vault.config.profiles.github).toEqual([{ name: 'hubber' }]);
     expect(vault.credentials.github).toBeUndefined();

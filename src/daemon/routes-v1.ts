@@ -1,10 +1,10 @@
 import { cannotManageProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
-import { listProfileRefs, resolveProfile } from '../config/config-manager';
+import { isProfileReadOnly, listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
-import { deleteProfileForKey, renameProfileForKey, saveProfileForKey } from '../config/profile-store';
+import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
 import type { RemoteAddBody, RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
@@ -107,7 +107,7 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       readOnly: effectiveReadOnly(key, r.readOnly),
       hasCredentials: !!stored[r.service]?.[r.name],
     }));
-  // The key's own add right rides along so a client can refuse `profile add` before any OAuth dance.
+  // The key's own managing right rides along so a client can refuse a profile write before any OAuth dance.
   return json({ profiles, canManageProfiles: key.canManageProfiles });
 }
 
@@ -142,9 +142,15 @@ function requireManage(key: ApiKeyView): void {
   if (!key.canManageProfiles) throw cannotManageProfilesError();
 }
 
-/** A profile the key cannot reach reads as absent, so a scoped token learns nothing about the rest of the vault. */
-function outOfReach(service: ServiceName, name: string): CliError {
-  return profileNotFoundError(service, name);
+/** Run a keyed write and turn anything but success into the shared error, inside the audited span. */
+async function applyWrite(
+  key: ApiKeyView, action: string, service: ServiceName, name: string,
+  write: () => Promise<WriteOutcome>, to?: string,
+): Promise<void> {
+  await audited(key, action, service, name, async () => {
+    const failure = writeFailure(await write(), service, name, to);
+    if (failure) throw failure;
+  });
 }
 
 /**
@@ -157,15 +163,15 @@ async function handleSave(request: Request, key: ApiKeyView, service: ServiceNam
   requireManage(key);
   // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
-  const readOnly = validateFlag('readOnly', body.readOnly ?? false);
+  // Undefined means "not stated", which a replace answers by keeping the owner's flag.
+  const stated = body.readOnly === undefined ? undefined : validateFlag('readOnly', body.readOnly);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
     throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
   }
-  await audited(key, 'save', service, name, async () => {
-    if (!(await saveProfileForKey(key.id, service, name, credentials, { readOnly }))) throw outOfReach(service, name);
-  });
-  return json({ service, name, readOnly }, 201);
+  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated }));
+  // Report what the profile ends up with, which for a replace may be the flag already stored.
+  return json({ service, name, readOnly: await isProfileReadOnly(service, name) }, 201);
 }
 
 /** A remote `profile rename`. The credentials and every key's scope follow the new name. */
@@ -173,20 +179,14 @@ async function handleRename(request: Request, key: ApiKeyView, service: ServiceN
   requireManage(key);
   const { name: to } = await readJson<Partial<Record<keyof RemoteRenameBody, unknown>>>(request);
   if (typeof to !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
-  const outcome = await audited(key, 'rename', service, name, () => renameProfileForKey(key.id, service, name, to));
-  if (outcome === 'not-found') throw outOfReach(service, name);
-  if (outcome === 'taken') {
-    throw new CliError('INVALID_PARAMS', `Profile ${service}/${to} already exists on the hub`, 'Choose another name');
-  }
+  await applyWrite(key, 'rename', service, name, () => renameProfileForKey(key.id, service, name, to), to);
   return json({ service, name: to });
 }
 
 /** A remote `profile remove`. */
 async function handleDelete(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   requireManage(key);
-  await audited(key, 'delete', service, name, async () => {
-    if (!(await deleteProfileForKey(key.id, service, name))) throw outOfReach(service, name);
-  });
+  await applyWrite(key, 'delete', service, name, () => deleteProfileForKey(key.id, service, name));
   return new Response(null, { status: 204 });
 }
 
