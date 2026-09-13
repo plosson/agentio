@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
-import { createProfileCommands } from '../utils/profile-commands';
+import { setProfile } from '../config/config-manager';
+import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDriveClient } from '../services/gdrive/client';
@@ -616,16 +616,7 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
     );
   }
 
-  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && await getProfile('gdrive', userEmail)) {
-    // Profile with email already exists, use -readonly suffix
-    profileName = `${userEmail}-readonly`;
-  } else {
-    profileName = userEmail;
-  }
+  const profileName = await chooseProfileName('gdrive', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
 
   const credentials: GDriveCredentials = {
     accessToken: tokens.access_token,

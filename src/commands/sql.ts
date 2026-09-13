@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
-import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
@@ -152,8 +152,7 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
   const displayName = extractDisplayName(url);
   console.error(`\nConnected to: ${displayName}\n`);
 
-  // Auto-name based on connection display name
-  const profileName = options.profile || displayName;
+  const profileName = await chooseProfileName('sql', { explicit: options.profile, derived: displayName, readOnly: options.readOnly });
 
   // Save credentials
   const credentials: SqlCredentials = {

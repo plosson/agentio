@@ -1,10 +1,33 @@
 import { Command } from 'commander';
-import { getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { getProfile, getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { pruneDanglingScopes } from '../auth/api-keys';
 import { updateVault } from '../vault/vault';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
+
+export interface ProfileNameChoice {
+  /** `--profile`, taken as is. */
+  explicit?: string;
+  /** What the service knows the account as: an email, a login, a hostname. */
+  derived: string;
+  readOnly?: boolean;
+}
+
+/**
+ * The name a new profile gets. An explicit `--profile` wins. Otherwise the
+ * derived name, unless the profile is read-only and that name is taken
+ * already: then `<derived>-readonly`, so one account can have a full and a
+ * read-only profile side by side without the second overwriting the first.
+ */
+export async function chooseProfileName(
+  service: ServiceName,
+  { explicit, derived, readOnly }: ProfileNameChoice,
+): Promise<string> {
+  if (explicit) return explicit;
+  if (readOnly && (await getProfile(service, derived))) return `${derived}-readonly`;
+  return derived;
+}
 
 /**
  * Drop a profile, its credentials, and its entry in every key's scope, in one

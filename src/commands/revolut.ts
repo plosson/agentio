@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
-import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import {
   buildConsentUrl,
@@ -1056,7 +1056,7 @@ export async function revolutProfileAdd(options: RevolutProfileAddOptions): Prom
   console.error(`\nConnected to Revolut ${environment}`);
   console.error(`${validation.info}\n`);
 
-  const profileName = options.profile || environment;
+  const profileName = await chooseProfileName('revolut', { explicit: options.profile, derived: environment, readOnly: options.readOnly });
 
   await setProfile('revolut', profileName, { readOnly: options.readOnly });
   await setCredentials('revolut', profileName, credentials);

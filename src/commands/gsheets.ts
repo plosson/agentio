@@ -2,8 +2,8 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
 import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
-import { createProfileCommands } from '../utils/profile-commands';
+import { setProfile } from '../config/config-manager';
+import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GSheetsClient } from '../services/gsheets/client';
@@ -610,16 +610,7 @@ export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: 
     throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
   }
 
-  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && await getProfile('gsheets', userEmail)) {
-    // Profile with email already exists, use -readonly suffix
-    profileName = `${userEmail}-readonly`;
-  } else {
-    profileName = userEmail;
-  }
+  const profileName = await chooseProfileName('gsheets', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
 
   const credentials: GSheetsCredentials = {
     accessToken: tokens.access_token,

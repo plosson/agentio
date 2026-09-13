@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { setCredentials } from '../auth/token-store';
 import { setProfile } from '../config/config-manager';
-import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performJiraOAuthFlow, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
@@ -253,7 +253,7 @@ export async function jiraProfileAdd(options: { profile?: string; readOnly?: boo
 
   // Auto-name based on site hostname
   const siteHostname = new URL(result.siteUrl).hostname;
-  const profileName = options.profile || siteHostname;
+  const profileName = await chooseProfileName('jira', { explicit: options.profile, derived: siteHostname, readOnly: options.readOnly });
 
   // Save credentials
   const credentials: JiraCredentials = {
