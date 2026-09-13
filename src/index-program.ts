@@ -34,8 +34,8 @@ import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
-import { isRemoteMode, remoteModeError } from './auth/remote';
-import { handleError } from './utils/errors';
+import { hub, isRemoteMode, remoteCanAddProfiles, remoteModeError } from './auth/remote';
+import { CliError, handleError } from './utils/errors';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -125,10 +125,21 @@ export function createProgram(): Command {
       const localOnly =
         LOCAL_ONLY_COMMANDS.has(name) ||
         (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
-        (parent === 'profile' && name !== 'list');
+        (parent === 'profile' && name !== 'list' && name !== 'add');
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
         handleError(remoteModeError(`\`agentio ${full}\``));
+      }
+      // A remote add ends in a PUT to the hub; refuse here, before any OAuth or token dance, when the key may not.
+      if (parent === 'profile' && name === 'add') {
+        try {
+          if (!(await remoteCanAddProfiles())) {
+            throw new CliError('PERMISSION_DENIED', `This token may not add profiles to the vault hub at ${hub().url}`,
+              'Ask the hub owner to allow this key to add profiles');
+          }
+        } catch (err) {
+          handleError(err);
+        }
       }
       return;
     }

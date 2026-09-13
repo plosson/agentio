@@ -2,6 +2,7 @@ import { findProfileIndex, getProfile, hasProfile, putProfileEntry, type SetProf
 import { putCredentials } from '../auth/token-store';
 import { grantProfileToKey, pruneDanglingScopes } from '../auth/api-keys';
 import { updateVault, type VaultContents } from '../vault/vault';
+import { isRemoteMode, remoteAddProfile } from '../auth/remote';
 import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 
@@ -35,13 +36,18 @@ export async function chooseProfileName(
   return derived;
 }
 
-/** Add or replace a profile and its credentials in one vault write; deleteProfile is the inverse. */
+/**
+ * Add or replace a profile and its credentials in one vault write; deleteProfile
+ * is the inverse. In remote mode the vault is on the hub, so the same call is
+ * one PUT there (create-only, see addProfileForKey).
+ */
 export function saveProfile(
   service: ServiceName,
   profileName: string,
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
+  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, !!options.readOnly);
   return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
 }
 

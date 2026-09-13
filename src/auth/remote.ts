@@ -76,13 +76,19 @@ export interface RemoteProfile extends ProfileRef {
   hasCredentials: boolean;
 }
 
-let parsed: TokenParts | null = null;
-let profilesPromise: Promise<RemoteProfile[]> | null = null;
+/** What `GET /v1/profiles` answers: the key's view of the vault, plus its own add right. */
+interface RemoteListing {
+  profiles: RemoteProfile[];
+  canAddProfiles: boolean;
+}
 
-/** Forget the parsed token and the cached profile list (tests change the env). */
+let parsed: TokenParts | null = null;
+let listingPromise: Promise<RemoteListing> | null = null;
+
+/** Forget the parsed token and the cached listing (tests change the env). */
 export function resetRemoteCache(): void {
   parsed = null;
-  profilesPromise = null;
+  listingPromise = null;
   fileToken = undefined;
 }
 
@@ -134,7 +140,7 @@ function hubError(status: number, body: { error?: string; code?: string; suggest
 }
 
 export interface HubCallOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT';
   /** JSON body; sets the content type. */
   body?: unknown;
   /** Bearer token; omitted for the public login routes. */
@@ -170,19 +176,30 @@ export async function hubCall<T>(url: string, path: string, { method = 'GET', bo
   return answer as T;
 }
 
-const hubRequest = <T>(path: string, method: 'GET' | 'POST' = 'GET') =>
-  hubCall<T>(hub().url, path, { method, token: remoteToken()! });
+const hubRequest = <T>(path: string, method: HubCallOptions['method'] = 'GET', body?: unknown) =>
+  hubCall<T>(hub().url, path, { method, body, token: remoteToken()! });
 
-/** The profiles this token may use. Fetched once per process. */
-export function remoteProfiles(): Promise<RemoteProfile[]> {
-  return (profilesPromise ??= hubRequest<{ profiles: RemoteProfile[] }>('/v1/profiles').then((r) => r.profiles));
+const profilePath = (service: ServiceName, name: string) => `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}`;
+
+/** The listing, fetched once per process. */
+const remoteListing = () => (listingPromise ??= hubRequest<RemoteListing>('/v1/profiles'));
+
+/** The profiles this token may use. */
+export const remoteProfiles = (): Promise<RemoteProfile[]> => remoteListing().then((l) => l.profiles);
+
+/** Whether this token may add profiles to the hub; asked before any OAuth dance starts. */
+export const remoteCanAddProfiles = (): Promise<boolean> => remoteListing().then((l) => l.canAddProfiles);
+
+/** A `profile add` finished on this machine, handed to the hub to store. The cached listing is stale afterwards. */
+export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, readOnly: boolean): Promise<void> {
+  await hubRequest(profilePath(service, name), 'PUT', { readOnly, credentials });
+  listingPromise = null;
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
 export async function remoteCredentials<T = Record<string, unknown>>(service: ServiceName, name: string): Promise<T | null> {
-  const path = `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}/credentials`;
   try {
-    return (await hubRequest<{ credentials: T }>(path, 'POST')).credentials;
+    return (await hubRequest<{ credentials: T }>(`${profilePath(service, name)}/credentials`, 'POST')).credentials;
   } catch (err) {
     // NOT_FOUND is "profile exists, nothing stored"; an unknown profile stays PROFILE_NOT_FOUND.
     if (err instanceof CliError && err.code === 'NOT_FOUND') return null;
