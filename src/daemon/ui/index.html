@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agentio vault</title>
-<style>
+<style nonce="__CSP_NONCE__">
   :root {
     --bg: #f8f9fa; --surface: #ffffff; --border: #d1d9e0; --border-light: #e8ecf0;
     --text: #1f2328; --text-secondary: #656d76; --text-muted: #8b949e;
@@ -140,6 +140,12 @@
   #toasts { position: fixed; right: 24px; bottom: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
   .toast { padding: 10px 14px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: .875rem; box-shadow: var(--shadow-lg); max-width: 360px; }
   .toast.error { background: var(--error); color: #fff; }
+  /* Utility classes for spots that would otherwise need an inline style="" the CSP forbids. */
+  .m-0 { margin: 0; }
+  .mt-1 { margin: 4px 0 0; }
+  .ml-16 { margin-left: 16px; }
+  .card-narrow { max-width: 640px; }
+  .hint-sm { font-size: .75rem; }
 </style>
 </head>
 <body>
@@ -190,7 +196,7 @@
     <section class="card" id="key-panel" hidden>
       <form id="key-form">
         <h3>New key</h3>
-        <p class="note" style="margin:0">Its token will point agents at <span class="mono" id="hub-origin"></span>.</p>
+        <p class="note m-0">Its token will point agents at <span class="mono" id="hub-origin"></span>.</p>
         <div class="key-fields"></div>
         <div class="alert error" id="key-error" hidden></div>
         <div class="row right"><button type="button" id="key-cancel-btn">Cancel</button><button class="primary" type="submit" id="key-create-btn">Create key</button></div>
@@ -222,7 +228,7 @@
   </section>
   <section id="view-authorize" hidden>
     <div class="page-head"><div><h2>Sign-in request</h2><p>A machine running <span class="mono">agentio login</span> asks for a key to this hub.</p></div></div>
-    <section class="card" style="max-width:640px">
+    <section class="card card-narrow">
       <div class="alert error top" id="auth-error" hidden></div>
       <div id="auth-request" hidden>
         <div class="setting"><div><strong>Code shown in the terminal</strong><p>Approve only if it matches.</p></div><span class="mono code" id="auth-code"></span></div>
@@ -234,7 +240,7 @@
       </div>
       <div id="auth-done" hidden>
         <h3 id="auth-done-title"></h3>
-        <p class="note" id="auth-done-body" style="margin:4px 0 0"></p>
+        <p class="note mt-1" id="auth-done-body"></p>
       </div>
     </section>
   </section>
@@ -254,7 +260,7 @@
   <div class="field">
     <label>Scope</label>
     <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
-    <label class="toggle" style="margin-left:16px"><input type="radio" name="scope" value="some"> selected profiles</label>
+    <label class="toggle ml-16"><input type="radio" name="scope" value="some"> selected profiles</label>
     <div class="choices" hidden></div>
   </div>
   <div class="field"><label class="toggle"><input type="checkbox" class="key-ro"> read-only on every profile this key can see</label></div>
@@ -286,7 +292,7 @@
 
 <div id="toasts"></div>
 
-<script>
+<script nonce="__CSP_NONCE__">
 (() => {
   const $ = (id) => document.getElementById(id);
   const views = { unlock: $('view-unlock'), profiles: $('view-profiles'), keys: $('view-keys'), settings: $('view-settings'), authorize: $('view-authorize') };
@@ -605,7 +611,7 @@
     const rows = keys.map((k) => {
       const scope = k.allowedProfiles === '*' ? 'all profiles' : (k.allowedProfiles.join(', ') || 'no profiles');
       return `<tr data-id="${escape(k.id)}" data-name="${escape(k.name)}">
-        <td>${escape(k.name)}<div class="muted mono" style="font-size:.75rem">${escape(k.id)}</div></td>
+        <td>${escape(k.name)}<div class="muted mono hint-sm">${escape(k.id)}</div></td>
         <td class="mono muted">agio1.…${escape(k.hint || '')}</td>
         <td class="muted">${escape(scope)}</td>
         <td>${k.readOnly ? 'yes' : 'no'}</td>

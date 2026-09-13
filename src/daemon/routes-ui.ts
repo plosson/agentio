@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { startKeepalive, stopKeepalive } from './keepalive';
@@ -27,9 +28,30 @@ export interface UiContext {
 /** Five wrong passphrases a minute per address, then 429 for the rest of it. */
 export const unlockLimiter = new RateLimiter(5, 60_000);
 
+/**
+ * Response headers that lock the admin UI down. The vault-unlock panel is a
+ * prime clickjacking target, so framing is denied outright; a strict CSP with a
+ * per-response nonce lets the single inline script and style run while blocking
+ * anything injected, and HSTS keeps the browser on TLS. The page pulls in no
+ * external resource, so everything but 'self' and the nonce is denied.
+ */
+function securityHeaders(nonce: string): Record<string, string> {
+  return {
+    'Content-Security-Policy':
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; ` +
+      `connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  };
+}
+
 function page(): Response {
-  return new Response(INDEX_HTML, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  const nonce = randomBytes(16).toString('base64');
+  const html = INDEX_HTML.replaceAll('__CSP_NONCE__', nonce);
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(nonce) },
   });
 }
 
