@@ -82,6 +82,7 @@ src/
 │   └── token-store.ts       # Encrypted credential storage
 ├── config/
 │   ├── config-manager.ts    # Profile configuration
+│   ├── profile-store.ts     # saveProfile/deleteProfile/chooseProfileName: how a profile enters and leaves the vault
 │   └── credentials.ts       # Credential helpers
 ├── types/                   # TypeScript interfaces
 │   ├── config.ts            # Config and ServiceName types

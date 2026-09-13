@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
@@ -454,7 +455,7 @@ async function setupWebhookProfile(profileName: string, readOnly?: boolean): Pro
     webhookUrl: webhookUrl,
   };
 
-  await saveProfile('gchat', profileName, { readOnly }, credentials);
+  await saveProfile('gchat', profileName, credentials, { readOnly });
 
   printProfileSetupSuccess(profileName, 'webhook', readOnly);
 }
@@ -504,7 +505,7 @@ async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolea
     email: userEmail,
   };
 
-  await saveProfile('gchat', profileName, { readOnly }, credentials);
+  await saveProfile('gchat', profileName, credentials, { readOnly });
 
   printProfileSetupSuccess(profileName, 'oauth', readOnly);
 }

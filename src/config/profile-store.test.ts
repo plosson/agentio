@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
-import { chooseProfileName, deleteProfile, saveProfile } from './profile-commands';
+import { chooseProfileName, deleteProfile, saveProfile } from './profile-store';
 
-withTempVault('agentio-profile-commands-test-', () => ({
+withTempVault('agentio-profile-store-test-', () => ({
   config: { profiles: { gmail: [{ name: 'me@example.com' }], github: ['octocat'] } },
 }));
 
@@ -32,21 +32,21 @@ describe('chooseProfileName', () => {
 
 describe('saveProfile', () => {
   test('writes the entry and the credentials together', async () => {
-    await saveProfile('telegram', 'bot', { readOnly: true }, { botToken: 't', chatId: '1' });
+    await saveProfile('telegram', 'bot', { botToken: 't', chatId: '1' }, { readOnly: true });
     const vault = await loadVault();
     expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
     expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't', chatId: '1' } });
   });
 
   test('replaces an existing profile in place, legacy string entries included', async () => {
-    await saveProfile('github', 'octocat', {}, { accessToken: 'new' });
+    await saveProfile('github', 'octocat', { accessToken: 'new' });
     const vault = await loadVault();
     expect(vault.config.profiles.github).toEqual([{ name: 'octocat' }]);
     expect(vault.credentials.github).toEqual({ octocat: { accessToken: 'new' } });
   });
 
   test('is the inverse of deleteProfile', async () => {
-    await saveProfile('gmail', 'new@example.com', {}, { access_token: 'a' });
+    await saveProfile('gmail', 'new@example.com', { access_token: 'a' });
     expect(await deleteProfile('gmail', 'new@example.com')).toBe(true);
     const vault = await loadVault();
     expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com' }]);

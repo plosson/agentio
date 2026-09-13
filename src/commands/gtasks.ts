@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { GTasksClient } from '../services/gtasks/client';
 import {
@@ -451,7 +452,7 @@ export async function gtasksProfileAdd(options: { profile?: string; readOnly?: b
 
   const profileName = await chooseProfileName('gtasks', { explicit: options.profile, derived: email, readOnly: options.readOnly });
 
-  await saveProfile('gtasks', profileName, { readOnly: options.readOnly }, { ...tokens, email });
+  await saveProfile('gtasks', profileName, { ...tokens, email }, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${email}`);

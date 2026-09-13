@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { DiscourseClient } from '../services/discourse/client';
 import { CliError, handleError } from '../utils/errors';
@@ -209,8 +210,7 @@ export async function discourseProfileAdd(options: { profile?: string; readOnly?
 
   const profileName = await chooseProfileName('discourse', { explicit: options.profile, derived: username.trim(), readOnly: options.readOnly });
 
-  // Save credentials
-  await saveProfile('discourse', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('discourse', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

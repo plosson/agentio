@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { calendar } from '@googleapis/calendar';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { GCalClient } from '../services/gcal/client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from '../utils/output';
@@ -504,7 +505,7 @@ export async function gcalProfileAdd(options: { profile?: string; readOnly?: boo
 
   const profileName = await chooseProfileName('gcal', { explicit: options.profile, derived: email, readOnly: options.readOnly });
 
-  await saveProfile('gcal', profileName, { readOnly: options.readOnly }, { ...tokens, email });
+  await saveProfile('gcal', profileName, { ...tokens, email }, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${email}`);

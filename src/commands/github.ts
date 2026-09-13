@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { GitHubClient } from '../services/github/client';
 import { performGitHubOAuthFlow } from '../auth/github-oauth';
@@ -161,8 +162,7 @@ export async function githubProfileAdd(options: { profile?: string; readOnly?: b
 
   console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
 
-  // Save credentials
-  await saveProfile('github', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('github', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

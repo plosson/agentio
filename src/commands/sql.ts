@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
@@ -152,13 +153,12 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
 
   const profileName = await chooseProfileName('sql', { explicit: options.profile, derived: displayName, readOnly: options.readOnly });
 
-  // Save credentials
   const credentials: SqlCredentials = {
     url,
     displayName,
   };
 
-  await saveProfile('sql', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('sql', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

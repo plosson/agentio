@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performJiraOAuthFlow, type AtlassianSite } from '../auth/jira-oauth';
 import { JiraClient } from '../services/jira/client';
@@ -249,11 +250,9 @@ export async function jiraProfileAdd(options: { profile?: string; readOnly?: boo
 
   console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
 
-  // Auto-name based on site hostname
   const siteHostname = new URL(result.siteUrl).hostname;
   const profileName = await chooseProfileName('jira', { explicit: options.profile, derived: siteHostname, readOnly: options.readOnly });
 
-  // Save credentials
   const credentials: JiraCredentials = {
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
@@ -262,7 +261,7 @@ export async function jiraProfileAdd(options: { profile?: string; readOnly?: boo
     siteUrl: result.siteUrl,
   };
 
-  await saveProfile('jira', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('jira', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

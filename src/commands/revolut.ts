@@ -3,7 +3,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import {
   buildConsentUrl,
@@ -1056,7 +1057,7 @@ export async function revolutProfileAdd(options: RevolutProfileAddOptions): Prom
 
   const profileName = await chooseProfileName('revolut', { explicit: options.profile, derived: environment, readOnly: options.readOnly });
 
-  await saveProfile('revolut', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('revolut', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

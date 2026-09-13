@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { GmailClient } from '../services/gmail/client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from '../utils/output';
@@ -1111,7 +1112,7 @@ export async function gmailProfileAdd(options: { profile?: string; readOnly?: bo
 
   const profileName = await chooseProfileName('gmail', { explicit: options.profile, derived: email, readOnly: options.readOnly });
 
-  await saveProfile('gmail', profileName, { readOnly: options.readOnly }, { ...tokens, email });
+  await saveProfile('gmail', profileName, { ...tokens, email }, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${email}`);

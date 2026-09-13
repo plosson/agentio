@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { writeFile, readFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDocsClient } from '../services/gdocs/client';
@@ -330,7 +331,7 @@ export async function gdocsProfileAdd(options: { profile?: string; readOnly?: bo
     email: userEmail,
   };
 
-  await saveProfile('gdocs', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('gdocs', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

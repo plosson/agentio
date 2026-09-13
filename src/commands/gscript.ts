@@ -3,7 +3,8 @@ import { readFile, writeFile, readdir, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
 import { fetchGoogleUserEmail } from '../auth/token-manager';
-import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
+import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GScriptClient } from '../services/gscript/client';
@@ -481,7 +482,7 @@ export async function gscriptProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await saveProfile('gscript', profileName, { readOnly: options.readOnly }, credentials);
+  await saveProfile('gscript', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

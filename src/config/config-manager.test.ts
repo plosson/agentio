@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { resolveProfile, setProfile } from './config-manager';
+import { putProfileEntry, resolveProfile, updateConfig } from './config-manager';
 import { clearVaultCache, saveVault, CURRENT_VAULT_VERSION } from '../vault/vault';
 import {
   clearPassphraseCache,
@@ -49,8 +49,10 @@ describe('resolveProfile multi-profile case', () => {
   });
 
   test('returns names array when multiple profiles exist and none specified', async () => {
-    await setProfile('telegram', 'work');
-    await setProfile('telegram', 'personal');
+    await updateConfig((config) => {
+      putProfileEntry(config, 'telegram', 'work');
+      putProfileEntry(config, 'telegram', 'personal');
+    });
     clearVaultCache();
     const r = await resolveProfile('telegram');
     if (r.profile === null && r.error === 'multiple') {

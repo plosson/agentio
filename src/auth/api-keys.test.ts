@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
-import { deleteProfile } from '../utils/profile-commands';
+import { deleteProfile } from '../config/profile-store';
 import { authenticateToken, createApiKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
 import { decodeToken, encodeToken } from './token';
 

@@ -114,14 +114,6 @@ export function putProfileEntry(
   else profiles[existingIndex] = entry;
 }
 
-export function setProfile(
-  service: ServiceName,
-  profileName: string,
-  options?: SetProfileOptions
-): Promise<void> {
-  return updateConfig((config) => putProfileEntry(config, service, profileName, options));
-}
-
 /** A configured profile, flattened. */
 export interface ProfileRef {
   service: ServiceName;
