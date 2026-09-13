@@ -2,16 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
 import { deleteProfile } from '../utils/profile-commands';
-import {
-  authenticateToken,
-  createApiKey,
-  keyAllows,
-  listApiKeys,
-  revokeApiKey,
-  rotateApiKey,
-  touchApiKey,
-  updateApiKey,
-} from './api-keys';
+import { authenticateToken, createApiKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
 import { decodeToken, encodeToken } from './token';
 
 const HUB = 'https://vault.example.com';
@@ -21,6 +12,10 @@ withTempVault('agentio-keys-test-', () => ({
 }));
 
 describe('api keys', () => {
+  test('ids never start with a dash, so `agentio key rotate <id>` cannot read one as an option', () => {
+    for (let i = 0; i < 5000; i++) expect(newKeyId()).toMatch(/^[A-Za-z0-9_][A-Za-z0-9_-]{7}$/);
+  });
+
   test('create stores only the hash and returns a token that authenticates', async () => {
     const { key, token } = await createApiKey({ name: 'agent', allowedProfiles: '*', readOnly: false }, HUB);
     expect(key).not.toHaveProperty('secretHash');
