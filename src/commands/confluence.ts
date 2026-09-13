@@ -1,7 +1,6 @@
 import { Command } from 'commander';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import {
   performConfluenceOAuthFlow,
@@ -379,7 +378,7 @@ export async function confluenceProfileAdd(options: {
   console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
 
   const siteHostname = new URL(result.siteUrl).hostname;
-  const profileName = options.profile || siteHostname;
+  const profileName = await chooseProfileName('confluence', { explicit: options.profile, derived: siteHostname, readOnly: options.readOnly });
 
   const credentials: ConfluenceCredentials = {
     accessToken: result.accessToken,
@@ -389,8 +388,7 @@ export async function confluenceProfileAdd(options: {
     siteUrl: result.siteUrl,
   };
 
-  await setProfile('confluence', profileName, { readOnly: options.readOnly });
-  await setCredentials('confluence', profileName, credentials);
+  await saveProfile('confluence', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

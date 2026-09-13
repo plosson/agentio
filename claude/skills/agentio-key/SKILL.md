@@ -17,6 +17,7 @@ Options:
 - `--profiles <list>`: Comma-separated service/name pairs the key may use
 - `--all`: Allow every profile
 - `--read-only`: Force read-only on every profile the key can see (default: false)
+- `--can-add-profiles`: Let the agent add profiles to this vault from its machine (default: false)
 
 ```
 Examples:
@@ -26,6 +27,9 @@ Examples:
 
   # everything, but read-only
   agentio key create reporter --url https://vault.example.com --all --read-only
+
+  # a laptop that can add its own profiles to the vault
+  agentio key create laptop --url https://vault.example.com --all --can-add-profiles
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)
@@ -52,12 +56,15 @@ Options:
 - `--all`: Allow every profile
 - `--read-only`: Force read-only
 - `--no-read-only`: Lift the key-level read-only restriction
+- `--can-add-profiles`: Let the agent add profiles to this vault from its machine
+- `--no-can-add-profiles`: Stop the agent from adding profiles
 
 ```
 Examples:
 
   agentio key update a1b2c3d4 --profiles gdrive/docunit
   agentio key update a1b2c3d4 --no-read-only
+  agentio key update a1b2c3d4 --can-add-profiles
 ```
 
 ## agentio key rotate <id>

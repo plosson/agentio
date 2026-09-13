@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { SlackClient } from '../services/slack/client';
 import { CliError, handleError } from '../utils/errors';
@@ -203,8 +202,7 @@ async function setupWebhookProfile(profileName: string, readOnly?: boolean): Pro
     channelName: channelName || undefined,
   };
 
-  await setProfile('slack', profileName, { readOnly });
-  await setCredentials('slack', profileName, credentials);
+  await saveProfile('slack', profileName, credentials, { readOnly });
 
   console.log(`\nSuccess! Webhook profile "${profileName}" configured.`);
   if (readOnly) {

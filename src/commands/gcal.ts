@@ -1,9 +1,8 @@
 import { Command } from 'commander';
 import { calendar } from '@googleapis/calendar';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { GCalClient } from '../services/gcal/client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from '../utils/output';
@@ -504,19 +503,9 @@ export async function gcalProfileAdd(options: { profile?: string; readOnly?: boo
     throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
   }
 
-  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && await getProfile('gcal', email)) {
-    // Profile with email already exists, use -readonly suffix
-    profileName = `${email}-readonly`;
-  } else {
-    profileName = email;
-  }
+  const profileName = await chooseProfileName('gcal', { explicit: options.profile, derived: email, readOnly: options.readOnly });
 
-  await setProfile('gcal', profileName, { readOnly: options.readOnly });
-  await setCredentials('gcal', profileName, { ...tokens, email });
+  await saveProfile('gcal', profileName, { ...tokens, email }, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${email}`);

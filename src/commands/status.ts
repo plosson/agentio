@@ -43,7 +43,7 @@ import type { DropboxCredentials } from '../types/dropbox';
 import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
-import { hub, isRemoteMode, remoteProfiles } from '../auth/remote';
+import { hub, isRemoteMode, remoteCanAddProfiles, remoteProfiles } from '../auth/remote';
 
 type GmailCredentials = OAuthTokens & { email?: string };
 
@@ -339,11 +339,10 @@ export function registerStatusCommand(program: Command): void {
             }
             services[service].push(rest);
           }
-          const output = {
-            version,
-            ...(isRemoteMode() ? { hub: hub().url } : { configDir: CONFIG_DIR }),
-            services,
-          };
+          const where = isRemoteMode()
+            ? { hub: hub().url, canAddProfiles: await remoteCanAddProfiles() }
+            : { configDir: CONFIG_DIR };
+          const output = { version, ...where, services };
           console.log(JSON.stringify(output, null, 2));
           return;
         }

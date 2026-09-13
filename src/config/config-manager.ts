@@ -100,19 +100,30 @@ export interface SetProfileOptions {
   readOnly?: boolean;
 }
 
-export function setProfile(
+/** Index of the profile in its service's list, whatever form the entry takes; -1 when absent. */
+export function findProfileIndex(config: Config, service: ServiceName, profileName: string): number {
+  return config.profiles[service]?.findIndex((p) => getProfileName(p) === profileName) ?? -1;
+}
+
+export function hasProfile(config: Config, service: ServiceName, profileName: string): boolean {
+  return findProfileIndex(config, service, profileName) !== -1;
+}
+
+/** Add or replace a profile entry in `config`, in place. */
+export function putProfileEntry(
+  config: Config,
   service: ServiceName,
   profileName: string,
   options?: SetProfileOptions
-): Promise<void> {
-  return updateConfig((config) => {
-    const profiles = (config.profiles[service] ??= []);
-    const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
-    const existingIndex = profiles.findIndex((p) => getProfileName(p) === profileName);
-    if (existingIndex === -1) profiles.push(entry);
-    else profiles[existingIndex] = entry;
-  });
+): void {
+  const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
+  const existingIndex = findProfileIndex(config, service, profileName);
+  if (existingIndex === -1) (config.profiles[service] ??= []).push(entry);
+  else config.profiles[service]![existingIndex] = entry;
 }
+
+/** The `service/name` form a key's allow-list holds. */
+export const profileRef = (service: string, name: string): string => `${service}/${name}`;
 
 /** A configured profile, flattened. */
 export interface ProfileRef {
@@ -155,9 +166,9 @@ export function setProfileReadOnly(
   readOnly: boolean
 ): Promise<boolean> {
   return updateConfig((config) => {
-    const serviceProfiles = config.profiles[service];
-    const index = serviceProfiles?.findIndex((p) => getProfileName(p) === profileName) ?? -1;
-    if (!serviceProfiles || index === -1) return false;
+    const index = findProfileIndex(config, service, profileName);
+    if (index === -1) return false;
+    const serviceProfiles = config.profiles[service]!;
 
     const entry = normalizeProfile(serviceProfiles[index]);
     if (readOnly) {

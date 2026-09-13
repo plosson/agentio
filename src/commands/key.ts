@@ -8,17 +8,25 @@ import {
   rotateApiKey,
   updateApiKey,
   describeScope,
+  type ApiKeyInput,
   type IssuedKey,
 } from '../auth/api-keys';
 import type { ApiKeyScope } from '../types/config';
 
-function scopeFromOptions(opts: { profiles?: string; all?: boolean }): ApiKeyScope | undefined {
+type KeyOptions = { name?: string; profiles?: string; all?: boolean; readOnly?: boolean; canAddProfiles?: boolean };
+
+function scopeFromOptions(opts: KeyOptions): ApiKeyScope | undefined {
   if (opts.all && opts.profiles) {
     throw new CliError('INVALID_PARAMS', '--all and --profiles are mutually exclusive');
   }
   if (opts.all) return '*';
   if (opts.profiles) return opts.profiles.split(',').map((s) => s.trim()).filter(Boolean);
   return undefined;
+}
+
+/** The options as createApiKey and updateApiKey take them; an option not given stays undefined. */
+function keyInputFromOptions(opts: KeyOptions): ApiKeyInput {
+  return { name: opts.name, allowedProfiles: scopeFromOptions(opts), readOnly: opts.readOnly, canAddProfiles: opts.canAddProfiles };
 }
 
 /** The token goes to stdout alone so it can be captured; everything else to stderr. */
@@ -42,11 +50,12 @@ export function registerKeyCommands(program: Command): void {
       .option('--profiles <list>', 'Comma-separated service/name pairs the key may use')
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only on every profile the key can see', false)
+      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds', false)
       .action(async (name: string, opts) => {
         try {
-          const scope = scopeFromOptions(opts);
-          if (!scope) throw new CliError('INVALID_PARAMS', 'Choose a scope', 'Pass --all or --profiles <service/name,...>');
-          printIssued(await createApiKey({ name, allowedProfiles: scope, readOnly: opts.readOnly }, opts.url));
+          const input = { ...keyInputFromOptions(opts), name };
+          if (!input.allowedProfiles) throw new CliError('INVALID_PARAMS', 'Choose a scope', 'Pass --all or --profiles <service/name,...>');
+          printIssued(await createApiKey(input, opts.url));
         } catch (error) {
           handleError(error);
         }
@@ -58,6 +67,9 @@ export function registerKeyCommands(program: Command): void {
 
   # everything, but read-only
   agentio key create reporter --url https://vault.example.com --all --read-only
+
+  # a laptop that can add its own profiles to the vault
+  agentio key create laptop --url https://vault.example.com --all --can-add-profiles
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)`,
@@ -97,13 +109,15 @@ export function registerKeyCommands(program: Command): void {
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only')
       .option('--no-read-only', 'Lift the key-level read-only restriction')
+      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds')
+      .option('--no-can-add-profiles', 'Stop the agent from adding profiles')
       .action(async (id: string, opts) => {
         try {
-          const scope = scopeFromOptions(opts);
-          if (opts.name === undefined && scope === undefined && opts.readOnly === undefined) {
-            throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass --name, --profiles/--all, or --read-only/--no-read-only');
+          const patch = keyInputFromOptions(opts);
+          if (Object.values(patch).every((v) => v === undefined)) {
+            throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass at least one option; see --help');
           }
-          const updated = await updateApiKey(id, { name: opts.name, allowedProfiles: scope, readOnly: opts.readOnly });
+          const updated = await updateApiKey(id, patch);
           console.log(`Updated "${updated.name}" (${updated.id}): ${describeScope(updated)}`);
         } catch (error) {
           handleError(error);
@@ -112,7 +126,8 @@ export function registerKeyCommands(program: Command): void {
     `Examples:
 
   agentio key update a1b2c3d4 --profiles gdrive/docunit
-  agentio key update a1b2c3d4 --no-read-only`,
+  agentio key update a1b2c3d4 --no-read-only
+  agentio key update a1b2c3d4 --can-add-profiles`,
   );
 
   addExamples(

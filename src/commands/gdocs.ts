@@ -1,9 +1,8 @@
 import { Command } from 'commander';
 import { writeFile, readFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDocsClient } from '../services/gdocs/client';
@@ -321,16 +320,7 @@ export async function gdocsProfileAdd(options: { profile?: string; readOnly?: bo
     );
   }
 
-  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && await getProfile('gdocs', userEmail)) {
-    // Profile with email already exists, use -readonly suffix
-    profileName = `${userEmail}-readonly`;
-  } else {
-    profileName = userEmail;
-  }
+  const profileName = await chooseProfileName('gdocs', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
 
   const credentials: GDocsCredentials = {
     accessToken: tokens.access_token,
@@ -341,8 +331,7 @@ export async function gdocsProfileAdd(options: { profile?: string; readOnly?: bo
     email: userEmail,
   };
 
-  await setProfile('gdocs', profileName, { readOnly: options.readOnly });
-  await setCredentials('gdocs', profileName, credentials);
+  await saveProfile('gdocs', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

@@ -1,9 +1,11 @@
-import { CliError, profileNotFoundError } from '../utils/errors';
+import { cannotAddProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
 import { listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
-import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, type ApiKeyView } from '../auth/api-keys';
+import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
+import { addProfileForKey } from '../config/profile-store';
+import type { RemoteAddBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { errorResponse, json, profilePath, readJson } from './http';
@@ -71,9 +73,24 @@ async function allowedProfile(key: ApiKeyView, service: ServiceName, name: strin
   return effectiveReadOnly(key, resolved.readOnly);
 }
 
-function audit(key: ApiKeyView, service: string, name: string, outcome: string, refreshed?: boolean): void {
+function audit(key: ApiKeyView, action: string, service: string, name: string, outcome: string, refreshed?: boolean): void {
   const extra = refreshed === undefined ? '' : ` refreshed=${refreshed}`;
-  console.log(`${new Date().toISOString()} v1 credentials key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
+  console.log(`${new Date().toISOString()} v1 ${action} key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
+}
+
+/** Run `work` and write its outcome to the audit log, the error code when it is a CliError. */
+async function audited<T>(
+  key: ApiKeyView, action: string, service: string, name: string,
+  work: () => Promise<T>, refreshedOf?: (result: T) => boolean,
+): Promise<T> {
+  try {
+    const result = await work();
+    audit(key, action, service, name, 'ok', refreshedOf?.(result));
+    return result;
+  } catch (err) {
+    if (err instanceof CliError) audit(key, action, service, name, err.code.toLowerCase());
+    throw err;
+  }
 }
 
 /** Credentials the way the hub hands them out: refreshed with the wider buffer. */
@@ -90,7 +107,8 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       readOnly: effectiveReadOnly(key, r.readOnly),
       hasCredentials: !!stored[r.service]?.[r.name],
     }));
-  return json({ profiles });
+  // The key's own add right rides along so a client can refuse `profile add` before any OAuth dance.
+  return json({ profiles, canAddProfiles: key.canAddProfiles });
 }
 
 /** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
@@ -115,14 +133,33 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   await requireStoredCredentials(service, name);
-  try {
-    const { credentials, refreshed } = await hubCredentials(service, name);
-    audit(key, service, name, 'ok', refreshed);
-    return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
-  } catch (err) {
-    if (err instanceof CliError) audit(key, service, name, err.code.toLowerCase());
-    throw err;
+  const { credentials, refreshed } = await audited(key, 'credentials', service, name, () => hubCredentials(service, name), (r) => r.refreshed);
+  return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
+}
+
+/**
+ * A remote `profile add`: the agent did the OAuth or token dance on its own
+ * machine and hands the result over. The hub does not re-validate the
+ * credentials against the service, exactly as the local flow does not.
+ */
+async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  if (!key.canAddProfiles) {
+    throw cannotAddProfilesError();
   }
+  // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
+  const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
+  const readOnly = validateFlag('readOnly', body.readOnly ?? false);
+  const { credentials } = body;
+  if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
+    throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
+  }
+  await audited(key, 'add', service, name, async () => {
+    if (!(await addProfileForKey(key.id, service, name, credentials, { readOnly }))) {
+      throw new CliError('INVALID_PARAMS', `Profile ${service}/${name} already exists on the hub`,
+        'Choose another profile name, or have the hub owner remove the existing one');
+    }
+  });
+  return json({ service, name, readOnly }, 201);
 }
 
 /** Routes under /v1. Returns null for anything else. */
@@ -148,6 +185,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
     if (ref && ref.action === 'credentials' && method === 'POST') return await handleCredentials(key, ref.service, ref.name);
+    if (ref && ref.action === null && method === 'PUT') return await handleAdd(request, key, ref.service, ref.name);
 
     throw new CliError('NOT_FOUND', 'Not found');
   } catch (err) {

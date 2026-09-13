@@ -1,9 +1,8 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GSlidesClient } from '../services/gslides/client';
@@ -298,14 +297,7 @@ export async function gslidesProfileAdd(options: { profile?: string; readOnly?: 
     );
   }
 
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && (await getProfile('gslides', userEmail))) {
-    profileName = `${userEmail}-readonly`;
-  } else {
-    profileName = userEmail;
-  }
+  const profileName = await chooseProfileName('gslides', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
 
   const credentials: GSlidesCredentials = {
     accessToken: tokens.access_token,
@@ -316,8 +308,7 @@ export async function gslidesProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await setProfile('gslides', profileName, { readOnly: options.readOnly });
-  await setCredentials('gslides', profileName, credentials);
+  await saveProfile('gslides', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

@@ -1,28 +1,9 @@
 import { Command } from 'commander';
-import { getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
-import { pruneDanglingScopes } from '../auth/api-keys';
-import { updateVault } from '../vault/vault';
+import { deleteProfile } from '../config/profile-store';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
-
-/**
- * Drop a profile, its credentials, and its entry in every key's scope, in one
- * vault write. False when no such profile existed (stray credentials are still
- * cleaned up in that case).
- */
-export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
-  return updateVault((vault) => {
-    const profiles = vault.config.profiles[service];
-    const removed = !!profiles?.some((p) => getProfileName(p) === profileName);
-    if (removed) {
-      vault.config.profiles[service] = profiles!.filter((p) => getProfileName(p) !== profileName);
-      pruneDanglingScopes(vault.config);
-    }
-    delete vault.credentials[service]?.[profileName];
-    return removed;
-  });
-}
 
 /**
  * Shared remove logic used both by the per-service `profile remove` command

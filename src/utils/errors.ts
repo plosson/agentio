@@ -82,6 +82,15 @@ export function noCredentialsError(service: ServiceName, profile: string): CliEr
   );
 }
 
+/** The refusal when a key may read a hub's credentials but not add profiles to it. */
+export function cannotAddProfilesError(hubUrl?: string): CliError {
+  return new CliError(
+    'PERMISSION_DENIED',
+    `This token may not add profiles${hubUrl ? ` to the vault hub at ${hubUrl}` : ''}`,
+    'Ask the hub owner to allow this key to add profiles',
+  );
+}
+
 export function handleError(error: unknown): never {
   if (error instanceof CliError) {
     console.error(`Error [${error.code}]: ${error.message}`);

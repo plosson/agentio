@@ -3,9 +3,8 @@ import { readFile, writeFile, readdir, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
 import { fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GScriptClient } from '../services/gscript/client';
@@ -472,14 +471,7 @@ export async function gscriptProfileAdd(options: { profile?: string; readOnly?: 
     );
   }
 
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && (await getProfile('gscript', userEmail))) {
-    profileName = `${userEmail}-readonly`;
-  } else {
-    profileName = userEmail;
-  }
+  const profileName = await chooseProfileName('gscript', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
 
   const credentials: GScriptCredentials = {
     accessToken: tokens.access_token,
@@ -490,8 +482,7 @@ export async function gscriptProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await setProfile('gscript', profileName, { readOnly: options.readOnly });
-  await setCredentials('gscript', profileName, credentials);
+  await saveProfile('gscript', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

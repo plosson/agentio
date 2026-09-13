@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../vault/test-helpers';
-import { lockVault, unlockVault } from '../vault/vault';
+import { loadVault, lockVault, unlockVault } from '../vault/vault';
 import { createApiKey, listApiKeys, revokeApiKey } from '../auth/api-keys';
 import { createRequestHandler } from '../daemon/api';
 
@@ -44,10 +44,10 @@ afterEach(async () => {
   await rm(clientHome, { recursive: true, force: true }).catch(() => {});
 });
 
-async function cli(args: string[], extraEnv: Record<string, string> = {}) {
+async function cli(args: string[], extraEnv: Record<string, string> = {}, stdin = '') {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), HOME: clientHome, AGENTIO_TOKEN: token, ...extraEnv };
   delete env.AGENTIO_PASSPHRASE;
-  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], { stdout: 'pipe', stderr: 'pipe', env });
+  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], { stdin: new Blob([stdin]), stdout: 'pipe', stderr: 'pipe', env });
   const exitCode = await proc.exited;
   return { exitCode, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };
 }
@@ -92,12 +92,49 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'status'], ['profile', 'add', 'gmail'], ['telegram', 'profile', 'add']]) {
+    for (const args of [['vault', 'status'], ['profile', 'remove', 'telegram', 'bare'], ['telegram', 'profile', 'remove', '--profile', 'bare']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
       expect(res.stderr).toContain(url);
     }
+  });
+
+  test('profile add is refused up front, before any prompt, when the key may not add', async () => {
+    const res = await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n');
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('PERMISSION_DENIED');
+    expect(res.stderr).toContain(url);
+    // The gate ran before the handler, so the setup dialogue never started.
+    expect(res.stderr).not.toContain('Connection URL');
+  });
+
+  test('a hub that predates the flag is told apart from a key that lacks it', async () => {
+    // An older hub answers the listing without canAddProfiles at all.
+    const bare = Bun.serve({ port: 0, fetch: () => Response.json({ profiles: [] }) });
+    try {
+      const res = await cli(['sql', 'profile', 'add'], {
+        AGENTIO_TOKEN: (await createApiKey({ name: 'old', allowedProfiles: '*' }, `http://127.0.0.1:${bare.port}`)).token,
+      }, 'sqlite://:memory:\n');
+      expect(res.stderr).toContain('does not support adding profiles');
+      expect(res.stderr).not.toContain('Ask the hub owner');
+    } finally {
+      bare.stop(true);
+    }
+  });
+
+  test('profile add on the agent lands on the hub, and the key can use it at once', async () => {
+    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canAddProfiles: true }, url)).token;
+    const added = await cli(['sql', 'profile', 'add', '--profile', 'mem', '--read-only'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
+    expect(added.exitCode).toBe(0);
+
+    // The entry and its read-only flag reached the hub's vault through the PUT.
+    expect((await loadVault()).config.profiles.sql).toEqual([{ name: 'mem', readOnly: true }]);
+
+    // And the adding key may use what it just added, without a new token.
+    const query = await cli(['sql', 'query', 'SELECT 1 AS one'], { AGENTIO_TOKEN: adder });
+    expect(query.exitCode).toBe(0);
+    expect(query.stdout).toContain('one');
   });
 
   test('a token outside the allow-list is refused by the hub, not the client', async () => {

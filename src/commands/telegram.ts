@@ -1,7 +1,7 @@
 import { Command } from 'commander';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
+import { resolveProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError, multipleProfilesError } from '../utils/errors';
@@ -177,10 +177,8 @@ export async function telegramProfileAdd(options: { profile?: string; readOnly?:
   console.error('    /setuserpic - Set bot photo');
   console.error('    /setdescription - Set bot description\n');
 
-  // Auto-name based on bot username
-  const profileName = options.profile || botInfo.username;
+  const profileName = await chooseProfileName('telegram', { explicit: options.profile, derived: botInfo.username, readOnly: options.readOnly });
 
-  // Save credentials
   const credentials: TelegramCredentials = {
     botToken: botToken,
     channelId: channelId,
@@ -188,8 +186,7 @@ export async function telegramProfileAdd(options: { profile?: string; readOnly?:
     channelName: channelName,
   };
 
-  await setProfile('telegram', profileName, { readOnly: options.readOnly });
-  await setCredentials('telegram', profileName, credentials);
+  await saveProfile('telegram', profileName, credentials, { readOnly: options.readOnly });
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

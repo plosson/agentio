@@ -1,17 +1,18 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { getProfileName, loadConfig, updateConfig, listProfileRefs } from '../config/config-manager';
+import { getProfileName, loadConfig, updateConfig, listProfileRefs, profileRef } from '../config/config-manager';
 import { CliError } from '../utils/errors';
-import type { ApiKey, ApiKeyScope, Config } from '../types/config';
+import type { ApiKey, ApiKeyScope, Config, ServiceName } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
-/** What callers may see: everything but the hash. */
-export type ApiKeyView = Omit<ApiKey, 'secretHash'>;
+/** What callers may see: everything but the hash, with every flag a plain boolean. */
+export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canAddProfiles'> & { canAddProfiles: boolean };
 
 /** Raw caller input; every field is validated here, so routes pass JSON through untouched. */
 export interface ApiKeyInput {
   name?: unknown;
   allowedProfiles?: unknown;
   readOnly?: unknown;
+  canAddProfiles?: unknown;
 }
 
 export interface IssuedKey {
@@ -23,8 +24,9 @@ export interface IssuedKey {
 /** A touch inside this window is not written; minute granularity is all lastUsedAt needs. */
 export const TOUCH_INTERVAL_MS = 60_000;
 
-function view({ secretHash: _hash, ...rest }: ApiKey): ApiKeyView {
-  return rest;
+/** Keys stored before canAddProfiles existed have no field; they read as no, here and nowhere else. */
+function view({ secretHash: _hash, canAddProfiles = false, ...rest }: ApiKey): ApiKeyView {
+  return { ...rest, canAddProfiles };
 }
 
 function hashSecret(secret: string): string {
@@ -60,15 +62,15 @@ export function validateName(name: unknown): string {
   return name.trim();
 }
 
-/** "all profiles" or the list, plus the read-only flag: the one-line summary the CLI prints. */
+/** "all profiles" or the list, plus the flags: the one-line summary the CLI prints. */
 export function describeScope(key: ApiKeyView): string {
   const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}`;
+  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canAddProfiles ? ', can add profiles' : ''}`;
 }
 
-function validateReadOnly(readOnly: unknown): boolean {
-  if (typeof readOnly !== 'boolean') throw new CliError('INVALID_PARAMS', 'readOnly must be true or false');
-  return readOnly;
+export function validateFlag(field: string, value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new CliError('INVALID_PARAMS', `${field} must be true or false`);
+  return value;
 }
 
 /** The hub base URL that goes into the token, as the browser or --url saw it. */
@@ -91,7 +93,7 @@ async function validateScope(scope: unknown): Promise<ApiKeyScope> {
   if (!Array.isArray(scope) || scope.length === 0 || !scope.every((s) => typeof s === 'string')) {
     throw new CliError('INVALID_PARAMS', 'allowedProfiles must be "*" or a non-empty list of service/name');
   }
-  const known = new Set((await listProfileRefs()).map((r) => `${r.service}/${r.name}`));
+  const known = new Set((await listProfileRefs()).map((r) => profileRef(r.service, r.name)));
   const unknown = (scope as string[]).filter((s) => !known.has(s));
   if (unknown.length > 0) {
     throw new CliError(
@@ -118,7 +120,8 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
 
 export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
   const name = validateName(input.name);
-  const readOnly = validateReadOnly(input.readOnly);
+  const readOnly = validateFlag('readOnly', input.readOnly ?? false);
+  const canAddProfiles = validateFlag('canAddProfiles', input.canAddProfiles ?? false);
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
@@ -127,7 +130,7 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
     const keys = (config.apiKeys ??= []);
     let id = newKeyId();
     while (keys.some((k) => k.id === id)) id = newKeyId();
-    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
+    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canAddProfiles, createdAt: new Date().toISOString() };
     keys.push(created);
     return created;
   });
@@ -139,7 +142,8 @@ export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView
   return withKey(id, async (key) => {
     if (patch.name !== undefined) key.name = validateName(patch.name);
     if (patch.allowedProfiles !== undefined) key.allowedProfiles = await validateScope(patch.allowedProfiles);
-    if (patch.readOnly !== undefined) key.readOnly = validateReadOnly(patch.readOnly);
+    if (patch.readOnly !== undefined) key.readOnly = validateFlag('readOnly', patch.readOnly);
+    if (patch.canAddProfiles !== undefined) key.canAddProfiles = validateFlag('canAddProfiles', patch.canAddProfiles);
     return view(key);
   });
 }
@@ -171,7 +175,7 @@ export function revokeApiKey(id: string): Promise<void> {
 export function pruneDanglingScopes(config: Config): boolean {
   const known = new Set(
     Object.entries(config.profiles).flatMap(([service, profiles]) =>
-      (profiles ?? []).map((p) => `${service}/${getProfileName(p)}`),
+      (profiles ?? []).map((p) => profileRef(service, getProfileName(p))),
     ),
   );
   let changed = false;
@@ -184,6 +188,17 @@ export function pruneDanglingScopes(config: Config): boolean {
     }
   }
   return changed;
+}
+
+/**
+ * Put a profile on a key's allow-list, in place, so the key that just added
+ * it can use it. A `*` key already sees everything. Unknown key: nothing.
+ */
+export function grantProfileToKey(config: Config, keyId: string, service: ServiceName, profile: string): void {
+  const key = findKey(config, keyId);
+  if (!key || key.allowedProfiles === '*') return;
+  const ref = profileRef(service, profile);
+  if (!key.allowedProfiles.includes(ref)) key.allowedProfiles.push(ref);
 }
 
 /** The key a token proves possession of, or null. Malformed tokens are null too. */
@@ -201,7 +216,7 @@ export async function authenticateToken(token: string): Promise<ApiKeyView | nul
 
 /** Whether a key's allow-list covers a profile. */
 export function keyAllows(key: ApiKeyView, service: string, profile: string): boolean {
-  return key.allowedProfiles === '*' || key.allowedProfiles.includes(`${service}/${profile}`);
+  return key.allowedProfiles === '*' || key.allowedProfiles.includes(profileRef(service, profile));
 }
 
 /** A profile is read-only for a key when either the profile or the key says so. */

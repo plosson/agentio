@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { getValidTokens, createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, getProfile } from '../config/config-manager';
 import { createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../config/profile-store';
 import { performOAuthFlow } from '../auth/oauth';
 import { GTasksClient } from '../services/gtasks/client';
 import {
@@ -451,19 +450,9 @@ export async function gtasksProfileAdd(options: { profile?: string; readOnly?: b
     throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
   }
 
-  // Determine profile name: use explicit --profile, or email, or email-readonly if conflict
-  let profileName: string;
-  if (options.profile) {
-    profileName = options.profile;
-  } else if (options.readOnly && await getProfile('gtasks', email)) {
-    // Profile with email already exists, use -readonly suffix
-    profileName = `${email}-readonly`;
-  } else {
-    profileName = email;
-  }
+  const profileName = await chooseProfileName('gtasks', { explicit: options.profile, derived: email, readOnly: options.readOnly });
 
-  await setProfile('gtasks', profileName, { readOnly: options.readOnly });
-  await setCredentials('gtasks', profileName, { ...tokens, email });
+  await saveProfile('gtasks', profileName, { ...tokens, email }, { readOnly: options.readOnly });
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${email}`);

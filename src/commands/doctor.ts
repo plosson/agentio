@@ -6,7 +6,7 @@ import type { Config } from '../types/config';
 import { readPointer } from '../vault/pointer';
 import { getDaemonHealth } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
-import { hub, isRemoteMode, remoteProfiles } from '../auth/remote';
+import { hub, isRemoteMode, remoteCanAddProfiles, remoteProfiles } from '../auth/remote';
 
 export interface Check {
   name: string;
@@ -52,8 +52,9 @@ async function checkVault(): Promise<Check> {
 async function checkHub(): Promise<Check> {
   const url = hub().url;
   try {
-    const profiles = await remoteProfiles();
-    return { name: 'Hub', status: 'ok', detail: `${url}, ${profiles.length} profile(s) allowed for this token` };
+    const [profiles, canAddProfiles] = await Promise.all([remoteProfiles(), remoteCanAddProfiles()]);
+    const may = canAddProfiles ? ', can add profiles' : '';
+    return { name: 'Hub', status: 'ok', detail: `${url}, ${profiles.length} profile(s) allowed for this token${may}` };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { name: 'Hub', status: 'error', detail, fix: err instanceof CliError ? err.suggestion : undefined };

@@ -34,7 +34,7 @@ import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
-import { isRemoteMode, remoteModeError } from './auth/remote';
+import { hubTooOldToAddError, isRemoteMode, remoteCanAddProfiles, remoteCannotAddError, remoteModeError } from './auth/remote';
 import { handleError } from './utils/errors';
 
 declare const BUILD_VERSION: string | undefined;
@@ -122,6 +122,17 @@ export function createProgram(): Command {
     const parent = actionCommand.parent?.name();
 
     if (isRemoteMode()) {
+      // An add ends in a PUT to the hub, so it runs here; refuse before any OAuth or token dance when the key may not.
+      if (parent === 'profile' && name === 'add') {
+        try {
+          const allowed = await remoteCanAddProfiles();
+          if (allowed === undefined) throw hubTooOldToAddError();
+          if (!allowed) throw remoteCannotAddError();
+        } catch (err) {
+          handleError(err);
+        }
+        return;
+      }
       const localOnly =
         LOCAL_ONLY_COMMANDS.has(name) ||
         (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||

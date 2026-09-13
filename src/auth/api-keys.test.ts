@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
-import { deleteProfile } from '../utils/profile-commands';
-import { authenticateToken, createApiKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
+import { updateConfig } from '../config/config-manager';
+import { deleteProfile } from '../config/profile-store';
+import { authenticateToken, createApiKey, describeScope, grantProfileToKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
 import { decodeToken, encodeToken } from './token';
 
 const HUB = 'https://vault.example.com';
@@ -51,19 +52,35 @@ describe('api keys', () => {
     expect(keyAllows(key, 'gmail', 'work')).toBe(false);
   });
 
-  test('name, readOnly, and hub URL are validated', async () => {
+  test('name, flags, and hub URL are validated', async () => {
     await expect(createApiKey({ name: '  ', allowedProfiles: '*', readOnly: false }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false, canAddProfiles: 'yes' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'vault.example.com')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'ftp://x')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     const { token } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'https://vault.example.com/ui/?x=1');
     expect(decodeToken(token).url).toBe(HUB);
   });
 
-  test('update changes name, scope, and read-only; unknown id is null', async () => {
+  test('flags are off unless asked for, and show in the scope summary', async () => {
+    const { key: plain } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
+    expect(plain).toMatchObject({ readOnly: false, canAddProfiles: false });
+    expect(describeScope(plain)).toBe('all profiles');
+    const { key } = await createApiKey({ name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true }, HUB);
+    expect(describeScope(key)).toBe('gmail/home, read-only, can add profiles');
+  });
+
+  test('a key stored before canAddProfiles existed lists as false', async () => {
+    const { key } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
+    await updateConfig((config) => { delete config.apiKeys![0].canAddProfiles; });
+    expect((await loadVault()).config.apiKeys![0]).not.toHaveProperty('canAddProfiles');
+    expect(await listApiKeys()).toEqual([{ ...key, canAddProfiles: false }]);
+  });
+
+  test('update changes name, scope, and flags; unknown id is null', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true });
-    expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true });
+    const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
+    expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
     await expect(updateApiKey('nope', { name: 'x' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
@@ -92,6 +109,20 @@ describe('api keys', () => {
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:00:00.000Z');
     await touchApiKey(key, new Date('2026-09-12T10:01:00Z'));
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:01:00.000Z');
+  });
+
+  test('granting a profile extends a list scope once; wildcard and unknown keys are untouched', async () => {
+    const { key: listed } = await createApiKey({ name: 'l', allowedProfiles: ['gdrive/docs'] }, HUB);
+    const { key: star } = await createApiKey({ name: 's', allowedProfiles: '*' }, HUB);
+    await updateConfig((config) => {
+      grantProfileToKey(config, listed.id, 'gmail', 'work');
+      grantProfileToKey(config, listed.id, 'gmail', 'work');
+      grantProfileToKey(config, star.id, 'gmail', 'work');
+      grantProfileToKey(config, 'nope', 'gmail', 'work');
+    });
+    const keys = await listApiKeys();
+    expect(keys.find((k) => k.id === listed.id)!.allowedProfiles).toEqual(['gdrive/docs', 'gmail/work']);
+    expect(keys.find((k) => k.id === star.id)!.allowedProfiles).toBe('*');
   });
 
   test('deleting a profile prunes it from key scopes; wildcard keys are untouched', async () => {
