@@ -276,6 +276,7 @@ export async function resetVault(): Promise<void> {
   if (await pointerExists()) {
     const path = await readPointer();
     if (path && existsSync(path)) {
+      assertTestWritable(path, 'vault');
       await unlink(path).catch(() => {});
     }
   }

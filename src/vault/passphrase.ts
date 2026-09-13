@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
+import { assertTestWritable } from './pointer';
 
 export interface PassphraseProvider {
   get(account: string): Promise<string | null>;
@@ -30,6 +31,7 @@ function fileProvider(): PassphraseProvider {
     },
     async set(_account, value) {
       const p = passphraseFilePath();
+      assertTestWritable(p, 'passphrase file');
       const dir = dirname(p);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeFileSync(p, value, { mode: 0o600 });
@@ -37,6 +39,7 @@ function fileProvider(): PassphraseProvider {
     async delete() {
       const p = passphraseFilePath();
       if (existsSync(p)) {
+        assertTestWritable(p, 'passphrase file');
         try { unlinkSync(p); } catch { /* ignore */ }
       }
     },

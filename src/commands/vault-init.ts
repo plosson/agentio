@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { dirname, isAbsolute, join } from 'path';
 import { password, input, confirm } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
-import { writePointer, readPointer, deletePointer } from '../vault/pointer';
+import { writePointer, readPointer, deletePointer, assertTestWritable } from '../vault/pointer';
 import {
   vaultExists,
   loadVault,
@@ -290,7 +290,7 @@ To use a vault that already exists, run 'agentio vault set <path>' instead.`,
           const cfgDir = join(process.env.HOME || homedir(), '.config', 'agentio');
           for (const name of ['config.json.bak', 'tokens.enc.bak']) {
             const p = join(cfgDir, name);
-            if (existsSync(p)) await unlink(p).catch(() => {});
+            if (existsSync(p)) { assertTestWritable(p, 'legacy backup'); await unlink(p).catch(() => {}); }
           }
 
           await resetVault();

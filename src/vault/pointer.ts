@@ -46,6 +46,7 @@ export async function writePointer(vaultPath: string): Promise<void> {
 
 export async function deletePointer(): Promise<void> {
   const path = pointerPath();
+  assertTestWritable(path, 'vault pointer');
   if (existsSync(path)) {
     await unlink(path);
   }

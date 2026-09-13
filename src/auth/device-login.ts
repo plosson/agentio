@@ -41,16 +41,18 @@ export async function deviceLogin(options: DeviceLoginOptions): Promise<DeviceLo
   const url = hubOrigin(options.url);
   const name = options.name?.trim() || hostname();
 
-  let start: { userCode: string; deviceCode: string; expiresIn: number; interval: number };
+  const notAHub = () =>
+    new CliError('CONFIG_ERROR', `${url} does not offer device login`, 'Is this the hub URL, and is the hub up to date?');
+  let start: { userCode: string; deviceCode: string; expiresIn: number; interval: number } | null;
   try {
     start = await hubCall(url, '/v1/device', { method: 'POST', body: { name } });
   } catch (err) {
     // Not a hub at all (404), or a hub too old to have the route, which answers with its bearer check instead.
-    if (code(err) === 'NOT_FOUND' || code(err) === 'AUTH_FAILED') {
-      throw new CliError('CONFIG_ERROR', `${url} does not offer device login`, 'Is this the hub URL, and is the hub up to date?');
-    }
+    if (code(err) === 'NOT_FOUND' || code(err) === 'AUTH_FAILED') throw notAHub();
     throw err;
   }
+  // A landing page or SPA answers 200 with HTML, which parses to null.
+  if (!start || typeof start.userCode !== 'string' || typeof start.deviceCode !== 'string') throw notAHub();
   options.onCode({ userCode: start.userCode, verifyUrl: `${url}/ui#authorize=${start.userCode}`, expiresIn: start.expiresIn });
 
   const deadline = Date.now() + start.expiresIn * 1000;

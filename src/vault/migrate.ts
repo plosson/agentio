@@ -6,6 +6,7 @@ import { createDecipheriv, scryptSync } from 'crypto';
 import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
+import { assertTestWritable } from './pointer';
 
 function configDir(): string {
   return join(process.env.HOME || homedir(), '.config', 'agentio');
@@ -100,9 +101,11 @@ export async function readLegacy(): Promise<MigrateResult> {
 export async function archiveLegacy(): Promise<void> {
   const { configPath, tokensPath } = legacyPaths();
   if (existsSync(configPath)) {
+    assertTestWritable(configPath, 'legacy config');
     await rename(configPath, configPath + '.bak');
   }
   if (existsSync(tokensPath)) {
+    assertTestWritable(tokensPath, 'legacy token store');
     await rename(tokensPath, tokensPath + '.bak');
   }
 }
