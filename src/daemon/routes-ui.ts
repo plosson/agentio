@@ -2,7 +2,7 @@ import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile } from '../config/profile-store';
-import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput } from '../auth/api-keys';
+import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
 import { RateLimiter } from './rate-limit';
@@ -70,8 +70,7 @@ async function handleDeleteProfile(ref: { service: ServiceName; name: string }):
 }
 
 async function handlePatchProfile(request: Request, ref: { service: ServiceName; name: string }): Promise<Response> {
-  const { readOnly } = await readJson<{ readOnly?: unknown }>(request);
-  if (typeof readOnly !== 'boolean') throw new CliError('INVALID_PARAMS', 'readOnly must be a boolean');
+  const readOnly = validateFlag('readOnly', (await readJson<{ readOnly?: unknown }>(request)).readOnly);
   if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) throw noProfile(ref);
   return json({ service: ref.service, name: ref.name, readOnly });
 }

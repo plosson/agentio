@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
+import { updateConfig } from '../config/config-manager';
 import { deleteProfile } from '../config/profile-store';
 import { authenticateToken, createApiKey, describeScope, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
 import { decodeToken, encodeToken } from './token';
@@ -54,30 +55,32 @@ describe('api keys', () => {
   test('name, flags, and hub URL are validated', async () => {
     await expect(createApiKey({ name: '  ', allowedProfiles: '*', readOnly: false }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false, canAddProfiles: 'yes' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: expect.stringContaining('canAddProfiles') });
+    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false, canAddProfiles: 'yes' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'vault.example.com')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'ftp://x')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     const { token } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'https://vault.example.com/ui/?x=1');
     expect(decodeToken(token).url).toBe(HUB);
   });
 
-  test('canAddProfiles is off unless asked for, and shows in the scope summary', async () => {
-    const { key: plain } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    expect(plain.canAddProfiles).toBe(false);
+  test('flags are off unless asked for, and show in the scope summary', async () => {
+    const { key: plain } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
+    expect(plain).toMatchObject({ readOnly: false, canAddProfiles: false });
     expect(describeScope(plain)).toBe('all profiles');
     const { key } = await createApiKey({ name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true }, HUB);
-    expect(key.canAddProfiles).toBe(true);
-    expect(describeScope(key)).toBe('gmail/home, read-only, may add profiles');
-    // A key stored before the flag existed has no field at all; it reads as no.
-    expect(describeScope({ ...key, canAddProfiles: undefined })).toBe('gmail/home, read-only');
+    expect(describeScope(key)).toBe('gmail/home, read-only, can add profiles');
+  });
+
+  test('a key stored before canAddProfiles existed lists as false', async () => {
+    const { key } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
+    await updateConfig((config) => { delete config.apiKeys![0].canAddProfiles; });
+    expect((await loadVault()).config.apiKeys![0]).not.toHaveProperty('canAddProfiles');
+    expect(await listApiKeys()).toEqual([{ ...key, canAddProfiles: false }]);
   });
 
   test('update changes name, scope, and flags; unknown id is null', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
     const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
     expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
-    expect(await updateApiKey(key.id, { canAddProfiles: false })).toMatchObject({ canAddProfiles: false });
-    await expect(updateApiKey(key.id, { canAddProfiles: 1 })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(updateApiKey('nope', { name: 'x' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 

@@ -4,8 +4,8 @@ import { CliError } from '../utils/errors';
 import type { ApiKey, ApiKeyScope, Config } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
-/** What callers may see: everything but the hash. */
-export type ApiKeyView = Omit<ApiKey, 'secretHash'>;
+/** What callers may see: everything but the hash, with every flag a plain boolean. */
+export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canAddProfiles'> & { canAddProfiles: boolean };
 
 /** Raw caller input; every field is validated here, so routes pass JSON through untouched. */
 export interface ApiKeyInput {
@@ -24,8 +24,9 @@ export interface IssuedKey {
 /** A touch inside this window is not written; minute granularity is all lastUsedAt needs. */
 export const TOUCH_INTERVAL_MS = 60_000;
 
-function view({ secretHash: _hash, ...rest }: ApiKey): ApiKeyView {
-  return rest;
+/** Keys stored before canAddProfiles existed have no field; they read as no, here and nowhere else. */
+function view({ secretHash: _hash, canAddProfiles = false, ...rest }: ApiKey): ApiKeyView {
+  return { ...rest, canAddProfiles };
 }
 
 function hashSecret(secret: string): string {
@@ -64,10 +65,10 @@ export function validateName(name: unknown): string {
 /** "all profiles" or the list, plus the flags: the one-line summary the CLI prints. */
 export function describeScope(key: ApiKeyView): string {
   const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canAddProfiles ? ', may add profiles' : ''}`;
+  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canAddProfiles ? ', can add profiles' : ''}`;
 }
 
-function validateFlag(field: string, value: unknown): boolean {
+export function validateFlag(field: string, value: unknown): boolean {
   if (typeof value !== 'boolean') throw new CliError('INVALID_PARAMS', `${field} must be true or false`);
   return value;
 }
@@ -119,7 +120,7 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
 
 export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
   const name = validateName(input.name);
-  const readOnly = validateFlag('readOnly', input.readOnly);
+  const readOnly = validateFlag('readOnly', input.readOnly ?? false);
   const canAddProfiles = validateFlag('canAddProfiles', input.canAddProfiles ?? false);
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
