@@ -17,6 +17,9 @@ let script: Record<string, Scripted> = {};
 let hits: string[] = [];
 let server: ReturnType<typeof Bun.serve>;
 let url = '';
+// Remote mode falls back to ~/.config/agentio/token, so the real HOME must stay out of reach.
+let home = '';
+let savedHome: string | undefined;
 
 const PROFILES = [
   { service: 'gdrive', name: 'docs', readOnly: false, hasCredentials: true },
@@ -24,7 +27,12 @@ const PROFILES = [
   { service: 'gmail', name: 'home', readOnly: false, hasCredentials: false },
 ];
 
-beforeAll(() => {
+beforeAll(async () => {
+  const { mkdtemp } = await import('fs/promises');
+  const { tmpdir } = await import('os');
+  savedHome = process.env.HOME;
+  home = await mkdtemp(`${tmpdir()}/agentio-remote-test-`);
+  process.env.HOME = home;
   server = Bun.serve({
     port: 0,
     fetch(req) {
@@ -40,7 +48,12 @@ beforeAll(() => {
   url = `http://127.0.0.1:${server.port}`;
 });
 
-afterAll(() => server.stop(true));
+afterAll(async () => {
+  server.stop(true);
+  process.env.HOME = savedHome;
+  const { rm } = await import('fs/promises');
+  await rm(home, { recursive: true, force: true });
+});
 
 beforeEach(() => {
   hits = [];

@@ -69,10 +69,13 @@ describe('device login', () => {
 
   test('a hub without the route is explained, an unreachable one is a network error', async () => {
     const plain = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('nope', { status: 404 }) });
+    const landing = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('<html>hi</html>', { status: 200, headers: { 'content-type': 'text/html' } }) });
     try {
       await expect(deviceLogin({ url: `http://127.0.0.1:${plain.port}`, onCode: () => {} })).rejects.toMatchObject({ code: 'CONFIG_ERROR' });
+      await expect(deviceLogin({ url: `http://127.0.0.1:${landing.port}`, onCode: () => {} })).rejects.toMatchObject({ code: 'CONFIG_ERROR' });
     } finally {
       plain.stop(true);
+      landing.stop(true);
     }
     await expect(deviceLogin({ url: 'http://127.0.0.1:1', onCode: () => {} })).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
   });

@@ -45,6 +45,7 @@
   .card.danger { border-color: var(--error); }
   .card.danger h3 { color: var(--error); }
   label { display: block; font-size: .875rem; font-weight: 500; margin-bottom: 6px; }
+  label > input[type=text] { margin-top: 6px; font-weight: 400; }
   input[type=password], input[type=text] { width: 100%; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
   input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
@@ -210,7 +211,7 @@
 
 <!-- The fields a key is made of, shared by Create key and the sign-in approval. -->
 <template id="key-fields-template">
-  <div class="field"><label>Name</label><input type="text" class="key-name" placeholder="e.g. laptop, ci, comptable" required></div>
+  <div class="field"><label>Name<input type="text" class="key-name" placeholder="e.g. laptop, ci, comptable" required></label></div>
   <div class="field">
     <label>Scope</label>
     <label class="toggle"><input type="radio" name="scope" value="all" checked> all profiles</label>
@@ -282,9 +283,11 @@
   }
 
   // #profiles, #keys, #settings pick a tab; #authorize=<code> is the login approval page.
-  function openFromHash() {
-    const hash = decodeURIComponent(location.hash.slice(1));
-    if (hash.startsWith('authorize=')) return openAuthorize(hash.slice('authorize='.length));
+  // `ready` resolves when the profile list is in, which the approval form needs.
+  function openFromHash(ready) {
+    let hash = location.hash.slice(1);
+    try { hash = decodeURIComponent(hash); } catch { /* a mangled link: fall through to the default tab */ }
+    if (hash.startsWith('authorize=')) return openAuthorize(hash.slice('authorize='.length), ready);
     show(TABS.includes(hash) ? hash : 'profiles');
   }
   window.addEventListener('hashchange', () => { if (views.unlock.hidden) openFromHash(); });
@@ -298,8 +301,8 @@
     const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
     let body = null;
     if (res.status !== 204) { try { body = await res.json(); } catch { /* no body */ } }
-    const lost = (res.status === 401 || res.status === 503) && views.unlock.hidden;
-    if (lost) show('unlock');
+    const lost = res.status === 401 || res.status === 503;
+    if (lost && views.unlock.hidden) show('unlock');
     return { ok: res.ok, status: res.status, body, lost, error: (body && body.error) || 'Request failed' };
   }
 
@@ -507,15 +510,16 @@
   $('key-cancel-btn').addEventListener('click', () => toggleKeyPanel(false));
 
   async function openVault() {
-    await Promise.all([openFromHash(), loadProfiles(), loadKeys()]);
+    const loading = Promise.all([loadProfiles(), loadKeys()]);
+    await Promise.all([openFromHash(loading), loading]);
   }
 
-  async function openAuthorize(code) {
+  async function openAuthorize(code, ready) {
     show('authorize');
     $('auth-error').hidden = true;
     $('auth-request').hidden = true;
     $('auth-done').hidden = true;
-    const res = await api('/ui/api/authorize/' + encodeURIComponent(code));
+    const [res] = await Promise.all([api('/ui/api/authorize/' + encodeURIComponent(code)), ready]);
     if (res.lost) return;
     if (!res.ok) { $('auth-error').textContent = res.error; $('auth-error').hidden = false; return; }
     $('auth-code').textContent = res.body.userCode;

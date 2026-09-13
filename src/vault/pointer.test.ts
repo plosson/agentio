@@ -68,3 +68,26 @@ describe('vault pointer', () => {
     expect(await readPointer()).toBe('/some/vault.enc');
   });
 });
+
+/** The guard that keeps `bun test` away from the real config directory, on every path that changes it. */
+describe('test write guard', () => {
+  test('accepts paths under the temp directory and refuses the rest', async () => {
+    const { assertTestWritable } = await import('./pointer');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    expect(() => assertTestWritable(join(tmpdir(), 'x', 'vault.enc'), 'vault')).not.toThrow();
+    expect(() => assertTestWritable('/Users/someone/.config/agentio/vault.enc', 'vault')).toThrow(/Refusing to write a vault/);
+  });
+
+  test('pointer writes and deletes are guarded', async () => {
+    const { writePointer, deletePointer } = await import('./pointer');
+    const saved = process.env.HOME;
+    process.env.HOME = '/definitely/not/a/temp/home';
+    try {
+      await expect(writePointer('/x/vault.enc')).rejects.toThrow(/Refusing/);
+      await expect(deletePointer()).rejects.toThrow(/Refusing/);
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+});
