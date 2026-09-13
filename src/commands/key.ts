@@ -13,7 +13,7 @@ import {
 } from '../auth/api-keys';
 import type { ApiKeyScope } from '../types/config';
 
-type KeyOptions = { name?: string; profiles?: string; all?: boolean; readOnly?: boolean; canAddProfiles?: boolean };
+type KeyOptions = { name?: string; profiles?: string; all?: boolean; readOnly?: boolean; canManageProfiles?: boolean };
 
 function scopeFromOptions(opts: KeyOptions): ApiKeyScope | undefined {
   if (opts.all && opts.profiles) {
@@ -26,7 +26,7 @@ function scopeFromOptions(opts: KeyOptions): ApiKeyScope | undefined {
 
 /** The options as createApiKey and updateApiKey take them; an option not given stays undefined. */
 function keyInputFromOptions(opts: KeyOptions): ApiKeyInput {
-  return { name: opts.name, allowedProfiles: scopeFromOptions(opts), readOnly: opts.readOnly, canAddProfiles: opts.canAddProfiles };
+  return { name: opts.name, allowedProfiles: scopeFromOptions(opts), readOnly: opts.readOnly, canManageProfiles: opts.canManageProfiles };
 }
 
 /** The token goes to stdout alone so it can be captured; everything else to stderr. */
@@ -50,7 +50,7 @@ export function registerKeyCommands(program: Command): void {
       .option('--profiles <list>', 'Comma-separated service/name pairs the key may use')
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only on every profile the key can see', false)
-      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds', false)
+      .option('--can-manage-profiles', 'Let the agent add, replace, rename and delete profiles from its machine', false)
       .action(async (name: string, opts) => {
         try {
           const input = { ...keyInputFromOptions(opts), name };
@@ -68,8 +68,8 @@ export function registerKeyCommands(program: Command): void {
   # everything, but read-only
   agentio key create reporter --url https://vault.example.com --all --read-only
 
-  # a laptop that can add its own profiles to the vault
-  agentio key create laptop --url https://vault.example.com --all --can-add-profiles
+  # a laptop that manages its own profiles in the vault
+  agentio key create laptop --url https://vault.example.com --all --can-manage-profiles
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)`,
@@ -109,8 +109,8 @@ export function registerKeyCommands(program: Command): void {
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only')
       .option('--no-read-only', 'Lift the key-level read-only restriction')
-      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds')
-      .option('--no-can-add-profiles', 'Stop the agent from adding profiles')
+      .option('--can-manage-profiles', 'Let the agent add, replace, rename and delete profiles from its machine')
+      .option('--no-can-manage-profiles', 'Stop the agent from managing profiles')
       .action(async (id: string, opts) => {
         try {
           const patch = keyInputFromOptions(opts);
@@ -127,7 +127,7 @@ export function registerKeyCommands(program: Command): void {
 
   agentio key update a1b2c3d4 --profiles gdrive/docunit
   agentio key update a1b2c3d4 --no-read-only
-  agentio key update a1b2c3d4 --can-add-profiles`,
+  agentio key update a1b2c3d4 --can-manage-profiles`,
   );
 
   addExamples(

@@ -19,19 +19,19 @@ async function runCli(args: string[]): Promise<{ exitCode: number; stdout: strin
 
 describe('agentio key', () => {
   test('create prints the token alone on stdout; list, rotate, revoke follow', async () => {
-    const created = await runCli(['key', 'create', 'ci', '--url', 'https://vault.example.com', '--profiles', 'gdrive/docs', '--read-only', '--can-add-profiles']);
+    const created = await runCli(['key', 'create', 'ci', '--url', 'https://vault.example.com', '--profiles', 'gdrive/docs', '--read-only', '--can-manage-profiles']);
     expect(created.exitCode).toBe(0);
     const token = created.stdout.trim();
     expect(token.split('\n')).toHaveLength(1);
     const { kid, url } = decodeToken(token);
     expect(url).toBe('https://vault.example.com');
-    expect(created.stderr).toContain('gdrive/docs, read-only, can add profiles');
+    expect(created.stderr).toContain('gdrive/docs, read-only, can manage profiles');
     expect(created.stderr).toContain('shown once');
 
     const listed = await runCli(['key', 'list']);
-    expect(listed.stdout).toContain(`${kid}  ci  agio1.…${token.slice(-4)}  gdrive/docs, read-only, can add profiles`);
+    expect(listed.stdout).toContain(`${kid}  ci  agio1.…${token.slice(-4)}  gdrive/docs, read-only, can manage profiles`);
 
-    const withdrawn = await runCli(['key', 'update', kid, '--no-can-add-profiles']);
+    const withdrawn = await runCli(['key', 'update', kid, '--no-can-manage-profiles']);
     expect(withdrawn.stdout).toContain('gdrive/docs, read-only');
     expect(withdrawn.stdout).not.toContain('can add');
 

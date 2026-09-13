@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { cannotAddProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
+import { cannotManageProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
@@ -80,8 +80,8 @@ export interface RemoteProfile extends ProfileRef {
 /** What `GET /v1/profiles` answers: the key's view of the vault, plus its own add right. */
 interface RemoteListing {
   profiles: RemoteProfile[];
-  /** Absent from a hub older than the flag, which is not the same as a key that lacks it. */
-  canAddProfiles?: boolean;
+  /** Absent from a hub older than the right, which is not the same as a key that lacks it. */
+  canManageProfiles?: boolean;
 }
 
 let parsed: TokenParts | null = null;
@@ -112,16 +112,16 @@ export function assertLocalMode(what: string): void {
 }
 
 /** The refusal a `profile add` gets here, naming the hub the token points at. */
-export function remoteCannotAddError(): CliError {
-  return cannotAddProfilesError(hub().url);
+export function remoteCannotManageError(): CliError {
+  return cannotManageProfilesError(hub().url);
 }
 
-/** A hub too old to know the flag says nothing about it; that is the hub's problem, not the key's. */
-export function hubTooOldToAddError(): CliError {
+/** A hub too old to know the right says nothing about it; that is the hub's problem, not the key's. */
+export function hubTooOldToManageError(): CliError {
   return new CliError(
     'CONFIG_ERROR',
-    `The vault hub at ${hub().url} does not support adding profiles from an agent`,
-    'Update the hub to agentio 2.4 or later',
+    `The vault hub at ${hub().url} does not support managing profiles from an agent`,
+    'Update the hub to agentio 2.5 or later',
   );
 }
 
@@ -207,9 +207,9 @@ export function remoteProfiles(): Promise<RemoteProfile[]> {
   return remoteListing().then((l) => l.profiles);
 }
 
-/** Whether this token may add profiles; undefined from a hub that predates the flag. Asked before any OAuth dance starts. */
-export function remoteCanAddProfiles(): Promise<boolean | undefined> {
-  return remoteListing().then((l) => l.canAddProfiles);
+/** Whether this token may change which profiles the hub holds; undefined from a hub that predates the right. */
+export function remoteCanManageProfiles(): Promise<boolean | undefined> {
+  return remoteListing().then((l) => l.canManageProfiles);
 }
 
 /** The body of `PUT /v1/profiles/:service/:name`; the hub parses this same type. */

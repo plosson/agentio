@@ -95,7 +95,7 @@ describe('/v1 credential API', () => {
 
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {
     const scoped = await (await call('/v1/profiles', { token: scopedToken })).json();
-    expect(scoped.canAddProfiles).toBe(false);
+    expect(scoped.canManageProfiles).toBe(false);
     expect(scoped.profiles).toEqual([
       { service: 'jira', name: 'fresh', readOnly: false, hasCredentials: true },
       { service: 'telegram', name: 'bot', readOnly: false, hasCredentials: true },
@@ -175,7 +175,7 @@ describe('/v1 credential API', () => {
 describe('PUT /v1/profiles/:service/:name', () => {
   let addToken = '';
   beforeEach(async () => {
-    addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canAddProfiles: true }, 'https://hub')).token;
+    addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canManageProfiles: true }, 'https://hub')).token;
   });
 
   test('adds a profile for a key allowed to, and the key can use it at once', async () => {
@@ -184,7 +184,7 @@ describe('PUT /v1/profiles/:service/:name', () => {
     expect(await res.json()).toEqual({ service: 'telegram', name: 'newbot', readOnly: true });
 
     const listed = await (await call('/v1/profiles', { token: addToken })).json();
-    expect(listed.canAddProfiles).toBe(true);
+    expect(listed.canManageProfiles).toBe(true);
     expect(listed.profiles).toContainEqual({ service: 'telegram', name: 'newbot', readOnly: true, hasCredentials: true });
     const got = await (await creds('/v1/profiles/telegram/newbot/credentials', addToken)).json();
     expect(got.credentials).toEqual({ botToken: 'n', channelId: '2' });

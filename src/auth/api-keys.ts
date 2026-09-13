@@ -5,14 +5,14 @@ import type { ApiKey, ApiKeyScope, Config, ServiceName } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
 /** What callers may see: everything but the hash, with every flag a plain boolean. */
-export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canAddProfiles'> & { canAddProfiles: boolean };
+export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canManageProfiles' | 'canAddProfiles'> & { canManageProfiles: boolean };
 
 /** Raw caller input; every field is validated here, so routes pass JSON through untouched. */
 export interface ApiKeyInput {
   name?: unknown;
   allowedProfiles?: unknown;
   readOnly?: unknown;
-  canAddProfiles?: unknown;
+  canManageProfiles?: unknown;
 }
 
 export interface IssuedKey {
@@ -24,9 +24,13 @@ export interface IssuedKey {
 /** A touch inside this window is not written; minute granularity is all lastUsedAt needs. */
 export const TOUCH_INTERVAL_MS = 60_000;
 
-/** Keys stored before canAddProfiles existed have no field; they read as no, here and nowhere else. */
-function view({ secretHash: _hash, canAddProfiles = false, ...rest }: ApiKey): ApiKeyView {
-  return { ...rest, canAddProfiles };
+/**
+ * The one place the stored shape is normalised: a key from before the right
+ * existed has no field and reads as no, and one minted by v2.4.0 carries the
+ * older `canAddProfiles` spelling.
+ */
+function view({ secretHash: _hash, canAddProfiles, canManageProfiles = canAddProfiles ?? false, ...rest }: ApiKey): ApiKeyView {
+  return { ...rest, canManageProfiles };
 }
 
 function hashSecret(secret: string): string {
@@ -65,7 +69,7 @@ export function validateName(name: unknown): string {
 /** "all profiles" or the list, plus the flags: the one-line summary the CLI prints. */
 export function describeScope(key: ApiKeyView): string {
   const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canAddProfiles ? ', can add profiles' : ''}`;
+  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canManageProfiles ? ', can manage profiles' : ''}`;
 }
 
 export function validateFlag(field: string, value: unknown): boolean {
@@ -121,7 +125,7 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
 export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
   const name = validateName(input.name);
   const readOnly = validateFlag('readOnly', input.readOnly ?? false);
-  const canAddProfiles = validateFlag('canAddProfiles', input.canAddProfiles ?? false);
+  const canManageProfiles = validateFlag('canManageProfiles', input.canManageProfiles ?? false);
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
@@ -130,7 +134,7 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
     const keys = (config.apiKeys ??= []);
     let id = newKeyId();
     while (keys.some((k) => k.id === id)) id = newKeyId();
-    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canAddProfiles, createdAt: new Date().toISOString() };
+    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canManageProfiles, createdAt: new Date().toISOString() };
     keys.push(created);
     return created;
   });
@@ -143,7 +147,7 @@ export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView
     if (patch.name !== undefined) key.name = validateName(patch.name);
     if (patch.allowedProfiles !== undefined) key.allowedProfiles = await validateScope(patch.allowedProfiles);
     if (patch.readOnly !== undefined) key.readOnly = validateFlag('readOnly', patch.readOnly);
-    if (patch.canAddProfiles !== undefined) key.canAddProfiles = validateFlag('canAddProfiles', patch.canAddProfiles);
+    if (patch.canManageProfiles !== undefined) key.canManageProfiles = validateFlag('canManageProfiles', patch.canManageProfiles);
     return view(key);
   });
 }

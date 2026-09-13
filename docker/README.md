@@ -79,10 +79,10 @@ In the UI's API keys card, or on the host:
 ```bash
 docker exec agentio agentio key create laptop --url https://<domain> --profiles gdrive/docunit,gmail/work
 docker exec agentio agentio key create reporter --url https://<domain> --all --read-only
-docker exec agentio agentio key create workstation --url https://<domain> --all --can-add-profiles
+docker exec agentio agentio key create workstation --url https://<domain> --all --can-manage-profiles
 ```
 
-The token is printed once. Scope each key to what that agent needs: a read-only key cannot write through any profile it sees, and only a `--can-add-profiles` key may add a profile to the vault.
+The token is printed once. Scope each key to what that agent needs: a read-only key cannot write through any profile it sees, and only a `--can-manage-profiles` key may add a profile to the vault.
 
 ### The agent machine
 
@@ -102,7 +102,7 @@ agentio gdrive list     # any service command, credentials served by the hub
 - **Lock state after a restart** follows `AGENTIO_PASSPHRASE`, see the Environment table.
 - **Rotate or revoke** from the UI or with `agentio key rotate|revoke` on the host. The old token stops working at once.
 - **Reauth** happens on the host with the CLI (`docker exec agentio agentio profile reauth <service> [name]`); the paste-back OAuth flow works without a browser there.
-- **New profiles** are added on the host the same way (`profile add <service>`), or from an agent machine whose key has `--can-add-profiles`: the OAuth or token dance runs there and the result is stored here. An agent can only add, never replace an existing profile.
+- **New profiles** are added on the host the same way (`profile add <service>`), or from an agent machine whose key has `--can-manage-profiles`: the OAuth or token dance runs there and the result is stored here. An agent can only add, never replace an existing profile.
 - **Audit**: every credential call and remote add is one line on the container's stdout (`docker logs`), naming the key and profile.
 - **Back up the vault file, not the env vars**: the file on the volume carries refreshed tokens and the keys, the env vars only the first-boot snapshot. Keep dated copies; a wrong write is undone by restoring the previous one and restarting.
 

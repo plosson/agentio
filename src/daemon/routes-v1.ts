@@ -1,4 +1,4 @@
-import { cannotAddProfilesError, CliError, profileNotFoundError } from '../utils/errors';
+import { cannotManageProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
 import { listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
@@ -108,7 +108,7 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       hasCredentials: !!stored[r.service]?.[r.name],
     }));
   // The key's own add right rides along so a client can refuse `profile add` before any OAuth dance.
-  return json({ profiles, canAddProfiles: key.canAddProfiles });
+  return json({ profiles, canManageProfiles: key.canManageProfiles });
 }
 
 /** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
@@ -143,8 +143,8 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
  * credentials against the service, exactly as the local flow does not.
  */
 async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
-  if (!key.canAddProfiles) {
-    throw cannotAddProfilesError();
+  if (!key.canManageProfiles) {
+    throw cannotManageProfilesError();
   }
   // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
