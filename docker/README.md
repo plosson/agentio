@@ -82,7 +82,7 @@ docker exec agentio agentio key create reporter --url https://<domain> --all --r
 docker exec agentio agentio key create workstation --url https://<domain> --all --can-manage-profiles
 ```
 
-The token is printed once. Scope each key to what that agent needs: a read-only key cannot write through any profile it sees, and only a `--can-manage-profiles` key may add a profile to the vault.
+The token is printed once. Scope each key to what that agent needs: a read-only key cannot write through any profile it sees, and only a `--can-manage-profiles` key may change which profiles the vault holds.
 
 ### The agent machine
 
@@ -95,15 +95,15 @@ agentio status          # the profiles this token may use
 agentio gdrive list     # any service command, credentials served by the hub
 ```
 
-`login` needs no browser on the agent machine: open the printed URL from anywhere, check the code matches, pick the profiles, approve. A key made with `agentio key create` works the same way through `export AGENTIO_TOKEN='agio1.…'`, which also overrides a stored login. No vault and no passphrase on this machine. `vault`, `key`, `daemon`, `reauth`, and profile removal are refused here; they belong on the hub. `profile add` is the exception, see Day-to-day.
+`login` needs no browser on the agent machine: open the printed URL from anywhere, check the code matches, pick the profiles, approve. A key made with `agentio key create` works the same way through `export AGENTIO_TOKEN='agio1.…'`, which also overrides a stored login. No vault and no passphrase on this machine. `vault`, `key`, `daemon` and `reauth` are refused here; they belong on the hub. Managing profiles is the exception, see Day-to-day.
 
 ### Day-to-day
 
 - **Lock state after a restart** follows `AGENTIO_PASSPHRASE`, see the Environment table.
 - **Rotate or revoke** from the UI or with `agentio key rotate|revoke` on the host. The old token stops working at once.
 - **Reauth** happens on the host with the CLI (`docker exec agentio agentio profile reauth <service> [name]`); the paste-back OAuth flow works without a browser there.
-- **New profiles** are added on the host the same way (`profile add <service>`), or from an agent machine whose key has `--can-manage-profiles`: the OAuth or token dance runs there and the result is stored here. An agent can only add, never replace an existing profile.
-- **Audit**: every credential call and remote add is one line on the container's stdout (`docker logs`), naming the key and profile.
+- **Profiles** are added, renamed and removed on the host (`profile add <service>`, `profile rename <service> <old> <new>`, `profile remove <service> <name>`), or from an agent machine whose key has `--can-manage-profiles`: the OAuth or token dance runs there and the result is stored here. Such a key reaches exactly the profiles its allow-list names, plus any new name it creates; anything else answers "not found" and is left alone.
+- **Audit**: every credential call and every remote save, rename or delete is one line on the container's stdout (`docker logs`), naming the key and profile.
 - **Back up the vault file, not the env vars**: the file on the volume carries refreshed tokens and the keys, the env vars only the first-boot snapshot. Keep dated copies; a wrong write is undone by restoring the previous one and restarting.
 
   ```bash

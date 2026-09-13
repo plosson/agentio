@@ -243,6 +243,7 @@
 <div class="menu" id="row-menu" hidden tabindex="-1">
   <button type="button" class="test">Test now</button>
   <button type="button" class="copy">Copy reference<span class="mono muted ref" id="row-menu-ref"></span></button>
+  <button type="button" class="rename">Rename profile</button>
   <hr>
   <button type="button" class="del">Delete profile</button>
 </div>
@@ -264,6 +265,15 @@
   <h3 id="confirm-title"></h3>
   <p id="confirm-body"></p>
   <form method="dialog" class="row right"><button value="cancel">Cancel</button><button value="ok" class="danger solid" id="confirm-ok"></button></form>
+</dialog>
+
+<dialog id="rename-dialog">
+  <h3>Rename profile</h3>
+  <p>The credentials stay, and every key scoped to this profile follows the new name.</p>
+  <form method="dialog">
+    <div class="field"><label>New name<input type="text" id="rename-input" required></label></div>
+    <div class="row right"><button value="cancel">Cancel</button><button value="ok" class="primary" type="submit">Rename</button></div>
+  </form>
 </dialog>
 
 <dialog id="token-dialog">
@@ -395,7 +405,7 @@
         // A plain reload says "skipped"; show what the last test found instead, and when.
         const last = lastResult.get(ref);
         const shown = last && p.status === 'skipped' ? last : { status: p.status, details: p.error || p.info || '' };
-        return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}" data-service="${escape(service)}" data-status="${escape(shown.status)}">
+        return `<tr data-ref="${ref}" data-label="${label}" data-name="${escape(p.profile)}" data-profile="${escape(p.profile.toLowerCase())}" data-service="${escape(service)}" data-status="${escape(shown.status)}">
           <td class="name"><div class="primary-text${p.profile.includes('/') ? ' mono' : ''}" title="${escape(p.profile)}">${escape(p.profile)}</div><div class="secondary details">${escape(secondaryText(shown.status, shown.details))}</div></td>
           <td class="service" title="${escape(service)}">${serviceLabel(service)}</td>
           <td class="status">${badge(shown.status)}<div class="tested">${last ? fmtRelative(last.at) : ''}</div></td>
@@ -518,6 +528,28 @@
     else if (btn.classList.contains('more')) openRowMenu(btn, row);
   });
 
+  function renameDialog(current) {
+    const dialog = $('rename-dialog');
+    const input = $('rename-input');
+    input.value = current;
+    dialog.returnValue = '';
+    dialog.showModal();
+    input.select();
+    return new Promise((resolve) => dialog.addEventListener('close', () => {
+      const name = input.value.trim();
+      resolve(dialog.returnValue === 'ok' && name && name !== current ? name : null);
+    }, { once: true }));
+  }
+
+  async function renameProfile(row) {
+    const name = await renameDialog(row.dataset.name);
+    if (!name) return;
+    const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ name }) });
+    if (res.lost) return;
+    if (res.ok) { toast('Renamed to ' + name); loadProfiles(); }
+    else toast(res.error, 'error');
+  }
+
   async function deleteProfile(row) {
     const ok = await confirmDialog({
       title: 'Delete ' + row.dataset.label + '?',
@@ -561,7 +593,8 @@
     else if (btn.classList.contains('copy')) {
       try { await navigator.clipboard.writeText(row.dataset.label); toast('Copied ' + row.dataset.label); }
       catch { toast('Could not copy; select it from the row instead', 'error'); }
-    } else if (btn.classList.contains('del')) await deleteProfile(row);
+    } else if (btn.classList.contains('rename')) await renameProfile(row);
+    else if (btn.classList.contains('del')) await deleteProfile(row);
   });
   document.addEventListener('click', (ev) => { if (menuRow && !ev.target.closest('#row-menu, button.more')) closeRowMenu(); });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeRowMenu(); });

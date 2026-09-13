@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { saveProfile } from '../config/profile-store';
 import { withTempVault } from '../vault/test-helpers';
 import { lockVault } from '../vault/vault';
 import { createRequestHandler, type PeerSource } from './api';
@@ -204,6 +205,40 @@ describe('daemon HTTP surface', () => {
   test('mutations need a session too', async () => {
     expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE' })).status).toBe(401);
     expect((await call('/ui/api/profiles/telegram/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
+  });
+
+  test('profiles: PATCH renames, carrying credentials and key scopes, and refuses a taken name', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const { key } = await (await call('/ui/api/keys', {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ name: 'k', allowedProfiles: ['telegram/bot'], readOnly: false, url: 'https://hub.example.com' }),
+    })).json();
+
+    const renamed = await call('/ui/api/profiles/telegram/bot', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'alerts' }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({ service: 'telegram', name: 'alerts' });
+
+    const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
+    expect(list.profiles).toContainEqual({ service: 'telegram', name: 'alerts', readOnly: true });
+    const keys = await (await call('/ui/api/keys', { headers: { cookie } })).json();
+    expect(keys.keys.find((k: { id: string }) => k.id === key.id).allowedProfiles).toEqual(['telegram/alerts']);
+
+    // A collision has to be inside the same service; slack/empty is a different namespace.
+    await saveProfile('telegram', 'second', { botToken: 'x' });
+    const taken = await call('/ui/api/profiles/telegram/alerts', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'second' }),
+    });
+    expect(taken.status).toBe(400);
+    const bad = await call('/ui/api/profiles/telegram/alerts', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 7 }),
+    });
+    expect(bad.status).toBe(400);
+    const missing = await call('/ui/api/profiles/telegram/nope', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'x' }),
+    });
+    expect(missing.status).toBe(404);
   });
 
   test('keys: create returns the token once, list hides hashes, rotate and revoke', async () => {
