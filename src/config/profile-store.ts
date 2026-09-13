@@ -1,7 +1,8 @@
-import { getProfile, getProfileName, putProfileEntry, type SetProfileOptions } from './config-manager';
+import { getProfile, getProfileName, hasProfile, putProfileEntry, type SetProfileOptions } from './config-manager';
 import { putCredentials } from '../auth/token-store';
-import { pruneDanglingScopes } from '../auth/api-keys';
-import { updateVault } from '../vault/vault';
+import { grantProfileToKey, pruneDanglingScopes } from '../auth/api-keys';
+import { updateVault, type VaultContents } from '../vault/vault';
+import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 
 /**
@@ -43,9 +44,35 @@ export function saveProfile(
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
+  return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
+}
+
+/** The entry and its credentials, in place. */
+function putProfile(vault: VaultContents, service: ServiceName, profileName: string, credentials: object, options: SetProfileOptions): void {
+  putProfileEntry(vault.config, service, profileName, options);
+  putCredentials(vault.credentials, service, profileName, credentials);
+}
+
+/**
+ * The hub's add on behalf of a remote key. Create-only: a key must not be
+ * able to swap the credentials behind a profile other agents use. The key
+ * gains the profile on its allow-list in the same write, so what it just
+ * added it can use.
+ */
+export function addProfileForKey(
+  keyId: string,
+  service: ServiceName,
+  profileName: string,
+  credentials: object,
+  options: SetProfileOptions = {},
+): Promise<void> {
   return updateVault((vault) => {
-    putProfileEntry(vault.config, service, profileName, options);
-    putCredentials(vault.credentials, service, profileName, credentials);
+    if (hasProfile(vault.config, service, profileName)) {
+      throw new CliError('INVALID_PARAMS', `Profile ${service}/${profileName} already exists on the hub`,
+        'Pass --profile <another-name>, or remove the existing profile on the hub first');
+    }
+    putProfile(vault, service, profileName, credentials, options);
+    grantProfileToKey(vault.config, keyId, service, profileName);
   });
 }
 
@@ -56,10 +83,9 @@ export function saveProfile(
  */
 export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
   return updateVault((vault) => {
-    const profiles = vault.config.profiles[service];
-    const removed = !!profiles?.some((p) => getProfileName(p) === profileName);
+    const removed = hasProfile(vault.config, service, profileName);
     if (removed) {
-      vault.config.profiles[service] = profiles!.filter((p) => getProfileName(p) !== profileName);
+      vault.config.profiles[service] = vault.config.profiles[service]!.filter((p) => getProfileName(p) !== profileName);
       pruneDanglingScopes(vault.config);
     }
     delete vault.credentials[service]?.[profileName];

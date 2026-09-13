@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { getProfileName, loadConfig, updateConfig, listProfileRefs } from '../config/config-manager';
 import { CliError } from '../utils/errors';
-import type { ApiKey, ApiKeyScope, Config } from '../types/config';
+import type { ApiKey, ApiKeyScope, Config, ServiceName } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
 /** What callers may see: everything but the hash, with every flag a plain boolean. */
@@ -188,6 +188,17 @@ export function pruneDanglingScopes(config: Config): boolean {
     }
   }
   return changed;
+}
+
+/**
+ * Put a profile on a key's allow-list, in place, so the key that just added
+ * it can use it. A `*` key already sees everything. Unknown key: nothing.
+ */
+export function grantProfileToKey(config: Config, keyId: string, service: ServiceName, profile: string): void {
+  const key = findKey(config, keyId);
+  if (!key || key.allowedProfiles === '*') return;
+  const ref = `${service}/${profile}`;
+  if (!key.allowedProfiles.includes(ref)) key.allowedProfiles.push(ref);
 }
 
 /** The key a token proves possession of, or null. Malformed tokens are null too. */

@@ -100,6 +100,11 @@ export interface SetProfileOptions {
   readOnly?: boolean;
 }
 
+/** Whether `config` lists the profile, whatever form the entry takes. */
+export function hasProfile(config: Config, service: ServiceName, profileName: string): boolean {
+  return !!config.profiles[service]?.some((p) => getProfileName(p) === profileName);
+}
+
 /** Add or replace a profile entry in `config`, in place. */
 export function putProfileEntry(
   config: Config,

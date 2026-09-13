@@ -15,6 +15,7 @@ const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
 let scopedToken = '';
 let allToken = '';
+let addToken = '';
 
 const handle = createRequestHandler({ version: 'test' });
 const peer = { requestIP: () => ({ address: '10.0.0.5' }) };
@@ -28,6 +29,8 @@ function call(path: string, init: RequestInit & { token?: string; ip?: string } 
 }
 
 const creds = (path: string, token: string) => call(path, { method: 'POST', token });
+const put = (path: string, token: string, body: unknown) =>
+  call(path, { method: 'PUT', token, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 withTempVault('agentio-v1-test-', () => ({
     passphrase: PASSPHRASE,
@@ -55,6 +58,7 @@ withTempVault('agentio-v1-test-', () => ({
 beforeEach(async () => {
   scopedToken = (await createApiKey({ name: 'scoped', allowedProfiles: ['telegram/bot', 'jira/fresh'], readOnly: false }, 'https://hub')).token;
   allToken = (await createApiKey({ name: 'all', allowedProfiles: '*', readOnly: true }, 'https://hub')).token;
+  addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canAddProfiles: true }, 'https://hub')).token;
   // Daemon posture: locked until unlocked, then stays so.
   delete process.env.AGENTIO_PASSPHRASE;
   lockVault();
@@ -93,6 +97,7 @@ describe('/v1 credential API', () => {
 
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {
     const scoped = await (await call('/v1/profiles', { token: scopedToken })).json();
+    expect(scoped.canAddProfiles).toBe(false);
     expect(scoped.profiles).toEqual([
       { service: 'jira', name: 'fresh', readOnly: false, hasCredentials: true },
       { service: 'telegram', name: 'bot', readOnly: false, hasCredentials: true },
@@ -158,6 +163,42 @@ describe('/v1 credential API', () => {
     expect(await (await call('/v1/profiles/jira/fresh', { token: scopedToken })).json()).toEqual({ status: 'ok', readOnly: false });
     expect(await (await call('/v1/profiles/slack/empty', { token: allToken })).json()).toEqual({ status: 'no_creds', readOnly: true });
     expect((await call('/v1/profiles/slack/empty', { token: scopedToken })).status).toBe(403);
+  });
+
+  test('PUT adds a profile for a key allowed to, and the key gains it on its allow-list', async () => {
+    const res = await put('/v1/profiles/telegram/newbot', addToken, { readOnly: true, credentials: { botToken: 'n', channelId: '2' } });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ service: 'telegram', name: 'newbot', readOnly: true });
+
+    const listed = await (await call('/v1/profiles', { token: addToken })).json();
+    expect(listed.canAddProfiles).toBe(true);
+    expect(listed.profiles).toContainEqual({ service: 'telegram', name: 'newbot', readOnly: true, hasCredentials: true });
+    const got = await (await creds('/v1/profiles/telegram/newbot/credentials', addToken)).json();
+    expect(got.credentials).toEqual({ botToken: 'n', channelId: '2' });
+    expect((await listApiKeys()).find((k) => k.name === 'adder')!.allowedProfiles).toEqual(['telegram/bot', 'telegram/newbot']);
+  });
+
+  test('PUT is refused without the flag, and is create-only', async () => {
+    const denied = await put('/v1/profiles/telegram/newbot', scopedToken, { credentials: { botToken: 'n' } });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect((await call('/v1/profiles/telegram/newbot', { token: allToken })).status).toBe(404);
+
+    const taken = await put('/v1/profiles/telegram/bot', addToken, { credentials: { botToken: 'hijack' } });
+    expect(taken.status).toBe(400);
+    expect(await taken.json()).toMatchObject({ code: 'INVALID_PARAMS', error: expect.stringContaining('already exists') });
+    const kept = await (await creds('/v1/profiles/telegram/bot/credentials', addToken)).json();
+    expect(kept.credentials.botToken).toBe('bot-secret');
+  });
+
+  test('PUT validates its body and the name', async () => {
+    for (const body of [{}, { credentials: null }, { credentials: [] }, { credentials: {} }, { credentials: { a: 1 }, readOnly: 'yes' }]) {
+      const res = await put('/v1/profiles/telegram/x', addToken, body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'INVALID_PARAMS' });
+    }
+    expect((await put('/v1/profiles/telegram/a%2Fb', addToken, { credentials: { a: 1 } })).status).toBe(400);
+    expect((await put('/v1/profiles/telegram/bot/credentials', addToken, { credentials: { a: 1 } })).status).toBe(404);
   });
 
   test('use is recorded on the key', async () => {

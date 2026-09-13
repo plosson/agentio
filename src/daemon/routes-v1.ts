@@ -3,7 +3,8 @@ import { isVaultUnlocked } from '../vault/vault';
 import { listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
-import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, type ApiKeyView } from '../auth/api-keys';
+import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
+import { addProfileForKey } from '../config/profile-store';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { errorResponse, json, profilePath, readJson } from './http';
@@ -71,9 +72,9 @@ async function allowedProfile(key: ApiKeyView, service: ServiceName, name: strin
   return effectiveReadOnly(key, resolved.readOnly);
 }
 
-function audit(key: ApiKeyView, service: string, name: string, outcome: string, refreshed?: boolean): void {
+function audit(key: ApiKeyView, action: 'credentials' | 'add', service: string, name: string, outcome: string, refreshed?: boolean): void {
   const extra = refreshed === undefined ? '' : ` refreshed=${refreshed}`;
-  console.log(`${new Date().toISOString()} v1 credentials key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
+  console.log(`${new Date().toISOString()} v1 ${action} key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
 }
 
 /** Credentials the way the hub hands them out: refreshed with the wider buffer. */
@@ -90,7 +91,8 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       readOnly: effectiveReadOnly(key, r.readOnly),
       hasCredentials: !!stored[r.service]?.[r.name],
     }));
-  return json({ profiles });
+  // The key's own add right rides along so a client can refuse `profile add` before any OAuth dance.
+  return json({ profiles, canAddProfiles: key.canAddProfiles });
 }
 
 /** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
@@ -117,12 +119,38 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
   await requireStoredCredentials(service, name);
   try {
     const { credentials, refreshed } = await hubCredentials(service, name);
-    audit(key, service, name, 'ok', refreshed);
+    audit(key, 'credentials', service, name, 'ok', refreshed);
     return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
   } catch (err) {
-    if (err instanceof CliError) audit(key, service, name, err.code.toLowerCase());
+    if (err instanceof CliError) audit(key, 'credentials', service, name, err.code.toLowerCase());
     throw err;
   }
+}
+
+/**
+ * A remote `profile add`: the agent did the OAuth or token dance on its own
+ * machine and hands the result over. The hub does not re-validate the
+ * credentials against the service, exactly as the local flow does not.
+ */
+async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  if (!key.canAddProfiles) {
+    throw new CliError('PERMISSION_DENIED', 'This token may not add profiles', 'Ask the hub owner to allow it (key update --can-add-profiles)');
+  }
+  if (name.includes('/')) throw new CliError('INVALID_PARAMS', 'A profile name cannot contain "/"');
+  const body = await readJson<{ readOnly?: unknown; credentials?: unknown }>(request);
+  const readOnly = body.readOnly === undefined ? false : validateFlag('readOnly', body.readOnly);
+  const { credentials } = body;
+  if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
+    throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
+  }
+  try {
+    await addProfileForKey(key.id, service, name, credentials, { readOnly });
+  } catch (err) {
+    if (err instanceof CliError) audit(key, 'add', service, name, err.code.toLowerCase());
+    throw err;
+  }
+  audit(key, 'add', service, name, 'ok');
+  return json({ service, name, readOnly }, 201);
 }
 
 /** Routes under /v1. Returns null for anything else. */
@@ -148,6 +176,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
     if (ref && ref.action === 'credentials' && method === 'POST') return await handleCredentials(key, ref.service, ref.name);
+    if (ref && ref.action === null && method === 'PUT') return await handleAdd(request, key, ref.service, ref.name);
 
     throw new CliError('NOT_FOUND', 'Not found');
   } catch (err) {

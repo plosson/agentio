@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
-import { chooseProfileName, deleteProfile, saveProfile } from './profile-store';
+import { createApiKey, listApiKeys } from '../auth/api-keys';
+import { addProfileForKey, chooseProfileName, deleteProfile, saveProfile } from './profile-store';
 
 withTempVault('agentio-profile-store-test-', () => ({
   config: { profiles: { gmail: [{ name: 'me@example.com' }], github: ['octocat'] } },
@@ -51,5 +52,19 @@ describe('saveProfile', () => {
     const vault = await loadVault();
     expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com' }]);
     expect(vault.credentials.gmail?.['new@example.com']).toBeUndefined();
+  });
+});
+
+describe('addProfileForKey', () => {
+  test('creates the profile and grants it to the key in one write; refuses an existing name', async () => {
+    const { key } = await createApiKey({ name: 'k', allowedProfiles: ['gmail/me@example.com'] }, 'https://hub');
+    await addProfileForKey(key.id, 'telegram', 'bot', { botToken: 't' }, { readOnly: true });
+    const vault = await loadVault();
+    expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
+    expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't' } });
+    expect((await listApiKeys())[0].allowedProfiles).toEqual(['gmail/me@example.com', 'telegram/bot']);
+
+    await expect(addProfileForKey(key.id, 'github', 'octocat', { accessToken: 'x' })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    expect((await loadVault()).credentials.github).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { withTempVault } from '../vault/test-helpers';
 import { loadVault } from '../vault/vault';
 import { updateConfig } from '../config/config-manager';
 import { deleteProfile } from '../config/profile-store';
-import { authenticateToken, createApiKey, describeScope, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
+import { authenticateToken, createApiKey, describeScope, grantProfileToKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from './api-keys';
 import { decodeToken, encodeToken } from './token';
 
 const HUB = 'https://vault.example.com';
@@ -109,6 +109,20 @@ describe('api keys', () => {
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:00:00.000Z');
     await touchApiKey(key, new Date('2026-09-12T10:01:00Z'));
     expect((await listApiKeys())[0].lastUsedAt).toBe('2026-09-12T10:01:00.000Z');
+  });
+
+  test('granting a profile extends a list scope once; wildcard and unknown keys are untouched', async () => {
+    const { key: listed } = await createApiKey({ name: 'l', allowedProfiles: ['gdrive/docs'] }, HUB);
+    const { key: star } = await createApiKey({ name: 's', allowedProfiles: '*' }, HUB);
+    await updateConfig((config) => {
+      grantProfileToKey(config, listed.id, 'gmail', 'work');
+      grantProfileToKey(config, listed.id, 'gmail', 'work');
+      grantProfileToKey(config, star.id, 'gmail', 'work');
+      grantProfileToKey(config, 'nope', 'gmail', 'work');
+    });
+    const keys = await listApiKeys();
+    expect(keys.find((k) => k.id === listed.id)!.allowedProfiles).toEqual(['gdrive/docs', 'gmail/work']);
+    expect(keys.find((k) => k.id === star.id)!.allowedProfiles).toBe('*');
   });
 
   test('deleting a profile prunes it from key scopes; wildcard keys are untouched', async () => {
