@@ -65,6 +65,12 @@ describe('daemon HTTP surface', () => {
     expect(res.headers.get('location')).toBe('http://hub/ui');
   });
 
+  test('the root redirects to the admin UI', async () => {
+    const res = await call('/');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('http://hub/ui');
+  });
+
   test('the page and the session probe are public', async () => {
     const page = await call('/ui');
     expect(page.status).toBe(200);
