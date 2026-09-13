@@ -1,11 +1,11 @@
-import { cannotAddProfilesError, CliError, profileNotFoundError } from '../utils/errors';
+import { cannotManageProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
-import { listProfileRefs, resolveProfile } from '../config/config-manager';
+import { isProfileReadOnly, listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
-import { addProfileForKey } from '../config/profile-store';
-import type { RemoteAddBody } from '../auth/remote';
+import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
+import type { RemoteAddBody, RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { errorResponse, json, profilePath, readJson } from './http';
@@ -107,8 +107,8 @@ async function handleList(key: ApiKeyView): Promise<Response> {
       readOnly: effectiveReadOnly(key, r.readOnly),
       hasCredentials: !!stored[r.service]?.[r.name],
     }));
-  // The key's own add right rides along so a client can refuse `profile add` before any OAuth dance.
-  return json({ profiles, canAddProfiles: key.canAddProfiles });
+  // The key's own managing right rides along so a client can refuse a profile write before any OAuth dance.
+  return json({ profiles, canManageProfiles: key.canManageProfiles });
 }
 
 /** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
@@ -137,29 +137,57 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
   return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
 }
 
+/** Every profile write asks the same first question. */
+function requireManage(key: ApiKeyView): void {
+  if (!key.canManageProfiles) throw cannotManageProfilesError();
+}
+
+/** Run a keyed write and turn anything but success into the shared error, inside the audited span. */
+async function applyWrite(
+  key: ApiKeyView, action: string, service: ServiceName, name: string,
+  write: () => Promise<WriteOutcome>, to?: string,
+): Promise<void> {
+  await audited(key, action, service, name, async () => {
+    const failure = writeFailure(await write(), service, name, to);
+    if (failure) throw failure;
+  });
+}
+
 /**
  * A remote `profile add`: the agent did the OAuth or token dance on its own
  * machine and hands the result over. The hub does not re-validate the
- * credentials against the service, exactly as the local flow does not.
+ * credentials against the service, exactly as the local flow does not. A name
+ * the key already reaches is replaced; one it cannot reach is refused.
  */
-async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
-  if (!key.canAddProfiles) {
-    throw cannotAddProfilesError();
-  }
+async function handleSave(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  requireManage(key);
   // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
-  const readOnly = validateFlag('readOnly', body.readOnly ?? false);
+  // Undefined means "not stated", which a replace answers by keeping the owner's flag.
+  const stated = body.readOnly === undefined ? undefined : validateFlag('readOnly', body.readOnly);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
     throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
   }
-  await audited(key, 'add', service, name, async () => {
-    if (!(await addProfileForKey(key.id, service, name, credentials, { readOnly }))) {
-      throw new CliError('INVALID_PARAMS', `Profile ${service}/${name} already exists on the hub`,
-        'Choose another profile name, or have the hub owner remove the existing one');
-    }
-  });
-  return json({ service, name, readOnly }, 201);
+  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated }));
+  // Report what the profile ends up with, which for a replace may be the flag already stored.
+  return json({ service, name, readOnly: await isProfileReadOnly(service, name) }, 201);
+}
+
+/** A remote `profile rename`. The credentials and every key's scope follow the new name. */
+async function handleRename(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  requireManage(key);
+  const { name: to } = await readJson<Partial<Record<keyof RemoteRenameBody, unknown>>>(request);
+  if (typeof to !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
+  await applyWrite(key, 'rename', service, name, () => renameProfileForKey(key.id, service, name, to), to);
+  return json({ service, name: to });
+}
+
+/** A remote `profile remove`. */
+async function handleDelete(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  requireManage(key);
+  await applyWrite(key, 'delete', service, name, () => deleteProfileForKey(key.id, service, name));
+  return new Response(null, { status: 204 });
 }
 
 /** Routes under /v1. Returns null for anything else. */
@@ -185,7 +213,9 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
     if (ref && ref.action === 'credentials' && method === 'POST') return await handleCredentials(key, ref.service, ref.name);
-    if (ref && ref.action === null && method === 'PUT') return await handleAdd(request, key, ref.service, ref.name);
+    if (ref && ref.action === null && method === 'PUT') return await handleSave(request, key, ref.service, ref.name);
+    if (ref && ref.action === null && method === 'PATCH') return await handleRename(request, key, ref.service, ref.name);
+    if (ref && ref.action === null && method === 'DELETE') return await handleDelete(key, ref.service, ref.name);
 
     throw new CliError('NOT_FOUND', 'Not found');
   } catch (err) {

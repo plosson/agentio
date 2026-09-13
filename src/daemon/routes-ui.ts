@@ -1,7 +1,7 @@
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
-import { deleteProfile } from '../config/profile-store';
+import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
@@ -69,8 +69,16 @@ async function handleDeleteProfile(ref: { service: ServiceName; name: string }):
   return new Response(null, { status: 204 });
 }
 
+/** One PATCH for the two things a profile's row can change: its name, or its read-only flag. */
 async function handlePatchProfile(request: Request, ref: { service: ServiceName; name: string }): Promise<Response> {
-  const readOnly = validateFlag('readOnly', (await readJson<{ readOnly?: unknown }>(request)).readOnly);
+  const body = await readJson<{ readOnly?: unknown; name?: unknown }>(request);
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
+    const failure = writeFailure(await renameProfile(ref.service, ref.name, body.name), ref.service, ref.name, body.name);
+    if (failure) throw failure;
+    return json({ service: ref.service, name: body.name });
+  }
+  const readOnly = validateFlag('readOnly', body.readOnly);
   if (!(await setProfileReadOnly(ref.service, ref.name, readOnly))) throw noProfile(ref);
   return json({ service: ref.service, name: ref.name, readOnly });
 }

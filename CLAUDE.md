@@ -82,7 +82,7 @@ src/
 │   └── token-store.ts       # Encrypted credential storage
 ├── config/
 │   ├── config-manager.ts    # Profile configuration
-│   ├── profile-store.ts     # saveProfile/deleteProfile/chooseProfileName: how a profile enters and leaves the vault
+│   ├── profile-store.ts     # save/rename/delete/chooseProfileName: how a profile enters, moves and leaves the vault
 │   └── credentials.ts       # Credential helpers
 ├── types/                   # TypeScript interfaces
 │   ├── config.ts            # Config and ServiceName types
@@ -381,7 +381,7 @@ agentio sql profile add|list|remove
 
 An agent machine needs no vault. With a token from the hub, either `AGENTIO_TOKEN` or the file `agentio login` stores at `~/.config/agentio/token` (env var wins; `src/auth/remote.ts`), profile reads go to `GET /v1/profiles` once per process and credential reads to `POST /v1/profiles/:service/:name/credentials`; the hub refreshes first and strips refresh material, so nothing on the client refreshes. The seams are `profilesOf` in the config manager, `getCredentials` in the token store, and `saveProfile` in the profile store; `loadVault` and `updateVault` refuse in remote mode, so anything else that touches the vault fails loudly.
 
-The one write is `profile add`: the OAuth or token dance runs on the agent as usual, and `saveProfile` becomes `PUT /v1/profiles/:service/:name`. It needs a key with `canAddProfiles` (`agentio key create --can-add-profiles`), and the gate refuses up front, before any prompt or browser, when the key lacks it. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
+The writes are `profile add`, `profile rename` and `profile remove`. Each runs as it does locally, with any OAuth or token dance on the agent, and reaches the hub as `PUT`, `PATCH` or `DELETE /v1/profiles/:service/:name`. They need a key with `canManageProfiles` (`agentio key create --can-manage-profiles`), and the gate refuses up front, before any prompt or browser, when the key lacks it. A profile the key's allow-list does not cover is refused with `PERMISSION_DENIED`, the same answer a read gets, and a replace keeps the read-only flag the owner set unless the write states one. `reauth` and the read-only toggle stay owner-only. Error mapping and the refused-command list: `docs/design/remote-vault.md`, section Remote mode in the CLI.
 
 ```bash
 agentio login <hub-url> [--name <n>] [--no-browser]   # prints a code, opens <hub>/ui#authorize=<code>, waits for approval, stores the token (0600)
@@ -395,9 +395,9 @@ agentio logout                                         # deletes the stored toke
 Keys let remote agents read credentials from this vault hub. Create them here or in the admin UI; both call `src/auth/api-keys.ts`. The two flags are orthogonal: a read-only key can still add profiles, and reads them back as read-only. Only the secret's hash is stored, plus its last four characters as a hint (`agio1.…xxxx` in `key list` and the UI) so tokens can be told apart. Token format and the hub-URL rule: `docs/design/remote-vault.md`, section Token format.
 
 ```bash
-agentio key create <name> --url https://vault.example.com (--all | --profiles gdrive/docunit,gmail/work) [--read-only] [--can-add-profiles]   # prints the token once, on stdout alone
+agentio key create <name> --url https://vault.example.com (--all | --profiles gdrive/docunit,gmail/work) [--read-only] [--can-manage-profiles]   # prints the token once, on stdout alone
 agentio key list
-agentio key update <id> [--name <n>] [--all | --profiles <list>] [--read-only | --no-read-only] [--can-add-profiles | --no-can-add-profiles]
+agentio key update <id> [--name <n>] [--all | --profiles <list>] [--read-only | --no-read-only] [--can-manage-profiles | --no-can-manage-profiles]
 agentio key rotate <id> --url https://vault.example.com
 agentio key revoke <id>
 ```
@@ -413,7 +413,7 @@ agentio daemon status            # probe /health
 
 The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked from the admin UI at `/ui`, or at boot when `AGENTIO_PASSPHRASE` is set, in which case the passphrase is verified against the vault before the server comes up and a wrong one fails with `AUTH_FAILED`. Once unlocked it stays so until Lock is pressed or the process restarts. `GET /health` is unauthenticated, answers 200 in both states, and carries `locked: true|false`.
 
-**Credential API** (`src/daemon/routes-v1.ts`): what remote agents call with `Authorization: Bearer agio1.…`. `GET /v1/profiles`, `GET /v1/profiles/:service/:name`, and `POST /v1/profiles/:service/:name/credentials`, which returns the credential object the local code expects, refreshed first, minus each refresher's `secretFields` (`src/auth/refresh.ts`). `PUT /v1/profiles/:service/:name` is the remote `profile add`: 403 without `canAddProfiles`, create-only, and the key's allow-list gains the profile in the same write (`addProfileForKey` in `src/config/profile-store.ts`). Error codes map to HTTP in `src/daemon/http.ts`. Two limits: five bad tokens a minute per address, and 120 requests a minute per key. Details: `docs/design/remote-vault.md`, sections HTTP API and What gets stripped. Deployment: `docker/README.md`, section Running the vault hub on a VPS.
+**Credential API** (`src/daemon/routes-v1.ts`): what remote agents call with `Authorization: Bearer agio1.…`. `GET /v1/profiles`, `GET /v1/profiles/:service/:name`, and `POST /v1/profiles/:service/:name/credentials`, which returns the credential object the local code expects, refreshed first, minus each refresher's `secretFields` (`src/auth/refresh.ts`). `PUT`, `PATCH` and `DELETE /v1/profiles/:service/:name` are the remote `profile add`, `rename` and `remove`: 403 without `canManageProfiles` or for a name outside the key's allow-list, 404 for a name nothing holds, and a new name is granted to the key in the same write (`saveProfileForKey`, `renameProfileForKey`, `deleteProfileForKey` in `src/config/profile-store.ts`). Error codes map to HTTP in `src/daemon/http.ts`. Two limits: five bad tokens a minute per address, and 120 requests a minute per key. Details: `docs/design/remote-vault.md`, sections HTTP API and What gets stripped. Deployment: `docker/README.md`, section Running the vault hub on a VPS.
 
 **Device login** (`src/daemon/device-auth.ts`): how `agentio login <hub>` gets a key without anyone pasting a token. `POST /v1/device {name}` (no bearer, vault may be locked) returns a `userCode` like `WDJB-MJHT` and a `deviceCode`; the CLI polls `POST /v1/device/token {deviceCode}` every 3 s and gets `pending`, `denied`, or `approved` with the token, once. The owner opens `/ui#authorize=<code>`, unlocks, checks the code against the terminal, sets name, scope, read-only and can-add, and approves (`POST /ui/api/authorize/:code`), which creates the key through `createApiKey`. Requests live in memory for 10 minutes, at most 100 at a time, 40 device calls a minute per address.
 

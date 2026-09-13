@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { saveProfile } from '../config/profile-store';
 import { withTempVault } from '../vault/test-helpers';
 import { lockVault } from '../vault/vault';
 import { createRequestHandler, type PeerSource } from './api';
@@ -206,17 +207,43 @@ describe('daemon HTTP surface', () => {
     expect((await call('/ui/api/profiles/telegram/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
   });
 
+  test('profiles: PATCH renames, carrying credentials and key scopes, and refuses a taken name', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const renamed = await call('/ui/api/profiles/telegram/bot', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'alerts' }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({ service: 'telegram', name: 'alerts' });
+
+    const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
+    expect(list.profiles).toContainEqual({ service: 'telegram', name: 'alerts', readOnly: true });
+    // A collision has to be inside the same service; slack/empty is a different namespace.
+    await saveProfile('telegram', 'second', { botToken: 'x' });
+    const taken = await call('/ui/api/profiles/telegram/alerts', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'second' }),
+    });
+    expect(taken.status).toBe(400);
+    const bad = await call('/ui/api/profiles/telegram/alerts', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 7 }),
+    });
+    expect(bad.status).toBe(400);
+    const missing = await call('/ui/api/profiles/telegram/nope', {
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'x' }),
+    });
+    expect(missing.status).toBe(404);
+  });
+
   test('keys: create returns the token once, list hides hashes, rotate and revoke', async () => {
     const cookie = await cookieFrom(await unlock());
     const created = await call('/ui/api/keys', {
       method: 'POST', headers: { cookie },
-      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, canAddProfiles: true, url: 'https://hub.example.com' }),
+      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, canManageProfiles: true, url: 'https://hub.example.com' }),
     });
     expect(created.status).toBe(201);
     const { key, token } = await created.json();
     expect(token).toMatch(/^agio1\./);
     expect(key).not.toHaveProperty('secretHash');
-    expect(key).toMatchObject({ readOnly: true, canAddProfiles: true });
+    expect(key).toMatchObject({ readOnly: true, canManageProfiles: true });
 
     const list = await (await call('/ui/api/keys', { headers: { cookie } })).json();
     expect(list.keys).toEqual([key]);
@@ -229,9 +256,9 @@ describe('daemon HTTP surface', () => {
     expect(bad.status).toBe(400);
 
     const patched = await call(`/ui/api/keys/${key.id}`, {
-      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'renamed', readOnly: false, canAddProfiles: false }),
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'renamed', readOnly: false, canManageProfiles: false }),
     });
-    expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false, canAddProfiles: false });
+    expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false, canManageProfiles: false });
 
     const rotated = await call(`/ui/api/keys/${key.id}/rotate`, {
       method: 'POST', headers: { cookie }, body: JSON.stringify({ url: 'https://hub.example.com' }),

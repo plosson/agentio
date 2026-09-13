@@ -34,7 +34,7 @@ import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
-import { hubTooOldToAddError, isRemoteMode, remoteCanAddProfiles, remoteCannotAddError, remoteModeError } from './auth/remote';
+import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
 import { handleError } from './utils/errors';
 
 declare const BUILD_VERSION: string | undefined;
@@ -114,6 +114,8 @@ export function createProgram(): Command {
   }
 
   const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout']);
+  // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
+  const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove']);
   // Owner-only on the hub host: they touch the vault or the daemon.
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
@@ -122,12 +124,12 @@ export function createProgram(): Command {
     const parent = actionCommand.parent?.name();
 
     if (isRemoteMode()) {
-      // An add ends in a PUT to the hub, so it runs here; refuse before any OAuth or token dance when the key may not.
-      if (parent === 'profile' && name === 'add') {
+      // These reach the hub as a write; refuse before any OAuth or token dance when the key may not.
+      if (parent === 'profile' && MANAGED_PROFILE_COMMANDS.has(name)) {
         try {
-          const allowed = await remoteCanAddProfiles();
-          if (allowed === undefined) throw hubTooOldToAddError();
-          if (!allowed) throw remoteCannotAddError();
+          const allowed = await remoteCanManageProfiles();
+          if (allowed === undefined) throw hubTooOldToManageError();
+          if (!allowed) throw remoteCannotManageError();
         } catch (err) {
           handleError(err);
         }

@@ -3,7 +3,7 @@ import type { ServiceName } from '../types/config';
 import { ALL_SERVICES } from '../types/config';
 import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/config-manager';
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
-import { removeProfileForService } from '../utils/profile-commands';
+import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
 import { gmailProfileAdd } from './gmail';
 import { gdocsProfileAdd } from './gdocs';
@@ -111,6 +111,21 @@ export function registerProfileCommands(program: Command): void {
       try {
         assertKnownService(service);
         await ADD_HANDLERS[service](opts);
+      } catch (e) {
+        handleError(e);
+      }
+    });
+
+  profile
+    .command('rename')
+    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('<name>', 'Current profile name')
+    .argument('<new-name>', 'New profile name')
+    .description('Rename a profile, keeping its credentials and key access')
+    .action(async (service: string, name: string, newName: string) => {
+      try {
+        assertKnownService(service);
+        await renameProfileForService(service as ServiceName, name, newName);
       } catch (e) {
         handleError(e);
       }

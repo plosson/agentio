@@ -17,7 +17,8 @@ export interface ApiKey {
   hint?: string;           // last characters of the secret, to tell tokens apart
   allowedProfiles: ApiKeyScope;
   readOnly: boolean;       // forces read-only on every profile the key can see
-  canAddProfiles?: boolean; // can add profiles to this vault from the agent machine; absent on keys from before the flag
+  canManageProfiles?: boolean; // may add, replace, rename and delete profiles from an agent machine
+  canAddProfiles?: boolean;    // v2.4.0 spelling of the same right, read as a fallback in view()
   createdAt: string;       // ISO
   lastUsedAt?: string;     // ISO
 }

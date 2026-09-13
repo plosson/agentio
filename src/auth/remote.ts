@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'fs';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { cannotAddProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
+import { cannotManageProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
 import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
+import type { WriteOutcome } from '../config/profile-store';
 import { decodeToken, type TokenParts } from './token';
 
 /**
@@ -80,8 +81,8 @@ export interface RemoteProfile extends ProfileRef {
 /** What `GET /v1/profiles` answers: the key's view of the vault, plus its own add right. */
 interface RemoteListing {
   profiles: RemoteProfile[];
-  /** Absent from a hub older than the flag, which is not the same as a key that lacks it. */
-  canAddProfiles?: boolean;
+  /** Absent from a hub older than the right, which is not the same as a key that lacks it. */
+  canManageProfiles?: boolean;
 }
 
 let parsed: TokenParts | null = null;
@@ -112,16 +113,16 @@ export function assertLocalMode(what: string): void {
 }
 
 /** The refusal a `profile add` gets here, naming the hub the token points at. */
-export function remoteCannotAddError(): CliError {
-  return cannotAddProfilesError(hub().url);
+export function remoteCannotManageError(): CliError {
+  return cannotManageProfilesError(hub().url);
 }
 
-/** A hub too old to know the flag says nothing about it; that is the hub's problem, not the key's. */
-export function hubTooOldToAddError(): CliError {
+/** A hub too old to know the right says nothing about it; that is the hub's problem, not the key's. */
+export function hubTooOldToManageError(): CliError {
   return new CliError(
     'CONFIG_ERROR',
-    `The vault hub at ${hub().url} does not support adding profiles from an agent`,
-    'Update the hub to agentio 2.4 or later',
+    `The vault hub at ${hub().url} does not support managing profiles from an agent`,
+    'Update the hub to agentio 2.5 or later',
   );
 }
 
@@ -156,7 +157,7 @@ function hubError(status: number, body: { error?: string; code?: string; suggest
 }
 
 export interface HubCallOptions {
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON body; sets the content type. */
   body?: unknown;
   /** Bearer token; omitted for the public login routes. */
@@ -207,18 +208,47 @@ export function remoteProfiles(): Promise<RemoteProfile[]> {
   return remoteListing().then((l) => l.profiles);
 }
 
-/** Whether this token may add profiles; undefined from a hub that predates the flag. Asked before any OAuth dance starts. */
-export function remoteCanAddProfiles(): Promise<boolean | undefined> {
-  return remoteListing().then((l) => l.canAddProfiles);
+/** Whether this token may change which profiles the hub holds; undefined from a hub that predates the right. */
+export function remoteCanManageProfiles(): Promise<boolean | undefined> {
+  return remoteListing().then((l) => l.canManageProfiles);
 }
 
 /** The body of `PUT /v1/profiles/:service/:name`; the hub parses this same type. */
 export type RemoteAddBody = SetProfileOptions & { credentials: object };
 
-/** A `profile add` finished on this machine, handed to the hub to store (create-only there). */
-export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
-  const body: RemoteAddBody = { ...options, credentials };
+/** The body of `PATCH /v1/profiles/:service/:name`; the hub parses this same type. */
+export type RemoteRenameBody = { name: string };
+
+/** A `profile add` finished on this machine, handed to the hub to store. Replaces what the key already reaches. */
+export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
+  const body: RemoteAddBody = { ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }), credentials };
   await hubRequest(profileRoute(service, name), 'PUT', body);
+}
+
+/** Rename a profile on the hub. */
+export function remoteRenameProfile(service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
+  const body: RemoteRenameBody = { name: to };
+  return absentAsOutcome(hubRequest(profileRoute(service, from), 'PATCH', body));
+}
+
+/** Drop a profile on the hub. */
+export function remoteDeleteProfile(service: ServiceName, name: string): Promise<WriteOutcome> {
+  return absentAsOutcome(hubRequest(profileRoute(service, name), 'DELETE'));
+}
+
+/**
+ * A profile the hub does not hold is an outcome, not a failure: the caller
+ * reports it the way the local path does. Everything else, a refusal or a
+ * taken name included, keeps the hub's own error and wording.
+ */
+async function absentAsOutcome(call: Promise<unknown>): Promise<WriteOutcome> {
+  try {
+    await call;
+    return 'ok';
+  } catch (err) {
+    if (err instanceof CliError && err.code === 'PROFILE_NOT_FOUND') return 'absent';
+    throw err;
+  }
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */

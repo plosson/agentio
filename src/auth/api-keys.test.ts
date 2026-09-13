@@ -55,7 +55,7 @@ describe('api keys', () => {
   test('name, flags, and hub URL are validated', async () => {
     await expect(createApiKey({ name: '  ', allowedProfiles: '*', readOnly: false }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: 'no' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
-    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false, canAddProfiles: 'yes' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false, canManageProfiles: 'yes' }, HUB)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'vault.example.com')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'ftp://x')).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     const { token } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, 'https://vault.example.com/ui/?x=1');
@@ -64,23 +64,37 @@ describe('api keys', () => {
 
   test('flags are off unless asked for, and show in the scope summary', async () => {
     const { key: plain } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
-    expect(plain).toMatchObject({ readOnly: false, canAddProfiles: false });
+    expect(plain).toMatchObject({ readOnly: false, canManageProfiles: false });
     expect(describeScope(plain)).toBe('all profiles');
-    const { key } = await createApiKey({ name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true }, HUB);
-    expect(describeScope(key)).toBe('gmail/home, read-only, can add profiles');
+    const { key } = await createApiKey({ name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canManageProfiles: true }, HUB);
+    expect(describeScope(key)).toBe('gmail/home, read-only, can manage profiles');
   });
 
-  test('a key stored before canAddProfiles existed lists as false', async () => {
+  test('a key minted by 2.4.0 keeps its right, and the next touch migrates the spelling away', async () => {
+    const { key } = await createApiKey({ name: 'old', allowedProfiles: '*' }, HUB);
+    await updateConfig((config) => {
+      delete config.apiKeys![0].canManageProfiles;
+      config.apiKeys![0].canAddProfiles = true;
+    });
+    expect(await listApiKeys()).toEqual([{ ...key, canManageProfiles: true }]);
+
+    await updateApiKey(key.id, { name: 'renamed' });
+    const stored = (await loadVault()).config.apiKeys![0];
+    expect(stored).not.toHaveProperty('canAddProfiles');
+    expect(stored.canManageProfiles).toBe(true);
+  });
+
+  test('a key stored before canManageProfiles existed lists as false', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*' }, HUB);
-    await updateConfig((config) => { delete config.apiKeys![0].canAddProfiles; });
-    expect((await loadVault()).config.apiKeys![0]).not.toHaveProperty('canAddProfiles');
-    expect(await listApiKeys()).toEqual([{ ...key, canAddProfiles: false }]);
+    await updateConfig((config) => { delete config.apiKeys![0].canManageProfiles; });
+    expect((await loadVault()).config.apiKeys![0]).not.toHaveProperty('canManageProfiles');
+    expect(await listApiKeys()).toEqual([{ ...key, canManageProfiles: false }]);
   });
 
   test('update changes name, scope, and flags; unknown id is null', async () => {
     const { key } = await createApiKey({ name: 'a', allowedProfiles: '*', readOnly: false }, HUB);
-    const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
-    expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canAddProfiles: true });
+    const updated = await updateApiKey(key.id, { name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canManageProfiles: true });
+    expect(updated).toMatchObject({ id: key.id, name: 'b', allowedProfiles: ['gmail/home'], readOnly: true, canManageProfiles: true });
     await expect(updateApiKey('nope', { name: 'x' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 

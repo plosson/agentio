@@ -92,7 +92,7 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'status'], ['profile', 'remove', 'telegram', 'bare'], ['telegram', 'profile', 'remove', '--profile', 'bare']]) {
+    for (const args of [['vault', 'status'], ['profile', 'reauth', 'telegram'], ['telegram', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -100,7 +100,7 @@ describe('remote mode end to end', () => {
     }
   });
 
-  test('profile add is refused up front, before any prompt, when the key may not add', async () => {
+  test('a profile write is refused up front, before any prompt, without the managing right', async () => {
     const res = await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n');
     expect(res.exitCode).toBe(2);
     expect(res.stderr).toContain('PERMISSION_DENIED');
@@ -109,14 +109,40 @@ describe('remote mode end to end', () => {
     expect(res.stderr).not.toContain('Connection URL');
   });
 
+  test('a managing key renames and removes a profile on the hub', async () => {
+    const manager = (await createApiKey({ name: 'manager', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+
+    const renamed = await cli(['profile', 'rename', 'telegram', 'alerts', 'sirens'], { AGENTIO_TOKEN: manager });
+    expect(renamed.exitCode).toBe(0);
+    expect(renamed.stdout).toContain('Renamed profile "alerts" to "sirens"');
+    const afterRename = await loadVault();
+    expect(afterRename.config.profiles.telegram).toEqual([{ name: 'sirens' }, { name: 'bare' }]);
+    expect(afterRename.credentials.telegram?.sirens).toMatchObject({ botToken: 'bot-secret' });
+
+    const removed = await cli(['profile', 'remove', 'telegram', 'sirens'], { AGENTIO_TOKEN: manager });
+    expect(removed.exitCode).toBe(0);
+    expect((await loadVault()).config.profiles.telegram).toEqual([{ name: 'bare' }]);
+  });
+
+  test('a managing key cannot touch a profile outside its allow-list', async () => {
+    const manager = (await createApiKey({ name: 'narrow', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+    // Out of the key's list is refused, not silently reported as done, and nothing is written.
+    for (const args of [['profile', 'remove', 'slack', 'ops'], ['profile', 'rename', 'slack', 'ops', 'mine']]) {
+      const res = await cli(args, { AGENTIO_TOKEN: manager });
+      expect(res.exitCode).not.toBe(0);
+      expect(res.stderr).toContain('PERMISSION_DENIED');
+      expect((await loadVault()).config.profiles.slack).toEqual([{ name: 'ops', readOnly: true }]);
+    }
+  });
+
   test('a hub that predates the flag is told apart from a key that lacks it', async () => {
-    // An older hub answers the listing without canAddProfiles at all.
+    // An older hub answers the listing without canManageProfiles at all.
     const bare = Bun.serve({ port: 0, fetch: () => Response.json({ profiles: [] }) });
     try {
       const res = await cli(['sql', 'profile', 'add'], {
         AGENTIO_TOKEN: (await createApiKey({ name: 'old', allowedProfiles: '*' }, `http://127.0.0.1:${bare.port}`)).token,
       }, 'sqlite://:memory:\n');
-      expect(res.stderr).toContain('does not support adding profiles');
+      expect(res.stderr).toContain('does not support managing profiles');
       expect(res.stderr).not.toContain('Ask the hub owner');
     } finally {
       bare.stop(true);
@@ -124,7 +150,7 @@ describe('remote mode end to end', () => {
   });
 
   test('profile add on the agent lands on the hub, and the key can use it at once', async () => {
-    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canAddProfiles: true }, url)).token;
+    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
     const added = await cli(['sql', 'profile', 'add', '--profile', 'mem', '--read-only'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
     expect(added.exitCode).toBe(0);
 

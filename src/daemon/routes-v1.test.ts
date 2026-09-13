@@ -28,8 +28,11 @@ function call(path: string, init: RequestInit & { token?: string; ip?: string } 
 }
 
 const creds = (path: string, token: string) => call(path, { method: 'POST', token });
-const put = (path: string, token: string, body: unknown) =>
-  call(path, { method: 'PUT', token, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const write = (method: 'PUT' | 'PATCH') => (path: string, token: string, body: unknown) =>
+  call(path, { method, token, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const put = write('PUT');
+const patch = write('PATCH');
+const del = (path: string, token: string) => call(path, { method: 'DELETE', token });
 
 withTempVault('agentio-v1-test-', () => ({
     passphrase: PASSPHRASE,
@@ -95,7 +98,7 @@ describe('/v1 credential API', () => {
 
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {
     const scoped = await (await call('/v1/profiles', { token: scopedToken })).json();
-    expect(scoped.canAddProfiles).toBe(false);
+    expect(scoped.canManageProfiles).toBe(false);
     expect(scoped.profiles).toEqual([
       { service: 'jira', name: 'fresh', readOnly: false, hasCredentials: true },
       { service: 'telegram', name: 'bot', readOnly: false, hasCredentials: true },
@@ -172,47 +175,114 @@ describe('/v1 credential API', () => {
   });
 });
 
-describe('PUT /v1/profiles/:service/:name', () => {
+describe('managing profiles over /v1', () => {
   let addToken = '';
   beforeEach(async () => {
-    addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canAddProfiles: true }, 'https://hub')).token;
+    addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canManageProfiles: true }, 'https://hub')).token;
   });
 
-  test('adds a profile for a key allowed to, and the key can use it at once', async () => {
+  test('PUT adds a free name and the key can use it at once', async () => {
     const res = await put('/v1/profiles/telegram/newbot', addToken, { readOnly: true, credentials: { botToken: 'n', channelId: '2' } });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ service: 'telegram', name: 'newbot', readOnly: true });
 
     const listed = await (await call('/v1/profiles', { token: addToken })).json();
-    expect(listed.canAddProfiles).toBe(true);
+    expect(listed.canManageProfiles).toBe(true);
     expect(listed.profiles).toContainEqual({ service: 'telegram', name: 'newbot', readOnly: true, hasCredentials: true });
     const got = await (await creds('/v1/profiles/telegram/newbot/credentials', addToken)).json();
     expect(got.credentials).toEqual({ botToken: 'n', channelId: '2' });
   });
 
-  test('is refused without the flag, and is create-only', async () => {
-    const denied = await put('/v1/profiles/telegram/newbot', scopedToken, { credentials: { botToken: 'n' } });
-    expect(denied.status).toBe(403);
-    expect(await denied.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
-    expect((await call('/v1/profiles/telegram/newbot', { token: allToken })).status).toBe(404);
+  test('PUT replaces a profile the key reaches, which is how an agent repairs its own credentials', async () => {
+    const res = await put('/v1/profiles/telegram/bot', addToken, { credentials: { botToken: 'refreshed', channelId: '1' } });
+    expect(res.status).toBe(201);
+    const got = await (await creds('/v1/profiles/telegram/bot/credentials', addToken)).json();
+    expect(got.credentials).toEqual({ botToken: 'refreshed', channelId: '1' });
+  });
 
-    const taken = await put('/v1/profiles/telegram/bot', addToken, { credentials: { botToken: 'hijack' } });
-    expect(taken.status).toBe(400);
-    expect(await taken.json()).toMatchObject({ code: 'INVALID_PARAMS', error: expect.stringContaining('already exists') });
-    const kept = await (await creds('/v1/profiles/telegram/bot/credentials', addToken)).json();
-    expect(kept.credentials.botToken).toBe('bot-secret');
+  test('PATCH renames, carrying the credentials and the key\'s own scope along', async () => {
+    const res = await patch('/v1/profiles/telegram/bot', addToken, { name: 'renamed' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ service: 'telegram', name: 'renamed' });
+
+    expect((await creds('/v1/profiles/telegram/bot/credentials', addToken)).status).toBe(404);
+    const got = await (await creds('/v1/profiles/telegram/renamed/credentials', addToken)).json();
+    expect(got.credentials).toEqual({ botToken: 'bot-secret', channelId: '1' });
+    expect((await listApiKeys()).find((k) => k.name === 'adder')!.allowedProfiles).toEqual(['telegram/renamed']);
+  });
+
+  test('DELETE removes the profile and drops it from the scope', async () => {
+    expect((await del('/v1/profiles/telegram/bot', addToken)).status).toBe(204);
+    expect((await call('/v1/profiles/telegram/bot', { token: allToken })).status).toBe(404);
+    expect((await listApiKeys()).find((k) => k.name === 'adder')!.allowedProfiles).toEqual([]);
+  });
+
+  test('every write is refused without the right', async () => {
+    for (const res of [
+      await put('/v1/profiles/telegram/newbot', scopedToken, { credentials: { botToken: 'n' } }),
+      await patch('/v1/profiles/telegram/bot', scopedToken, { name: 'x' }),
+      await del('/v1/profiles/telegram/bot', scopedToken),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+    }
+    expect((await call('/v1/profiles/telegram/newbot', { token: allToken })).status).toBe(404);
+  });
+
+  test('a profile outside the key\'s list is 403 on every verb, as it is on a read, and nothing is written', async () => {
+    for (const res of [
+      await put('/v1/profiles/gmail/work', addToken, { credentials: { access_token: 'hijack' } }),
+      await patch('/v1/profiles/gmail/work', addToken, { name: 'stolen' }),
+      await del('/v1/profiles/gmail/work', addToken),
+      await creds('/v1/profiles/gmail/work/credentials', addToken),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
+    }
+    const kept = await (await creds('/v1/profiles/gmail/work/credentials', allToken)).json();
+    expect(kept.credentials).toMatchObject({ access_token: 'g-at' });
+  });
+
+  test('a name nothing holds is 404 on rename and delete, and free to create', async () => {
+    expect((await patch('/v1/profiles/telegram/ghost', addToken, { name: 'x' })).status).toBe(404);
+    expect((await del('/v1/profiles/telegram/ghost', addToken)).status).toBe(404);
+    expect((await put('/v1/profiles/telegram/ghost', addToken, { credentials: { botToken: 'g' } })).status).toBe(201);
+  });
+
+  test('a replace keeps the read-only flag the owner set unless the write states one', async () => {
+    const wide = (await createApiKey({ name: 'wide2', allowedProfiles: '*', canManageProfiles: true }, 'https://hub')).token;
+    // gmail/work is read-only in the fixture; a repair sends credentials only.
+    expect((await put('/v1/profiles/gmail/work', wide, { credentials: { access_token: 'fresh' } })).status).toBe(201);
+    const listed = await (await call('/v1/profiles', { token: wide })).json();
+    expect(listed.profiles.find((p: { name: string }) => p.name === 'work').readOnly).toBe(true);
+  });
+
+  test('a rename onto a name taken in the same service is 400, and changes nothing', async () => {
+    const wide = (await createApiKey({ name: 'wide', allowedProfiles: '*', canManageProfiles: true }, 'https://hub')).token;
+    const res = await patch('/v1/profiles/jira/fresh', wide, { name: 'stale' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'INVALID_PARAMS', error: expect.stringContaining('already exists') });
+    expect((await call('/v1/profiles/jira/fresh', { token: wide })).status).toBe(200);
+
+    // Names are per service, so the same word in another service is free.
+    expect((await patch('/v1/profiles/telegram/bot', wide, { name: 'stale' })).status).toBe(200);
   });
 
   test.each([{}, { credentials: null }, { credentials: [] }, { credentials: {} }, { credentials: { a: 1 }, readOnly: 'yes' }])(
-    'rejects body %j', async (body) => {
+    'PUT rejects body %j', async (body) => {
       const res = await put('/v1/profiles/telegram/x', addToken, body);
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ code: 'INVALID_PARAMS' });
     },
   );
 
-  test('a name with "/" is 400, and the credentials path is not a PUT target', async () => {
+  test.each([{}, { name: 4 }, { name: 'a/b' }, { name: '' }])('PATCH rejects body %j', async (body) => {
+    expect((await patch('/v1/profiles/telegram/bot', addToken, body)).status).toBe(400);
+  });
+
+  test('a name with "/" is 400, and the credentials path is not a write target', async () => {
     expect((await put('/v1/profiles/telegram/a%2Fb', addToken, { credentials: { a: 1 } })).status).toBe(400);
     expect((await put('/v1/profiles/telegram/bot/credentials', addToken, { credentials: { a: 1 } })).status).toBe(404);
+    expect((await del('/v1/profiles/telegram/bot/credentials', addToken)).status).toBe(404);
   });
 });

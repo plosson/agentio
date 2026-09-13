@@ -198,7 +198,7 @@
     </section>
     <div class="card table">
       <table>
-        <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Read-only</th><th>Can add</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Read-only</th><th>Can manage</th><th>Created</th><th>Last used</th><th></th></tr></thead>
         <tbody id="keys-body"></tbody>
       </table>
     </div>
@@ -243,6 +243,7 @@
 <div class="menu" id="row-menu" hidden tabindex="-1">
   <button type="button" class="test">Test now</button>
   <button type="button" class="copy">Copy reference<span class="mono muted ref" id="row-menu-ref"></span></button>
+  <button type="button" class="rename">Rename profile</button>
   <hr>
   <button type="button" class="del">Delete profile</button>
 </div>
@@ -257,13 +258,22 @@
     <div class="choices" hidden></div>
   </div>
   <div class="field"><label class="toggle"><input type="checkbox" class="key-ro"> read-only on every profile this key can see</label></div>
-  <div class="field"><label class="toggle"><input type="checkbox" class="key-add"> can add profiles from the agent machine, and use what it adds</label></div>
+  <div class="field"><label class="toggle"><input type="checkbox" class="key-add"> can add, replace, rename and delete profiles from the agent machine</label></div>
 </template>
 
 <dialog id="confirm-dialog">
   <h3 id="confirm-title"></h3>
   <p id="confirm-body"></p>
   <form method="dialog" class="row right"><button value="cancel">Cancel</button><button value="ok" class="danger solid" id="confirm-ok"></button></form>
+</dialog>
+
+<dialog id="rename-dialog">
+  <h3>Rename profile</h3>
+  <p>The credentials stay, and every key scoped to this profile follows the new name.</p>
+  <form method="dialog">
+    <div class="field"><label>New name<input type="text" id="rename-input" required></label></div>
+    <div class="row right"><button value="cancel">Cancel</button><button value="ok" class="primary" type="submit">Rename</button></div>
+  </form>
 </dialog>
 
 <dialog id="token-dialog">
@@ -359,14 +369,19 @@
     setTimeout(() => el.remove(), kind === 'error' ? 6000 : 3500);
   }
 
-  function confirmDialog({ title, body, action }) {
+  // Open a <dialog> and resolve with the button value that closed it.
+  function modal(id) {
+    const dialog = $(id);
+    dialog.returnValue = '';
+    dialog.showModal();
+    return new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
+  }
+
+  async function confirmDialog({ title, body, action }) {
     $('confirm-title').textContent = title;
     $('confirm-body').textContent = body;
     $('confirm-ok').textContent = action;
-    const dialog = $('confirm-dialog');
-    dialog.returnValue = '';
-    dialog.showModal();
-    return new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true }));
+    return (await modal('confirm-dialog')) === 'ok';
   }
 
   function fmtRelative(date) {
@@ -395,7 +410,7 @@
         // A plain reload says "skipped"; show what the last test found instead, and when.
         const last = lastResult.get(ref);
         const shown = last && p.status === 'skipped' ? last : { status: p.status, details: p.error || p.info || '' };
-        return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}" data-service="${escape(service)}" data-status="${escape(shown.status)}">
+        return `<tr data-ref="${ref}" data-label="${label}" data-name="${escape(p.profile)}" data-profile="${escape(p.profile.toLowerCase())}" data-service="${escape(service)}" data-status="${escape(shown.status)}">
           <td class="name"><div class="primary-text${p.profile.includes('/') ? ' mono' : ''}" title="${escape(p.profile)}">${escape(p.profile)}</div><div class="secondary details">${escape(secondaryText(shown.status, shown.details))}</div></td>
           <td class="service" title="${escape(service)}">${serviceLabel(service)}</td>
           <td class="status">${badge(shown.status)}<div class="tested">${last ? fmtRelative(last.at) : ''}</div></td>
@@ -518,6 +533,23 @@
     else if (btn.classList.contains('more')) openRowMenu(btn, row);
   });
 
+  async function renameDialog(current) {
+    const input = $('rename-input');
+    input.value = current;
+    const chosen = modal('rename-dialog');
+    input.select();
+    return (await chosen) === 'ok' ? input.value.trim() : null;
+  }
+
+  async function renameProfile(row) {
+    const name = await renameDialog(row.dataset.name);
+    if (!name || name === row.dataset.name) return;
+    const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'PATCH', body: JSON.stringify({ name }) });
+    if (res.lost) return;
+    if (res.ok) { toast('Renamed to ' + name); loadProfiles(); }
+    else toast(res.error, 'error');
+  }
+
   async function deleteProfile(row) {
     const ok = await confirmDialog({
       title: 'Delete ' + row.dataset.label + '?',
@@ -561,7 +593,8 @@
     else if (btn.classList.contains('copy')) {
       try { await navigator.clipboard.writeText(row.dataset.label); toast('Copied ' + row.dataset.label); }
       catch { toast('Could not copy; select it from the row instead', 'error'); }
-    } else if (btn.classList.contains('del')) await deleteProfile(row);
+    } else if (btn.classList.contains('rename')) await renameProfile(row);
+    else if (btn.classList.contains('del')) await deleteProfile(row);
   });
   document.addEventListener('click', (ev) => { if (menuRow && !ev.target.closest('#row-menu, button.more')) closeRowMenu(); });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeRowMenu(); });
@@ -576,7 +609,7 @@
         <td class="mono muted">agio1.…${escape(k.hint || '')}</td>
         <td class="muted">${escape(scope)}</td>
         <td>${k.readOnly ? 'yes' : 'no'}</td>
-        <td>${k.canAddProfiles ? 'yes' : 'no'}</td>
+        <td>${k.canManageProfiles ? 'yes' : 'no'}</td>
         <td class="muted">${fmtRelative(k.createdAt)}</td>
         <td class="muted">${k.lastUsedAt ? fmtRelative(k.lastUsedAt) : 'never'}</td>
         <td class="actions"><button class="link rotate" type="button">Rotate</button> <button class="link del" type="button">Revoke</button></td>
@@ -610,7 +643,7 @@
     name: form.querySelector('.key-name').value,
     allowedProfiles: scopeIsSome(form) ? [...form.querySelectorAll('.choices input:checked')].map((i) => i.value) : '*',
     readOnly: form.querySelector('.key-ro').checked,
-    canAddProfiles: form.querySelector('.key-add').checked,
+    canManageProfiles: form.querySelector('.key-add').checked,
     url: window.location.origin,
   });
   const resetForm = (form) => { form.reset(); syncScope(form); };

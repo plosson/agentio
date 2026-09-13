@@ -109,6 +109,16 @@ export function hasProfile(config: Config, service: ServiceName, profileName: st
   return findProfileIndex(config, service, profileName) !== -1;
 }
 
+/** The stored shape of a profile entry. The one place it is built. */
+export function profileEntry(name: string, options?: SetProfileOptions): ProfileEntry {
+  return { name, ...(options?.readOnly ? { readOnly: true } : {}) };
+}
+
+/** The options an existing entry carries, whatever form it is stored in. */
+export function optionsOf(entry: ProfileValue): SetProfileOptions {
+  return { readOnly: normalizeProfile(entry).readOnly };
+}
+
 /** Add or replace a profile entry in `config`, in place. */
 export function putProfileEntry(
   config: Config,
@@ -116,10 +126,15 @@ export function putProfileEntry(
   profileName: string,
   options?: SetProfileOptions
 ): void {
-  const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
   const existingIndex = findProfileIndex(config, service, profileName);
-  if (existingIndex === -1) (config.profiles[service] ??= []).push(entry);
-  else config.profiles[service]![existingIndex] = entry;
+  if (existingIndex === -1) (config.profiles[service] ??= []).push(profileEntry(profileName, options));
+  else config.profiles[service]![existingIndex] = profileEntry(profileName, options);
+}
+
+/** The entry at `index`, renamed in place, keeping every other field it carries. */
+export function renameProfileEntry(config: Config, service: ServiceName, index: number, to: string): void {
+  const entry = config.profiles[service]![index];
+  config.profiles[service]![index] = profileEntry(to, optionsOf(entry));
 }
 
 /** The `service/name` form a key's allow-list holds. */
