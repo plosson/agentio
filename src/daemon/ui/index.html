@@ -74,6 +74,34 @@
   td.service { white-space: nowrap; }
   input[type=search] { width: 220px; padding: 8px 12px; font-size: .875rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
   td.actions { text-align: right; white-space: nowrap; }
+  th.center, td.center { text-align: center; }
+  td.name { max-width: 0; width: 40%; }
+  td.name .primary-text { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td.name .secondary { font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  td.status { white-space: nowrap; }
+  td.status .tested { font-size: .75rem; color: var(--text-muted); margin-top: 2px; min-height: 1em; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: .8125rem; font-weight: 500; line-height: 1.6; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip.active { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+  .chip.invalid { color: var(--error); font-weight: 600; }
+  .chip .svc-icon { width: 14px; height: 14px; margin: 0; vertical-align: -2px; }
+  .switch { position: relative; display: inline-block; width: 34px; height: 18px; vertical-align: middle; }
+  .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--border); transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(31,35,40,.2); transition: left .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { left: 18px; }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch input:disabled + span { opacity: .6; }
+  button.icon { width: 28px; height: 28px; padding: 0; border: 0; background: none; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); vertical-align: middle; }
+  button.icon:hover, button.icon.open { background: var(--border-light); color: var(--text); }
+  .menu { position: fixed; z-index: 20; width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .menu button { text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; font-weight: 400; font-size: .875rem; white-space: normal; }
+  .menu button:hover { background: var(--code-bg); }
+  .menu button.del { color: var(--error); }
+  .menu hr { border: 0; border-top: 1px solid var(--border-light); margin: 4px 0; }
+  .summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 12px; font-size: .8125rem; color: var(--text-secondary); }
   td.empty { color: var(--text-secondary); padding: 32px 12px; text-align: center; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
   .badge.ok { background: var(--success-bg); color: var(--success); }
@@ -137,18 +165,19 @@
 
   <section id="view-profiles" hidden>
     <div class="page-head">
-      <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent. The same profile name usually spans several services.</p></div>
+      <div><h2>Profiles</h2><p>Every service account this hub can hand to an agent. Filter by name, or pick a service or a state below.</p></div>
       <div class="actions"><input type="search" id="profile-filter" placeholder="Filter by profile name" autocomplete="off"><button id="refresh-btn">Refresh</button><button class="primary" id="test-btn">Test all</button></div>
     </div>
-    <div class="alert info top" id="profiles-msg" hidden></div>
+    <div class="alert error top" id="profiles-msg" hidden></div>
+    <div class="chips" id="profile-chips"></div>
     <div class="card table">
       <table id="profiles-table">
-        <thead><tr><th>Profile</th><th>Service</th><th>Status</th><th>Details</th><th>Last tested</th><th>Read-only</th><th></th></tr></thead>
+        <thead><tr><th>Profile</th><th>Service</th><th>Status</th><th class="center">Read-only</th><th></th></tr></thead>
         <tbody id="profiles-body"></tbody>
       </table>
     </div>
-    <p class="note" id="filter-empty" hidden>No profile name matches the filter.</p>
-    <p class="note">Add or reauthorise profiles with the CLI on this host: <span class="mono">agentio &lt;service&gt; profile add</span>.</p>
+    <p class="note" id="filter-empty" hidden>No profile matches the filter.</p>
+    <div class="summary"><span id="profiles-summary"></span><span>Add or reauthorise with the CLI on this host: <span class="mono">agentio &lt;service&gt; profile add</span></span></div>
   </section>
 
   <section id="view-keys" hidden>
@@ -209,6 +238,13 @@
   </section>
 </main>
 
+<div class="menu" id="row-menu" hidden>
+  <button type="button" class="test">Test now</button>
+  <button type="button" class="copy">Copy reference <span class="mono muted" id="row-menu-ref"></span></button>
+  <hr>
+  <button type="button" class="del">Delete profile</button>
+</div>
+
 <!-- The fields a key is made of, shared by Create key and the sign-in approval. -->
 <template id="key-fields-template">
   <div class="field"><label>Name<input type="text" class="key-name" placeholder="e.g. laptop, ci, comptable" required></label></div>
@@ -267,6 +303,8 @@
     revolut: ['Revolut', null, 'M20.9133 6.9566C20.9133 3.1208 17.7898 0 13.9503 0H2.424v3.8605h10.9782c1.7376 0 3.177 1.3651 3.2087 3.043.016.84-.2994 1.633-.8878 2.2324-.5886.5998-1.375.9303-2.2144.9303H9.2322a.2756.2756 0 0 0-.2755.2752v3.431c0 .0585.018.1142.052.1612L16.2646 24h5.3114l-7.2727-10.094c3.6625-.1838 6.61-3.2612 6.61-6.9494zM6.8943 5.9229H2.424V24h4.4704z'],
     sql: ['SQL', null, 'M12 2C7.58 2 4 3.79 4 6v12c0 2.21 3.58 4 8 4s8-1.79 8-4V6c0-2.21-3.58-4-8-4zm0 2c3.87 0 6 1.5 6 2s-2.13 2-6 2-6-1.5-6-2 2.13-2 6-2zm6 14c0 .5-2.13 2-6 2s-6-1.5-6-2v-2.3c1.47.83 3.6 1.3 6 1.3s4.53-.47 6-1.3V18zm0-4.5c0 .5-2.13 2-6 2s-6-1.5-6-2v-2.3c1.47.83 3.6 1.3 6 1.3s4.53-.47 6-1.3v2.3z'],
   };
+
+  const serviceName = (service) => (SERVICES[service] || [service])[0];
 
   function serviceLabel(service) {
     const [name, colour, path] = SERVICES[service] || [service, null, ''];
@@ -354,31 +392,70 @@
         // A plain reload says "skipped"; show what the last test found instead, and when.
         const last = lastResult.get(ref);
         const shown = last && p.status === 'skipped' ? last : { status: p.status, details: p.error || p.info || '' };
-        return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}">
-          <td>${escape(p.profile)}</td>
+        return `<tr data-ref="${ref}" data-label="${label}" data-profile="${escape(p.profile.toLowerCase())}" data-service="${escape(service)}" data-status="${escape(shown.status)}">
+          <td class="name"><div class="primary-text${p.profile.includes('/') ? ' mono' : ''}" title="${escape(p.profile)}">${escape(p.profile)}</div><div class="secondary details">${escape(secondaryText(shown.status, shown.details))}</div></td>
           <td class="service" title="${escape(service)}">${serviceLabel(service)}</td>
-          <td>${badge(shown.status)}</td>
-          <td class="muted details">${escape(shown.details)}</td>
-          <td class="muted tested">${fmtRelative(last && last.at)}</td>
-          <td><label class="toggle"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}> read-only</label></td>
-          <td class="actions"><button class="link test" type="button">Test</button> <button class="link del" type="button">Delete</button></td>
+          <td class="status">${badge(shown.status)}<div class="tested">${last ? fmtRelative(last.at) : ''}</div></td>
+          <td class="center"><label class="switch" title="Read-only"><input type="checkbox" class="ro" ${p.readOnly ? 'checked' : ''}><span></span></label></td>
+          <td class="actions"><button class="link test" type="button">Test</button><button class="icon more" type="button" aria-label="More actions"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></td>
         </tr>`;
     });
-    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr>';
+    $('profiles-body').innerHTML = rows.join('') || '<tr><td colspan="5" class="empty">No profiles yet. Add one with the CLI on this host.</td></tr>';
     const choiceHtml = choices.join('');
     document.querySelectorAll('.choices').forEach((el) => { el.innerHTML = choiceHtml; });
+    refreshCounts();
+  }
+
+  const secondaryText = (status, details) => details || (status === 'skipped' ? 'not tested yet' : '');
+  const profileRows = () => [...document.querySelectorAll('#profiles-body tr[data-ref]')];
+
+  /** Which chip is pressed: 'all', 'status:<s>' or 'service:<id>'. Name filter and chip combine. */
+  let chip = 'all';
+
+  function refreshCounts() {
+    const rows = profileRows();
+    const byStatus = {};
+    const byService = {};
+    for (const row of rows) {
+      byStatus[row.dataset.status] = (byStatus[row.dataset.status] || 0) + 1;
+      byService[row.dataset.service] = (byService[row.dataset.service] || 0) + 1;
+    }
+    const chips = [['all', `All ${rows.length}`, '']];
+    for (const [status, cls] of [['invalid', 'invalid'], ['skipped', ''], ['no-creds', '']]) {
+      if (byStatus[status]) chips.push([`status:${status}`, `${byStatus[status]} ${STATUS_LABEL[status]}`, cls]);
+    }
+    for (const service of Object.keys(byService).sort((a, b) => serviceName(a).localeCompare(serviceName(b)))) {
+      chips.push([`service:${service}`, `${serviceLabel(service)} ${byService[service]}`, '']);
+    }
+    if (!chips.some(([key]) => key === chip)) chip = 'all';
+    $('profile-chips').innerHTML = chips.map(([key, text, cls]) =>
+      `<button type="button" class="chip${cls ? ' ' + cls : ''}${key === chip ? ' active' : ''}" data-chip="${escape(key)}">${text}</button>`).join('');
+    const parts = [`${rows.length} profile${rows.length === 1 ? '' : 's'}`];
+    for (const status of ['ok', 'invalid', 'no-creds', 'skipped']) if (byStatus[status]) parts.push(`${byStatus[status]} ${STATUS_LABEL[status]}`);
+    $('profiles-summary').textContent = rows.length ? parts.join(' · ') : '';
     applyFilter();
   }
 
-  /** Client-side, on the profile name only; hidden rows are left out of Test all. */
+  $('profile-chips').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.chip');
+    if (!btn) return;
+    chip = btn.dataset.chip;
+    $('profile-chips').querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c === btn));
+    applyFilter();
+  });
+
+  /** Client-side; hidden rows are left out of Test all. */
   function applyFilter() {
     const needle = $('profile-filter').value.trim().toLowerCase();
+    const [kind, value] = chip.split(':');
     let shown = 0;
-    for (const row of document.querySelectorAll('#profiles-body tr[data-ref]')) {
-      row.hidden = needle !== '' && !row.dataset.profile.includes(needle);
+    for (const row of profileRows()) {
+      const byName = needle === '' || row.dataset.profile.includes(needle);
+      const byChip = kind === 'all' || (kind === 'status' ? row.dataset.status === value : row.dataset.service === value);
+      row.hidden = !(byName && byChip);
       if (!row.hidden) shown += 1;
     }
-    $('filter-empty').hidden = shown > 0 || !needle;
+    $('filter-empty').hidden = shown > 0 || (!needle && chip === 'all');
   }
   $('profile-filter').addEventListener('input', applyFilter);
 
@@ -386,15 +463,14 @@
 
   async function loadProfiles() {
     const msg = $('profiles-msg');
-    msg.hidden = false;
-    msg.textContent = 'Loading…';
+    msg.hidden = true;
+    $('profiles-summary').textContent = 'Loading…';
     busy(true);
     try {
       const res = await api('/ui/api/status?test=false');
       if (res.lost) return;
-      if (!res.ok) { msg.textContent = res.error; return; }
+      if (!res.ok) { msg.textContent = res.error; msg.hidden = false; return; }
       renderProfiles(res.body);
-      msg.hidden = true;
     } finally { busy(false); }
   }
 
@@ -435,20 +511,59 @@
     const btn = ev.target.closest('button');
     if (!btn) return;
     const row = btn.closest('tr');
-    if (btn.classList.contains('test')) { await testProfiles([row]); return; }
-    if (!btn.classList.contains('del')) return;
+    if (btn.classList.contains('test')) await testProfiles([row]);
+    else if (btn.classList.contains('more')) openRowMenu(btn, row);
+  });
+
+  async function deleteProfile(row) {
     const ok = await confirmDialog({
       title: 'Delete ' + row.dataset.label + '?',
       body: 'The profile and its stored credentials are removed from the vault, and every key scoped to it loses access. Agents using it stop working. This cannot be undone.',
       action: 'Delete profile',
     });
     if (!ok) return;
-    btn.disabled = true;
     const res = await api('/ui/api/profiles/' + row.dataset.ref, { method: 'DELETE' });
     if (res.lost) return;
     if (res.ok) { toast('Deleted ' + row.dataset.label); loadProfiles(); }
-    else { btn.disabled = false; toast(res.error, 'error'); }
+    else toast(res.error, 'error');
+  }
+
+  // One floating menu, moved under whichever ⋯ was pressed; the destructive item sits last.
+  let menuRow = null;
+  function openRowMenu(btn, row) {
+    const menu = $('row-menu');
+    if (menuRow === row) { closeRowMenu(); return; }
+    closeRowMenu();
+    menuRow = row;
+    btn.classList.add('open');
+    $('row-menu-ref').textContent = row.dataset.label;
+    const rect = btn.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, rect.right - 220)}px`;
+    menu.hidden = false;
+    menu.querySelector('button').focus();
+  }
+  function closeRowMenu() {
+    if (!menuRow) return;
+    menuRow.querySelector('.more').classList.remove('open');
+    menuRow = null;
+    $('row-menu').hidden = true;
+  }
+  $('row-menu').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button');
+    const row = menuRow;
+    if (!btn || !row) return;
+    closeRowMenu();
+    if (btn.classList.contains('test')) await testProfiles([row]);
+    else if (btn.classList.contains('copy')) {
+      try { await navigator.clipboard.writeText(row.dataset.label); toast('Copied ' + row.dataset.label); }
+      catch { toast('Could not copy; select it from the row instead', 'error'); }
+    } else if (btn.classList.contains('del')) await deleteProfile(row);
   });
+  document.addEventListener('click', (ev) => { if (menuRow && !ev.target.closest('#row-menu, button.more')) closeRowMenu(); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeRowMenu(); });
+  window.addEventListener('scroll', closeRowMenu, { passive: true });
+  window.addEventListener('resize', closeRowMenu);
 
   function renderKeys(keys) {
     const rows = keys.map((k) => {
@@ -584,11 +699,12 @@
 
   function setRowStatus(row, status, details) {
     row.querySelector('.badge').outerHTML = badge(status);
-    row.querySelector('td.details').textContent = details || '';
+    row.querySelector('.details').textContent = secondaryText(status, details);
+    row.dataset.status = status;
     if (status !== 'testing') {
       const at = new Date();
       lastResult.set(row.dataset.ref, { status, details: details || '', at });
-      row.querySelector('td.tested').innerHTML = fmtRelative(at);
+      row.querySelector('.tested').innerHTML = fmtRelative(at);
     }
   }
 
@@ -597,13 +713,12 @@
   // refresh, so running a few at once is safe.
   async function testProfiles(rows) {
     if (!rows.length) return;
-    const msg = $('profiles-msg');
+    const summary = $('profiles-summary');
     const counts = { ok: 0, invalid: 0, 'no-creds': 0 };
     let done = 0;
-    const report = (prefix) => { msg.textContent = `${prefix} ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials.`; };
+    const report = () => { summary.textContent = `Testing ${done}/${rows.length}… ${counts.ok} ok, ${counts.invalid} invalid, ${counts['no-creds']} without credentials`; };
     for (const row of rows) setRowStatus(row, 'testing', '');
-    msg.hidden = rows.length < 2;
-    report(`Testing ${done}/${rows.length}…`);
+    report();
     busy(true);
     const queue = rows.slice();
     const worker = async () => {
@@ -612,13 +727,12 @@
         if (res.lost) return;
         if (res.ok) { setRowStatus(row, res.body.status, res.body.error || res.body.info); counts[res.body.status] = (counts[res.body.status] || 0) + 1; }
         else setRowStatus(row, 'invalid', res.error);
-        done += 1; report(`Testing ${done}/${rows.length}…`);
+        done += 1; report();
       }
     };
     try {
       await Promise.all([worker(), worker(), worker()]);
-      if (rows.length > 1) report(`Tested ${rows.length} profiles:`);
-    } finally { busy(false); }
+    } finally { busy(false); refreshCounts(); }
   }
 
   $('refresh-btn').addEventListener('click', loadProfiles);
