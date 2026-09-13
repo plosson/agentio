@@ -46,6 +46,7 @@ The port is published on loopback because the daemon speaks plain HTTP and the p
 | `AGENTIO_VERSION` | Optional: pin binary version (default: latest release) |
 | `AGENTIO_PASSPHRASE` | Vault passphrase. Required on first boot, since there is no terminal to prompt. Afterwards optional: when set, every restart comes up unlocked; when unset, the daemon starts locked and someone unlocks it at `/ui`. Anyone who can run the siteio or docker CLI on the host can read it back, so weigh that against unlocking by hand |
 | `AGENTIO_KEEPALIVE_HOURS` | Hours between token keepalive passes (default: 168, one week; clamped to 1-336). `0` turns the loop off |
+| `AGENTIO_TRUSTED_IP_HEADER` | Header the fronting proxy sets to the caller's address, used as the rate-limit key. Unset (default) keys on the socket peer, so a client-supplied header can never be trusted. Set to `cf-connecting-ip` behind Cloudflare, or `x-forwarded-for` behind a single proxy that appends. The last comma token is used, never the leftmost |
 
 ## Volumes / health
 
@@ -71,7 +72,7 @@ The daemon always binds `0.0.0.0:7890` inside the container; what matters is how
 - **Proxy on the same host** (the common case): keep `-p 127.0.0.1:7890:7890` and point the proxy at `http://127.0.0.1:7890`.
 - **Proxy on another machine**: publish with `-p 7890:7890`, allow inbound 7890 from the proxy's address only, for example `ufw allow from <proxy-ip> to any port 7890`, and point the proxy at `http://<vps-ip>:7890`.
 
-The proxy must set `X-Forwarded-For`; the daemon's rate limits key on it. Open `https://<domain>/ui`, unlock with the passphrase, and check the profile list.
+The proxy must set the caller's address in a header and `AGENTIO_TRUSTED_IP_HEADER` must name it, or the daemon's rate limits key on the socket peer (the proxy) and collapse every caller onto one bucket. A client-supplied header is never trusted without this env, so it cannot be spoofed to dodge the limits. Behind Cloudflare set `AGENTIO_TRUSTED_IP_HEADER=cf-connecting-ip`; behind a single appending proxy set `x-forwarded-for`. Open `https://<domain>/ui`, unlock with the passphrase, and check the profile list.
 
 ### One token per agent
 

@@ -40,14 +40,25 @@ export class RateLimiter {
 }
 
 /**
- * The address to rate-limit on. siteio fronts the daemon, so a forwarded
- * header wins when present; otherwise the socket peer.
+ * The address to rate-limit on. A client-supplied `X-Forwarded-For` is
+ * attacker-controlled — its leftmost token is whatever the client claimed — so
+ * it is never trusted implicitly. When `AGENTIO_TRUSTED_IP_HEADER` names the
+ * header the fronting proxy sets (e.g. `cf-connecting-ip` behind Cloudflare,
+ * or `x-forwarded-for` behind a single appending proxy), its value is used,
+ * taking the LAST comma token — the one the nearest trusted proxy appended,
+ * never the leftmost. With no such config the socket peer is authoritative,
+ * which is safe by default: a proxy that forwards without the env set collapses
+ * every caller onto one bucket rather than trusting a spoofable header.
  */
 export function clientIp(request: Request, socketAddress: string | null): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0].trim();
-    if (first) return first;
+  const header = process.env.AGENTIO_TRUSTED_IP_HEADER?.toLowerCase().trim();
+  if (header) {
+    const raw = request.headers.get(header);
+    if (raw) {
+      const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last) return last;
+    }
   }
   return socketAddress ?? 'unknown';
 }

@@ -11,6 +11,9 @@ const { createRequestHandler } = await import('./api');
 const { createApiKey, listApiKeys } = await import('../auth/api-keys');
 const { v1AuthLimiter, v1KeyLimiter, V1_REQUESTS_PER_MINUTE } = await import('./routes-v1');
 
+// Tests inject the client IP via X-Forwarded-For; trust it here as a fronting proxy would.
+process.env.AGENTIO_TRUSTED_IP_HEADER = 'x-forwarded-for';
+
 const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
 let scopedToken = '';

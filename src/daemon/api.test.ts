@@ -9,6 +9,9 @@ import { unlockLimiter } from './routes-ui';
 import { deviceLimiter } from './routes-v1';
 import { resetDeviceAuth } from './device-auth';
 
+// Tests inject the client IP via X-Forwarded-For; trust it here as a fronting proxy would.
+process.env.AGENTIO_TRUSTED_IP_HEADER = 'x-forwarded-for';
+
 const PASSPHRASE = 'hub-passphrase-123';
 
 const peer: PeerSource = { requestIP: () => ({ address: '10.0.0.5' }) };
@@ -80,6 +83,29 @@ describe('daemon HTTP surface', () => {
 
     const probe = await call('/ui/api/session');
     expect(await probe.json()).toEqual({ authenticated: false, locked: true });
+  });
+
+  test('the page carries the security headers and a nonce-bound CSP', async () => {
+    const page = await call('/ui');
+    expect(page.headers.get('x-frame-options')).toBe('DENY');
+    expect(page.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(page.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(page.headers.get('strict-transport-security')).toContain('max-age=');
+
+    const csp = page.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("frame-ancestors 'none'");
+    const nonce = csp.match(/script-src 'nonce-([^']+)'/)?.[1];
+    expect(nonce).toBeTruthy();
+
+    const html = await page.text();
+    // The placeholder is fully substituted, and the served nonce matches the CSP.
+    expect(html).not.toContain('__CSP_NONCE__');
+    expect(html).toContain(`<script nonce="${nonce}">`);
+    expect(html).toContain(`<style nonce="${nonce}">`);
+
+    // Each response gets a fresh nonce.
+    const other = (await call('/ui')).headers.get('content-security-policy') ?? '';
+    expect(other).not.toBe(csp);
   });
 
   test('vault routes need a session', async () => {
