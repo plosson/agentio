@@ -1,4 +1,5 @@
 import { startApiServer, stopApiServer } from './api';
+import { startKeepalive, stopKeepalive } from './keepalive';
 import { getPassphrase, memoryOnlyProvider, setPassphraseProvider } from '../vault/passphrase';
 import { unlockVault } from '../vault/vault';
 
@@ -10,12 +11,16 @@ import { unlockVault } from '../vault/vault';
  * The daemon never reads the passphrase file. It starts locked unless
  * AGENTIO_PASSPHRASE is set, in which case the passphrase is verified
  * against the vault before the server comes up.
+ *
+ * It also keeps refresh tokens alive on a timer once it is unlocked; see
+ * keepalive.ts for why that is the hub's job and nothing else's.
  */
 export async function startDaemon(options: { version: string }): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);
 
   const shutdown = (signal: string) => {
     console.log(`\nReceived ${signal}, shutting down...`);
+    stopKeepalive();
     stopApiServer();
     console.log('Daemon stopped');
     process.exit(0);
@@ -37,6 +42,7 @@ export async function startDaemon(options: { version: string }): Promise<void> {
   }
 
   startApiServer({ version: options.version });
+  startKeepalive();
 
   console.log('Daemon ready');
 }
