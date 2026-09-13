@@ -1,5 +1,6 @@
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
+import { startKeepalive, stopKeepalive } from './keepalive';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
@@ -39,6 +40,8 @@ async function handleUnlock(request: Request, ip: string): Promise<Response> {
     throw new CliError('INVALID_PARAMS', 'passphrase is required');
   }
   await unlockVault(passphrase);
+  // Tokens are reachable again, so the keepalive starts here and passes at once.
+  startKeepalive();
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession(), isSecureRequest(request)) });
 }
 
@@ -47,6 +50,8 @@ const signedOut = (request: Request) =>
 
 function handleLock(request: Request): Response {
   lockVault();
+  // Nothing to refresh once locked, and a pass would only log that every time.
+  stopKeepalive();
   clearSessions();
   return signedOut(request);
 }

@@ -9,7 +9,8 @@ const jiraRefresh = mock(async (refreshToken: string) => ({
 const realJira = await import('../auth/jira-oauth');
 mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
-const { intervalHours, runRefreshPass, startKeepalive, stopKeepalive, DEFAULT_INTERVAL_HOURS } = await import('./keepalive');
+const { intervalHours, keepaliveRunning, runRefreshPass, startKeepalive, stopKeepalive,
+  DEFAULT_INTERVAL_HOURS, MAX_INTERVAL_HOURS, MIN_INTERVAL_HOURS } = await import('./keepalive');
 
 const PASSPHRASE = 'keepalive-pw-123';
 const HOUR = 60 * 60 * 1000;
@@ -36,7 +37,7 @@ withTempVault('agentio-keepalive-test-', () => ({
 
 beforeEach(async () => {
   delete process.env.AGENTIO_PASSPHRASE;
-  delete process.env.AGENTIO_REFRESH_HOURS;
+  delete process.env.AGENTIO_KEEPALIVE_HOURS;
   lockVault();
   await unlockVault(PASSPHRASE);
   jiraRefresh.mockClear();
@@ -87,6 +88,30 @@ describe('the keepalive pass', () => {
     expect(failed).toBe(0);
   });
 
+  test('a second pass does not start over one already running', async () => {
+    let entered!: () => void;
+    const reachedRefresh = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    // Only the first profile parks; the fixture has two, and parking both would deadlock.
+    let parked = false;
+    jiraRefresh.mockImplementation(async (refreshToken: string) => {
+      if (!parked) {
+        parked = true;
+        entered();
+        await new Promise<void>((resolve) => { release = resolve; });
+      }
+      return { accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600 };
+    });
+
+    const inFlight = runRefreshPass();
+    await reachedRefresh; // the first pass is now parked inside a refresh
+    const overlapping = await runRefreshPass();
+    expect(overlapping).toEqual({ refreshed: 0, fresh: 0, skipped: 0, failed: 0 });
+
+    release();
+    await inFlight;
+  });
+
   test('a locked vault is left alone entirely', async () => {
     lockVault();
     expect(await runRefreshPass()).toEqual({ refreshed: 0, fresh: 0, skipped: 0, failed: 0 });
@@ -95,24 +120,42 @@ describe('the keepalive pass', () => {
 });
 
 describe('the interval', () => {
-  test('defaults, accepts hours, and treats nonsense as the default', () => {
+  test('defaults, accepts hours, clamps out of range, and treats nonsense as the default', () => {
     expect(intervalHours(undefined)).toBe(DEFAULT_INTERVAL_HOURS);
     expect(intervalHours('')).toBe(DEFAULT_INTERVAL_HOURS);
     expect(intervalHours('6')).toBe(6);
-    expect(intervalHours('0.5')).toBe(0.5);
     expect(intervalHours('nope')).toBe(DEFAULT_INTERVAL_HOURS);
     expect(intervalHours('-1')).toBe(DEFAULT_INTERVAL_HOURS);
-  });
-
-  test('zero turns the loop off, and stopping twice is safe', () => {
     expect(intervalHours('0')).toBe(0);
-    startKeepalive(0);
-    stopKeepalive();
-    stopKeepalive();
+
+    // Below the floor, and the sub-second value that would spin.
+    expect(intervalHours('0.0001')).toBe(MIN_INTERVAL_HOURS);
+    // "Monthly" is the natural thing to reach for, and unclamped it overflows
+    // setTimeout's 32-bit millisecond argument and fires immediately, forever.
+    expect(intervalHours('720')).toBe(MAX_INTERVAL_HOURS);
+    expect(MAX_INTERVAL_HOURS * 60 * 60 * 1000).toBeLessThan(2 ** 31 - 1);
   });
 
-  test('the timers do not hold the process open', () => {
+  test('zero leaves the loop off; a real interval turns it on and stopping is idempotent', () => {
+    startKeepalive(0);
+    expect(keepaliveRunning()).toBe(false);
+
     startKeepalive(24);
+    expect(keepaliveRunning()).toBe(true);
+    // Starting again must not strand the previous timer.
+    startKeepalive(24);
+    expect(keepaliveRunning()).toBe(true);
+
     stopKeepalive();
+    expect(keepaliveRunning()).toBe(false);
+    stopKeepalive();
+    expect(keepaliveRunning()).toBe(false);
+  });
+
+  test('starting passes immediately rather than waiting out the first gap', async () => {
+    startKeepalive(24);
+    await Bun.sleep(50);
+    stopKeepalive();
+    expect(jiraRefresh).toHaveBeenCalled();
   });
 });

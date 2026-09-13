@@ -12,8 +12,8 @@ import { unlockVault } from '../vault/vault';
  * AGENTIO_PASSPHRASE is set, in which case the passphrase is verified
  * against the vault before the server comes up.
  *
- * It also keeps refresh tokens alive on a timer once it is unlocked; see
- * keepalive.ts for why that is the hub's job and nothing else's.
+ * Unlocking, here or at /ui, starts the token keepalive loop, and locking
+ * stops it; see keepalive.ts for why that is the hub's job and nothing else's.
  */
 export async function startDaemon(options: { version: string }): Promise<void> {
   console.log(`agentio-daemon starting (PID ${process.pid})`);
@@ -37,12 +37,13 @@ export async function startDaemon(options: { version: string }): Promise<void> {
     await unlockVault(envPassphrase);
     delete process.env.AGENTIO_PASSPHRASE;
     console.log('Vault unlocked from AGENTIO_PASSPHRASE');
+    startKeepalive();
   } else {
+    // Nothing to refresh while locked; unlocking at /ui starts the loop.
     console.log('Vault is locked');
   }
 
   startApiServer({ version: options.version });
-  startKeepalive();
 
   console.log('Daemon ready');
 }
