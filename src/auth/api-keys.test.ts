@@ -21,6 +21,13 @@ withTempVault('agentio-keys-test-', () => ({
 }));
 
 describe('api keys', () => {
+  test('ids never start with a dash, so `agentio key rotate <id>` cannot read one as an option', async () => {
+    for (let i = 0; i < 300; i++) {
+      const { key } = await createApiKey({ name: 'k', allowedProfiles: '*', readOnly: false }, HUB);
+      expect(key.id).not.toMatch(/^-/);
+    }
+  });
+
   test('create stores only the hash and returns a token that authenticates', async () => {
     const { key, token } = await createApiKey({ name: 'agent', allowedProfiles: '*', readOnly: false }, HUB);
     expect(key).not.toHaveProperty('secretHash');
