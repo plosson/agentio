@@ -62,7 +62,7 @@ describe('daemon HTTP surface', () => {
   test('the root redirects to the admin UI', async () => {
     const res = await call('/');
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('http://hub/ui');
+    expect(res.headers.get('location')).toBe('/ui');
   });
 
   test('the root redirects to the admin UI', async () => {

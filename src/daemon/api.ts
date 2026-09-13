@@ -35,7 +35,9 @@ export function createRequestHandler(ctx: UiContext) {
 
     if (path === '/health' && request.method === 'GET') return handleHealth();
     // The domain alone lands on the admin UI; the API lives under /v1 and /health.
-    if (path === '/' && request.method === 'GET') return Response.redirect(new URL('/ui', request.url), 302);
+    // Relative on purpose: behind the TLS proxy the daemon sees plain http, and an absolute
+    // Location would send the browser to http://… for the proxy to bounce back to https.
+    if (path === '/' && request.method === 'GET') return new Response(null, { status: 302, headers: { Location: '/ui' } });
     // The domain alone should land on the admin UI, not a JSON 404.
     if (path === '/' && request.method === 'GET') return Response.redirect(new URL('/ui', request.url), 302);
 
