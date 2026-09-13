@@ -2,7 +2,7 @@ import { findProfileIndex, getProfile, hasProfile, putProfileEntry, type SetProf
 import { putCredentials } from '../auth/token-store';
 import { grantProfileToKey, pruneDanglingScopes } from '../auth/api-keys';
 import { updateVault, type VaultContents } from '../vault/vault';
-import { isRemoteMode, remoteAddProfile } from '../auth/remote';
+import { hub, isRemoteMode, remoteAddProfile } from '../auth/remote';
 import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 
@@ -49,7 +49,8 @@ export function saveProfile(
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
-  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, options);
+  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, options)
+    .then(() => { console.error(`Stored on the vault hub at ${hub().url}`); });
   return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
 }
 

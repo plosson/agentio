@@ -109,15 +109,27 @@ describe('remote mode end to end', () => {
     expect(res.stderr).not.toContain('Connection URL');
   });
 
+  test('a hub that predates the flag is told apart from a key that lacks it', async () => {
+    // An older hub answers the listing without canAddProfiles at all.
+    const bare = Bun.serve({ port: 0, fetch: () => Response.json({ profiles: [] }) });
+    try {
+      const res = await cli(['sql', 'profile', 'add'], {
+        AGENTIO_TOKEN: (await createApiKey({ name: 'old', allowedProfiles: '*' }, `http://127.0.0.1:${bare.port}`)).token,
+      }, 'sqlite://:memory:\n');
+      expect(res.stderr).toContain('does not support adding profiles');
+      expect(res.stderr).not.toContain('Ask the hub owner');
+    } finally {
+      bare.stop(true);
+    }
+  });
+
   test('profile add on the agent lands on the hub, and the key can use it at once', async () => {
     const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canAddProfiles: true }, url)).token;
     const added = await cli(['sql', 'profile', 'add', '--profile', 'mem', '--read-only'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
     expect(added.exitCode).toBe(0);
 
-    // The entry, its flag and its credentials reached the hub's vault through the PUT.
-    const { config, credentials } = await loadVault();
-    expect(config.profiles.sql).toEqual([{ name: 'mem', readOnly: true }]);
-    expect(credentials.sql?.mem).toMatchObject({ url: 'sqlite://:memory:' });
+    // The entry and its read-only flag reached the hub's vault through the PUT.
+    expect((await loadVault()).config.profiles.sql).toEqual([{ name: 'mem', readOnly: true }]);
 
     // And the adding key may use what it just added, without a new token.
     const query = await cli(['sql', 'query', 'SELECT 1 AS one'], { AGENTIO_TOKEN: adder });

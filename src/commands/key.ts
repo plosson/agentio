@@ -50,7 +50,7 @@ export function registerKeyCommands(program: Command): void {
       .option('--profiles <list>', 'Comma-separated service/name pairs the key may use')
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only on every profile the key can see', false)
-      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine', false)
+      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds', false)
       .action(async (name: string, opts) => {
         try {
           const input = { ...keyInputFromOptions(opts), name };
@@ -109,7 +109,7 @@ export function registerKeyCommands(program: Command): void {
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only')
       .option('--no-read-only', 'Lift the key-level read-only restriction')
-      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine')
+      .option('--can-add-profiles', 'Let the agent add profiles to this vault from its machine, and use what it adds')
       .option('--no-can-add-profiles', 'Stop the agent from adding profiles')
       .action(async (id: string, opts) => {
         try {

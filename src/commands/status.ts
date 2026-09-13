@@ -339,11 +339,10 @@ export function registerStatusCommand(program: Command): void {
             }
             services[service].push(rest);
           }
-          const output = {
-            version,
-            ...(isRemoteMode() ? { hub: hub().url, canAddProfiles: await remoteCanAddProfiles() } : { configDir: CONFIG_DIR }),
-            services,
-          };
+          const where = isRemoteMode()
+            ? { hub: hub().url, canAddProfiles: await remoteCanAddProfiles() }
+            : { configDir: CONFIG_DIR };
+          const output = { version, ...where, services };
           console.log(JSON.stringify(output, null, 2));
           return;
         }

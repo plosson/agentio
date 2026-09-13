@@ -34,7 +34,7 @@ import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
-import { isRemoteMode, remoteCanAddProfiles, remoteCannotAddError, remoteModeError } from './auth/remote';
+import { hubTooOldToAddError, isRemoteMode, remoteCanAddProfiles, remoteCannotAddError, remoteModeError } from './auth/remote';
 import { handleError } from './utils/errors';
 
 declare const BUILD_VERSION: string | undefined;
@@ -122,17 +122,24 @@ export function createProgram(): Command {
     const parent = actionCommand.parent?.name();
 
     if (isRemoteMode()) {
+      // An add ends in a PUT to the hub, so it runs here; refuse before any OAuth or token dance when the key may not.
+      if (parent === 'profile' && name === 'add') {
+        try {
+          const allowed = await remoteCanAddProfiles();
+          if (allowed === undefined) throw hubTooOldToAddError();
+          if (!allowed) throw remoteCannotAddError();
+        } catch (err) {
+          handleError(err);
+        }
+        return;
+      }
       const localOnly =
         LOCAL_ONLY_COMMANDS.has(name) ||
         (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
-        (parent === 'profile' && name !== 'list' && name !== 'add');
+        (parent === 'profile' && name !== 'list');
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
         handleError(remoteModeError(`\`agentio ${full}\``));
-      }
-      // A remote add ends in a PUT to the hub; refuse here, before any OAuth or token dance, when the key may not.
-      if (parent === 'profile' && name === 'add' && !(await remoteCanAddProfiles().catch(handleError))) {
-        handleError(remoteCannotAddError());
       }
       return;
     }

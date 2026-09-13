@@ -1,10 +1,11 @@
-import { CliError, profileNotFoundError } from '../utils/errors';
+import { cannotAddProfilesError, CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked } from '../vault/vault';
 import { listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
 import { addProfileForKey } from '../config/profile-store';
+import type { RemoteAddBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { errorResponse, json, profilePath, readJson } from './http';
@@ -143,9 +144,10 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
  */
 async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   if (!key.canAddProfiles) {
-    throw new CliError('PERMISSION_DENIED', 'This token may not add profiles', 'Ask the hub owner to allow this key to add profiles');
+    throw cannotAddProfilesError();
   }
-  const body = await readJson<{ readOnly?: unknown; credentials?: unknown }>(request);
+  // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
+  const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
   const readOnly = validateFlag('readOnly', body.readOnly ?? false);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {

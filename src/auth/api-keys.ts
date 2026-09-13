@@ -175,7 +175,7 @@ export function revokeApiKey(id: string): Promise<void> {
 export function pruneDanglingScopes(config: Config): boolean {
   const known = new Set(
     Object.entries(config.profiles).flatMap(([service, profiles]) =>
-      (profiles ?? []).map((p) => profileRef(service as ServiceName, getProfileName(p))),
+      (profiles ?? []).map((p) => profileRef(service, getProfileName(p))),
     ),
   );
   let changed = false;
@@ -216,7 +216,7 @@ export async function authenticateToken(token: string): Promise<ApiKeyView | nul
 
 /** Whether a key's allow-list covers a profile. */
 export function keyAllows(key: ApiKeyView, service: string, profile: string): boolean {
-  return key.allowedProfiles === '*' || key.allowedProfiles.includes(profileRef(service as ServiceName, profile));
+  return key.allowedProfiles === '*' || key.allowedProfiles.includes(profileRef(service, profile));
 }
 
 /** A profile is read-only for a key when either the profile or the key says so. */

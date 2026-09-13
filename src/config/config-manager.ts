@@ -123,7 +123,7 @@ export function putProfileEntry(
 }
 
 /** The `service/name` form a key's allow-list holds. */
-export const profileRef = (service: ServiceName, name: string): string => `${service}/${name}`;
+export const profileRef = (service: string, name: string): string => `${service}/${name}`;
 
 /** A configured profile, flattened. */
 export interface ProfileRef {
