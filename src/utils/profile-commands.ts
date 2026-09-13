@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { getProfile, getProfileName, listProfiles, setProfileReadOnly } from '../config/config-manager';
+import { getProfile, getProfileName, listProfiles, putProfileEntry, setProfileReadOnly, type SetProfileOptions } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { pruneDanglingScopes } from '../auth/api-keys';
 import { updateVault } from '../vault/vault';
@@ -27,6 +27,22 @@ export async function chooseProfileName(
   if (explicit) return explicit;
   if (readOnly && (await getProfile(service, derived))) return `${derived}-readonly`;
   return derived;
+}
+
+/**
+ * Add or replace a profile and its credentials in one vault write. Every
+ * `profile add` ends here; deleteProfile is the inverse.
+ */
+export function saveProfile(
+  service: ServiceName,
+  profileName: string,
+  options: SetProfileOptions,
+  credentials: object,
+): Promise<void> {
+  return updateVault((vault) => {
+    putProfileEntry(vault.config, service, profileName, options);
+    (vault.credentials[service] ??= {})[profileName] = credentials as Record<string, unknown>;
+  });
 }
 
 /**

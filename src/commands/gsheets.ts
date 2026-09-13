@@ -1,9 +1,7 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
-import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GSheetsClient } from '../services/gsheets/client';
@@ -621,8 +619,7 @@ export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await setProfile('gsheets', profileName, { readOnly: options.readOnly });
-  await setCredentials('gsheets', profileName, credentials);
+  await saveProfile('gsheets', profileName, { readOnly: options.readOnly }, credentials);
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

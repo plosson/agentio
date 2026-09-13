@@ -1,7 +1,5 @@
 import { Command } from 'commander';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
-import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { SqlClient } from '../services/sql/client';
 import { CliError, handleError } from '../utils/errors';
@@ -160,8 +158,7 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
     displayName,
   };
 
-  await setProfile('sql', profileName, { readOnly: options.readOnly });
-  await setCredentials('sql', profileName, credentials);
+  await saveProfile('sql', profileName, { readOnly: options.readOnly }, credentials);
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../auth/token-manager';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
-import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { performOAuthFlow } from '../auth/oauth';
 import { GDriveClient } from '../services/gdrive/client';
@@ -628,8 +626,7 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
     accessLevel,
   };
 
-  await setProfile('gdrive', profileName, { readOnly: options.readOnly });
-  await setCredentials('gdrive', profileName, credentials);
+  await saveProfile('gdrive', profileName, { readOnly: options.readOnly }, credentials);
 
   console.log(`\nSuccess! Profile "${profileName}" configured.`);
   console.log(`   Email: ${userEmail}`);

@@ -1,7 +1,6 @@
 import { Command } from 'commander';
-import { setCredentials } from '../auth/token-store';
-import { setProfile, resolveProfile } from '../config/config-manager';
-import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
+import { resolveProfile } from '../config/config-manager';
+import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import { TelegramClient } from '../services/telegram/client';
 import { CliError, handleError, multipleProfilesError } from '../utils/errors';
@@ -187,8 +186,7 @@ export async function telegramProfileAdd(options: { profile?: string; readOnly?:
     channelName: channelName,
   };
 
-  await setProfile('telegram', profileName, { readOnly: options.readOnly });
-  await setCredentials('telegram', profileName, credentials);
+  await saveProfile('telegram', profileName, { readOnly: options.readOnly }, credentials);
 
   console.log(`\nProfile "${profileName}" configured!`);
   if (options.readOnly) {

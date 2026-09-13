@@ -1,7 +1,5 @@
 import { Command } from 'commander';
-import { setCredentials } from '../auth/token-store';
-import { setProfile } from '../config/config-manager';
-import { chooseProfileName, createProfileCommands } from '../utils/profile-commands';
+import { chooseProfileName, createProfileCommands, saveProfile } from '../utils/profile-commands';
 import { createClientGetter } from '../utils/client-factory';
 import {
   buildAuthorizeUrl,
@@ -463,8 +461,7 @@ export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Prom
 
   const profileName = await chooseProfileName('dropbox', { explicit: options.profile, derived: account.email, readOnly: options.readOnly });
 
-  await setProfile('dropbox', profileName, { readOnly: options.readOnly });
-  await setCredentials('dropbox', profileName, credentials);
+  await saveProfile('dropbox', profileName, { readOnly: options.readOnly }, credentials);
 
   console.log(`\nProfile "${profileName}" configured!`);
   console.log(`   Account: ${account.name} <${account.email}>`);

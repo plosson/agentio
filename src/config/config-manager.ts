@@ -100,18 +100,26 @@ export interface SetProfileOptions {
   readOnly?: boolean;
 }
 
+/** Add or replace a profile entry in `config`, in place. */
+export function putProfileEntry(
+  config: Config,
+  service: ServiceName,
+  profileName: string,
+  options?: SetProfileOptions
+): void {
+  const profiles = (config.profiles[service] ??= []);
+  const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
+  const existingIndex = profiles.findIndex((p) => getProfileName(p) === profileName);
+  if (existingIndex === -1) profiles.push(entry);
+  else profiles[existingIndex] = entry;
+}
+
 export function setProfile(
   service: ServiceName,
   profileName: string,
   options?: SetProfileOptions
 ): Promise<void> {
-  return updateConfig((config) => {
-    const profiles = (config.profiles[service] ??= []);
-    const entry: ProfileEntry = { name: profileName, ...(options?.readOnly ? { readOnly: true } : {}) };
-    const existingIndex = profiles.findIndex((p) => getProfileName(p) === profileName);
-    if (existingIndex === -1) profiles.push(entry);
-    else profiles[existingIndex] = entry;
-  });
+  return updateConfig((config) => putProfileEntry(config, service, profileName, options));
 }
 
 /** A configured profile, flattened. */
