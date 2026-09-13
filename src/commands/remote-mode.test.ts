@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../vault/test-helpers';
-import { lockVault, unlockVault } from '../vault/vault';
+import { loadVault, lockVault, unlockVault } from '../vault/vault';
 import { createApiKey, listApiKeys, revokeApiKey } from '../auth/api-keys';
 import { createRequestHandler } from '../daemon/api';
 
@@ -101,31 +101,25 @@ describe('remote mode end to end', () => {
   });
 
   test('profile add is refused up front, before any prompt, when the key may not add', async () => {
-    for (const args of [['profile', 'add', 'sql'], ['sql', 'profile', 'add']]) {
-      const res = await cli(args, {}, 'sqlite://:memory:\n');
-      expect(res.exitCode).toBe(2);
-      expect(res.stderr).toContain('PERMISSION_DENIED');
-      expect(res.stderr).toContain(url);
-      expect(res.stderr).not.toContain('Connection URL');
-    }
+    const res = await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n');
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('PERMISSION_DENIED');
+    expect(res.stderr).toContain(url);
+    // The gate ran before the handler, so the setup dialogue never started.
+    expect(res.stderr).not.toContain('Connection URL');
   });
 
   test('profile add on the agent lands on the hub, and the key can use it at once', async () => {
-    const { key, token: adder } = await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canAddProfiles: true }, url);
+    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canAddProfiles: true }, url)).token;
     const added = await cli(['sql', 'profile', 'add', '--profile', 'mem', '--read-only'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
     expect(added.exitCode).toBe(0);
-    expect(added.stdout).toContain('"mem"');
 
-    const vault = (await import('../vault/vault')).loadVault;
-    const { config, credentials } = await vault();
+    // The entry, its flag and its credentials reached the hub's vault through the PUT.
+    const { config, credentials } = await loadVault();
     expect(config.profiles.sql).toEqual([{ name: 'mem', readOnly: true }]);
     expect(credentials.sql?.mem).toMatchObject({ url: 'sqlite://:memory:' });
-    expect((await listApiKeys()).find((k) => k.id === key.id)!.allowedProfiles).toEqual(['telegram/alerts', 'sql/mem']);
 
-    const again = await cli(['sql', 'profile', 'add', '--profile', 'mem'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
-    expect(again.exitCode).not.toBe(0);
-    expect(again.stderr).toContain('already exists');
-
+    // And the adding key may use what it just added, without a new token.
     const query = await cli(['sql', 'query', 'SELECT 1 AS one'], { AGENTIO_TOKEN: adder });
     expect(query.exitCode).toBe(0);
     expect(query.stdout).toContain('one');

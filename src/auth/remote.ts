@@ -4,14 +4,17 @@ import { join } from 'path';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
-import type { ProfileRef } from '../config/config-manager';
+import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
 import { decodeToken, type TokenParts } from './token';
 
 /**
  * Remote mode: this machine has no vault. A token names a hub and a key, and
- * every profile or credential read becomes one HTTPS call. Writes are not
- * possible here; the hub owns the vault. A CLI process is short-lived, so the
- * profile list is fetched once and credentials once per profile touched.
+ * every profile or credential read becomes one HTTPS call. The hub owns the
+ * vault: the one write from here is a finished `profile add` handed over
+ * (remoteAddProfile), and it needs a key the owner marked canAddProfiles;
+ * everything else that changes the vault stays owner-only on the hub host.
+ * A CLI process is short-lived, so the listing is fetched once and
+ * credentials once per profile touched.
  *
  * The token comes from AGENTIO_TOKEN, else from the file `agentio login`
  * writes. The env var wins so a script can override a stored login.
@@ -109,6 +112,15 @@ export function assertLocalMode(what: string): void {
   if (isRemoteMode()) throw remoteModeError(what);
 }
 
+/** The refusal when a key may read this hub's credentials but not add to it. */
+export function remoteCannotAddError(): CliError {
+  return new CliError(
+    'PERMISSION_DENIED',
+    `This token may not add profiles to the vault hub at ${hub().url}`,
+    'Ask the hub owner to allow this key to add profiles',
+  );
+}
+
 const REQUEST_TIMEOUT_MS = 15_000;
 const KNOWN_CODES = new Set<string>([
   'AUTH_FAILED', 'TOKEN_EXPIRED', 'PROFILE_NOT_FOUND', 'INVALID_PARAMS', 'API_ERROR', 'NETWORK_ERROR',
@@ -150,7 +162,7 @@ export interface HubCallOptions {
 /**
  * One JSON call to a hub. Transport failures are NETWORK_ERROR; an error
  * answer keeps the hub's own code and suggestion (see hubError). Shared by
- * the authenticated credential reads and the pre-token login flow.
+ * the authenticated credential and profile calls and the pre-token login flow.
  */
 export async function hubCall<T>(url: string, path: string, { method = 'GET', body, token }: HubCallOptions = {}): Promise<T> {
   let response: Response;
@@ -179,27 +191,32 @@ export async function hubCall<T>(url: string, path: string, { method = 'GET', bo
 const hubRequest = <T>(path: string, method: HubCallOptions['method'] = 'GET', body?: unknown) =>
   hubCall<T>(hub().url, path, { method, body, token: remoteToken()! });
 
-const profilePath = (service: ServiceName, name: string) => `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}`;
+const profileRoute = (service: ServiceName, name: string) => `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}`;
 
-/** The listing, fetched once per process. */
-const remoteListing = () => (listingPromise ??= hubRequest<RemoteListing>('/v1/profiles'));
+/** This key's view of the hub, fetched once per process and shared by every reader below. */
+export function remoteListing(): Promise<RemoteListing> {
+  return (listingPromise ??= hubRequest<RemoteListing>('/v1/profiles'));
+}
 
 /** The profiles this token may use. */
-export const remoteProfiles = (): Promise<RemoteProfile[]> => remoteListing().then((l) => l.profiles);
+export function remoteProfiles(): Promise<RemoteProfile[]> {
+  return remoteListing().then((l) => l.profiles);
+}
 
 /** Whether this token may add profiles to the hub; asked before any OAuth dance starts. */
-export const remoteCanAddProfiles = (): Promise<boolean> => remoteListing().then((l) => l.canAddProfiles);
+export function remoteCanAddProfiles(): Promise<boolean> {
+  return remoteListing().then((l) => l.canAddProfiles);
+}
 
-/** A `profile add` finished on this machine, handed to the hub to store. The cached listing is stale afterwards. */
-export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, readOnly: boolean): Promise<void> {
-  await hubRequest(profilePath(service, name), 'PUT', { readOnly, credentials });
-  listingPromise = null;
+/** A `profile add` finished on this machine, handed to the hub to store (create-only there). */
+export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
+  await hubRequest(profileRoute(service, name), 'PUT', { ...options, credentials });
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
 export async function remoteCredentials<T = Record<string, unknown>>(service: ServiceName, name: string): Promise<T | null> {
   try {
-    return (await hubRequest<{ credentials: T }>(`${profilePath(service, name)}/credentials`, 'POST')).credentials;
+    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials`, 'POST')).credentials;
   } catch (err) {
     // NOT_FOUND is "profile exists, nothing stored"; an unknown profile stays PROFILE_NOT_FOUND.
     if (err instanceof CliError && err.code === 'NOT_FOUND') return null;

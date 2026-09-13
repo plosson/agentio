@@ -26,6 +26,8 @@ export interface ProfileNameChoice {
  * derived name, unless the profile is read-only and that name is taken
  * already: then `<derived>-readonly`, so one account can have a full and a
  * read-only profile side by side without the second overwriting the first.
+ * In remote mode only the key's allow-listed names are visible, so a
+ * collision outside it surfaces as the hub's error rather than a rename.
  */
 export async function chooseProfileName(
   service: ServiceName,
@@ -47,7 +49,7 @@ export function saveProfile(
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
-  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, !!options.readOnly);
+  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, options);
   return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
 }
 

@@ -79,9 +79,10 @@ In the UI's API keys card, or on the host:
 ```bash
 docker exec agentio agentio key create laptop --url https://<domain> --profiles gdrive/docunit,gmail/work
 docker exec agentio agentio key create reporter --url https://<domain> --all --read-only
+docker exec agentio agentio key create laptop --url https://<domain> --all --can-add-profiles
 ```
 
-The token is printed once. Scope each key to what that agent needs; a read-only key cannot write through any profile it sees.
+The token is printed once. Scope each key to what that agent needs; a read-only key cannot write through any profile it sees, and only a `--can-add-profiles` key may add a profile to the vault.
 
 ### The agent machine
 
@@ -94,13 +95,14 @@ agentio status          # the profiles this token may use
 agentio gdrive list     # any service command, credentials served by the hub
 ```
 
-`login` needs no browser on the agent machine: open the printed URL from anywhere, check the code matches, pick the profiles, approve. A key made with `agentio key create` works the same way through `export AGENTIO_TOKEN='agio1.…'`, which also overrides a stored login. No vault and no passphrase on this machine. `vault`, `key`, `daemon`, `reauth`, and profile changes are refused here; they belong on the hub.
+`login` needs no browser on the agent machine: open the printed URL from anywhere, check the code matches, pick the profiles, approve. A key made with `agentio key create` works the same way through `export AGENTIO_TOKEN='agio1.…'`, which also overrides a stored login. No vault and no passphrase on this machine. `vault`, `key`, `daemon`, `reauth`, and profile removal are refused here; they belong on the hub. `profile add` works with a key the owner marked `--can-add-profiles`.
 
 ### Day-to-day
 
 - **Lock state after a restart** follows `AGENTIO_PASSPHRASE`, see the Environment table.
 - **Rotate or revoke** from the UI or with `agentio key rotate|revoke` on the host. The old token stops working at once.
-- **Reauth and new profiles** happen on the host with the CLI (`docker exec agentio agentio <service> profile add`); the paste-back OAuth flow works without a browser there.
+- **Reauth** happens on the host with the CLI (`docker exec agentio agentio <service> reauth <service>`); the paste-back OAuth flow works without a browser there.
+- **New profiles** can be added on the host the same way, or from an agent machine when its key was created with `--can-add-profiles`: the OAuth or token dance runs there and the result is stored here. An agent cannot replace a profile that already exists.
 - **Audit**: every credential call is one line on the container's stdout (`docker logs`), naming the key and profile.
 - **Back up the vault file, not the env vars**: the file on the volume carries refreshed tokens and the keys, the env vars only the first-boot snapshot. Keep dated copies; a wrong write is undone by restoring the previous one and restarting.
 
