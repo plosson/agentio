@@ -390,12 +390,12 @@ agentio logout                                         # deletes the stored toke
 
 ### API keys
 
-Keys let remote agents read credentials from this vault hub. Create them here or in the admin UI; both call `src/auth/api-keys.ts`. Only the secret's hash is stored, plus its last four characters as a hint (`agio1.…xxxx` in `key list` and the UI) so tokens can be told apart. Token format and the hub-URL rule: `docs/design/remote-vault.md`, section Token format.
+Keys let remote agents read credentials from this vault hub. Create them here or in the admin UI; both call `src/auth/api-keys.ts`. A key carries an allow-list (`--all` or `--profiles`) and two flags: `--read-only` forces read-only on every profile it can see, `--allow-add` (`canAddProfiles`) lets the agent add profiles to this vault from its own machine with `agentio <service> profile add`. Both are off by default and orthogonal: a read-only key may still add a profile, and reads it back as read-only. Only the secret's hash is stored, plus its last four characters as a hint (`agio1.…xxxx` in `key list` and the UI) so tokens can be told apart. Token format and the hub-URL rule: `docs/design/remote-vault.md`, section Token format.
 
 ```bash
-agentio key create <name> --url https://vault.example.com (--all | --profiles gdrive/docunit,gmail/work) [--read-only]   # prints the token once, on stdout alone
+agentio key create <name> --url https://vault.example.com (--all | --profiles gdrive/docunit,gmail/work) [--read-only] [--allow-add]   # prints the token once, on stdout alone
 agentio key list
-agentio key update <id> [--name <n>] [--all | --profiles <list>] [--read-only | --no-read-only]
+agentio key update <id> [--name <n>] [--all | --profiles <list>] [--read-only | --no-read-only] [--allow-add | --no-allow-add]
 agentio key rotate <id> --url https://vault.example.com
 agentio key revoke <id>
 ```

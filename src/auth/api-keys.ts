@@ -12,6 +12,7 @@ export interface ApiKeyInput {
   name?: unknown;
   allowedProfiles?: unknown;
   readOnly?: unknown;
+  canAddProfiles?: unknown;
 }
 
 export interface IssuedKey {
@@ -60,15 +61,15 @@ export function validateName(name: unknown): string {
   return name.trim();
 }
 
-/** "all profiles" or the list, plus the read-only flag: the one-line summary the CLI prints. */
+/** "all profiles" or the list, plus the flags: the one-line summary the CLI prints. */
 export function describeScope(key: ApiKeyView): string {
   const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}`;
+  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canAddProfiles ? ', may add profiles' : ''}`;
 }
 
-function validateReadOnly(readOnly: unknown): boolean {
-  if (typeof readOnly !== 'boolean') throw new CliError('INVALID_PARAMS', 'readOnly must be true or false');
-  return readOnly;
+function validateFlag(field: string, value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new CliError('INVALID_PARAMS', `${field} must be true or false`);
+  return value;
 }
 
 /** The hub base URL that goes into the token, as the browser or --url saw it. */
@@ -118,7 +119,8 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
 
 export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
   const name = validateName(input.name);
-  const readOnly = validateReadOnly(input.readOnly);
+  const readOnly = validateFlag('readOnly', input.readOnly);
+  const canAddProfiles = validateFlag('canAddProfiles', input.canAddProfiles ?? false);
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
@@ -127,7 +129,7 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
     const keys = (config.apiKeys ??= []);
     let id = newKeyId();
     while (keys.some((k) => k.id === id)) id = newKeyId();
-    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, createdAt: new Date().toISOString() };
+    const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canAddProfiles, createdAt: new Date().toISOString() };
     keys.push(created);
     return created;
   });
@@ -139,7 +141,8 @@ export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView
   return withKey(id, async (key) => {
     if (patch.name !== undefined) key.name = validateName(patch.name);
     if (patch.allowedProfiles !== undefined) key.allowedProfiles = await validateScope(patch.allowedProfiles);
-    if (patch.readOnly !== undefined) key.readOnly = validateReadOnly(patch.readOnly);
+    if (patch.readOnly !== undefined) key.readOnly = validateFlag('readOnly', patch.readOnly);
+    if (patch.canAddProfiles !== undefined) key.canAddProfiles = validateFlag('canAddProfiles', patch.canAddProfiles);
     return view(key);
   });
 }

@@ -17,6 +17,7 @@ export interface ApiKey {
   hint?: string;           // last characters of the secret, to tell tokens apart
   allowedProfiles: ApiKeyScope;
   readOnly: boolean;       // forces read-only on every profile the key can see
+  canAddProfiles?: boolean; // may add profiles to this vault from the agent machine; absent means no
   createdAt: string;       // ISO
   lastUsedAt?: string;     // ISO
 }

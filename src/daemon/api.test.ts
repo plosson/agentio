@@ -210,12 +210,13 @@ describe('daemon HTTP surface', () => {
     const cookie = await cookieFrom(await unlock());
     const created = await call('/ui/api/keys', {
       method: 'POST', headers: { cookie },
-      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, url: 'https://hub.example.com' }),
+      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, canAddProfiles: true, url: 'https://hub.example.com' }),
     });
     expect(created.status).toBe(201);
     const { key, token } = await created.json();
     expect(token).toMatch(/^agio1\./);
     expect(key).not.toHaveProperty('secretHash');
+    expect(key).toMatchObject({ readOnly: true, canAddProfiles: true });
 
     const list = await (await call('/ui/api/keys', { headers: { cookie } })).json();
     expect(list.keys).toEqual([key]);
@@ -228,9 +229,9 @@ describe('daemon HTTP surface', () => {
     expect(bad.status).toBe(400);
 
     const patched = await call(`/ui/api/keys/${key.id}`, {
-      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'renamed', readOnly: false }),
+      method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'renamed', readOnly: false, canAddProfiles: false }),
     });
-    expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false });
+    expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false, canAddProfiles: false });
 
     const rotated = await call(`/ui/api/keys/${key.id}/rotate`, {
       method: 'POST', headers: { cookie }, body: JSON.stringify({ url: 'https://hub.example.com' }),

@@ -28,7 +28,12 @@ describe('agentio key', () => {
     expect(created.stderr).toContain('shown once');
 
     const listed = await runCli(['key', 'list']);
-    expect(listed.stdout).toContain(`${kid}  ci  agio1.…${token.slice(-4)}  gdrive/docs, read-only`);
+    expect(listed.stdout).toContain(`${kid}  ci  agio1.…${token.slice(-4)}  gdrive/docs, read-only  created`);
+
+    const allowed = await runCli(['key', 'update', kid, '--allow-add']);
+    expect(allowed.stdout).toContain('gdrive/docs, read-only, may add profiles');
+    const withdrawn = await runCli(['key', 'update', kid, '--no-allow-add']);
+    expect(withdrawn.stdout).toContain('gdrive/docs, read-only\n');
 
     const rotated = await runCli(['key', 'rotate', kid, '--url', 'https://vault.example.com']);
     expect(rotated.exitCode).toBe(0);
@@ -39,6 +44,12 @@ describe('agentio key', () => {
     const revoked = await runCli(['key', 'revoke', kid]);
     expect(revoked.exitCode).toBe(0);
     expect((await runCli(['key', 'list'])).stdout).toContain('No API keys');
+  });
+
+  test('create --allow-add marks the key in the one-line summary', async () => {
+    const created = await runCli(['key', 'create', 'laptop', '--url', 'https://vault.example.com', '--all', '--allow-add']);
+    expect(created.exitCode).toBe(0);
+    expect(created.stderr).toContain('all profiles, may add profiles');
   });
 
   test('create refuses a missing scope and --all with --profiles', async () => {

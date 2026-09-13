@@ -42,11 +42,12 @@ export function registerKeyCommands(program: Command): void {
       .option('--profiles <list>', 'Comma-separated service/name pairs the key may use')
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only on every profile the key can see', false)
+      .option('--allow-add', 'Let the agent add profiles to this vault with `agentio <service> profile add`', false)
       .action(async (name: string, opts) => {
         try {
           const scope = scopeFromOptions(opts);
           if (!scope) throw new CliError('INVALID_PARAMS', 'Choose a scope', 'Pass --all or --profiles <service/name,...>');
-          printIssued(await createApiKey({ name, allowedProfiles: scope, readOnly: opts.readOnly }, opts.url));
+          printIssued(await createApiKey({ name, allowedProfiles: scope, readOnly: opts.readOnly, canAddProfiles: opts.allowAdd }, opts.url));
         } catch (error) {
           handleError(error);
         }
@@ -58,6 +59,9 @@ export function registerKeyCommands(program: Command): void {
 
   # everything, but read-only
   agentio key create reporter --url https://vault.example.com --all --read-only
+
+  # a laptop that may add its own profiles to the vault
+  agentio key create laptop --url https://vault.example.com --all --allow-add
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)`,
@@ -97,13 +101,15 @@ export function registerKeyCommands(program: Command): void {
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only')
       .option('--no-read-only', 'Lift the key-level read-only restriction')
+      .option('--allow-add', 'Let the agent add profiles to this vault')
+      .option('--no-allow-add', 'Stop the agent from adding profiles')
       .action(async (id: string, opts) => {
         try {
           const scope = scopeFromOptions(opts);
-          if (opts.name === undefined && scope === undefined && opts.readOnly === undefined) {
-            throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass --name, --profiles/--all, or --read-only/--no-read-only');
+          if (opts.name === undefined && scope === undefined && opts.readOnly === undefined && opts.allowAdd === undefined) {
+            throw new CliError('INVALID_PARAMS', 'Nothing to update', 'Pass --name, --profiles/--all, --read-only/--no-read-only, or --allow-add/--no-allow-add');
           }
-          const updated = await updateApiKey(id, { name: opts.name, allowedProfiles: scope, readOnly: opts.readOnly });
+          const updated = await updateApiKey(id, { name: opts.name, allowedProfiles: scope, readOnly: opts.readOnly, canAddProfiles: opts.allowAdd });
           console.log(`Updated "${updated.name}" (${updated.id}): ${describeScope(updated)}`);
         } catch (error) {
           handleError(error);
@@ -112,7 +118,8 @@ export function registerKeyCommands(program: Command): void {
     `Examples:
 
   agentio key update a1b2c3d4 --profiles gdrive/docunit
-  agentio key update a1b2c3d4 --no-read-only`,
+  agentio key update a1b2c3d4 --no-read-only
+  agentio key update a1b2c3d4 --allow-add`,
   );
 
   addExamples(

@@ -198,7 +198,7 @@
     </section>
     <div class="card table">
       <table>
-        <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Read-only</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Token</th><th>Scope</th><th>Read-only</th><th>May add</th><th>Created</th><th>Last used</th><th></th></tr></thead>
         <tbody id="keys-body"></tbody>
       </table>
     </div>
@@ -257,6 +257,7 @@
     <div class="choices" hidden></div>
   </div>
   <div class="field"><label class="toggle"><input type="checkbox" class="key-ro"> read-only on every profile this key can see</label></div>
+  <div class="field"><label class="toggle"><input type="checkbox" class="key-add"> may add profiles to this vault from the agent machine</label></div>
 </template>
 
 <dialog id="confirm-dialog">
@@ -575,12 +576,13 @@
         <td class="mono muted">agio1.…${escape(k.hint || '')}</td>
         <td class="muted">${escape(scope)}</td>
         <td>${k.readOnly ? 'yes' : 'no'}</td>
+        <td>${k.canAddProfiles ? 'yes' : 'no'}</td>
         <td class="muted">${fmtRelative(k.createdAt)}</td>
         <td class="muted">${k.lastUsedAt ? fmtRelative(k.lastUsedAt) : 'never'}</td>
         <td class="actions"><button class="link rotate" type="button">Rotate</button> <button class="link del" type="button">Revoke</button></td>
       </tr>`;
     });
-    $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="7" class="empty">No keys yet. Create one to let an agent machine use this hub.</td></tr>';
+    $('keys-body').innerHTML = rows.join('') || '<tr><td colspan="8" class="empty">No keys yet. Create one to let an agent machine use this hub.</td></tr>';
   }
 
   async function loadKeys() {
@@ -608,6 +610,7 @@
     name: form.querySelector('.key-name').value,
     allowedProfiles: scopeIsSome(form) ? [...form.querySelectorAll('.choices input:checked')].map((i) => i.value) : '*',
     readOnly: form.querySelector('.key-ro').checked,
+    canAddProfiles: form.querySelector('.key-add').checked,
     url: window.location.origin,
   });
   const resetForm = (form) => { form.reset(); syncScope(form); };
