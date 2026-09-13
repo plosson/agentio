@@ -205,6 +205,28 @@ export function grantProfileToKey(config: Config, keyId: string, service: Servic
   if (!key.allowedProfiles.includes(ref)) key.allowedProfiles.push(ref);
 }
 
+/**
+ * The stored key as a write path sees it, or null when it is gone. A view
+ * authenticated at the start of a request can be stale by the time the write
+ * runs: the owner may have revoked or rescoped it, and a rename earlier in the
+ * same request moves its own allow-list. Scope checks inside `updateVault` use
+ * this instead.
+ */
+export function keyInConfig(config: Config, keyId: string): ApiKeyView | null {
+  const key = findKey(config, keyId);
+  return key ? view(key) : null;
+}
+
+/** Follow a profile rename through every list scope, in place, so no key loses access to it. */
+export function renameProfileInScopes(config: Config, service: ServiceName, from: string, to: string): void {
+  const before = profileRef(service, from);
+  const after = profileRef(service, to);
+  for (const key of config.apiKeys ?? []) {
+    if (key.allowedProfiles === '*') continue;
+    key.allowedProfiles = [...new Set(key.allowedProfiles.map((ref) => (ref === before ? after : ref)))];
+  }
+}
+
 /** The key a token proves possession of, or null. Malformed tokens are null too. */
 export async function authenticateToken(token: string): Promise<ApiKeyView | null> {
   let parts;

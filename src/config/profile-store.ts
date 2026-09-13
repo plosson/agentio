@@ -1,10 +1,10 @@
 import { findProfileIndex, getProfile, hasProfile, putProfileEntry, type SetProfileOptions } from './config-manager';
 import { putCredentials } from '../auth/token-store';
-import { grantProfileToKey, pruneDanglingScopes } from '../auth/api-keys';
+import { grantProfileToKey, keyAllows, keyInConfig, pruneDanglingScopes, renameProfileInScopes } from '../auth/api-keys';
 import { updateVault, type VaultContents } from '../vault/vault';
 import { hub, isRemoteMode, remoteAddProfile } from '../auth/remote';
 import { CliError } from '../utils/errors';
-import type { ServiceName } from '../types/config';
+import type { Config, ServiceName } from '../types/config';
 
 /**
  * How a profile enters and leaves the vault. A local `profile add` ends in
@@ -73,12 +73,20 @@ function putProfile(vault: VaultContents, service: ServiceName, profileName: str
 }
 
 /**
- * The hub's add on behalf of a remote key. Create-only: false, and nothing
- * written, when the name is taken, so a key cannot swap the credentials
- * behind a profile other agents use. The key gains the profile on its
- * allow-list in the same write, so what it just added it can use.
+ * Why the hub-side operations take a key: the vault has one owner, so a
+ * managing key is that owner on another machine and may replace or drop what
+ * it can already reach. The allow-list still bounds it. A name nobody holds
+ * yet is free to create, and the key gains it in the same write; a name the
+ * key cannot see is refused, since touching it is a mistake rather than an
+ * intent. `false` means nothing was written.
  */
-export function addProfileForKey(
+function reaches(config: Config, keyId: string, service: ServiceName, profileName: string): boolean {
+  const key = keyInConfig(config, keyId);
+  return !!key && keyAllows(key, service, profileName);
+}
+
+/** Add a profile for a remote key, or replace one it already reaches. */
+export function saveProfileForKey(
   keyId: string,
   service: ServiceName,
   profileName: string,
@@ -86,11 +94,55 @@ export function addProfileForKey(
   options: SetProfileOptions,
 ): Promise<boolean> {
   return updateVault((vault) => {
-    if (hasProfile(vault.config, service, profileName)) return false;
+    const free = !hasProfile(vault.config, service, profileName);
+    if (!free && !reaches(vault.config, keyId, service, profileName)) return false;
     putProfile(vault, service, profileName, credentials, options);
     grantProfileToKey(vault.config, keyId, service, profileName);
     return true;
   });
+}
+
+/** Drop a profile for a remote key, when the key reaches it. */
+export function deleteProfileForKey(keyId: string, service: ServiceName, profileName: string): Promise<boolean> {
+  return updateVault((vault) =>
+    reaches(vault.config, keyId, service, profileName) && removeProfile(vault, service, profileName));
+}
+
+/** Rename a profile for a remote key, when the key reaches it and the new name is free. */
+export function renameProfileForKey(keyId: string, service: ServiceName, from: string, to: string): Promise<RenameResult> {
+  return updateVault((vault) =>
+    reaches(vault.config, keyId, service, from) ? moveProfile(vault, service, from, to) : 'not-found');
+}
+
+export type RenameResult = 'renamed' | 'not-found' | 'taken';
+
+/**
+ * Move a profile to a new name: its entry keeps its flag, its credentials
+ * follow, and every key that named it is updated, all in one vault write.
+ */
+export function renameProfile(service: ServiceName, from: string, to: string): Promise<RenameResult> {
+  return updateVault((vault) => moveProfile(vault, service, from, to));
+}
+
+/** The move itself, in place; validation included so no caller can skip it. */
+function moveProfile(vault: VaultContents, service: ServiceName, from: string, to: string): RenameResult {
+  validateProfileName(to);
+  if (from === to) return hasProfile(vault.config, service, from) ? 'renamed' : 'not-found';
+  const index = findProfileIndex(vault.config, service, from);
+  if (index === -1) return 'not-found';
+  if (hasProfile(vault.config, service, to)) return 'taken';
+
+  const entry = vault.config.profiles[service]![index];
+  const readOnly = typeof entry === 'string' ? undefined : entry.readOnly;
+  vault.config.profiles[service]![index] = { name: to, ...(readOnly ? { readOnly: true } : {}) };
+
+  const stored = vault.credentials[service]?.[from];
+  if (stored !== undefined) {
+    putCredentials(vault.credentials, service, to, stored);
+    delete vault.credentials[service]![from];
+  }
+  renameProfileInScopes(vault.config, service, from, to);
+  return 'renamed';
 }
 
 /**
@@ -99,14 +151,17 @@ export function addProfileForKey(
  * cleaned up in that case).
  */
 export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
-  return updateVault((vault) => {
-    const index = findProfileIndex(vault.config, service, profileName);
-    const removed = index !== -1;
-    if (removed) {
-      vault.config.profiles[service]!.splice(index, 1);
-      pruneDanglingScopes(vault.config);
-    }
-    delete vault.credentials[service]?.[profileName];
-    return removed;
-  });
+  return updateVault((vault) => removeProfile(vault, service, profileName));
+}
+
+/** The entry, its credentials and its place in every key's scope, gone. In place. */
+function removeProfile(vault: VaultContents, service: ServiceName, profileName: string): boolean {
+  const index = findProfileIndex(vault.config, service, profileName);
+  const removed = index !== -1;
+  if (removed) {
+    vault.config.profiles[service]!.splice(index, 1);
+    pruneDanglingScopes(vault.config);
+  }
+  delete vault.credentials[service]?.[profileName];
+  return removed;
 }

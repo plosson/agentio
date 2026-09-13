@@ -215,6 +215,9 @@ export function remoteCanManageProfiles(): Promise<boolean | undefined> {
 /** The body of `PUT /v1/profiles/:service/:name`; the hub parses this same type. */
 export type RemoteAddBody = SetProfileOptions & { credentials: object };
 
+/** The body of `PATCH /v1/profiles/:service/:name`; the hub parses this same type. */
+export type RemoteRenameBody = { name: string };
+
 /** A `profile add` finished on this machine, handed to the hub to store (create-only there). */
 export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
   const body: RemoteAddBody = { ...options, credentials };
