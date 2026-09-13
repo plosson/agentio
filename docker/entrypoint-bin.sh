@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+# A volume mounted by the host is often root-owned; make it ours, then become
+# the unprivileged user for everything that follows.
+if [ "$(id -u)" = "0" ]; then
+  chown agentio:agentio /data
+  exec setpriv --reuid=agentio --regid=agentio --init-groups "$0" "$@"
+fi
+
 BIN_DIR="/home/agentio/bin"
 
 # Detect platform
@@ -21,7 +28,7 @@ else
 fi
 
 echo "Installing agentio v${VERSION} (${PLATFORM})..."
-curl -fL "https://github.com/plosson/agentio/releases/download/v${VERSION}/agentio-${PLATFORM}" \
+curl -fsSL "https://github.com/plosson/agentio/releases/download/v${VERSION}/agentio-${PLATFORM}" \
     -o "${BIN_DIR}/agentio"
 chmod +x "${BIN_DIR}/agentio"
 

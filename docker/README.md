@@ -7,7 +7,7 @@ Runs the shipped CLI daemon (`agentio daemon start`), which serves the daemon AP
 From the repository root:
 
 ```bash
-docker build -f docker/Dockerfile -t agentio .
+docker build -t agentio docker
 ```
 
 ## Run

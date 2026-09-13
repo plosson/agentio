@@ -20,8 +20,8 @@ RUN mkdir -p /data /home/agentio/bin && chown -R agentio:agentio /data /home/age
 # Install entrypoint that fetches latest agentio on start (vault-imports when AGENTIO_KEY+AGENTIO_CONFIG set)
 COPY --chmod=755 entrypoint-bin.sh /usr/local/bin/entrypoint-bin.sh
 
-# Switch to non-root user
-USER agentio
+# The entrypoint starts as root only to take ownership of /data (a volume the
+# host may hand over root-owned), then drops to `agentio` before anything else.
 
 # Config directory and binary path
 ENV HOME=/data
