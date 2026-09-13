@@ -114,6 +114,8 @@ export function createProgram(): Command {
   }
 
   const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout']);
+  // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
+  const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove']);
   // Owner-only on the hub host: they touch the vault or the daemon.
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
@@ -122,8 +124,8 @@ export function createProgram(): Command {
     const parent = actionCommand.parent?.name();
 
     if (isRemoteMode()) {
-      // An add ends in a PUT to the hub, so it runs here; refuse before any OAuth or token dance when the key may not.
-      if (parent === 'profile' && name === 'add') {
+      // These reach the hub as a write; refuse before any OAuth or token dance when the key may not.
+      if (parent === 'profile' && MANAGED_PROFILE_COMMANDS.has(name)) {
         try {
           const allowed = await remoteCanManageProfiles();
           if (allowed === undefined) throw hubTooOldToManageError();

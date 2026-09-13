@@ -92,7 +92,7 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'status'], ['profile', 'remove', 'telegram', 'bare'], ['telegram', 'profile', 'remove', '--profile', 'bare']]) {
+    for (const args of [['vault', 'status'], ['profile', 'reauth', 'telegram'], ['telegram', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -100,13 +100,46 @@ describe('remote mode end to end', () => {
     }
   });
 
-  test('profile add is refused up front, before any prompt, when the key may not add', async () => {
-    const res = await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n');
-    expect(res.exitCode).toBe(2);
-    expect(res.stderr).toContain('PERMISSION_DENIED');
-    expect(res.stderr).toContain(url);
+  test('every profile write is refused up front, before any prompt, without the managing right', async () => {
+    for (const args of [['sql', 'profile', 'add'], ['profile', 'rename', 'telegram', 'alerts', 'x'], ['profile', 'remove', 'telegram', 'alerts']]) {
+      const res = await cli(args, {}, 'sqlite://:memory:\n');
+      expect(res.exitCode).toBe(2);
+      expect(res.stderr).toContain('PERMISSION_DENIED');
+      expect(res.stderr).toContain(url);
+    }
     // The gate ran before the handler, so the setup dialogue never started.
-    expect(res.stderr).not.toContain('Connection URL');
+    expect((await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n')).stderr).not.toContain('Connection URL');
+    // And nothing was touched on the hub.
+    expect((await loadVault()).config.profiles.telegram).toEqual([{ name: 'alerts' }, { name: 'bare' }]);
+  });
+
+  test('a managing key renames and removes a profile on the hub', async () => {
+    const manager = (await createApiKey({ name: 'manager', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+
+    const renamed = await cli(['profile', 'rename', 'telegram', 'alerts', 'sirens'], { AGENTIO_TOKEN: manager });
+    expect(renamed.exitCode).toBe(0);
+    expect(renamed.stdout).toContain('Renamed profile "alerts" to "sirens"');
+    const afterRename = await loadVault();
+    expect(afterRename.config.profiles.telegram).toEqual([{ name: 'sirens' }, { name: 'bare' }]);
+    expect(afterRename.credentials.telegram?.sirens).toMatchObject({ botToken: 'bot-secret' });
+    // The key's own scope followed the rename, so it can still reach the profile.
+    expect((await listApiKeys()).find((k) => k.name === 'manager')!.allowedProfiles).toEqual(['telegram/sirens']);
+
+    const removed = await cli(['profile', 'remove', 'telegram', 'sirens'], { AGENTIO_TOKEN: manager });
+    expect(removed.exitCode).toBe(0);
+    expect((await loadVault()).config.profiles.telegram).toEqual([{ name: 'bare' }]);
+  });
+
+  test('a managing key cannot touch a profile outside its allow-list', async () => {
+    const manager = (await createApiKey({ name: 'narrow', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+    // Out of reach reads as absent, so the token learns nothing about it, and nothing is written.
+    const res = await cli(['profile', 'remove', 'slack', 'ops'], { AGENTIO_TOKEN: manager });
+    expect(res.stderr).toContain('not found');
+    expect((await loadVault()).config.profiles.slack).toEqual([{ name: 'ops', readOnly: true }]);
+
+    const renamed = await cli(['profile', 'rename', 'slack', 'ops', 'mine'], { AGENTIO_TOKEN: manager });
+    expect(renamed.exitCode).not.toBe(0);
+    expect((await loadVault()).config.profiles.slack).toEqual([{ name: 'ops', readOnly: true }]);
   });
 
   test('a hub that predates the flag is told apart from a key that lacks it', async () => {

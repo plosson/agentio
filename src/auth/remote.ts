@@ -156,7 +156,7 @@ function hubError(status: number, body: { error?: string; code?: string; suggest
 }
 
 export interface HubCallOptions {
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON body; sets the content type. */
   body?: unknown;
   /** Bearer token; omitted for the public login routes. */
@@ -218,10 +218,32 @@ export type RemoteAddBody = SetProfileOptions & { credentials: object };
 /** The body of `PATCH /v1/profiles/:service/:name`; the hub parses this same type. */
 export type RemoteRenameBody = { name: string };
 
-/** A `profile add` finished on this machine, handed to the hub to store (create-only there). */
-export async function remoteAddProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
+/** A `profile add` finished on this machine, handed to the hub to store. Replaces what the key already reaches. */
+export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
   const body: RemoteAddBody = { ...options, credentials };
   await hubRequest(profileRoute(service, name), 'PUT', body);
+}
+
+/** Rename a profile on the hub. False when the hub does not hold it for this key. */
+export async function remoteRenameProfile(service: ServiceName, from: string, to: string): Promise<boolean> {
+  const body: RemoteRenameBody = { name: to };
+  return notFoundAsFalse(hubRequest(profileRoute(service, from), 'PATCH', body));
+}
+
+/** Drop a profile on the hub. False when the hub does not hold it for this key. */
+export async function remoteDeleteProfile(service: ServiceName, name: string): Promise<boolean> {
+  return notFoundAsFalse(hubRequest(profileRoute(service, name), 'DELETE'));
+}
+
+/** The hub answers 404 both for a profile it does not hold and one this key cannot reach; either way, nothing happened. */
+async function notFoundAsFalse(call: Promise<unknown>): Promise<boolean> {
+  try {
+    await call;
+    return true;
+  } catch (err) {
+    if (err instanceof CliError && (err.code === 'NOT_FOUND' || err.code === 'PROFILE_NOT_FOUND')) return false;
+    throw err;
+  }
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */

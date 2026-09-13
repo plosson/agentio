@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
-import { deleteProfile } from '../config/profile-store';
+import { deleteProfile, renameProfile } from '../config/profile-store';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
 
@@ -16,6 +16,22 @@ export async function removeProfileForService(service: ServiceName, profileName:
     console.log(`Removed profile "${profileName}"`);
   } else {
     console.error(`Profile "${profileName}" not found`);
+  }
+}
+
+/**
+ * Shared rename logic for the unified `agentio profile rename` and the
+ * per-service one. The credentials and every key scope follow the new name.
+ */
+export async function renameProfileForService(service: ServiceName, from: string, to: string): Promise<void> {
+  switch (await renameProfile(service, from, to)) {
+    case 'renamed':
+      console.log(`Renamed profile "${from}" to "${to}"`);
+      return;
+    case 'taken':
+      throw new CliError('INVALID_PARAMS', `Profile "${to}" already exists for ${service}`, 'Choose another name');
+    case 'not-found':
+      throw profileNotFoundError(service, from);
   }
 }
 
@@ -83,6 +99,19 @@ export function createProfileCommands<T>(
         } else {
           console.log(`Profile "${profileName}" read-only restriction removed`);
         }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  profile
+    .command('rename')
+    .description(`Rename a ${displayName} profile`)
+    .requiredOption('--profile <name>', 'Current profile name')
+    .requiredOption('--to <name>', 'New profile name')
+    .action(async (opts) => {
+      try {
+        await renameProfileForService(service, opts.profile, opts.to);
       } catch (error) {
         handleError(error);
       }

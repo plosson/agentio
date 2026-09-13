@@ -2,7 +2,7 @@ import { findProfileIndex, getProfile, hasProfile, putProfileEntry, type SetProf
 import { putCredentials } from '../auth/token-store';
 import { grantProfileToKey, keyAllows, keyInConfig, pruneDanglingScopes, renameProfileInScopes } from '../auth/api-keys';
 import { updateVault, type VaultContents } from '../vault/vault';
-import { hub, isRemoteMode, remoteAddProfile } from '../auth/remote';
+import { hub, isRemoteMode, remoteDeleteProfile, remoteRenameProfile, remoteSaveProfile } from '../auth/remote';
 import { CliError } from '../utils/errors';
 import type { Config, ServiceName } from '../types/config';
 
@@ -49,7 +49,7 @@ export function saveProfile(
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
-  if (isRemoteMode()) return remoteAddProfile(service, profileName, credentials, options)
+  if (isRemoteMode()) return remoteSaveProfile(service, profileName, credentials, options)
     .then(() => { console.error(`Stored on the vault hub at ${hub().url}`); });
   return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
 }
@@ -121,6 +121,10 @@ export type RenameResult = 'renamed' | 'not-found' | 'taken';
  * follow, and every key that named it is updated, all in one vault write.
  */
 export function renameProfile(service: ServiceName, from: string, to: string): Promise<RenameResult> {
+  if (isRemoteMode()) {
+    validateProfileName(to);
+    return remoteRenameProfile(service, from, to).then((ok) => (ok ? 'renamed' : 'not-found'));
+  }
   return updateVault((vault) => moveProfile(vault, service, from, to));
 }
 
@@ -151,6 +155,7 @@ function moveProfile(vault: VaultContents, service: ServiceName, from: string, t
  * cleaned up in that case).
  */
 export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
+  if (isRemoteMode()) return remoteDeleteProfile(service, profileName);
   return updateVault((vault) => removeProfile(vault, service, profileName));
 }
 
