@@ -1,4 +1,4 @@
-import { getProfile, getProfileName, hasProfile, putProfileEntry, type SetProfileOptions } from './config-manager';
+import { findProfileIndex, getProfile, hasProfile, putProfileEntry, type SetProfileOptions } from './config-manager';
 import { putCredentials } from '../auth/token-store';
 import { grantProfileToKey, pruneDanglingScopes } from '../auth/api-keys';
 import { updateVault, type VaultContents } from '../vault/vault';
@@ -6,9 +6,10 @@ import { CliError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 
 /**
- * How a profile enters and leaves the vault. Every `profile add` ends in
- * saveProfile, every removal (CLI or admin UI) in deleteProfile, so a change
- * to what a profile is made of happens here and nowhere else.
+ * How a profile enters and leaves the vault. A local `profile add` ends in
+ * saveProfile, a remote one in addProfileForKey on the hub, and both go
+ * through putProfile; every removal (CLI or admin UI) is deleteProfile. So a
+ * change to what a profile is made of happens here and nowhere else.
  */
 
 export interface ProfileNameChoice {
@@ -34,10 +35,7 @@ export async function chooseProfileName(
   return derived;
 }
 
-/**
- * Add or replace a profile and its credentials in one vault write. Every
- * `profile add` ends here; deleteProfile is the inverse.
- */
+/** Add or replace a profile and its credentials in one vault write; deleteProfile is the inverse. */
 export function saveProfile(
   service: ServiceName,
   profileName: string,
@@ -47,32 +45,42 @@ export function saveProfile(
   return updateVault((vault) => putProfile(vault, service, profileName, credentials, options));
 }
 
-/** The entry and its credentials, in place. */
+/**
+ * A name is one path segment on the hub and one half of a key's allow-list
+ * entry, so it cannot be empty or contain "/". Checked once, here, for the
+ * local and the remote add alike.
+ */
+function validateProfileName(profileName: string): void {
+  if (!profileName.trim() || profileName.includes('/')) {
+    throw new CliError('INVALID_PARAMS', `Invalid profile name "${profileName}"`, 'A name cannot be empty or contain "/"');
+  }
+}
+
+/** The one place a profile is written: its entry and its credentials, in place. */
 function putProfile(vault: VaultContents, service: ServiceName, profileName: string, credentials: object, options: SetProfileOptions): void {
+  validateProfileName(profileName);
   putProfileEntry(vault.config, service, profileName, options);
   putCredentials(vault.credentials, service, profileName, credentials);
 }
 
 /**
- * The hub's add on behalf of a remote key. Create-only: a key must not be
- * able to swap the credentials behind a profile other agents use. The key
- * gains the profile on its allow-list in the same write, so what it just
- * added it can use.
+ * The hub's add on behalf of a remote key. Create-only: false, and nothing
+ * written, when the name is taken, so a key cannot swap the credentials
+ * behind a profile other agents use. The key gains the profile on its
+ * allow-list in the same write, so what it just added it can use.
  */
 export function addProfileForKey(
   keyId: string,
   service: ServiceName,
   profileName: string,
   credentials: object,
-  options: SetProfileOptions = {},
-): Promise<void> {
+  options: SetProfileOptions,
+): Promise<boolean> {
   return updateVault((vault) => {
-    if (hasProfile(vault.config, service, profileName)) {
-      throw new CliError('INVALID_PARAMS', `Profile ${service}/${profileName} already exists on the hub`,
-        'Pass --profile <another-name>, or remove the existing profile on the hub first');
-    }
+    if (hasProfile(vault.config, service, profileName)) return false;
     putProfile(vault, service, profileName, credentials, options);
     grantProfileToKey(vault.config, keyId, service, profileName);
+    return true;
   });
 }
 
@@ -83,9 +91,10 @@ export function addProfileForKey(
  */
 export function deleteProfile(service: ServiceName, profileName: string): Promise<boolean> {
   return updateVault((vault) => {
-    const removed = hasProfile(vault.config, service, profileName);
+    const index = findProfileIndex(vault.config, service, profileName);
+    const removed = index !== -1;
     if (removed) {
-      vault.config.profiles[service] = vault.config.profiles[service]!.filter((p) => getProfileName(p) !== profileName);
+      vault.config.profiles[service]!.splice(index, 1);
       pruneDanglingScopes(vault.config);
     }
     delete vault.credentials[service]?.[profileName];

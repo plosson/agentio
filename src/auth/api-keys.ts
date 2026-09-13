@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { getProfileName, loadConfig, updateConfig, listProfileRefs } from '../config/config-manager';
+import { getProfileName, loadConfig, updateConfig, listProfileRefs, profileRef } from '../config/config-manager';
 import { CliError } from '../utils/errors';
 import type { ApiKey, ApiKeyScope, Config, ServiceName } from '../types/config';
 import { decodeToken, encodeToken } from './token';
@@ -93,7 +93,7 @@ async function validateScope(scope: unknown): Promise<ApiKeyScope> {
   if (!Array.isArray(scope) || scope.length === 0 || !scope.every((s) => typeof s === 'string')) {
     throw new CliError('INVALID_PARAMS', 'allowedProfiles must be "*" or a non-empty list of service/name');
   }
-  const known = new Set((await listProfileRefs()).map((r) => `${r.service}/${r.name}`));
+  const known = new Set((await listProfileRefs()).map((r) => profileRef(r.service, r.name)));
   const unknown = (scope as string[]).filter((s) => !known.has(s));
   if (unknown.length > 0) {
     throw new CliError(
@@ -175,7 +175,7 @@ export function revokeApiKey(id: string): Promise<void> {
 export function pruneDanglingScopes(config: Config): boolean {
   const known = new Set(
     Object.entries(config.profiles).flatMap(([service, profiles]) =>
-      (profiles ?? []).map((p) => `${service}/${getProfileName(p)}`),
+      (profiles ?? []).map((p) => profileRef(service as ServiceName, getProfileName(p))),
     ),
   );
   let changed = false;
@@ -197,7 +197,7 @@ export function pruneDanglingScopes(config: Config): boolean {
 export function grantProfileToKey(config: Config, keyId: string, service: ServiceName, profile: string): void {
   const key = findKey(config, keyId);
   if (!key || key.allowedProfiles === '*') return;
-  const ref = `${service}/${profile}`;
+  const ref = profileRef(service, profile);
   if (!key.allowedProfiles.includes(ref)) key.allowedProfiles.push(ref);
 }
 
@@ -216,7 +216,7 @@ export async function authenticateToken(token: string): Promise<ApiKeyView | nul
 
 /** Whether a key's allow-list covers a profile. */
 export function keyAllows(key: ApiKeyView, service: string, profile: string): boolean {
-  return key.allowedProfiles === '*' || key.allowedProfiles.includes(`${service}/${profile}`);
+  return key.allowedProfiles === '*' || key.allowedProfiles.includes(profileRef(service as ServiceName, profile));
 }
 
 /** A profile is read-only for a key when either the profile or the key says so. */

@@ -72,9 +72,24 @@ async function allowedProfile(key: ApiKeyView, service: ServiceName, name: strin
   return effectiveReadOnly(key, resolved.readOnly);
 }
 
-function audit(key: ApiKeyView, action: 'credentials' | 'add', service: string, name: string, outcome: string, refreshed?: boolean): void {
+function audit(key: ApiKeyView, action: string, service: string, name: string, outcome: string, refreshed?: boolean): void {
   const extra = refreshed === undefined ? '' : ` refreshed=${refreshed}`;
   console.log(`${new Date().toISOString()} v1 ${action} key=${key.id} (${key.name}) profile=${service}/${name} outcome=${outcome}${extra}`);
+}
+
+/** Run `work` and write its outcome to the audit log, the error code when it is a CliError. */
+async function audited<T>(
+  key: ApiKeyView, action: string, service: string, name: string,
+  work: () => Promise<T>, refreshedOf?: (result: T) => boolean,
+): Promise<T> {
+  try {
+    const result = await work();
+    audit(key, action, service, name, 'ok', refreshedOf?.(result));
+    return result;
+  } catch (err) {
+    if (err instanceof CliError) audit(key, action, service, name, err.code.toLowerCase());
+    throw err;
+  }
 }
 
 /** Credentials the way the hub hands them out: refreshed with the wider buffer. */
@@ -117,14 +132,8 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   await requireStoredCredentials(service, name);
-  try {
-    const { credentials, refreshed } = await hubCredentials(service, name);
-    audit(key, 'credentials', service, name, 'ok', refreshed);
-    return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
-  } catch (err) {
-    if (err instanceof CliError) audit(key, 'credentials', service, name, err.code.toLowerCase());
-    throw err;
-  }
+  const { credentials, refreshed } = await audited(key, 'credentials', service, name, () => hubCredentials(service, name), (r) => r.refreshed);
+  return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
 }
 
 /**
@@ -134,22 +143,20 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
  */
 async function handleAdd(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   if (!key.canAddProfiles) {
-    throw new CliError('PERMISSION_DENIED', 'This token may not add profiles', 'Ask the hub owner to allow it (key update --can-add-profiles)');
+    throw new CliError('PERMISSION_DENIED', 'This token may not add profiles', 'Ask the hub owner to allow this key to add profiles');
   }
-  if (name.includes('/')) throw new CliError('INVALID_PARAMS', 'A profile name cannot contain "/"');
   const body = await readJson<{ readOnly?: unknown; credentials?: unknown }>(request);
-  const readOnly = body.readOnly === undefined ? false : validateFlag('readOnly', body.readOnly);
+  const readOnly = validateFlag('readOnly', body.readOnly ?? false);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
     throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
   }
-  try {
-    await addProfileForKey(key.id, service, name, credentials, { readOnly });
-  } catch (err) {
-    if (err instanceof CliError) audit(key, 'add', service, name, err.code.toLowerCase());
-    throw err;
-  }
-  audit(key, 'add', service, name, 'ok');
+  await audited(key, 'add', service, name, async () => {
+    if (!(await addProfileForKey(key.id, service, name, credentials, { readOnly }))) {
+      throw new CliError('INVALID_PARAMS', `Profile ${service}/${name} already exists on the hub`,
+        'Choose another profile name, or have the hub owner remove the existing one');
+    }
+  });
   return json({ service, name, readOnly }, 201);
 }
 

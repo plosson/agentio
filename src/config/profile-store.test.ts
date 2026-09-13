@@ -46,6 +46,12 @@ describe('saveProfile', () => {
     expect(vault.credentials.github).toEqual({ octocat: { accessToken: 'new' } });
   });
 
+  test('refuses a name that is empty or contains "/"', async () => {
+    await expect(saveProfile('gmail', 'a/b', { a: 1 })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await expect(saveProfile('gmail', ' ', { a: 1 })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    expect((await loadVault()).config.profiles.gmail).toEqual([{ name: 'me@example.com' }]);
+  });
+
   test('is the inverse of deleteProfile', async () => {
     await saveProfile('gmail', 'new@example.com', { access_token: 'a' });
     expect(await deleteProfile('gmail', 'new@example.com')).toBe(true);
@@ -56,15 +62,15 @@ describe('saveProfile', () => {
 });
 
 describe('addProfileForKey', () => {
-  test('creates the profile and grants it to the key in one write; refuses an existing name', async () => {
+  test('creates the profile and grants it to the key in one write; an existing name is false and untouched', async () => {
     const { key } = await createApiKey({ name: 'k', allowedProfiles: ['gmail/me@example.com'] }, 'https://hub');
-    await addProfileForKey(key.id, 'telegram', 'bot', { botToken: 't' }, { readOnly: true });
+    expect(await addProfileForKey(key.id, 'telegram', 'bot', { botToken: 't' }, { readOnly: true })).toBe(true);
     const vault = await loadVault();
     expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
     expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't' } });
     expect((await listApiKeys())[0].allowedProfiles).toEqual(['gmail/me@example.com', 'telegram/bot']);
 
-    await expect(addProfileForKey(key.id, 'github', 'octocat', { accessToken: 'x' })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    expect(await addProfileForKey(key.id, 'github', 'octocat', { accessToken: 'x' }, {})).toBe(false);
     expect((await loadVault()).credentials.github).toBeUndefined();
   });
 });

@@ -15,7 +15,6 @@ const PASSPHRASE = 'hub-passphrase-123';
 const HOUR = 60 * 60 * 1000;
 let scopedToken = '';
 let allToken = '';
-let addToken = '';
 
 const handle = createRequestHandler({ version: 'test' });
 const peer = { requestIP: () => ({ address: '10.0.0.5' }) };
@@ -58,7 +57,6 @@ withTempVault('agentio-v1-test-', () => ({
 beforeEach(async () => {
   scopedToken = (await createApiKey({ name: 'scoped', allowedProfiles: ['telegram/bot', 'jira/fresh'], readOnly: false }, 'https://hub')).token;
   allToken = (await createApiKey({ name: 'all', allowedProfiles: '*', readOnly: true }, 'https://hub')).token;
-  addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canAddProfiles: true }, 'https://hub')).token;
   // Daemon posture: locked until unlocked, then stays so.
   delete process.env.AGENTIO_PASSPHRASE;
   lockVault();
@@ -165,7 +163,22 @@ describe('/v1 credential API', () => {
     expect((await call('/v1/profiles/slack/empty', { token: scopedToken })).status).toBe(403);
   });
 
-  test('PUT adds a profile for a key allowed to, and the key gains it on its allow-list', async () => {
+  test('use is recorded on the key', async () => {
+    await creds('/v1/profiles/telegram/bot/credentials', scopedToken);
+    await new Promise((r) => setTimeout(r, 20));
+    const keys = await listApiKeys();
+    expect(keys.find((k) => k.name === 'scoped')!.lastUsedAt).toBeDefined();
+    expect(keys.find((k) => k.name === 'all')!.lastUsedAt).toBeUndefined();
+  });
+});
+
+describe('PUT /v1/profiles/:service/:name', () => {
+  let addToken = '';
+  beforeEach(async () => {
+    addToken = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/bot'], canAddProfiles: true }, 'https://hub')).token;
+  });
+
+  test('adds a profile for a key allowed to, and the key can use it at once', async () => {
     const res = await put('/v1/profiles/telegram/newbot', addToken, { readOnly: true, credentials: { botToken: 'n', channelId: '2' } });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ service: 'telegram', name: 'newbot', readOnly: true });
@@ -175,10 +188,9 @@ describe('/v1 credential API', () => {
     expect(listed.profiles).toContainEqual({ service: 'telegram', name: 'newbot', readOnly: true, hasCredentials: true });
     const got = await (await creds('/v1/profiles/telegram/newbot/credentials', addToken)).json();
     expect(got.credentials).toEqual({ botToken: 'n', channelId: '2' });
-    expect((await listApiKeys()).find((k) => k.name === 'adder')!.allowedProfiles).toEqual(['telegram/bot', 'telegram/newbot']);
   });
 
-  test('PUT is refused without the flag, and is create-only', async () => {
+  test('is refused without the flag, and is create-only', async () => {
     const denied = await put('/v1/profiles/telegram/newbot', scopedToken, { credentials: { botToken: 'n' } });
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ code: 'PERMISSION_DENIED' });
@@ -191,21 +203,16 @@ describe('/v1 credential API', () => {
     expect(kept.credentials.botToken).toBe('bot-secret');
   });
 
-  test('PUT validates its body and the name', async () => {
-    for (const body of [{}, { credentials: null }, { credentials: [] }, { credentials: {} }, { credentials: { a: 1 }, readOnly: 'yes' }]) {
+  test.each([{}, { credentials: null }, { credentials: [] }, { credentials: {} }, { credentials: { a: 1 }, readOnly: 'yes' }])(
+    'rejects body %j', async (body) => {
       const res = await put('/v1/profiles/telegram/x', addToken, body);
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ code: 'INVALID_PARAMS' });
-    }
+    },
+  );
+
+  test('a name with "/" is 400, and the credentials path is not a PUT target', async () => {
     expect((await put('/v1/profiles/telegram/a%2Fb', addToken, { credentials: { a: 1 } })).status).toBe(400);
     expect((await put('/v1/profiles/telegram/bot/credentials', addToken, { credentials: { a: 1 } })).status).toBe(404);
-  });
-
-  test('use is recorded on the key', async () => {
-    await creds('/v1/profiles/telegram/bot/credentials', scopedToken);
-    await new Promise((r) => setTimeout(r, 20));
-    const keys = await listApiKeys();
-    expect(keys.find((k) => k.name === 'scoped')!.lastUsedAt).toBeDefined();
-    expect(keys.find((k) => k.name === 'all')!.lastUsedAt).toBeUndefined();
   });
 });
