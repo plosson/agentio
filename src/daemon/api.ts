@@ -34,6 +34,8 @@ export function createRequestHandler(ctx: UiContext) {
     const path = new URL(request.url).pathname;
 
     if (path === '/health' && request.method === 'GET') return handleHealth();
+    // The domain alone should land on the admin UI, not a JSON 404.
+    if (path === '/' && request.method === 'GET') return Response.redirect(new URL('/ui', request.url), 302);
 
     const ip = clientIp(request, peer.requestIP(request)?.address ?? null);
     const v1 = await handleV1Request(request, ip);
