@@ -79,13 +79,13 @@ async function main(): Promise<void> {
       ],
     },
     {
-      cmd: 'agentio whatsapp inbox pull',
+      cmd: 'agentio dropbox list /Invoices',
       output: [
-        '5 messages from 3 conversations',
-        '────────────────────────────────',
-        'wa-1  Bob (mobile)        "see you at 6?"',
-        'wa-2  Family group        [photo]',
-        'wa-3  Alice               "did you read the doc?"',
+        'Entries in /Invoices (3)',
+        '',
+        'folder         -              /Invoices/2026/',
+        'file    182.4 KB  2025-12-31  /Invoices/2025-12-acme.pdf',
+        'file    179.1 KB  2025-11-30  /Invoices/2025-11-acme.pdf',
       ],
     },
   ];
