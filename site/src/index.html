@@ -31,7 +31,7 @@
     </div>
     <div class="card">
       <h3>CLI + GitHub Actions</h3>
-      <p>Same binary runs as a local CLI and unchanged inside GitHub Actions — run your agents on a cron with a copy of your vault.</p>
+      <p>Same binary runs as a local CLI and unchanged inside GitHub Actions — your workflows use a copy of your vault.</p>
     </div>
   </div>
 </section>
@@ -42,32 +42,6 @@
   <div class="grid">
     {{services_grid}}
   </div>
-</section>
-
-<section class="section">
-  <div class="eyebrow">GitHub Actions</div>
-  <h2>Schedule agents in CI</h2>
-  <pre><code>name: daily-summary
-on:
-  schedule: [{ cron: '0 9 * * *' }]
-jobs:
-  summarize:
-    runs-on: ubuntu-latest
-    env:
-      AGENTIO_PASSPHRASE: ${{ secrets.AGENTIO_PASSPHRASE }}
-    steps:
-      - run: |
-          curl -LsSf https://agentio.houlahop.com/install | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - env:
-          AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
-          AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
-        run: agentio vault import
-      - run: |
-          agentio gmail list --query "is:unread" --limit 20 \
-            | claude -p "summarize these in 3 bullets" \
-            | agentio slack send --channel team-updates</code></pre>
-  <p><code>agentio github install &lt;owner/repo&gt;</code> installs <code>AGENTIO_KEY</code> and <code>AGENTIO_CONFIG</code> for you. Add <code>AGENTIO_PASSPHRASE</code> yourself: any value of 8 characters or more. It protects the vault that <code>vault import</code> creates on the runner.</p>
 </section>
 
 <section class="section" id="hub">
