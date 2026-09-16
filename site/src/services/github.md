@@ -10,7 +10,7 @@ order: 70
 ## What you can do
 
 - Install `AGENTIO_KEY` and `AGENTIO_CONFIG` as repo secrets in one command
-- Drive scheduled agent workflows via GitHub Actions
+- Give GitHub Actions workflows a copy of your vault
 
 ## Setup
 
