@@ -103,7 +103,7 @@ jobs:
         run: bun build src/index.ts --compile --target=bun-${{ matrix.target }} --minify --sourcemap --bytecode --define BUILD_VERSION="\"${{ needs.validate.outputs.version }}\"" --outfile=${{ matrix.artifact }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
@@ -122,7 +122,7 @@ jobs:
   #           binary: agentio-linux-arm64
   #   steps:
   #     - name: Download binary
-  #       uses: actions/download-artifact@v5
+  #       uses: actions/download-artifact@v8
   #       with:
   #         name: ${{ matrix.binary }}
   #     - name: Build .deb package
@@ -135,7 +135,7 @@ jobs:
   #         chmod 755 ${PKG_NAME}/usr/bin/agentio
   #         dpkg-deb --build ${PKG_NAME}
   #     - name: Upload artifact
-  #       uses: actions/upload-artifact@v5
+  #       uses: actions/upload-artifact@v7
   #       with:
   #         name: agentio_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.deb
   #         path: agentio_${{ needs.validate.outputs.version }}_${{ matrix.arch }}.deb
@@ -150,7 +150,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -163,7 +163,7 @@ jobs:
           cat checksums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
