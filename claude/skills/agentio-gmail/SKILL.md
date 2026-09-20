@@ -103,7 +103,10 @@ Options:
 - `--cc <email>`: CC recipient (repeatable) (default: )
 - `--bcc <email>`: BCC recipient (repeatable) (default: )
 - `--subject <subject>`: Email subject (required unless --reply-to)
+- `--subject-file <path>`: Read subject from a UTF-8 file (preferred for agents; avoids shell quoting)
 - `--body <body>`: Email body (omit or pass "-" to read from stdin)
+- `--body-file <path>`: Read body from a UTF-8 file (preferred for agents; avoids shell quoting)
+- `--spec <path.json>`: Compose from JSON file {to,cc,bcc,subject,body,attachments}; flags override
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
 - `--attachment <path>`: File to attach (repeatable) (default: )
@@ -117,6 +120,9 @@ Examples:
 
   # body from stdin (great for piping)
   echo "Sent via pipe" | agentio gmail send --to alice@example.com --subject "Note"
+
+  # preferred for agents: subject/body from UTF-8 files
+  agentio gmail send --to alice@example.com     --subject-file ./subject.txt --body-file ./body.txt
 
   # reply within an existing thread (to/subject derived from thread)
   agentio gmail send --reply-to 18c4f1a2b3d --body "Thanks!"
@@ -139,7 +145,10 @@ Options:
 - `--cc <email>`: CC recipient (repeatable) (default: )
 - `--bcc <email>`: BCC recipient (repeatable) (default: )
 - `--subject <subject>`: Email subject (required unless --reply-to)
+- `--subject-file <path>`: Read subject from a UTF-8 file (preferred for agents; avoids shell quoting)
 - `--body <body>`: Email body (omit or pass "-" to read from stdin)
+- `--body-file <path>`: Read body from a UTF-8 file (preferred for agents; avoids shell quoting)
+- `--spec <path.json>`: Compose from JSON file {to,cc,bcc,subject,body,attachments}; flags override
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
 - `--attachment <path>`: File to attach (repeatable) (default: )
@@ -150,6 +159,12 @@ Examples:
 
   # save a draft for later editing in Gmail
   agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # preferred for agents: subject/body from UTF-8 files (avoids shell quoting bugs)
+  agentio gmail draft --to alice@example.com     --subject-file ./subject.txt --body-file ./body.txt
+
+  # or a single JSON spec (flags still override individual fields)
+  agentio gmail draft --spec ./draft.json
 
   # update an existing draft (replaces its entire content)
   agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
@@ -478,3 +493,4 @@ Examples:
 
 Requires Chrome, Chromium, or Microsoft Edge installed locally.
 ```
+
