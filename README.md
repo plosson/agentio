@@ -309,7 +309,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: curl -LsSf https://agentio.houlahop.com/install | sh
       - run: npm install -g @anthropic-ai/claude-code
-      - run: agentio vault import && agentio claude install
+      - run: agentio vault import
+      - run: claude plugin marketplace add https://github.com/plosson/agentio
+      - run: claude plugin install agentio-gmail@agentio --scope project
+      - run: claude plugin install agentio-slack@agentio --scope project
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions
 ```
 
@@ -333,9 +336,9 @@ agentio includes skills for [Claude Code](https://claude.ai/download) that let C
 **Install skills:**
 
 ```bash
-agentio claude install https://github.com/plosson/agentio  # marketplace
-agentio claude install agentio-gmail@agentio               # Gmail skill
-agentio claude install agentio-jira@agentio                # JIRA skill
+claude plugin marketplace add https://github.com/plosson/agentio
+claude plugin install agentio-gmail@agentio --scope project
+claude plugin install agentio-jira@agentio --scope project
 ```
 
 **Then in Claude Code:**

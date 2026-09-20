@@ -21,7 +21,7 @@
 - No formatter/linter is configured; keep edits consistent with nearby code.
 
 ## Testing Guidelines
-- Run `bun test` (or `bun run test`) for the Bun test suite. Tests live next to sources as `*.test.ts` under `src/` (and some under `scripts/`).
+- Run `bun test` (or `bun run test`) for the Bun test suite. Tests live under `tests/` and mirror the production source tree.
 - Use `bun run typecheck` to validate types.
 
 ## Commit & Pull Request Guidelines

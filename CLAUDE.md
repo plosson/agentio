@@ -50,8 +50,7 @@ src/
 │   ├── update.ts            # CLI self-update
 │   ├── vault.ts             # Vault group: set/status + registers the two below
 │   ├── vault-init.ts        # Vault lifecycle: init/passphrase/reset
-│   ├── docs.ts              # Documentation generator
-│   └── claude.ts            # Claude Code plugin operations
+│   └── docs.ts              # Documentation generator
 ├── services/                # API clients (one folder per service)
 │   ├── gmail/client.ts      # Gmail API wrapper
 │   ├── gdocs/client.ts      # Google Docs API wrapper
@@ -428,7 +427,6 @@ The daemon never reads `vault.passphrase`. It starts **locked** and is unlocked 
 agentio status [--no-test] [--json]        # Show all profiles and test credentials
 agentio update [--force]                   # Update CLI to latest version
 agentio docs [--format markdown|json]      # Output CLI reference for LLMs
-agentio claude docs|agentio-json           # Claude Code plugin operations
 ```
 
 ## Key Architecture

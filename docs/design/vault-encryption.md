@@ -180,7 +180,7 @@ Setup proceeds. A warning is printed: "Passphrase could not be stored in the OS 
 
 All tests are automated. No manual verification checklist.
 
-### Unit tests (`src/vault/*.test.ts`)
+### Unit tests (`tests/vault/*.test.ts`)
 
 - **`crypto.test.ts`** — encrypt/decrypt round-trip; byte-layout assertion; GCM tag tamper rejection; wrong-passphrase rejection.
 - **`vault.test.ts`** — `loadVault`/`saveVault` round-trip via temp dir; atomic-write failure leaves original intact and cleans up `.tmp`; `vaultExists` dangling-pointer case; version mismatch rejection.

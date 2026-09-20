@@ -36,7 +36,6 @@ This opens a browser for authentication and outputs a token. Copy it for the nex
 
 | File | Purpose |
 |------|---------|
-| `agentio.json` | Declares which agentio plugins to install |
 | `prompt.md` | Instructions for Claude |
 | `.github/workflows/daily-briefing.yml` | GitHub Actions workflow |
 
@@ -44,4 +43,3 @@ This opens a browser for authentication and outputs a token. Copy it for the nex
 
 - Edit `prompt.md` to change the briefing format
 - Modify the cron schedule in the workflow
-- Add more plugins to `agentio.json` (e.g., `agentio-telegram@agentio`)

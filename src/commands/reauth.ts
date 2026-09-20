@@ -1,43 +1,10 @@
 import { Command } from 'commander';
 import { getProfileStatuses, type ProfileStatus } from './status';
 import { getCredentials, setCredentials } from '../auth/token-store';
-import { performGitHubOAuthFlow } from '../auth/github-oauth';
-import { GitHubClient } from '../services/github/client';
 import { interactiveCheckbox } from '../utils/interactive';
 import { handleError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
-import type { GitHubCredentials } from '../types/github';
 import { findServicePlugin } from '../plugins/registry';
-
-// Services that require manual credential setup
-const MANUAL_SERVICES: ServiceName[] = ['telegram', 'slack', 'discourse', 'dropbox', 'sql'];
-
-async function reauthGitHub(profileName: string): Promise<void> {
-  console.error(`\nRe-authenticating github / ${profileName}...`);
-
-  const oauthResult = await performGitHubOAuthFlow();
-
-  // Fetch updated user info
-  const tempCreds: GitHubCredentials = {
-    accessToken: oauthResult.accessToken,
-    username: '',
-    email: null,
-  };
-  const client = new GitHubClient(tempCreds);
-  const user = await client.getUser();
-
-  // Preserve existing fields, update token and user info
-  const existing = await getCredentials<GitHubCredentials>('github', profileName);
-  const credentials: GitHubCredentials = {
-    ...existing,
-    accessToken: oauthResult.accessToken,
-    username: user.login,
-    email: user.email,
-  };
-
-  await setCredentials('github', profileName, credentials);
-  console.error(`  Done (${user.login})`);
-}
 
 export async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
   const pluginReauthenticate = findServicePlugin(service)?.profile?.reauthenticate;
@@ -48,17 +15,7 @@ export async function reauthProfile(service: ServiceName, profileName: string): 
     return;
   }
 
-  switch (service) {
-    case 'github':
-      await reauthGitHub(profileName);
-      break;
-
-    default:
-      if (MANUAL_SERVICES.includes(service)) {
-        console.error(`\nSkipping ${service} / ${profileName}: uses manual credentials. Run 'agentio ${service} profile add' to update.`);
-      }
-      break;
-  }
+  console.error(`\nSkipping ${service} / ${profileName}: no automatic reauthentication is registered. Run 'agentio ${service} profile add --profile ${profileName}' to update.`);
 }
 
 export function registerReauthCommand(program: Command): void {

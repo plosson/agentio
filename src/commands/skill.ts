@@ -6,11 +6,6 @@ import { CliError, handleError } from '../utils/errors';
 import { findServicePlugin } from '../plugins/registry';
 
 const SERVICE_DESCRIPTIONS: Record<string, string> = {
-  telegram: 'Use when sending Telegram messages via the agentio CLI.',
-  github: 'Use when interacting with GitHub via the agentio CLI.',
-  discourse: 'Use when interacting with Discourse forums via the agentio CLI.',
-  dropbox: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
-  sql: 'Use when running SQL queries via the agentio CLI.',
   daemon: 'Use to manage the agentio daemon (HTTP API server for health and future vault UI/API).',
   key: 'Use to manage the API keys that let remote agents read credentials from this vault hub - create, list, update, rotate, revoke.',
 };

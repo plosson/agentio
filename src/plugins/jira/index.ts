@@ -4,7 +4,7 @@ import { jiraProfileAdd, registerJiraCommands } from './commands';
 import { jiraCredentialLifecycle, reauthenticateJira } from './lifecycle';
 import type { JiraCredentials } from './types';
 
-const jira = defineServicePlugin({
+const jira = defineServicePlugin<JiraCredentials>()({
   apiVersion: 1,
   id: 'jira',
   displayName: 'JIRA',
@@ -12,7 +12,7 @@ const jira = defineServicePlugin({
   registerCommands: registerJiraCommands,
   profile: {
     add: jiraProfileAdd,
-    createClient: (credentials: unknown) => new JiraClient(credentials as JiraCredentials),
+    createClient: (credentials) => new JiraClient(credentials),
     reauthenticate: reauthenticateJira,
   },
   credentialLifecycle: jiraCredentialLifecycle,

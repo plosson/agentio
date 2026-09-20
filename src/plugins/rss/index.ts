@@ -1,7 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { registerRssCommands } from './commands';
 
-const rss = defineServicePlugin({
+const rss = defineServicePlugin()({
   apiVersion: 1,
   id: 'rss',
   displayName: 'RSS',

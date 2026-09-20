@@ -1,33 +1,30 @@
 import { performOAuthFlow, type OAuthService } from './oauth';
 import { createGoogleAuth, fetchGoogleUserEmail, refreshGoogleAccessToken } from './token-manager';
-import type { GoogleCamelTokens, OAuthTokens } from '../../types/tokens';
+import type { GoogleCamelTokens, OAuthTokens } from './tokens';
 import type { CredentialLifecycle, ProfilePlugin } from '../types';
 
-type Reauthenticate = NonNullable<ProfilePlugin['reauthenticate']>;
+export type GoogleSnakeCredentials = OAuthTokens & { email?: string };
+export type GoogleCamelCredentials = GoogleCamelTokens & { email?: string };
 
-function objectWith(credentials: unknown, field: string): Record<string, unknown> | undefined {
-  if (typeof credentials !== 'object' || credentials === null) return undefined;
-  const record = credentials as Record<string, unknown>;
-  return record[field] ? record : undefined;
-}
-
-function expiresSoon(credentials: unknown, field: string, now: number, bufferMs: number): boolean {
-  if (typeof credentials !== 'object' || credentials === null) return false;
-  const expiry = (credentials as Record<string, unknown>)[field];
-  return typeof expiry === 'number' && now + bufferMs >= expiry;
-}
-
-export const googleSnakeCredentialLifecycle: CredentialLifecycle = {
+export const googleSnakeCredentialLifecycle: CredentialLifecycle<OAuthTokens> = {
   secretFields: ['refresh_token'],
-  applies: (credentials) => !!objectWith(credentials, 'refresh_token'),
-  isStale: (credentials, now, bufferMs) => expiresSoon(credentials, 'expiry_date', now, bufferMs),
-  refresh: (credentials) => refreshGoogleAccessToken(credentials as OAuthTokens),
+  applies: (credentials): credentials is OAuthTokens => typeof credentials === 'object'
+    && credentials !== null
+    && !!(credentials as Partial<OAuthTokens>).refresh_token,
+  isStale: (credentials, now, bufferMs) => credentials.expiry_date !== undefined
+    && now + bufferMs >= credentials.expiry_date,
+  async refresh(credentials) {
+    return { ...credentials, ...(await refreshGoogleAccessToken(credentials)) };
+  },
 };
 
-export const googleCamelCredentialLifecycle: CredentialLifecycle = {
+export const googleCamelCredentialLifecycle: CredentialLifecycle<GoogleCamelTokens> = {
   secretFields: ['refreshToken'],
-  applies: (credentials) => !!objectWith(credentials, 'refreshToken'),
-  isStale: (credentials, now, bufferMs) => expiresSoon(credentials, 'expiryDate', now, bufferMs),
+  applies: (credentials): credentials is GoogleCamelTokens => typeof credentials === 'object'
+    && credentials !== null
+    && !!(credentials as Partial<GoogleCamelTokens>).refreshToken,
+  isStale: (credentials, now, bufferMs) => credentials.expiryDate !== undefined
+    && now + bufferMs >= credentials.expiryDate,
   async refresh(credentials) {
     const current = credentials as GoogleCamelTokens;
     const refreshed = await refreshGoogleAccessToken({
@@ -48,8 +45,7 @@ export const googleCamelCredentialLifecycle: CredentialLifecycle = {
   },
 };
 
-export function googleAuthFromSnakeCredentials(credentials: unknown) {
-  const tokens = credentials as OAuthTokens;
+export function googleAuthFromSnakeCredentials(tokens: OAuthTokens) {
   return createGoogleAuth({
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
@@ -59,38 +55,38 @@ export function googleAuthFromSnakeCredentials(credentials: unknown) {
   });
 }
 
-export function reauthenticateGoogleSnake(
+export function reauthenticateGoogleSnake<TCredentials extends GoogleSnakeCredentials = GoogleSnakeCredentials>(
   service: OAuthService,
   performOAuth: typeof performOAuthFlow = performOAuthFlow,
   fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
-): Reauthenticate {
+): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
   return async (credentials, profileName) => {
     console.error(`\nRe-authenticating ${service} / ${profileName}...`);
     const tokens = await performOAuth(service);
     const email = await fetchEmail(tokens.access_token);
     console.error(`  Done (${email})`);
-    return { ...(credentials as object), ...tokens, email };
+    return { ...(credentials ?? {}), ...tokens, email } as TCredentials;
   };
 }
 
-export function reauthenticateGoogleCamel(
+export function reauthenticateGoogleCamel<TCredentials extends GoogleCamelCredentials>(
   service: OAuthService,
   performOAuth: typeof performOAuthFlow = performOAuthFlow,
   fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
-): Reauthenticate {
+): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
   return async (credentials, profileName) => {
     console.error(`\nRe-authenticating ${service} / ${profileName}...`);
     const tokens = await performOAuth(service);
     const email = await fetchEmail(tokens.access_token);
     console.error(`  Done (${email})`);
     return {
-      ...(credentials as object),
+      ...(credentials ?? {}),
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiryDate: tokens.expiry_date,
       tokenType: tokens.token_type,
       scope: tokens.scope,
       email,
-    };
+    } as TCredentials;
   };
 }

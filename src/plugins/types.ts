@@ -6,23 +6,26 @@ export interface ProfileAddOptions {
   readOnly?: boolean;
 }
 
-export interface ProfilePlugin {
+export interface ProfilePlugin<TCredentials extends object> {
   add(options: ProfileAddOptions): Promise<void>;
-  createClient(credentials: unknown): ServiceClient;
+  createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
-  reauthenticate?(credentials: unknown, profileName: string): Promise<object>;
+  reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;
 }
 
-export interface CredentialLifecycle {
+export interface CredentialLifecycle<TCredentials extends object> {
   /** Credential fields that must never be sent to a remote agent. */
-  readonly secretFields: readonly string[];
+  readonly secretFields: readonly Extract<keyof TCredentials, string>[];
   /** Whether this credential shape supports refresh. */
-  applies(credentials: unknown): boolean;
+  applies(credentials: unknown): credentials is TCredentials;
   /** Whether the credentials expire within the supplied buffer. */
-  isStale(credentials: unknown, now: number, bufferMs: number): boolean;
+  isStale(credentials: TCredentials, now: number, bufferMs: number): boolean;
   /** Return refreshed credentials without persisting them. */
-  refresh(credentials: unknown): Promise<unknown>;
+  refresh(credentials: TCredentials): Promise<TCredentials>;
 }
+
+/** Type-erased lifecycle shape used by host-side credential dispatch. */
+export type RegisteredCredentialLifecycle = CredentialLifecycle<any>;
 
 /**
  * The boundary between the CLI host and an in-tree service plugin.
@@ -36,15 +39,24 @@ export interface ServiceRegistration {
   readonly registerCommands: (program: Command) => void;
 }
 
-export interface ServicePlugin extends ServiceRegistration {
+export interface ServicePlugin<
+  TCredentials extends object = Record<string, unknown>,
+  TRefreshCredentials extends object = TCredentials,
+> extends ServiceRegistration {
   readonly apiVersion: 1;
   readonly displayName: string;
   readonly description: string;
-  readonly profile?: ProfilePlugin;
-  readonly credentialLifecycle?: CredentialLifecycle;
+  readonly profile?: ProfilePlugin<TCredentials>;
+  readonly credentialLifecycle?: CredentialLifecycle<TRefreshCredentials>;
 }
 
-/** Keep each plugin definition type-checked without widening its literals. */
-export function defineServicePlugin<const T extends ServicePlugin>(plugin: T): T {
-  return plugin;
+/** Type-erased shape used only after a plugin has crossed into the host registry. */
+export type RegisteredServicePlugin = ServicePlugin<any, any>;
+
+/** Keep each plugin definition credential-typed without widening its literals. */
+export function defineServicePlugin<
+  TCredentials extends object = Record<string, unknown>,
+  TRefreshCredentials extends object = TCredentials,
+>() {
+  return <const T extends ServicePlugin<TCredentials, TRefreshCredentials>>(plugin: T): T => plugin;
 }

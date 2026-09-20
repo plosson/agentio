@@ -5,13 +5,6 @@ import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/conf
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
-import { githubProfileAdd } from './github';
-import { confluenceProfileAdd } from './confluence';
-import { telegramProfileAdd } from './telegram';
-import { discourseProfileAdd } from './discourse';
-import { dropboxProfileAdd } from './dropbox';
-import { revolutProfileAdd } from './revolut';
-import { sqlProfileAdd } from './sql';
 import { findServicePlugin } from '../plugins/registry';
 
 export type ProfileSummary = ProfileRef;
@@ -49,18 +42,6 @@ function assertKnownService(service: string): asserts service is ServiceName {
   }
 }
 
-type AddOpts = { profile?: string; readOnly?: boolean };
-
-const ADD_HANDLERS: Partial<Record<ServiceName, (opts: AddOpts) => Promise<void>>> = {
-  github: githubProfileAdd,
-  confluence: confluenceProfileAdd,
-  telegram: telegramProfileAdd,
-  revolut: revolutProfileAdd,
-  discourse: discourseProfileAdd,
-  dropbox: dropboxProfileAdd,
-  sql: sqlProfileAdd,
-};
-
 export function registerProfileCommands(program: Command): void {
   const profile = program
     .command('profile')
@@ -89,7 +70,7 @@ export function registerProfileCommands(program: Command): void {
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
         assertKnownService(service);
-        const add = findServicePlugin(service)?.profile?.add ?? ADD_HANDLERS[service];
+        const add = findServicePlugin(service)?.profile?.add;
         if (!add) throw new Error(`No profile setup registered for ${service}`);
         await add(opts);
       } catch (e) {

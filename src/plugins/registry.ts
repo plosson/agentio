@@ -1,75 +1,55 @@
 import type { Command } from 'commander';
-import { registerConfluenceCommands } from '../commands/confluence';
-import { registerDiscourseCommands } from '../commands/discourse';
-import { registerDropboxCommands } from '../commands/dropbox';
-import { registerGitHubCommands } from '../commands/github';
-import { registerRevolutCommands } from '../commands/revolut';
-import { registerSqlCommands } from '../commands/sql';
-import { registerTelegramCommands } from '../commands/telegram';
+import confluence from './confluence';
+import discourse from './discourse';
+import dropbox from './dropbox';
 import gcal from './google/gcal';
 import gchat from './google/gchat';
 import gdocs from './google/gdocs';
 import gdrive from './google/gdrive';
+import github from './github';
 import gmail from './google/gmail';
 import gsheets from './google/gsheets';
 import gslides from './google/gslides';
 import gscript from './google/gscript';
 import gtasks from './google/gtasks';
 import jira from './jira';
+import revolut from './revolut';
 import rss from './rss';
 import slack from './slack';
-import type { ServicePlugin, ServiceRegistration } from './types';
+import sql from './sql';
+import telegram from './telegram';
+import type { RegisteredServicePlugin } from './types';
 
-function legacy(
-  id: string,
-  registerCommands: (program: Command) => void,
-): ServiceRegistration {
-  return { id, registerCommands };
-}
-
-/** Plugins whose implementation has moved into `src/plugins/<id>/`. */
+/** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
+  confluence,
+  discourse,
+  dropbox,
   gcal,
   gchat,
   gdocs,
   gdrive,
+  github,
   gmail,
   gsheets,
   gslides,
   gscript,
   gtasks,
   jira,
+  revolut,
   rss,
   slack,
-] as const satisfies readonly ServicePlugin[];
+  sql,
+  telegram,
+] as const satisfies readonly RegisteredServicePlugin[];
 
 /**
  * The canonical service order for every Agentio command tree.
  *
- * Unmigrated services use lightweight adapters. Migrating one means replacing
- * its adapter in place with its plugin object, preserving visible ordering.
+ * Registration remains explicit so bundled builds include every service and
+ * command ordering cannot depend on filesystem traversal.
  */
-export const SERVICE_REGISTRY = [
-  legacy('confluence', registerConfluenceCommands),
-  legacy('discourse', registerDiscourseCommands),
-  legacy('dropbox', registerDropboxCommands),
-  gcal,
-  gchat,
-  gdocs,
-  gdrive,
-  legacy('github', registerGitHubCommands),
-  gmail,
-  gsheets,
-  gslides,
-  gscript,
-  gtasks,
-  jira,
-  legacy('revolut', registerRevolutCommands),
-  rss,
-  slack,
-  legacy('sql', registerSqlCommands),
-  legacy('telegram', registerTelegramCommands),
-] as const satisfies readonly ServiceRegistration[];
+export const SERVICE_REGISTRY = SERVICE_PLUGINS;
 
 validateRegistry(SERVICE_REGISTRY);
 
@@ -79,11 +59,11 @@ export function registerServiceCommands(program: Command): void {
   }
 }
 
-export function findServicePlugin(id: string): ServicePlugin | undefined {
+export function findServicePlugin(id: string): RegisteredServicePlugin | undefined {
   return SERVICE_PLUGINS.find((plugin) => plugin.id === id);
 }
 
-function validateRegistry(services: readonly ServiceRegistration[]): void {
+function validateRegistry(services: readonly RegisteredServicePlugin[]): void {
   const ids = new Set<string>();
 
   for (const service of services) {

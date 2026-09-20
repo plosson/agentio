@@ -14,24 +14,21 @@ export async function selectJiraSite(sites: AtlassianSite[]): Promise<AtlassianS
   });
 }
 
-export const jiraCredentialLifecycle: CredentialLifecycle = {
+export const jiraCredentialLifecycle: CredentialLifecycle<JiraCredentials> = {
   secretFields: ['refreshToken'],
-  applies(credentials) {
+  applies(credentials): credentials is JiraCredentials {
     return typeof credentials === 'object'
       && credentials !== null
       && !!(credentials as Partial<JiraCredentials>).refreshToken;
   },
   isStale(credentials, now, bufferMs) {
-    const expiry = typeof credentials === 'object' && credentials !== null
-      ? (credentials as Partial<JiraCredentials>).expiryDate
-      : undefined;
+    const expiry = credentials.expiryDate;
     return expiry !== undefined && now + bufferMs >= expiry;
   },
   async refresh(credentials) {
-    const current = credentials as JiraCredentials;
-    const refreshed = await refreshJiraToken(current.refreshToken);
+    const refreshed = await refreshJiraToken(credentials.refreshToken);
     return {
-      ...current,
+      ...credentials,
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken,
       expiryDate: Date.now() + refreshed.expiresIn * 1000,
@@ -40,7 +37,7 @@ export const jiraCredentialLifecycle: CredentialLifecycle = {
 };
 
 export async function reauthenticateJira(
-  credentials: unknown,
+  credentials: JiraCredentials | null,
   profileName: string,
   performOAuth: typeof performJiraOAuthFlow = performJiraOAuthFlow
 ): Promise<JiraCredentials> {
@@ -48,7 +45,7 @@ export async function reauthenticateJira(
 
   const result = await performOAuth(selectJiraSite);
   const replacement: JiraCredentials = {
-    ...(credentials as JiraCredentials),
+    ...credentials,
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
     expiryDate: result.expiryDate,

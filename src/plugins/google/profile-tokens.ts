@@ -1,7 +1,7 @@
 import { getFreshCredentials } from '../../auth/refresh';
 import { requireProfile } from '../../utils/client-factory';
 import type { ServiceName } from '../../types/config';
-import type { OAuthTokens } from '../../types/tokens';
+import type { OAuthTokens } from './tokens';
 
 /** Resolve a profile and return its refreshed snake-case Google tokens. */
 export async function getValidTokens(

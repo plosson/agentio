@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
-import type { OAuthTokens } from '../../types/tokens';
+import type { OAuthTokens } from './tokens';
 
 function newGoogleOAuthClient(): OAuth2Client {
   return new OAuth2Client(GOOGLE_OAUTH_CONFIG.clientId, GOOGLE_OAUTH_CONFIG.clientSecret);

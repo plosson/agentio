@@ -1,17 +1,5 @@
 # Use Cases
 
-## Plugin Install (`agentio claude install`)
-
-### Team Onboarding & Consistency
-- New developer clones repo, runs `agentio claude install` → gets all team skills/commands/hooks instantly
-- `agentio.json` becomes like `package.json` for Claude Code plugins and marketplaces - version-controlled, reproducible environments
-- Ensures everyone on the team has identical Claude Code capabilities
-
-### CI/CD Agent Environments
-- GitHub Actions / GitLab CI jobs can install plugins at workflow start
-- Ephemeral runners get consistent Claude Code tooling per-project
-- Different repos can have different plugin configurations
-
 ## Config Export/Import (`agentio config export/import`)
 
 ### CI/CD Credential Injection

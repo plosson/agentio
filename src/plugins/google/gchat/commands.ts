@@ -1,0 +1,511 @@
+import { Command } from 'commander';
+import { chat as gchat } from '@googleapis/chat';
+import { readFile } from 'fs/promises';
+import { createProfileCommands } from '../../../utils/profile-commands';
+import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { createClientGetter } from '../../../utils/client-factory';
+import { performOAuthFlow } from '../oauth';
+import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { GChatClient } from './client';
+import { CliError, handleError } from '../../../utils/errors';
+import { readStdin, prompt } from '../../../utils/stdin';
+import { interactiveSelect } from '../../../utils/interactive';
+import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from './output';
+import { enforceWriteAccess } from '../../../utils/read-only';
+import { addExamples } from '../../../utils/command-tree';
+import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from './types';
+
+const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
+  service: 'gchat',
+  createClient: (credentials) => new GChatClient(credentials),
+});
+
+export function registerGChatCommands(program: Command): void {
+  const gchat = program
+    .command('gchat')
+    .description('Google Chat operations');
+
+  const sendCmd = gchat
+    .command('send')
+    .description('Send a message to Google Chat')
+    .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+    .option('--space <id>', 'Space ID (required for OAuth profiles)')
+    .option('--thread <id>', 'Thread ID (optional)')
+    .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
+    .option('--attachment <path>', 'File to attach (repeatable, OAuth profiles only)', (val: string, acc: string[]) => [...acc, val], [] as string[])
+    .argument('[message]', 'Message text (or pipe via stdin)')
+    .action(async (message: string | undefined, options) => {
+      try {
+        let text: string | undefined = message;
+        let payload: Record<string, unknown> | undefined;
+
+        // Handle --json option
+        if (options.json !== undefined) {
+          // Check mutual exclusivity
+          if (message) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              'Cannot use both text message and --json option',
+              'Use either: agentio gchat send "text" OR agentio gchat send --json file.json'
+            );
+          }
+
+          let jsonContent: string;
+
+          if (typeof options.json === 'string') {
+            // Read from file
+            try {
+              jsonContent = await readFile(options.json, 'utf-8');
+            } catch (err) {
+              throw new CliError(
+                'INVALID_PARAMS',
+                `Failed to read JSON file: ${options.json}`,
+                'Check that the file exists and is readable'
+              );
+            }
+          } else {
+            // Read from stdin
+            const stdinContent = await readStdin();
+            if (!stdinContent) {
+              throw new CliError(
+                'INVALID_PARAMS',
+                'No JSON provided via stdin',
+                'Pipe JSON content: cat message.json | agentio gchat send --json'
+              );
+            }
+            jsonContent = stdinContent;
+          }
+
+          // Parse JSON
+          try {
+            payload = JSON.parse(jsonContent) as Record<string, unknown>;
+          } catch (err) {
+            throw new CliError(
+              'INVALID_PARAMS',
+              `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+              'Check that the JSON is valid'
+            );
+          }
+        } else {
+          // Text message mode
+          if (!text) {
+            text = await readStdin() || undefined;
+          }
+
+          const hasAttachments = (options.attachment as string[] | undefined)?.length;
+          if (!text && !hasAttachments) {
+            throw new CliError('INVALID_PARAMS', 'Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.');
+          }
+        }
+
+        // Unescape shell-escaped characters (e.g. zsh history expansion: \! → !)
+        if (text) {
+          text = text.replace(/\\!/g, '!');
+        }
+
+        const { client, profile } = await getGChatClient(options.profile);
+        await enforceWriteAccess('gchat', profile, 'send message');
+        const attachments = (options.attachment as string[] | undefined)?.length
+          ? (options.attachment as string[])
+          : undefined;
+
+        const result = await client.send({
+          text,
+          payload,
+          threadId: options.thread,
+          spaceId: options.space,
+          attachments,
+        });
+
+        printGChatSendResult(result);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+  addExamples(
+    sendCmd,
+    `Examples:
+
+  # webhook profile: short text, no --space needed
+  agentio gchat send "Deployment complete"
+
+  # OAuth profile: send to a specific space
+  agentio gchat send "Status update" --space spaces/AAAA1234
+
+  # reply within an existing thread
+  agentio gchat send "Following up" --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+
+  # rich card via JSON file (OAuth or webhook)
+  agentio gchat send --json ./card.json --space spaces/AAAA1234
+
+  # JSON via stdin (good for inline cards)
+  echo '{"text":"Build status","cards":[{"header":{"title":"CI"}}]}' | \\
+    agentio gchat send --json --space spaces/AAAA1234`,
+  );
+
+  addExamples(
+    gchat
+      .command('list')
+      .description('List messages from a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id>', 'Space ID')
+      .option('--limit <n>', 'Number of messages', '10')
+      .option('--thread <id>', 'Filter by thread ID')
+      .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
+      .option('--until <date>', 'Only messages before this date (YYYY-MM-DD)')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (options) => {
+        try {
+          if (options.format !== 'text' && options.format !== 'json') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${options.format}`, 'Use --format text or --format json');
+          }
+          const limit = parseInt(options.limit, 10);
+          const { client } = await getGChatClient(options.profile);
+          const { messages, truncated } = await client.list({
+            spaceId: options.space,
+            limit,
+            threadId: options.thread,
+            since: options.since ? new Date(options.since) : undefined,
+            until: options.until ? new Date(options.until) : undefined,
+          });
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(messages, null, 2));
+          } else {
+            printGChatMessageList(messages);
+          }
+
+          if (truncated) {
+            const oldest = messages[messages.length - 1]?.createTime;
+            console.error(
+              `Warning: reached --limit ${limit}; more messages exist before ${oldest}. ` +
+              `Raise --limit or narrow the window with --since/--until.`
+            );
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # 10 most recent messages in a space (OAuth only)
+  agentio gchat list --space spaces/AAAA1234
+
+  # last 50 messages
+  agentio gchat list --space spaces/AAAA1234 --limit 50
+
+  # only messages in a specific thread
+  agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+
+  # messages within a closed date range, as JSON for scripting
+  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json`,
+  );
+
+  addExamples(
+    gchat
+      .command('get')
+      .argument('<message-id>', 'Message ID')
+      .description('Get a message from a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id>', 'Space ID')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (messageId: string, options) => {
+        try {
+          if (options.format !== 'text' && options.format !== 'json') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${options.format}`, 'Use --format text or --format json');
+          }
+          const { client } = await getGChatClient(options.profile);
+          const message = await client.get({
+            spaceId: options.space,
+            messageId: messageId,
+          });
+
+          if (options.format === 'json') {
+            console.log(JSON.stringify(message, null, 2));
+          } else {
+            printGChatMessage(message);
+          }
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # fetch one message by id from a space (OAuth only)
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234
+
+  # as JSON for scripting
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json`,
+  );
+
+  addExamples(
+    gchat
+      .command('spaces')
+      .description('List available Google Chat spaces (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--filter <text>', 'Filter spaces by name (case-insensitive)')
+      .option('--with <user>', 'Resolve the 1:1 DM space with a user (email, numeric id, or users/<id>)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+
+          if (options.with) {
+            const space = await client.findDirectMessage(options.with);
+            printGChatSpaceList([space]);
+            return;
+          }
+
+          let spaces = await client.listSpaces();
+
+          if (options.filter) {
+            const filterLower = options.filter.toLowerCase();
+            spaces = spaces.filter(s => s.displayName.toLowerCase().includes(filterLower));
+          }
+
+          printGChatSpaceList(spaces);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # all spaces this OAuth profile can see
+  agentio gchat spaces
+
+  # filter by display name (case-insensitive substring)
+  agentio gchat spaces --filter eng
+
+  # resolve the 1:1 DM space with a workspace user (1 API call, instant)
+  agentio gchat spaces --with teammate@example.com`,
+  );
+
+  addExamples(
+    gchat
+      .command('members')
+      .description('List members of a Google Chat space (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id-or-name>', 'Space ID or display name')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const members = await client.listMembers(options.space);
+          printGChatMemberList(members);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # members by space id
+  agentio gchat members --space spaces/AAAA1234
+
+  # members by space display name (resolved against the space list)
+  agentio gchat members --space "Engineering"`,
+  );
+
+  addExamples(
+    gchat
+      .command('user')
+      .argument('<user-id>', 'User ID (e.g. "123456789" or "users/123456789")')
+      .description('Get full user info from the People API (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (userId: string, options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const user = await client.getUser(userId);
+          printGChatUser(user);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # by raw numeric id
+  agentio gchat user 123456789
+
+  # by full users/<id> form (as it appears in 'gchat members' output)
+  agentio gchat user users/123456789`,
+  );
+
+  const directory = gchat
+    .command('directory')
+    .description('Manage the cached workspace directory used to resolve user IDs');
+
+  addExamples(
+    directory
+      .command('refresh')
+      .description('Force refresh the cached workspace directory (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .action(async (options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const result = await client.refreshDirectory();
+          console.log(`Refreshed: ${result.size} users`);
+          console.log(`Path: ${result.path}`);
+          console.log(`Fetched at: ${result.fetchedAt}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # rebuild the local user-id -> name/email cache (OAuth only)
+  agentio gchat directory refresh
+
+  # refresh the cache for a specific OAuth profile
+  agentio gchat directory refresh --profile alice@example.com`,
+  );
+
+  // Profile management
+  const profile = createProfileCommands<GChatCredentials>(gchat, {
+    service: 'gchat',
+    displayName: 'Google Chat',
+    getExtraInfo: (credentials) => credentials?.type === 'webhook' ? ' - webhook' : ' - oauth',
+  });
+
+  profile
+    .command('add')
+    .description('Add a new Google Chat profile (webhook or OAuth)')
+    .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    .action(async (options) => {
+      try {
+        await gchatProfileAdd(options);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+}
+
+export async function gchatProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+  console.error('\nGoogle Chat Setup\n');
+
+  const profileType = await interactiveSelect({
+    message: 'Choose profile type:',
+    choices: [
+      { name: 'Webhook', value: 'webhook', description: 'Simple incoming webhook URL' },
+      { name: 'OAuth', value: 'oauth', description: 'Full API access with Google Workspace account' },
+    ],
+  });
+
+  if (profileType === 'webhook') {
+    if (!options.profile) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        'Profile name is required for webhook profiles',
+        'Run: agentio gchat profile add --profile <name>'
+      );
+    }
+    await setupWebhookProfile(options.profile, options.readOnly);
+  } else {
+    await setupOAuthProfile(options.profile, options.readOnly);
+  }
+}
+
+function printProfileSetupSuccess(profileName: string, authType: 'webhook' | 'oauth', readOnly?: boolean): void {
+  const typeLabel = authType.charAt(0).toUpperCase() + authType.slice(1);
+  console.log(`\nSuccess! ${typeLabel} profile "${profileName}" configured.`);
+  if (readOnly) {
+    console.log(`   Access: read-only`);
+  }
+  console.log(`   Test with: agentio gchat send --profile ${profileName} "Hello from agentio"`);
+}
+
+async function setupWebhookProfile(profileName: string, readOnly?: boolean): Promise<void> {
+  console.error('Webhook Setup\n');
+  console.error('1. In Google Chat, find or create a space');
+  console.error('2. Go to Space Settings → Webhooks');
+  console.error('3. Create a new webhook and copy the URL\n');
+
+  const webhookUrl = await prompt('? Paste your webhook URL: ');
+
+  if (!webhookUrl) {
+    throw new CliError('INVALID_PARAMS', 'Webhook URL is required');
+  }
+
+  // Validate webhook with a test request
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: 'Test message from agentio' }),
+    });
+
+    if (!response.ok) {
+      throw new CliError(
+        'API_ERROR',
+        `Webhook validation failed: ${response.status}`,
+        'Check the webhook URL and try again'
+      );
+    }
+  } catch (err) {
+    if (err instanceof CliError) throw err;
+    throw new CliError(
+      'API_ERROR',
+      `Failed to validate webhook: ${err instanceof Error ? err.message : String(err)}`,
+      'Check that the URL is correct and accessible'
+    );
+  }
+
+  const credentials: GChatWebhookCredentials = {
+    type: 'webhook',
+    webhookUrl: webhookUrl,
+  };
+
+  await saveProfile('gchat', profileName, credentials, { readOnly });
+
+  printProfileSetupSuccess(profileName, 'webhook', readOnly);
+}
+
+async function setupOAuthProfile(profileNameOverride?: string, readOnly?: boolean): Promise<void> {
+  console.error('OAuth Setup\n');
+  console.error('Starting OAuth flow for Google Chat profile...\n');
+
+  const tokens = await performOAuthFlow('gchat');
+  const auth = createGoogleAuth(tokens);
+
+  // Fetch user email for profile naming
+  let userEmail: string;
+  try {
+    userEmail = await fetchGoogleUserEmail(tokens.access_token);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new CliError(
+      'AUTH_FAILED',
+      `Failed to fetch user email: ${errorMessage}`,
+      'Ensure the account has an email address'
+    );
+  }
+
+  // Validate the token works with Chat API
+  try {
+    const chatApi = gchat({ version: 'v1', auth: auth as any });
+    await chatApi.spaces.list({ pageSize: 1 });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new CliError(
+      'AUTH_FAILED',
+      `Failed to validate Google Chat access: ${errorMessage}`,
+      'Google Chat API requires a Google Workspace account. Personal Gmail accounts cannot use the Chat API.'
+    );
+  }
+
+  const profileName = await chooseProfileName('gchat', { explicit: profileNameOverride, derived: userEmail, readOnly });
+
+  const credentials: GChatOAuthCredentials = {
+    type: 'oauth',
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiryDate: tokens.expiry_date,
+    tokenType: tokens.token_type,
+    scope: tokens.scope,
+    email: userEmail,
+  };
+
+  await saveProfile('gchat', profileName, credentials, { readOnly });
+
+  printProfileSetupSuccess(profileName, 'oauth', readOnly);
+}

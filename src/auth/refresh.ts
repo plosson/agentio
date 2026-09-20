@@ -1,13 +1,8 @@
 import { CliError, noCredentialsError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
-import type { RevolutCredentials } from '../types/revolut';
-import type { DropboxCredentials } from '../types/dropbox';
 import { findCredentialLifecycle } from '../plugins/credential-lifecycles';
-import type { CredentialLifecycle } from '../plugins/types';
+import type { RegisteredCredentialLifecycle } from '../plugins/types';
 import { getCredentials, setCredentials } from './token-store';
-import { refreshConfluenceToken } from './confluence-oauth';
-import { refreshRevolutToken } from './revolut-oauth';
-import { refreshDropboxToken } from './dropbox-oauth';
 
 /** Refresh when the access token has less than this left. */
 export const REFRESH_BUFFER_MS = 5 * 60 * 1000;
@@ -38,61 +33,8 @@ interface Refresher<T> {
   refresh(creds: T): Promise<T>;
 }
 
-/** Google and Atlassian record an expiry; a missing one means "never checked", not stale. */
-const expiring = (expiry: number | undefined, now: number, buffer: number) =>
-  expiry !== undefined && now + buffer >= expiry;
-/** Revolut and Dropbox tokens live under a few hours; a missing expiry is treated as stale. */
-const shortLived = (expiry: number | undefined, now: number, buffer: number) =>
-  expiry === undefined || now + buffer >= expiry;
-
-/** Atlassian rotates refresh tokens, so the new one must be kept. */
-function atlassian(
-  call: (refreshToken: string) => Promise<{ accessToken: string; refreshToken: string; expiresIn: number }>,
-): Refresher<{
-  accessToken: string;
-  refreshToken: string;
-  expiryDate: number;
-  [key: string]: unknown;
-}> {
-  return {
-    secretFields: ['refreshToken'],
-    applies: (c) => !!c.refreshToken,
-    isStale: (c, now, buffer) => expiring(c.expiryDate, now, buffer),
-    async refresh(c) {
-      const r = await call(c.refreshToken);
-      return { ...c, accessToken: r.accessToken, refreshToken: r.refreshToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-    },
-  };
-}
-
-const revolut: Refresher<RevolutCredentials> = {
-  secretFields: ['refreshToken', 'privateKey'],
-  applies: (c) => !!c.refreshToken,
-  isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
-  async refresh(c) {
-    const r = await refreshRevolutToken(c);
-    return { ...c, accessToken: r.accessToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-  },
-};
-
-const dropbox: Refresher<DropboxCredentials> = {
-  secretFields: ['refreshToken'],
-  applies: (c) => !!c.refreshToken,
-  isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
-  async refresh(c) {
-    const r = await refreshDropboxToken(c.appKey, c.refreshToken);
-    return { ...c, accessToken: r.accessToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-  },
-};
-
-const LEGACY_REFRESHERS: Partial<Record<ServiceName, Refresher<unknown>>> = {
-  confluence: atlassian((t) => refreshConfluenceToken(t)),
-  revolut,
-  dropbox,
-};
-
-function refresherFor(service: ServiceName): CredentialLifecycle | Refresher<unknown> | undefined {
-  return findCredentialLifecycle(service) ?? LEGACY_REFRESHERS[service];
+function refresherFor(service: ServiceName): RegisteredCredentialLifecycle | undefined {
+  return findCredentialLifecycle(service);
 }
 
 /**

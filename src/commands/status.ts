@@ -3,22 +3,8 @@ import { listProfileRefs as listConfiguredProfiles, CONFIG_DIR } from '../config
 import { getCredentials } from '../auth/token-store';
 import { getFreshCredentials } from '../auth/refresh';
 import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
-import { TelegramClient } from '../services/telegram/client';
-import { GitHubClient } from '../services/github/client';
-import { ConfluenceClient } from '../services/confluence/client';
-import { DiscourseClient } from '../services/discourse/client';
-import { DropboxClient } from '../services/dropbox/client';
-import { RevolutClient } from '../services/revolut/client';
-import { SqlClient } from '../services/sql/client';
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
-import type { TelegramCredentials } from '../types/telegram';
-import type { GitHubCredentials } from '../types/github';
-import type { ConfluenceCredentials } from '../types/confluence';
-import type { DiscourseCredentials } from '../types/discourse';
-import type { DropboxCredentials } from '../types/dropbox';
-import type { RevolutCredentials } from '../types/revolut';
-import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { findServicePlugin } from '../plugins/registry';
@@ -29,66 +15,8 @@ import { findServicePlugin } from '../plugins/registry';
  */
 function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient {
   const pluginClient = findServicePlugin(service)?.profile?.createClient;
-  if (pluginClient) return pluginClient(credentials);
-
-  switch (service) {
-    case 'gmail':
-    case 'gdocs':
-    case 'gdrive':
-    case 'gsheets':
-    case 'gslides':
-    case 'gscript':
-    case 'gcal':
-    case 'gtasks':
-    case 'gchat':
-      throw new Error(`${service} profile plugin is not registered`);
-
-    case 'telegram': {
-      const creds = credentials as TelegramCredentials;
-      return new TelegramClient(creds.botToken, creds.channelId);
-    }
-
-    case 'github': {
-      const creds = credentials as GitHubCredentials;
-      return new GitHubClient(creds);
-    }
-
-    case 'jira':
-      throw new Error('Jira profile plugin is not registered');
-
-    case 'confluence': {
-      const creds = credentials as ConfluenceCredentials;
-      return new ConfluenceClient(creds);
-    }
-
-    case 'slack':
-      throw new Error('Slack profile plugin is not registered');
-
-    case 'discourse': {
-      const creds = credentials as DiscourseCredentials;
-      return new DiscourseClient(creds);
-    }
-
-    case 'revolut': {
-      const creds = credentials as RevolutCredentials;
-      return new RevolutClient(creds);
-    }
-
-    case 'dropbox': {
-      const creds = credentials as DropboxCredentials;
-      return new DropboxClient(creds);
-    }
-
-    case 'sql': {
-      const creds = credentials as SqlCredentials;
-      return new SqlClient(creds);
-    }
-
-    default: {
-      const exhaustive: never = service;
-      throw new Error(`Unhandled service ${String(exhaustive)}`);
-    }
-  }
+  if (!pluginClient) throw new Error(`${service} profile plugin is not registered`);
+  return pluginClient(credentials);
 }
 
 export interface ProfileStatus {

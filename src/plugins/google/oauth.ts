@@ -1,7 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
 import { findAvailablePort, awaitOAuthCode } from '../../auth/oauth-server';
-import type { OAuthTokens } from '../../types/tokens';
+import type { OAuthTokens } from './tokens';
 
 const SCOPES = {
   gmail: [
