@@ -10,6 +10,7 @@ import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
+import { loadComposeSpec, resolveComposeText } from './compose-input';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GmailAttachment, GmailSendOptions, GmailFilterCriteria, GmailFilterAction } from './types';
@@ -21,21 +22,30 @@ function addComposeOptions(cmd: Command): Command {
     .option('--cc <email>', 'CC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
     .option('--bcc <email>', 'BCC recipient (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
     .option('--subject <subject>', 'Email subject (required unless --reply-to)')
+    .option('--subject-file <path>', 'Read subject from a UTF-8 file (preferred for agents; avoids shell quoting)')
     .option('--body <body>', 'Email body (omit or pass "-" to read from stdin)')
+    .option('--body-file <path>', 'Read body from a UTF-8 file (preferred for agents; avoids shell quoting)')
+    .option('--spec <path.json>', 'Compose from JSON file {to,cc,bcc,subject,body,attachments}; flags override')
     .option('--html', 'Treat body as HTML')
     .option('--reply-to <thread-id>', 'Thread ID to reply to (derives to/subject from thread)')
     .option('--attachment <path>', 'File to attach (repeatable)', (val: string, acc: string[]) => [...acc, val], [])
     .option('--inline <cid:path>', 'Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)', (val: string, acc: string[]) => [...acc, val], []);
 }
 
-async function parseBody(body: string | undefined): Promise<string> {
+async function parseBody(
+  body: string | undefined,
+  opts: { allowStdin: boolean } = { allowStdin: true },
+): Promise<string> {
   // Treat a bare "-" as an explicit "read from stdin" sentinel, matching the
   // common CLI convention (otherwise the literal "-" would be sent as the body).
-  if (!body || body === '-') {
+  if (opts.allowStdin && (!body || body === '-')) {
     body = await readStdin() ?? undefined;
   }
   if (!body) {
-    throw new CliError('INVALID_PARAMS', 'Body is required. Use --body or pipe via stdin.');
+    throw new CliError(
+      'INVALID_PARAMS',
+      'Body is required. Use --body, --body-file, --spec, or pipe via stdin.',
+    );
   }
   return body;
 }
@@ -64,22 +74,52 @@ function parseInlineAttachments(specs: string[]): GmailAttachment[] {
 }
 
 async function parseSendOptions(options: Record<string, unknown>): Promise<GmailSendOptions> {
-  const replyTo = options.replyTo as string | undefined;
-  const to = options.to as string[];
-  const subject = options.subject as string | undefined;
+  const specPath = options.spec as string | undefined;
+  const spec = specPath ? await loadComposeSpec(specPath) : undefined;
+
+  const resolved = await resolveComposeText({
+    subject: options.subject as string | undefined,
+    subjectFile: options.subjectFile as string | undefined,
+    body: options.body as string | undefined,
+    bodyFile: options.bodyFile as string | undefined,
+    spec,
+  });
+
+  const flagTo = options.to as string[];
+  const flagCc = options.cc as string[];
+  const flagBcc = options.bcc as string[];
+  const flagAttachments = options.attachment as string[];
+
+  const to = flagTo.length ? flagTo : (spec?.to ?? []);
+  const cc = flagCc.length ? flagCc : (spec?.cc ?? []);
+  const bcc = flagBcc.length ? flagBcc : (spec?.bcc ?? []);
+  const attachmentPaths = flagAttachments.length ? flagAttachments : (spec?.attachments ?? []);
+
+  const replyTo =
+    (options.replyTo as string | undefined) ||
+    spec?.replyTo ||
+    undefined;
+  const subject = resolved.subject;
 
   if (!replyTo) {
     if (!to.length) {
       throw new CliError('INVALID_PARAMS', '--to is required (unless using --reply-to)');
     }
     if (!subject) {
-      throw new CliError('INVALID_PARAMS', '--subject is required (unless using --reply-to)');
+      throw new CliError(
+        'INVALID_PARAMS',
+        '--subject is required (unless using --reply-to)',
+        'Use --subject, --subject-file, or --spec',
+      );
     }
   }
 
-  const body = await parseBody(options.body as string | undefined);
+  const body = await parseBody(resolved.body, {
+    // If body came from --body-file / --spec, do not fall back to stdin.
+    allowStdin: !resolved.bodyFromFileOrSpec,
+  });
 
-  const regularAttachments = parseAttachments(options.attachment as string[]);
+  const regularAttachments = parseAttachments(attachmentPaths);
   const inlineAttachments = parseInlineAttachments(options.inline as string[]);
 
   const attachments: GmailAttachment[] | undefined =
@@ -87,13 +127,18 @@ async function parseSendOptions(options: Record<string, unknown>): Promise<Gmail
       ? [...regularAttachments, ...inlineAttachments]
       : undefined;
 
+  const isHtml =
+    (options.html as boolean | undefined) ||
+    spec?.html ||
+    undefined;
+
   return {
     to,
-    cc: (options.cc as string[]).length ? options.cc as string[] : undefined,
-    bcc: (options.bcc as string[]).length ? options.bcc as string[] : undefined,
+    cc: cc.length ? cc : undefined,
+    bcc: bcc.length ? bcc : undefined,
     subject: subject || '',
     body,
-    isHtml: options.html as boolean | undefined,
+    isHtml,
     attachments,
     replyTo,
   };
@@ -361,6 +406,10 @@ Combine with spaces (AND), OR, or - to negate.`,
   # body from stdin (great for piping)
   echo "Sent via pipe" | agentio gmail send --to alice@example.com --subject "Note"
 
+  # preferred for agents: subject/body from UTF-8 files
+  agentio gmail send --to alice@example.com \
+    --subject-file ./subject.txt --body-file ./body.txt
+
   # reply within an existing thread (to/subject derived from thread)
   agentio gmail send --reply-to 18c4f1a2b3d --body "Thanks!"
 
@@ -395,6 +444,13 @@ Combine with spaces (AND), OR, or - to negate.`,
 
   # save a draft for later editing in Gmail
   agentio gmail draft --to alice@example.com --subject "Hello" --body "Draft body"
+
+  # preferred for agents: subject/body from UTF-8 files (avoids shell quoting bugs)
+  agentio gmail draft --to alice@example.com \
+    --subject-file ./subject.txt --body-file ./body.txt
+
+  # or a single JSON spec (flags still override individual fields)
+  agentio gmail draft --spec ./draft.json
 
   # update an existing draft (replaces its entire content)
   agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
