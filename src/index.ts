@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createProgram } from './index-program';
+import { createProgram } from './cli';
 
 const program = createProgram();
 program.parse();

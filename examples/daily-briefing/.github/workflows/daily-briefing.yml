@@ -16,5 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: curl -LsSf https://agentio.me/install | sh
       - run: npm install -g @anthropic-ai/claude-code
-      - run: agentio config import && agentio claude install
+      - run: agentio config import
+      - run: claude plugin marketplace add https://github.com/plosson/agentio
+      - run: claude plugin install agentio-gmail@agentio --scope project
+      - run: claude plugin install agentio-slack@agentio --scope project
       - run: claude -p "$(cat prompt.md)" --max-turns 30 --dangerously-skip-permissions

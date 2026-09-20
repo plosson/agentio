@@ -1,15 +1,8 @@
 import { CliError, noCredentialsError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
-import type { OAuthTokens, GoogleCamelTokens } from '../types/tokens';
-import type { JiraCredentials } from '../types/jira';
-import type { RevolutCredentials } from '../types/revolut';
-import type { DropboxCredentials } from '../types/dropbox';
+import { findCredentialLifecycle } from '../plugins/credential-lifecycles';
+import type { RegisteredCredentialLifecycle } from '../plugins/types';
 import { getCredentials, setCredentials } from './token-store';
-import { refreshGoogleAccessToken } from './token-manager';
-import { refreshJiraToken } from './jira-oauth';
-import { refreshConfluenceToken } from './confluence-oauth';
-import { refreshRevolutToken } from './revolut-oauth';
-import { refreshDropboxToken } from './dropbox-oauth';
 
 /** Refresh when the access token has less than this left. */
 export const REFRESH_BUFFER_MS = 5 * 60 * 1000;
@@ -40,95 +33,9 @@ interface Refresher<T> {
   refresh(creds: T): Promise<T>;
 }
 
-/** Google and Atlassian record an expiry; a missing one means "never checked", not stale. */
-const expiring = (expiry: number | undefined, now: number, buffer: number) =>
-  expiry !== undefined && now + buffer >= expiry;
-/** Revolut and Dropbox tokens live under a few hours; a missing expiry is treated as stale. */
-const shortLived = (expiry: number | undefined, now: number, buffer: number) =>
-  expiry === undefined || now + buffer >= expiry;
-
-const googleSnake: Refresher<OAuthTokens> = {
-  secretFields: ['refresh_token'],
-  applies: (c) => !!c.refresh_token,
-  isStale: (c, now, buffer) => expiring(c.expiry_date, now, buffer),
-  refresh: (c) => refreshGoogleAccessToken(c),
-};
-
-/** Same exchange as googleSnake; only the stored field names differ. */
-const googleCamel: Refresher<GoogleCamelTokens> = {
-  secretFields: ['refreshToken'],
-  applies: (c) => !!c.refreshToken,
-  isStale: (c, now, buffer) => expiring(c.expiryDate, now, buffer),
-  async refresh(c) {
-    const r = await refreshGoogleAccessToken({
-      access_token: c.accessToken,
-      refresh_token: c.refreshToken,
-      expiry_date: c.expiryDate,
-      token_type: c.tokenType,
-      scope: c.scope,
-    });
-    return {
-      ...c,
-      accessToken: r.access_token,
-      refreshToken: r.refresh_token,
-      expiryDate: r.expiry_date,
-      tokenType: r.token_type,
-      scope: r.scope,
-    };
-  },
-};
-
-/** Atlassian rotates refresh tokens, so the new one must be kept. Jira and Confluence share the shape. */
-function atlassian(
-  call: (refreshToken: string) => Promise<{ accessToken: string; refreshToken: string; expiresIn: number }>,
-): Refresher<JiraCredentials> {
-  return {
-    secretFields: ['refreshToken'],
-    applies: (c) => !!c.refreshToken,
-    isStale: (c, now, buffer) => expiring(c.expiryDate, now, buffer),
-    async refresh(c) {
-      const r = await call(c.refreshToken);
-      return { ...c, accessToken: r.accessToken, refreshToken: r.refreshToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-    },
-  };
+function refresherFor(service: ServiceName): RegisteredCredentialLifecycle | undefined {
+  return findCredentialLifecycle(service);
 }
-
-const revolut: Refresher<RevolutCredentials> = {
-  secretFields: ['refreshToken', 'privateKey'],
-  applies: (c) => !!c.refreshToken,
-  isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
-  async refresh(c) {
-    const r = await refreshRevolutToken(c);
-    return { ...c, accessToken: r.accessToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-  },
-};
-
-const dropbox: Refresher<DropboxCredentials> = {
-  secretFields: ['refreshToken'],
-  applies: (c) => !!c.refreshToken,
-  isStale: (c, now, buffer) => shortLived(c.expiryDate, now, buffer),
-  async refresh(c) {
-    const r = await refreshDropboxToken(c.appKey, c.refreshToken);
-    return { ...c, accessToken: r.accessToken, expiryDate: Date.now() + r.expiresIn * 1000 };
-  },
-};
-
-const REFRESHERS: Partial<Record<ServiceName, Refresher<unknown>>> = {
-  gmail: googleSnake,
-  gcal: googleSnake,
-  gtasks: googleSnake,
-  gdocs: googleCamel,
-  gdrive: googleCamel,
-  gsheets: googleCamel,
-  gslides: googleCamel,
-  gscript: googleCamel,
-  gchat: googleCamel,
-  // Late-bound so the exchange functions resolve through the module at call time.
-  jira: atlassian((t) => refreshJiraToken(t)),
-  confluence: atlassian((t) => refreshConfluenceToken(t)),
-  revolut,
-  dropbox,
-};
 
 /**
  * The credentials as a remote agent may see them: the refresh material stays on
@@ -136,7 +43,7 @@ const REFRESHERS: Partial<Record<ServiceName, Refresher<unknown>>> = {
  * hands over whole; it is a transparent vault for those.
  */
 export function redactForRemote(service: ServiceName, credentials: Record<string, unknown>): Record<string, unknown> {
-  const refresher = REFRESHERS[service];
+  const refresher = refresherFor(service);
   if (!refresher) return credentials;
   const out = { ...credentials };
   for (const field of refresher.secretFields) delete out[field];
@@ -178,7 +85,7 @@ export function getFreshCredentials<T = Record<string, unknown>>(
     const stored = await getCredentials<T>(service, profile);
     if (!stored) throw noCredentialsError(service, profile);
 
-    const refresher = REFRESHERS[service] as Refresher<T> | undefined;
+    const refresher = refresherFor(service) as Refresher<T> | undefined;
     const bufferMs = options.bufferMs ?? REFRESH_BUFFER_MS;
     const wanted = !!refresher && refresher.applies(stored)
       && (options.force || refresher.isStale(stored, Date.now(), bufferMs));

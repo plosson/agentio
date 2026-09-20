@@ -3,23 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { collectCommands, type CommandInfo } from '../utils/command-tree';
 import { CliError, handleError } from '../utils/errors';
+import { findServicePlugin } from '../plugins/registry';
 
 const SERVICE_DESCRIPTIONS: Record<string, string> = {
-  gmail: 'Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.',
-  gdocs: 'Use when interacting with Google Docs via the agentio CLI - list, read, create.',
-  gdrive: 'Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.',
-  telegram: 'Use when sending Telegram messages via the agentio CLI.',
-  gchat: 'Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.',
-  gcal: 'Use when interacting with Google Calendar via the agentio CLI.',
-  gsheets: 'Use when interacting with Google Sheets via the agentio CLI.',
-  gtasks: 'Use when interacting with Google Tasks via the agentio CLI.',
-  github: 'Use when interacting with GitHub via the agentio CLI.',
-  jira: 'Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.',
-  slack: 'Use when sending Slack messages via the agentio CLI.',
-  rss: 'Use when reading RSS feeds via the agentio CLI.',
-  discourse: 'Use when interacting with Discourse forums via the agentio CLI.',
-  dropbox: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
-  sql: 'Use when running SQL queries via the agentio CLI.',
   daemon: 'Use to manage the agentio daemon (HTTP API server for health and future vault UI/API).',
   key: 'Use to manage the API keys that let remote agents read credentials from this vault hub - create, list, update, rotate, revoke.',
 };
@@ -69,7 +55,8 @@ function renderCommand(cmd: CommandInfo): string {
 }
 
 export function generateSkill(program: Command, service: string): string {
-  const description = SERVICE_DESCRIPTIONS[service]
+  const description = findServicePlugin(service)?.description
+    ?? SERVICE_DESCRIPTIONS[service]
     ?? `Use when interacting with ${service} via the agentio CLI.`;
 
   const all = collectCommands(program, 'agentio');
