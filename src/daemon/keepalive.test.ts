@@ -6,8 +6,8 @@ import { lockVault, loadVault, unlockVault } from '../vault/vault';
 const jiraRefresh = mock(async (refreshToken: string) => ({
   accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600,
 }));
-const realJira = await import('../auth/jira-oauth');
-mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
+const realJira = await import('../plugins/jira/oauth');
+mock.module('../plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
 const { intervalHours, keepaliveRunning, runRefreshPass, startKeepalive, stopKeepalive,
   DEFAULT_INTERVAL_HOURS, MAX_INTERVAL_HOURS, MIN_INTERVAL_HOURS } = await import('./keepalive');

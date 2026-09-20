@@ -5,24 +5,14 @@ import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/conf
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
-import { gmailProfileAdd } from './gmail';
-import { gdocsProfileAdd } from './gdocs';
-import { gdriveProfileAdd } from './gdrive';
-import { gcalProfileAdd } from './gcal';
-import { gtasksProfileAdd } from './gtasks';
-import { gchatProfileAdd } from './gchat';
-import { gsheetsProfileAdd } from './gsheets';
-import { gslidesProfileAdd } from './gslides';
-import { gscriptProfileAdd } from './gscript';
 import { githubProfileAdd } from './github';
-import { jiraProfileAdd } from './jira';
 import { confluenceProfileAdd } from './confluence';
-import { slackProfileAdd } from './slack';
 import { telegramProfileAdd } from './telegram';
 import { discourseProfileAdd } from './discourse';
 import { dropboxProfileAdd } from './dropbox';
 import { revolutProfileAdd } from './revolut';
 import { sqlProfileAdd } from './sql';
+import { findServicePlugin } from '../plugins/registry';
 
 export type ProfileSummary = ProfileRef;
 
@@ -61,20 +51,9 @@ function assertKnownService(service: string): asserts service is ServiceName {
 
 type AddOpts = { profile?: string; readOnly?: boolean };
 
-const ADD_HANDLERS: Record<ServiceName, (opts: AddOpts) => Promise<void>> = {
-  gmail: gmailProfileAdd,
-  gdocs: gdocsProfileAdd,
-  gdrive: gdriveProfileAdd,
-  gcal: gcalProfileAdd,
-  gtasks: gtasksProfileAdd,
-  gchat: gchatProfileAdd,
-  gsheets: gsheetsProfileAdd,
-  gslides: gslidesProfileAdd,
-  gscript: gscriptProfileAdd,
+const ADD_HANDLERS: Partial<Record<ServiceName, (opts: AddOpts) => Promise<void>>> = {
   github: githubProfileAdd,
-  jira: jiraProfileAdd,
   confluence: confluenceProfileAdd,
-  slack: slackProfileAdd,
   telegram: telegramProfileAdd,
   revolut: revolutProfileAdd,
   discourse: discourseProfileAdd,
@@ -110,7 +89,9 @@ export function registerProfileCommands(program: Command): void {
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
         assertKnownService(service);
-        await ADD_HANDLERS[service](opts);
+        const add = findServicePlugin(service)?.profile?.add ?? ADD_HANDLERS[service];
+        if (!add) throw new Error(`No profile setup registered for ${service}`);
+        await add(opts);
       } catch (e) {
         handleError(e);
       }

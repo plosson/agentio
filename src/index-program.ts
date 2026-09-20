@@ -1,24 +1,5 @@
 import { Command } from 'commander';
-// Services (alphabetical)
-import { registerConfluenceCommands } from './commands/confluence';
-import { registerDiscourseCommands } from './commands/discourse';
-import { registerDropboxCommands } from './commands/dropbox';
-import { registerGCalCommands } from './commands/gcal';
-import { registerGChatCommands } from './commands/gchat';
-import { registerGDocsCommands } from './commands/gdocs';
-import { registerGDriveCommands } from './commands/gdrive';
-import { registerGitHubCommands } from './commands/github';
-import { registerGmailCommands } from './commands/gmail';
-import { registerGSheetsCommands } from './commands/gsheets';
-import { registerGSlidesCommands } from './commands/gslides';
-import { registerGScriptCommands } from './commands/gscript';
-import { registerGTasksCommands } from './commands/gtasks';
-import { registerJiraCommands } from './commands/jira';
-import { registerRevolutCommands } from './commands/revolut';
-import { registerRssCommands } from './commands/rss';
-import { registerSlackCommands } from './commands/slack';
-import { registerSqlCommands } from './commands/sql';
-import { registerTelegramCommands } from './commands/telegram';
+import { registerServiceCommands, SERVICE_REGISTRY } from './plugins/registry';
 
 // Agentio utilities
 import { registerClaudeCommands } from './commands/claude';
@@ -60,26 +41,7 @@ export function createProgram(): Command {
     .description('CLI for LLM agents to interact with communication and tracking services')
     .version(getVersion());
 
-  // Services (alphabetical)
-  registerConfluenceCommands(program);
-  registerDiscourseCommands(program);
-  registerDropboxCommands(program);
-  registerGCalCommands(program);
-  registerGChatCommands(program);
-  registerGDocsCommands(program);
-  registerGDriveCommands(program);
-  registerGitHubCommands(program);
-  registerGmailCommands(program);
-  registerGSheetsCommands(program);
-  registerGSlidesCommands(program);
-  registerGScriptCommands(program);
-  registerGTasksCommands(program);
-  registerJiraCommands(program);
-  registerRevolutCommands(program);
-  registerRssCommands(program);
-  registerSlackCommands(program);
-  registerSqlCommands(program);
-  registerTelegramCommands(program);
+  registerServiceCommands(program);
 
   // Agentio utilities
   registerClaudeCommands(program);
@@ -162,10 +124,7 @@ export function createProgram(): Command {
   ['vault', 'login', 'logout', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
 
   // Services
-  [
-    'gmail', 'gdocs', 'gdrive', 'gcal', 'gchat', 'gtasks', 'gsheets', 'gslides', 'gscript',
-    'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'rss', 'sql', 'revolut',
-  ].forEach((n) => setGroup(n, 'Services'));
+  SERVICE_REGISTRY.forEach(({ id }) => setGroup(id, 'Services'));
 
   // Advanced
   ['daemon', 'key', 'profile'].forEach((n) => setGroup(n, 'Advanced'));

@@ -1,0 +1,22 @@
+import { defineServicePlugin } from '../types';
+import { SlackClient } from './client';
+import { registerSlackCommands, slackProfileAdd } from './commands';
+import type { SlackCredentials } from './types';
+
+const slack = defineServicePlugin({
+  apiVersion: 1,
+  id: 'slack',
+  displayName: 'Slack',
+  description: 'Use when sending Slack messages via the agentio CLI.',
+  registerCommands: registerSlackCommands,
+  profile: {
+    add: slackProfileAdd,
+    createClient: (credentials: unknown) => new SlackClient(credentials as SlackCredentials),
+  },
+});
+
+export default slack;
+export { SlackClient } from './client';
+export { registerSlackCommands, slackProfileAdd } from './commands';
+export * from './output';
+export type * from './types';

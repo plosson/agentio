@@ -1,118 +1,47 @@
 import { Command } from 'commander';
 import { listProfileRefs as listConfiguredProfiles, CONFIG_DIR } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
-import { createGoogleAuth } from '../auth/token-manager';
 import { getFreshCredentials } from '../auth/refresh';
 import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors';
 import { TelegramClient } from '../services/telegram/client';
-import { GmailClient } from '../services/gmail/client';
-import { GDocsClient } from '../services/gdocs/client';
-import { GDriveClient } from '../services/gdrive/client';
-import { GCalClient } from '../services/gcal/client';
-import { GTasksClient } from '../services/gtasks/client';
 import { GitHubClient } from '../services/github/client';
-import { JiraClient } from '../services/jira/client';
 import { ConfluenceClient } from '../services/confluence/client';
-import { GChatClient } from '../services/gchat/client';
-import { SlackClient } from '../services/slack/client';
 import { DiscourseClient } from '../services/discourse/client';
 import { DropboxClient } from '../services/dropbox/client';
 import { RevolutClient } from '../services/revolut/client';
-import { GSheetsClient } from '../services/gsheets/client';
-import { GSlidesClient } from '../services/gslides/client';
-import { GScriptClient } from '../services/gscript/client';
 import { SqlClient } from '../services/sql/client';
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
-import type { OAuthTokens } from '../types/tokens';
 import type { TelegramCredentials } from '../types/telegram';
 import type { GitHubCredentials } from '../types/github';
-import type { JiraCredentials } from '../types/jira';
 import type { ConfluenceCredentials } from '../types/confluence';
-import type { GDocsCredentials } from '../types/gdocs';
-import type { GDriveCredentials } from '../types/gdrive';
-import type { GCalCredentials } from '../types/gcal';
-import type { GTasksCredentials } from '../types/gtasks';
-import type { GChatCredentials } from '../types/gchat';
-import type { GSheetsCredentials } from '../types/gsheets';
-import type { GSlidesCredentials } from '../types/gslides';
-import type { GScriptCredentials } from '../types/gscript';
-import type { SlackCredentials } from '../types/slack';
 import type { DiscourseCredentials } from '../types/discourse';
 import type { DropboxCredentials } from '../types/dropbox';
 import type { RevolutCredentials } from '../types/revolut';
 import type { SqlCredentials } from '../types/sql';
 import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
-
-type GmailCredentials = OAuthTokens & { email?: string };
+import { findServicePlugin } from '../plugins/registry';
 
 /**
  * Creates a ServiceClient for the given service and credentials. Refresh is
  * not this function's job; callers pass credentials from getFreshCredentials.
  */
 function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient {
+  const pluginClient = findServicePlugin(service)?.profile?.createClient;
+  if (pluginClient) return pluginClient(credentials);
+
   switch (service) {
-    case 'gmail': {
-      const creds = credentials as GmailCredentials;
-      const auth = createGoogleAuth({
-        access_token: creds.access_token,
-        refresh_token: creds.refresh_token,
-        expiry_date: creds.expiry_date,
-        token_type: creds.token_type || 'Bearer',
-        scope: creds.scope,
-      });
-      return new GmailClient(auth);
-    }
-
-    case 'gdocs': {
-      const creds = credentials as GDocsCredentials;
-      return new GDocsClient(creds);
-    }
-
-    case 'gdrive': {
-      const creds = credentials as GDriveCredentials;
-      return new GDriveClient(creds);
-    }
-
-    case 'gsheets': {
-      const creds = credentials as GSheetsCredentials;
-      return new GSheetsClient(creds);
-    }
-
-    case 'gslides': {
-      const creds = credentials as GSlidesCredentials;
-      return new GSlidesClient(creds);
-    }
-
-    case 'gscript': {
-      const creds = credentials as GScriptCredentials;
-      return new GScriptClient(creds);
-    }
-
-    case 'gcal': {
-      const creds = credentials as GCalCredentials;
-      const auth = createGoogleAuth({
-        access_token: creds.access_token,
-        refresh_token: creds.refresh_token,
-        expiry_date: creds.expiry_date,
-        token_type: creds.token_type || 'Bearer',
-        scope: creds.scope,
-      });
-      return new GCalClient(auth);
-    }
-
-    case 'gtasks': {
-      const creds = credentials as GTasksCredentials;
-      const auth = createGoogleAuth({
-        access_token: creds.access_token,
-        refresh_token: creds.refresh_token,
-        expiry_date: creds.expiry_date,
-        token_type: creds.token_type || 'Bearer',
-        scope: creds.scope,
-      });
-      return new GTasksClient(auth);
-    }
+    case 'gmail':
+    case 'gdocs':
+    case 'gdrive':
+    case 'gsheets':
+    case 'gslides':
+    case 'gscript':
+    case 'gcal':
+    case 'gtasks':
+    case 'gchat':
+      throw new Error(`${service} profile plugin is not registered`);
 
     case 'telegram': {
       const creds = credentials as TelegramCredentials;
@@ -124,25 +53,16 @@ function createServiceClient(service: ServiceName, credentials: unknown): Servic
       return new GitHubClient(creds);
     }
 
-    case 'jira': {
-      const creds = credentials as JiraCredentials;
-      return new JiraClient(creds);
-    }
+    case 'jira':
+      throw new Error('Jira profile plugin is not registered');
 
     case 'confluence': {
       const creds = credentials as ConfluenceCredentials;
       return new ConfluenceClient(creds);
     }
 
-    case 'gchat': {
-      const creds = credentials as GChatCredentials;
-      return new GChatClient(creds);
-    }
-
-    case 'slack': {
-      const creds = credentials as SlackCredentials;
-      return new SlackClient(creds);
-    }
+    case 'slack':
+      throw new Error('Slack profile plugin is not registered');
 
     case 'discourse': {
       const creds = credentials as DiscourseCredentials;

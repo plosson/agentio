@@ -1,130 +1,16 @@
 import { Command } from 'commander';
 import { getProfileStatuses, type ProfileStatus } from './status';
 import { getCredentials, setCredentials } from '../auth/token-store';
-import { performOAuthFlow, type OAuthService } from '../auth/oauth';
 import { performGitHubOAuthFlow } from '../auth/github-oauth';
-import { performJiraOAuthFlow, type AtlassianSite } from '../auth/jira-oauth';
-import { fetchGoogleUserEmail } from '../auth/token-manager';
 import { GitHubClient } from '../services/github/client';
-import { interactiveCheckbox, interactiveSelect } from '../utils/interactive';
+import { interactiveCheckbox } from '../utils/interactive';
 import { handleError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
-import type { GDocsCredentials } from '../types/gdocs';
-import type { GDriveCredentials } from '../types/gdrive';
-import type { GChatCredentials } from '../types/gchat';
-import type { GSheetsCredentials } from '../types/gsheets';
 import type { GitHubCredentials } from '../types/github';
-import type { JiraCredentials } from '../types/jira';
-import type { OAuthTokens } from '../types/tokens';
-
-type GmailCredentials = OAuthTokens & { email?: string };
-type GCalCredentials = OAuthTokens & { email?: string };
-type GTasksCredentials = OAuthTokens & { email?: string };
-
-// Services that use Google OAuth and store { ...tokens, email }
-const GOOGLE_SIMPLE_SERVICES: ServiceName[] = ['gmail', 'gcal', 'gtasks'];
-
-// Services that use Google OAuth with custom credential objects
-const GOOGLE_CUSTOM_SERVICES: ServiceName[] = ['gdocs', 'gsheets'];
+import { findServicePlugin } from '../plugins/registry';
 
 // Services that require manual credential setup
 const MANUAL_SERVICES: ServiceName[] = ['telegram', 'slack', 'discourse', 'dropbox', 'sql'];
-
-async function reauthGoogleSimple(
-  service: ServiceName,
-  profileName: string
-): Promise<void> {
-  const oauthService = service as OAuthService;
-  console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-
-  const tokens = await performOAuthFlow(oauthService);
-  const email = await fetchGoogleUserEmail(tokens.access_token);
-
-  // Preserve existing credential fields, update tokens and email
-  const existing = await getCredentials<GmailCredentials | GCalCredentials | GTasksCredentials>(service, profileName);
-  await setCredentials(service, profileName, { ...existing, ...tokens, email });
-
-  console.error(`  Done (${email})`);
-}
-
-async function reauthGoogleCustom(
-  service: ServiceName,
-  profileName: string
-): Promise<void> {
-  const oauthService = service as OAuthService;
-  console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-
-  const tokens = await performOAuthFlow(oauthService);
-  const email = await fetchGoogleUserEmail(tokens.access_token);
-
-  const existing = await getCredentials<GDocsCredentials | GSheetsCredentials>(service, profileName);
-  const credentials = {
-    ...existing,
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email,
-  };
-
-  await setCredentials(service, profileName, credentials);
-  console.error(`  Done (${email})`);
-}
-
-async function reauthGDrive(profileName: string): Promise<void> {
-  console.error(`\nRe-authenticating gdrive / ${profileName}...`);
-
-  // Read existing credentials to preserve accessLevel
-  const existing = await getCredentials<GDriveCredentials>('gdrive', profileName);
-  const accessLevel = existing?.accessLevel || 'readonly';
-  const oauthService: OAuthService = accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly';
-
-  const tokens = await performOAuthFlow(oauthService);
-  const email = await fetchGoogleUserEmail(tokens.access_token);
-
-  const credentials: GDriveCredentials = {
-    ...existing,
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email,
-    accessLevel,
-  };
-
-  await setCredentials('gdrive', profileName, credentials);
-  console.error(`  Done (${email}, ${accessLevel})`);
-}
-
-async function reauthGChat(profileName: string): Promise<void> {
-  const existing = await getCredentials<GChatCredentials>('gchat', profileName);
-
-  if (existing?.type === 'webhook') {
-    console.error(`\nSkipping gchat / ${profileName}: webhook profiles don't expire. Run 'agentio gchat profile add' to update.`);
-    return;
-  }
-
-  console.error(`\nRe-authenticating gchat / ${profileName}...`);
-
-  const tokens = await performOAuthFlow('gchat');
-  const email = await fetchGoogleUserEmail(tokens.access_token);
-
-  const credentials = {
-    ...existing,
-    type: 'oauth' as const,
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email,
-  };
-
-  await setCredentials('gchat', profileName, credentials);
-  console.error(`  Done (${email})`);
-}
 
 async function reauthGitHub(profileName: string): Promise<void> {
   console.error(`\nRe-authenticating github / ${profileName}...`);
@@ -153,62 +39,18 @@ async function reauthGitHub(profileName: string): Promise<void> {
   console.error(`  Done (${user.login})`);
 }
 
-async function reauthJira(profileName: string): Promise<void> {
-  console.error(`\nRe-authenticating jira / ${profileName}...`);
-
-  const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
-    return interactiveSelect({
-      message: 'Select a JIRA site:',
-      choices: sites.map((site) => ({
-        name: site.name,
-        value: site,
-        description: site.url,
-      })),
-    });
-  };
-
-  const result = await performJiraOAuthFlow(selectSite);
-
-  const existing = await getCredentials<JiraCredentials>('jira', profileName);
-  const credentials: JiraCredentials = {
-    ...existing,
-    accessToken: result.accessToken,
-    refreshToken: result.refreshToken,
-    expiryDate: result.expiryDate,
-    cloudId: result.cloudId,
-    siteUrl: result.siteUrl,
-  };
-
-  await setCredentials('jira', profileName, credentials);
-  console.error(`  Done (${result.siteUrl})`);
-}
-
 export async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
-  if (GOOGLE_SIMPLE_SERVICES.includes(service)) {
-    await reauthGoogleSimple(service, profileName);
-    return;
-  }
-
-  if (GOOGLE_CUSTOM_SERVICES.includes(service)) {
-    await reauthGoogleCustom(service, profileName);
+  const pluginReauthenticate = findServicePlugin(service)?.profile?.reauthenticate;
+  if (pluginReauthenticate) {
+    const existing = await getCredentials<Record<string, unknown>>(service, profileName);
+    const replacement = await pluginReauthenticate(existing, profileName);
+    await setCredentials(service, profileName, replacement);
     return;
   }
 
   switch (service) {
-    case 'gdrive':
-      await reauthGDrive(profileName);
-      break;
-
-    case 'gchat':
-      await reauthGChat(profileName);
-      break;
-
     case 'github':
       await reauthGitHub(profileName);
-      break;
-
-    case 'jira':
-      await reauthJira(profileName);
       break;
 
     default:

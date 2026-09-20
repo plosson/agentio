@@ -6,8 +6,8 @@ import { CliError } from '../utils/errors';
 const jiraRefresh = mock(async (_refreshToken: string) => {
   throw new Error('{"error":"unauthorized_client","error_description":"refresh_token is invalid"}');
 });
-const realJira = await import('../auth/jira-oauth');
-mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
+const realJira = await import('../plugins/jira/oauth');
+mock.module('../plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
 const { getProfileStatuses } = await import('./status');
 

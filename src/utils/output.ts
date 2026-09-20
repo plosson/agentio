@@ -12,7 +12,6 @@ import type {
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult, GDriveCopyResult } from '../types/gdrive';
 import type { GCalCalendar, GCalEvent, GCalFreeBusyResponse } from '../types/gcal';
 import type { GTaskList, GTask } from '../types/gtasks';
-import type { JiraProject, JiraIssue, JiraTransition, JiraCommentResult, JiraTransitionResult } from '../types/jira';
 import type {
   ConfluenceSpace,
   ConfluencePage,
@@ -23,8 +22,6 @@ import type {
   ConfluencePageUpdateResult,
   ConfluenceCommentResult,
 } from '../types/confluence';
-import type { SlackSendResult } from '../types/slack';
-import type { RssFeed, RssArticle } from '../types/rss';
 import type { DiscourseCategory, DiscourseTopic, DiscourseTopicDetail } from '../types/discourse';
 import type {
   RevolutAccount,
@@ -50,6 +47,18 @@ import type {
   GScriptPullResult,
   GScriptPushResult,
 } from '../types/gscript';
+
+// Compatibility exports while service output moves into plugin folders.
+export { printSlackSendResult } from '../plugins/slack/output';
+export { printRssArticle, printRssArticleList, printRssFeedInfo } from '../plugins/rss/output';
+export {
+  printJiraCommentResult,
+  printJiraIssue,
+  printJiraIssueList,
+  printJiraProjectList,
+  printJiraTransitionResult,
+  printJiraTransitions,
+} from '../plugins/jira/output';
 
 /** Replace $HOME prefix with `~` for display. */
 export function abbrHome(p: string, home: string = homedir()): string {
@@ -370,84 +379,6 @@ export function printGChatUser(user: GChatUser): void {
   }
 }
 
-// JIRA specific formatters
-export function printJiraProjectList(projects: JiraProject[]): void {
-  if (projects.length === 0) {
-    console.log('No projects found');
-    return;
-  }
-
-  console.log(`Projects (${projects.length})\n`);
-
-  for (const project of projects) {
-    const privateMarker = project.isPrivate ? ' [private]' : '';
-    console.log(`${project.key} - ${project.name}${privateMarker}`);
-    console.log(`    Type: ${project.projectTypeKey}`);
-    console.log('');
-  }
-}
-
-export function printJiraIssueList(issues: JiraIssue[]): void {
-  if (issues.length === 0) {
-    console.log('No issues found');
-    return;
-  }
-
-  console.log(`Issues (${issues.length})\n`);
-
-  for (const issue of issues) {
-    console.log(`${issue.key} [${issue.status}] ${issue.summary}`);
-    console.log(`    Type: ${issue.issueType} | Project: ${issue.projectKey}`);
-    if (issue.assignee) console.log(`    Assignee: ${issue.assignee}`);
-    if (issue.priority) console.log(`    Priority: ${issue.priority}`);
-    console.log(`    Updated: ${issue.updated}`);
-    console.log('');
-  }
-}
-
-export function printJiraIssue(issue: JiraIssue): void {
-  console.log(`Key: ${issue.key}`);
-  console.log(`Summary: ${issue.summary}`);
-  console.log(`Status: ${issue.status}`);
-  console.log(`Type: ${issue.issueType}`);
-  console.log(`Project: ${issue.projectKey}`);
-  if (issue.priority) console.log(`Priority: ${issue.priority}`);
-  if (issue.assignee) console.log(`Assignee: ${issue.assignee}`);
-  if (issue.reporter) console.log(`Reporter: ${issue.reporter}`);
-  console.log(`Created: ${issue.created}`);
-  console.log(`Updated: ${issue.updated}`);
-  if (issue.description) {
-    console.log('---');
-    console.log(issue.description);
-  }
-}
-
-export function printJiraTransitions(issueKey: string, transitions: JiraTransition[]): void {
-  if (transitions.length === 0) {
-    console.log(`No transitions available for ${issueKey}`);
-    return;
-  }
-
-  console.log(`Available transitions for ${issueKey}:\n`);
-
-  for (const transition of transitions) {
-    console.log(`[${transition.id}] ${transition.name} → ${transition.to.name}`);
-  }
-}
-
-export function printJiraCommentResult(result: JiraCommentResult): void {
-  console.log('Comment added');
-  console.log(`Issue: ${result.issueKey}`);
-  console.log(`Comment ID: ${result.id}`);
-}
-
-export function printJiraTransitionResult(result: JiraTransitionResult): void {
-  console.log('Issue transitioned');
-  console.log(`Issue: ${result.issueKey}`);
-  console.log(`Transition: ${result.transitionName}`);
-  console.log(`New Status: ${result.newStatus}`);
-}
-
 // Confluence specific formatters
 export function printConfluenceSpaceList(spaces: ConfluenceSpace[]): void {
   if (spaces.length === 0) {
@@ -562,61 +493,6 @@ export function printConfluenceCommentResult(result: ConfluenceCommentResult): v
   console.log('Comment added');
   console.log(`Page: ${result.pageId}`);
   console.log(`Comment ID: ${result.id}`);
-}
-
-// Slack specific formatters
-export function printSlackSendResult(result: SlackSendResult): void {
-  console.log('Message sent');
-  if (result.isJsonPayload) {
-    console.log('Type: Block Kit payload');
-  }
-}
-
-// RSS specific formatters
-export function printRssArticleList(articles: RssArticle[], feedName: string): void {
-  if (articles.length === 0) {
-    console.log('No articles found');
-    return;
-  }
-
-  console.log(`Articles from ${feedName} (${articles.length})\n`);
-
-  for (let i = 0; i < articles.length; i++) {
-    const article = articles[i];
-    console.log(`[${i + 1}] ${article.title}`);
-    if (article.author) console.log(`    Author: ${article.author}`);
-    if (article.pubDate) console.log(`    Date: ${article.pubDate}`);
-    if (article.link) console.log(`    Link: ${article.link}`);
-    if (article.description) {
-      const snippet = article.description.length > 150
-        ? article.description.substring(0, 150) + '...'
-        : article.description;
-      console.log(`    > ${snippet}`);
-    }
-    console.log('');
-  }
-}
-
-export function printRssArticle(article: RssArticle): void {
-  console.log(`Title: ${article.title}`);
-  if (article.author) console.log(`Author: ${article.author}`);
-  if (article.pubDate) console.log(`Date: ${article.pubDate}`);
-  if (article.link) console.log(`Link: ${article.link}`);
-  if (article.categories && article.categories.length > 0) {
-    console.log(`Categories: ${article.categories.join(', ')}`);
-  }
-  console.log('---');
-  console.log(article.content || article.description || 'No content available');
-}
-
-export function printRssFeedInfo(feed: RssFeed & { feedUrl: string }): void {
-  console.log(`Title: ${feed.title}`);
-  console.log(`Feed URL: ${feed.feedUrl}`);
-  if (feed.description) console.log(`Description: ${feed.description}`);
-  if (feed.link) console.log(`Site: ${feed.link}`);
-  if (feed.language) console.log(`Language: ${feed.language}`);
-  if (feed.lastBuildDate) console.log(`Last Updated: ${feed.lastBuildDate}`);
-  console.log(`Articles: ${feed.items.length}`);
 }
 
 // Discourse specific formatters

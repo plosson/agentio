@@ -4,8 +4,8 @@ import { lockVault, unlockVault } from '../vault/vault';
 
 // Only the Atlassian exchange is replaced; bun's module mocks are process-wide.
 const jiraRefresh = mock(async (refreshToken: string) => ({ accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600 }));
-const realJira = await import('../auth/jira-oauth');
-mock.module('../auth/jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
+const realJira = await import('../plugins/jira/oauth');
+mock.module('../plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
 const { createRequestHandler } = await import('./api');
 const { createApiKey, listApiKeys } = await import('../auth/api-keys');

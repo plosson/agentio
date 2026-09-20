@@ -10,9 +10,9 @@ const jiraRefresh = mock(async (refreshToken: string) => {
   return { accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600 };
 });
 const revolutRefresh = mock(async () => ({ accessToken: 'rev-new', expiresIn: 2400 }));
-const realJira = await import('./jira-oauth');
+const realJira = await import('../plugins/jira/oauth');
 const realRevolut = await import('./revolut-oauth');
-mock.module('./jira-oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
+mock.module('../plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 mock.module('./revolut-oauth', () => ({ ...realRevolut, refreshRevolutToken: revolutRefresh }));
 
 const { getFreshCredentials, REFRESH_BUFFER_MS } = await import('./refresh');
