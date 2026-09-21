@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { registerServiceCommands, SERVICE_REGISTRY } from './plugins/registry';
+import { activatePluginRegistry, DEFAULT_PLUGIN_REGISTRY, registerServiceCommands } from './plugins/registry';
+import type { PluginRegistry } from './plugins/plugin-registry';
 
 // Agentio utilities
 import { registerDocsCommand } from './commands/docs';
@@ -27,7 +28,8 @@ function getVersion(): string {
   return require('../package.json').version;
 }
 
-export function createProgram(): Command {
+export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): Command {
+  activatePluginRegistry(registry);
   const program = new Command();
 
   function setGroup(name: string, group: string): void {
@@ -40,7 +42,7 @@ export function createProgram(): Command {
     .description('CLI for LLM agents to interact with communication and tracking services')
     .version(getVersion());
 
-  registerServiceCommands(program);
+  registerServiceCommands(program, registry);
 
   // Agentio utilities
   registerDocsCommand(program);
@@ -122,7 +124,7 @@ export function createProgram(): Command {
   ['vault', 'login', 'logout', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
 
   // Services
-  SERVICE_REGISTRY.forEach(({ id }) => setGroup(id, 'Services'));
+  registry.plugins.forEach(({ id }) => setGroup(id, 'Services'));
 
   // Advanced
   ['daemon', 'key', 'profile'].forEach((n) => setGroup(n, 'Advanced'));

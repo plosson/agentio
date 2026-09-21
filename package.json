@@ -25,6 +25,12 @@
   "bin": {
     "agentio": "./src/index.ts"
   },
+  "exports": {
+    "./plugin-sdk": {
+      "types": "./src/plugin-sdk/index.ts",
+      "default": "./src/plugin-sdk/index.ts"
+    }
+  },
   "files": [
     "src",
     "LICENSE",

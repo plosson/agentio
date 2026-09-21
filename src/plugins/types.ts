@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { ServiceClient } from '../types/service';
+import type { AgentioPlugin } from '../plugin-sdk';
 
 export interface ProfileAddOptions {
   profile?: string;
@@ -51,7 +52,15 @@ export interface ServicePlugin<
 }
 
 /** Type-erased shape used only after a plugin has crossed into the host registry. */
-export type RegisteredServicePlugin = ServicePlugin<any, any>;
+export type RegisteredServicePlugin = ServicePlugin<any, any> | AgentioPlugin<any>;
+
+export function isDeclarativePlugin(plugin: unknown): plugin is AgentioPlugin<any> {
+  return typeof plugin === 'object' && plugin !== null && 'commands' in plugin;
+}
+
+export function isLegacyServicePlugin(plugin: RegisteredServicePlugin): plugin is ServicePlugin<any, any> {
+  return 'registerCommands' in plugin;
+}
 
 /** Keep each plugin definition credential-typed without widening its literals. */
 export function defineServicePlugin<

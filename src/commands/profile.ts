@@ -5,6 +5,7 @@ import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
 import { findServicePlugin, SERVICE_REGISTRY } from '../plugins/registry';
+import { addProfileFromPlugin } from '../plugins/profile-host';
 
 export type ProfileSummary = ProfileRef;
 
@@ -69,9 +70,9 @@ export function registerProfileCommands(program: Command): void {
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
         assertKnownService(service);
-        const add = findServicePlugin(service)?.profile?.add;
-        if (!add) throw new Error(`No profile setup registered for ${service}`);
-        await add(opts);
+        const plugin = findServicePlugin(service);
+        if (!plugin?.profile) throw new Error(`No profile setup registered for ${service}`);
+        await addProfileFromPlugin(plugin, opts);
       } catch (e) {
         handleError(e);
       }

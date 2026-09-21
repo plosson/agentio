@@ -3,7 +3,9 @@
 Agentio services live in self-contained folders under `src/plugins/` instead
 of parallel `commands/`, `services/`, and `types/` trees. This is a code
 organization boundary for services shipped with Agentio. It does not load
-third-party code or discover plugins at runtime.
+third-party code itself. Developers building a plugin outside this repository
+should use the stable declarative contract in [Writing an Agentio plugin](plugin-sdk.md),
+not the private in-tree adapter described here.
 
 Every service implements the same contract. OAuth services own their refresh,
 redaction, and reauthentication policy. Google services use a provider group so

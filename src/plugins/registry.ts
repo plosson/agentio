@@ -19,8 +19,9 @@ import rss from './rss';
 import slack from './slack';
 import sql from './sql';
 import telegram from './telegram';
-import type { RegisteredServicePlugin } from './types';
+import { isLegacyServicePlugin, type RegisteredServicePlugin } from './types';
 import { PluginRegistry } from './plugin-registry';
+import { registerDeclarativePlugin } from './declarative';
 
 /** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
@@ -55,13 +56,23 @@ export const SERVICE_PLUGINS = [
 export const SERVICE_REGISTRY = SERVICE_PLUGINS;
 
 export const DEFAULT_PLUGIN_REGISTRY = new PluginRegistry(SERVICE_REGISTRY);
+let activePluginRegistry = DEFAULT_PLUGIN_REGISTRY;
+
+export function activatePluginRegistry(registry: PluginRegistry): void {
+  activePluginRegistry = registry;
+}
+
+export function getPluginRegistry(): PluginRegistry {
+  return activePluginRegistry;
+}
 
 export function registerServiceCommands(program: Command, registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): void {
   for (const service of registry.plugins) {
-    service.registerCommands(program);
+    if (isLegacyServicePlugin(service)) service.registerCommands(program);
+    else registerDeclarativePlugin(program, service);
   }
 }
 
 export function findServicePlugin(id: string): RegisteredServicePlugin | undefined {
-  return DEFAULT_PLUGIN_REGISTRY.find(id);
+  return activePluginRegistry.find(id);
 }

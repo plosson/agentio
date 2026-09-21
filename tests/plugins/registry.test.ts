@@ -10,7 +10,7 @@ import {
   SERVICE_PLUGINS,
   SERVICE_REGISTRY,
 } from '../../src/plugins/registry';
-import type { RegisteredServicePlugin } from '../../src/plugins/types';
+import { isLegacyServicePlugin, type RegisteredServicePlugin } from '../../src/plugins/types';
 import { PluginRegistry } from '../../src/plugins/plugin-registry';
 
 const SERVICE_ORDER = [
@@ -84,7 +84,7 @@ describe('service plugin registry', () => {
     // The catalog is a const tuple, so widen to the host's own erased view
     // before reaching for optional hooks.
     const plugins: readonly RegisteredServicePlugin[] = SERVICE_REGISTRY;
-    const missing = plugins.filter((plugin) => plugin.profile?.add).filter((plugin) => {
+    const missing = plugins.filter(isLegacyServicePlugin).filter((plugin) => plugin.profile?.add).filter((plugin) => {
       const service = program.commands.find((command) => command.name() === plugin.id);
       const profile = service?.commands.find((command) => command.name() === 'profile');
       return !profile?.commands.some((command) => command.name() === 'add');
@@ -94,29 +94,32 @@ describe('service plugin registry', () => {
   });
 
   test('exposes profile hooks only for authenticated plugins', () => {
+    const slack = findServicePlugin('slack');
+    const jira = findServicePlugin('jira');
+    const falco = findServicePlugin('falco');
     expect(findServicePlugin('rss')?.profile).toBeUndefined();
-    expect(findServicePlugin('slack')?.profile?.createClient).toBeFunction();
-    expect(findServicePlugin('gmail')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('gslides')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('jira')?.credentialLifecycle?.secretFields).toEqual(['refreshToken']);
-    expect(findServicePlugin('jira')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('confluence')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('dropbox')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('github')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('revolut')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('falco')?.profile?.reauthenticate).toBeFunction();
-    expect(findServicePlugin('falco')?.credentialLifecycle?.secretFields).toEqual(['refreshToken']);
+    expect(slack && isLegacyServicePlugin(slack) && slack.profile?.createClient).toBeFunction();
+    for (const id of ['gmail', 'gslides', 'jira', 'confluence', 'dropbox', 'github', 'revolut', 'falco']) {
+      const plugin = findServicePlugin(id);
+      expect(plugin?.profile?.reauthenticate).toBeFunction();
+    }
+    expect(jira && isLegacyServicePlugin(jira) ? jira.credentialLifecycle?.secretFields : undefined).toEqual(['refreshToken']);
+    expect(falco && isLegacyServicePlugin(falco) ? falco.credentialLifecycle?.secretFields : undefined).toEqual(['refreshToken']);
     expect(findServicePlugin('missing')).toBeUndefined();
   });
 
   test('exposes plugin lifecycle hooks to credential management without loading commands', () => {
+    const lifecycle = (id: string) => {
+      const plugin = findServicePlugin(id);
+      return plugin && isLegacyServicePlugin(plugin) ? plugin.credentialLifecycle : undefined;
+    };
     expect(findCredentialLifecycle('gmail')).toBe(googleSnakeCredentialLifecycle);
     expect(findCredentialLifecycle('gdocs')).toBe(googleCamelCredentialLifecycle);
     expect(findCredentialLifecycle('jira')).toBe(jiraCredentialLifecycle);
-    expect(findCredentialLifecycle('confluence')).toBe(findServicePlugin('confluence')?.credentialLifecycle);
-    expect(findCredentialLifecycle('dropbox')).toBe(findServicePlugin('dropbox')?.credentialLifecycle);
-    expect(findCredentialLifecycle('revolut')).toBe(findServicePlugin('revolut')?.credentialLifecycle);
-    expect(findCredentialLifecycle('falco')).toBe(findServicePlugin('falco')?.credentialLifecycle);
+    expect(findCredentialLifecycle('confluence')).toBe(lifecycle('confluence'));
+    expect(findCredentialLifecycle('dropbox')).toBe(lifecycle('dropbox'));
+    expect(findCredentialLifecycle('revolut')).toBe(lifecycle('revolut'));
+    expect(findCredentialLifecycle('falco')).toBe(lifecycle('falco'));
     expect(findCredentialLifecycle('slack')).toBeUndefined();
   });
 });
