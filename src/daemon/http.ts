@@ -1,5 +1,5 @@
 import { CliError, type ErrorCode } from '../utils/errors';
-import { ALL_SERVICES, type ServiceName } from '../types/config';
+import type { ServiceName } from '../types/config';
 
 /** How the CLI's error codes surface over HTTP. Anything unlisted is a 500. */
 const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
@@ -45,7 +45,9 @@ export function errorResponse(err: unknown): Response {
 
 /**
  * `<prefix>/<service>/<name>[/<action>]` → the parts, or null when the path is
- * not that shape or names a service that does not exist.
+ * not that shape or contains an invalid service id. Whether the current host
+ * has the plugin is an operation-level decision: unknown ids must remain
+ * representable so their vault data can survive plugin-set changes.
  */
 export function profilePath(
   pathname: string,
@@ -55,7 +57,7 @@ export function profilePath(
   const parts = pathname.slice(prefix.length + 1).split('/');
   if (parts.length < 2 || parts.length > 3 || parts.some((p) => p === '')) return null;
   const service = decodeURIComponent(parts[0]);
-  if (!(ALL_SERVICES as readonly string[]).includes(service)) return null;
+  if (!/^[a-z][a-z0-9-]*$/.test(service)) return null;
   return { service: service as ServiceName, name: decodeURIComponent(parts[1]), action: parts[2] ?? null };
 }
 

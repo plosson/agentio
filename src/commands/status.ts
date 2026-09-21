@@ -77,6 +77,10 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
     return { ...ref, status: 'skipped' };
   }
 
+  if (!findServicePlugin(ref.service)?.profile) {
+    return { ...ref, status: 'invalid', error: 'plugin is not installed in this agentio build' };
+  }
+
   let result: ValidationResult;
   try {
     const { credentials } = await getFreshCredentials(ref.service, ref.profile);

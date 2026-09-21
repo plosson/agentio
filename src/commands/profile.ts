@@ -1,11 +1,10 @@
 import { Command } from 'commander';
 import type { ServiceName } from '../types/config';
-import { ALL_SERVICES } from '../types/config';
 import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/config-manager';
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
-import { findServicePlugin } from '../plugins/registry';
+import { findServicePlugin, SERVICE_REGISTRY } from '../plugins/registry';
 
 export type ProfileSummary = ProfileRef;
 
@@ -30,10 +29,10 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
   return lines.join('\n');
 }
 
-const KNOWN_SERVICES = ALL_SERVICES;
+const KNOWN_SERVICES = SERVICE_REGISTRY.filter((plugin) => 'profile' in plugin).map((plugin) => plugin.id);
 
 function assertKnownService(service: string): asserts service is ServiceName {
-  if (!KNOWN_SERVICES.includes(service as ServiceName)) {
+  if (!findServicePlugin(service)?.profile) {
     throw new CliError(
       'INVALID_PARAMS',
       `Unknown service: "${service}"`,
