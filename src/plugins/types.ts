@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { ServiceClient } from '../types/service';
-import type { AgentioPlugin } from '../plugin-sdk';
+import type { AgentioPlugin, SetupResult } from '../plugin-sdk';
 
 export interface ProfileAddOptions {
   profile?: string;
@@ -8,7 +8,10 @@ export interface ProfileAddOptions {
 }
 
 export interface ProfilePlugin<TCredentials extends object> {
-  add(options: ProfileAddOptions): Promise<void>;
+  /** Legacy fallback while bundled plugins migrate to host-owned persistence. */
+  add?(options: ProfileAddOptions): Promise<void>;
+  /** Authenticate and return credentials; the host chooses the name and persists them. */
+  setup?(options: ProfileAddOptions): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
   reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;

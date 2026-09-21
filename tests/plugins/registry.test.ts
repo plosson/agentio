@@ -84,7 +84,7 @@ describe('service plugin registry', () => {
     // The catalog is a const tuple, so widen to the host's own erased view
     // before reaching for optional hooks.
     const plugins: readonly RegisteredServicePlugin[] = SERVICE_REGISTRY;
-    const missing = plugins.filter(isLegacyServicePlugin).filter((plugin) => plugin.profile?.add).filter((plugin) => {
+    const missing = plugins.filter(isLegacyServicePlugin).filter((plugin) => plugin.profile?.add || plugin.profile?.setup).filter((plugin) => {
       const service = program.commands.find((command) => command.name() === plugin.id);
       const profile = service?.commands.find((command) => command.name() === 'profile');
       return !profile?.commands.some((command) => command.name() === 'add');
