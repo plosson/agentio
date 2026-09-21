@@ -11,6 +11,7 @@ import {
   SERVICE_REGISTRY,
 } from '../../src/plugins/registry';
 import type { RegisteredServicePlugin } from '../../src/plugins/types';
+import { PluginRegistry } from '../../src/plugins/plugin-registry';
 
 const SERVICE_ORDER = [
   'confluence',
@@ -36,6 +37,19 @@ const SERVICE_ORDER = [
 ];
 
 describe('service plugin registry', () => {
+  test('validates external catalogs at runtime', () => {
+    const valid = {
+      apiVersion: 1 as const,
+      id: 'acme-linear',
+      displayName: 'Linear',
+      description: 'Work with Linear issues',
+      registerCommands: () => {},
+    };
+    expect(new PluginRegistry([valid]).find('acme-linear')).toBe(valid);
+    expect(() => new PluginRegistry([{ ...valid, id: 'Bad Id' }])).toThrow(/Invalid service id/);
+    expect(() => new PluginRegistry([valid, valid])).toThrow(/Duplicate service id/);
+    expect(() => new PluginRegistry([{ ...valid, apiVersion: 2 as 1 }])).toThrow(/Unsupported plugin API version/);
+  });
   test('is the complete, ordered service catalog', () => {
     const ids: string[] = SERVICE_REGISTRY.map((service) => service.id);
 
