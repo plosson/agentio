@@ -419,12 +419,37 @@ export function registerFalcoCommands(program: Command): void {
   agentio falco invoices sync --output ./sales --customer "Acme"`,
   );
 
-  createProfileCommands<FalcoCredentials>(falco, {
+  const profile = createProfileCommands<FalcoCredentials>(falco, {
     service: 'falco',
     displayName: 'Falco',
     getExtraInfo: (credentials) =>
       credentials ? ` - ${credentials.userEmail} (${credentials.organizationName ?? credentials.organizationId})` : '',
   });
+
+  addExamples(
+    profile
+      .command('add')
+      .description('Add a new Falco profile')
+      .option('--profile <name>', 'Profile name (defaults to a slug of the organization)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+      .action(async (options) => {
+        try {
+          await falcoProfileAdd(options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # log in and pick an organization
+  agentio falco profile add
+
+  # name the profile yourself
+  agentio falco profile add --profile letschill
+
+  # a profile that cannot change payment status
+  agentio falco profile add --profile audit --read-only`,
+  );
 }
 
 // --- Command bodies ---------------------------------------------------------

@@ -60,6 +60,21 @@ describe('service plugin registry', () => {
     expect(program.commands.map((command) => command.name())).toEqual(SERVICE_ORDER);
   });
 
+  test('every profile-backed plugin registers its own `profile add` command', () => {
+    const program = new Command();
+    registerServiceCommands(program);
+
+    // The host's global `profile add <service>` dispatches to the plugin hook,
+    // but each service must also surface `agentio <service> profile add`.
+    const missing = SERVICE_PLUGINS.filter((plugin) => plugin.profile?.add).filter((plugin) => {
+      const service = program.commands.find((command) => command.name() === plugin.id);
+      const profile = service?.commands.find((command) => command.name() === 'profile');
+      return !profile?.commands.some((command) => command.name() === 'add');
+    });
+
+    expect(missing.map((plugin) => plugin.id)).toEqual([]);
+  });
+
   test('exposes profile hooks only for authenticated plugins', () => {
     expect(findServicePlugin('rss')?.profile).toBeUndefined();
     expect(findServicePlugin('slack')?.profile?.createClient).toBeFunction();
