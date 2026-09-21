@@ -53,7 +53,8 @@ export function printPeppolDocuments(documents: PeppolDocument[]): void {
 }
 
 export function describeInvoice(invoice: Invoice): string {
-  return `${invoice.invoiceReference ?? invoice.id} (${invoice.supplierName ?? '?'}, €${invoice.amount ?? '?'})`;
+  const amount = fmtAmount(invoice.amount, invoice.invoiceCurrency);
+  return `${invoice.invoiceReference ?? invoice.id} (${invoice.supplierName ?? '?'}, ${amount})`;
 }
 
 export function printPaymentStatusChange(label: string, from: string | null, to: string, confirmed: boolean): void {
@@ -89,4 +90,11 @@ export function printSyncSummary(tally: SyncTally, directory: string): void {
     parts.push(`${tally.pdfsEmbedded ?? 0} PDFs extracted`, `${tally.pdfsRendered ?? 0} PDFs rendered`);
   }
   console.log(`\nDone: ${parts.join(', ')}. Dir: ${directory}`);
+}
+
+export function describePeppolDocument(document: PeppolDocument): string {
+  return `${fmtDate(document.documentDate)}  ${document.supplierName ?? '?'}  ${fmtAmount(
+    document.amount,
+    document.currency,
+  )}`;
 }

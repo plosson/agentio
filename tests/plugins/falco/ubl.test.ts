@@ -125,4 +125,17 @@ describe('embedded PDF extraction', () => {
     const payload = Buffer.from('not-a-pdf').toString('base64');
     expect(extractEmbeddedPdf(embed('mimeCode="image/png" filename="logo.png"', payload))).toBeNull();
   });
+
+  test('skips a non-PDF attachment declared with single-quoted attributes', () => {
+    // XML permits either quote character. Reading only double quotes made the
+    // mimeCode check fail open and hand back an image as though it were a PDF.
+    const payload = Buffer.from('not-a-pdf').toString('base64');
+    expect(extractEmbeddedPdf(embed("mimeCode='image/png' filename='logo.png'", payload))).toBeNull();
+  });
+
+  test('reads a single-quoted filename', () => {
+    const payload = Buffer.from('%PDF-1.4 fake').toString('base64');
+    const found = extractEmbeddedPdf(embed("mimeCode='application/pdf' filename='invoice.pdf'", payload));
+    expect(found?.filename).toBe('invoice.pdf');
+  });
 });

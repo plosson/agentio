@@ -8,9 +8,12 @@ const EMBEDDED_RE =
   /<(?:[a-z]+:)?EmbeddedDocumentBinaryObject\b([^>]*)>([\s\S]*?)<\/(?:[a-z]+:)?EmbeddedDocumentBinaryObject>/gi;
 
 function readAttr(attrs: string, name: string): string | null {
-  const re = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i');
+  // XML allows either quote character; matching only double quotes made the
+  // mimeCode guard below fail open and accept a non-PDF attachment.
+  const re = new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, 'i');
   const m = re.exec(attrs);
-  return m ? m[1] ?? null : null;
+  if (!m) return null;
+  return m[2] ?? m[3] ?? null;
 }
 
 export type EmbeddedPdf = {

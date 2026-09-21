@@ -15,6 +15,7 @@ import { buildBasename, buildBillingBasename, uniqueBasename } from './naming';
 import {
   describeBillingDocument,
   describeInvoice,
+  describePeppolDocument,
   printFileWritten,
   printPaymentStatusChange,
   printPeppolDocuments,
@@ -132,6 +133,41 @@ export async function resolveBasename(
   await onRename(existing, target);
   manifest.entries[id] = target;
   return { basename: target, renamed: true };
+}
+
+/**
+ * A sync that could not fetch everything must not report success: a scheduled
+ * run chained with `&&` would otherwise treat a directory of holes as complete.
+ * Raised after the summary so the counts are still printed.
+ */
+function failIfAnyFailed(failed: number, total: number): void {
+  if (failed === 0) return;
+  throw new CliError(
+    'API_ERROR',
+    `${failed} of ${total} document(s) could not be downloaded`,
+    'Everything else was written. Re-run to retry only what is missing.',
+  );
+}
+
+/**
+ * What a sync run has to do for one document, given what is already on disk.
+ *
+ * `reuseXml` means the XML is kept and read back rather than re-fetched; a
+ * fresh download always re-renders the PDF, so a new XML never sits beside a
+ * stale rendition.
+ */
+export function planDocumentWork(state: {
+  haveXml: boolean;
+  havePdf: boolean;
+  extractPdf: boolean;
+  force: boolean;
+}): { skip: boolean; reuseXml: boolean; writePdf: boolean } {
+  const needPdf = state.extractPdf && !state.havePdf;
+  if (state.haveXml && !needPdf && !state.force) {
+    return { skip: true, reuseXml: false, writePdf: false };
+  }
+  const reuseXml = state.haveXml && !state.force;
+  return { skip: false, reuseXml, writePdf: state.extractPdf && (!reuseXml || needPdf) };
 }
 
 export function indexManifest(entries: Record<string, string>): Map<string, string> {
@@ -493,18 +529,24 @@ async function runPeppolSync(options: PeppolSyncOptions): Promise<void> {
 
     const xmlPath = join(options.output, `${basename}.xml`);
     const pdfPath = join(options.output, `${basename}.pdf`);
-    const haveXml = await fileExists(xmlPath);
-    const needPdf = !!options.extractPdf && !(await fileExists(pdfPath));
+    const { skip, reuseXml, writePdf } = planDocumentWork({
+      haveXml: await fileExists(xmlPath),
+      havePdf: await fileExists(pdfPath),
+      extractPdf: !!options.extractPdf,
+      force: !!options.force,
+    });
 
-    if (haveXml && !needPdf && !options.force) {
+    if (skip) {
       tally.skipped += 1;
       continue;
     }
 
     let xml: string;
     try {
-      if (haveXml && !options.force) {
+      if (reuseXml) {
+        // Already on disk; we are here only to produce the missing PDF.
         xml = await Bun.file(xmlPath).text();
+        tally.skipped += 1;
       } else {
         const payload = await client.downloadPeppolDocumentUbl(document.id);
         xml = new TextDecoder('utf-8').decode(payload.bytes);
@@ -517,7 +559,7 @@ async function runPeppolSync(options: PeppolSyncOptions): Promise<void> {
       continue;
     }
 
-    if (options.extractPdf && (options.force || !(await fileExists(pdfPath)))) {
+    if (writePdf) {
       try {
         const embedded = extractEmbeddedPdf(xml);
         const bytes = embedded ? embedded.bytes : await renderUblXmlToPdf(xml);
@@ -531,11 +573,12 @@ async function runPeppolSync(options: PeppolSyncOptions): Promise<void> {
       }
     }
 
-    console.log(`  ✓ ${basename}`);
+    console.log(`  ${reuseXml ? '·' : '✓'} ${basename}  (${describePeppolDocument(document)})`);
   }
 
   await saveManifest(options.output, manifest);
   printSyncSummary(tally, options.output);
+  failIfAnyFailed(tally.failed, documents.length);
 }
 
 interface InvoicesSyncOptions {
@@ -616,6 +659,7 @@ async function runInvoicesSync(options: InvoicesSyncOptions): Promise<void> {
 
   await saveManifest(options.output, manifest);
   printSyncSummary(tally, options.output);
+  failIfAnyFailed(tally.failed, documents.length);
 }
 
 interface MarkPaidOptions {
