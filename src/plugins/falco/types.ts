@@ -25,6 +25,12 @@ export interface FalcoCredentials {
   accessToken?: string;
   /** Unix ms. */
   expiryDate?: number;
+  /**
+   * The organization this profile acts on. Note the access token is scoped to
+   * the ACCOUNT, not to this organization: it is only a path parameter on each
+   * request. A holder of these credentials can reach every organization on the
+   * account, and profile read-only is enforced by the CLI, not by Falco.
+   */
   organizationId: string;
   organizationName?: string;
   userId: string;

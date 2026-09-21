@@ -44,8 +44,18 @@ export class FalcoClient implements ServiceClient {
   async validate(): Promise<ValidationResult> {
     try {
       const me = await this.getUserMe();
+      // A profile is an (account, organization) pair. Credentials that no
+      // longer reach the organization are not valid for this profile, even
+      // though the token itself is good — otherwise a revoked membership looks
+      // healthy here and every data call fails later with no explanation.
       const org = me.organizations.find((o) => o.id === this.organizationId);
-      return { valid: true, info: `${me.email} — ${org?.name ?? this.organizationId}` };
+      if (!org) {
+        return {
+          valid: false,
+          error: `${me.email} is no longer a member of organization ${this.organizationId}`,
+        };
+      }
+      return { valid: true, info: `${me.email} — ${org.name}` };
     } catch (error) {
       return { valid: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
@@ -151,8 +161,22 @@ export class FalcoClient implements ServiceClient {
   }
 
   /** The raw UBL XML for one Peppol document. */
-  downloadPeppolDocumentUbl(documentId: string): Promise<BinaryPayload> {
-    return this.getBinary(`/peppol/document/${documentId}`, 'application/xml', `downloading document ${documentId}`);
+  async downloadPeppolDocumentUbl(documentId: string): Promise<BinaryPayload> {
+    const payload = await this.getBinary(
+      `/peppol/document/${encodeURIComponent(documentId)}`,
+      'application/xml',
+      `downloading document ${documentId}`,
+    );
+    // Falco can answer 200 with an HTML error page. Writing that to <id>.xml
+    // produces a file that looks like a document and parses as nothing.
+    if (/html/i.test(payload.contentType)) {
+      throw new CliError(
+        'API_ERROR',
+        `Falco returned a web page instead of UBL XML for ${documentId}`,
+        'The document may not be available yet. Run: agentio falco peppol list',
+      );
+    }
+    return payload;
   }
 
   // --- Invoices (the payment-status view) -----------------------------------

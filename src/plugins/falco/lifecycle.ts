@@ -92,10 +92,19 @@ export async function reauthenticateFalco(
     refreshExpiryDate: now + result.tokens.refreshTokenExpiresIn * 1000,
   };
 
-  const validation = await new FalcoClient(replacement).validate();
+  const client = new FalcoClient(replacement);
+  const validation = await client.validate();
   if (!validation.valid) {
-    throw new CliError('AUTH_FAILED', `Could not read the account: ${validation.error}`);
+    // Covers a revoked membership as well as bad credentials: validate() fails
+    // when the stored organization is no longer on the account.
+    throw new CliError('AUTH_FAILED', `Could not use this profile: ${validation.error}`);
   }
+
+  // Pick up a renamed organization rather than keeping a stale label.
+  const me = await client.getUserMe();
+  const organization = me.organizations.find((org) => org.id === replacement.organizationId);
+  if (organization) replacement.organizationName = organization.name;
+
   console.error(`  Done (${validation.info})`);
   return replacement;
 }

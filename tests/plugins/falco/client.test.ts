@@ -157,6 +157,34 @@ describe('FalcoClient requests', () => {
     expect(result.info).toContain('Acme BV');
   });
 
+  test('validate() fails when the profile organization is gone from the account', async () => {
+    // A revoked membership leaves the token valid but the profile useless; if
+    // validate() passed here, every later call would 403 with no explanation.
+    stubFetch([json({ id: 'u', email: 'pierre@example.com', organizations: [{ id: 'other-org', name: 'Other' }] })]);
+    const result = await new FalcoClient(credentials).validate();
+
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('no longer a member');
+  });
+
+  test('rejects an HTML error page served as a UBL document', async () => {
+    stubFetch([new Response('<html>error</html>', { status: 200, headers: { 'content-type': 'text/html' } })]);
+    const error = (await new FalcoClient(credentials).downloadPeppolDocumentUbl('doc-1').catch((e) => e)) as CliError;
+
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.message).toContain('web page instead of UBL');
+  });
+
+  test('accepts a UBL document and encodes the id in the path', async () => {
+    const { urls } = stubFetch([
+      new Response('<Invoice/>', { status: 200, headers: { 'content-type': 'application/xml' } }),
+    ]);
+    const payload = await new FalcoClient(credentials).downloadPeppolDocumentUbl('doc/1');
+
+    expect(new TextDecoder().decode(payload.bytes)).toBe('<Invoice/>');
+    expect(urls[0]).toContain('doc%2F1');
+  });
+
   test('validate() reports a failure instead of throwing', async () => {
     stubFetch([new Response('', { status: 401 })]);
     const result = await new FalcoClient(credentials).validate();

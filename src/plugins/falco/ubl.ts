@@ -22,8 +22,9 @@ export type EmbeddedPdf = {
 };
 
 /**
- * Return the first embedded PDF (or image/*) in the given UBL XML.
- * Returns null if no embedded binary with a PDF mime code is present.
+ * Return the first embedded PDF in the given UBL XML, or null when the sender
+ * embedded none. Attachments declaring a non-PDF mime code are skipped; one
+ * with no readable mimeCode at all is accepted, since omitting it is common.
  */
 export function extractEmbeddedPdf(xml: string): EmbeddedPdf | null {
   EMBEDDED_RE.lastIndex = 0;
@@ -40,7 +41,8 @@ export function extractEmbeddedPdf(xml: string): EmbeddedPdf | null {
       const bytes = Buffer.from(base64, 'base64');
       return { filename, bytes: new Uint8Array(bytes) };
     } catch {
-      return null;
+      // Skip this attachment rather than abandoning the ones after it.
+      continue;
     }
   }
   return null;
