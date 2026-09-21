@@ -30,10 +30,25 @@ export interface SetupResult<Credentials extends object> {
   info?: string;
 }
 
+export interface OAuthSetupOptions {
+  serviceName: string;
+  expectedState?: string;
+  /** Build the provider URL after the host has reserved a localhost callback URI. */
+  authorizationUrl(redirectUri: string): string;
+}
+
+export interface OAuthSetupResult {
+  code: string;
+  state?: string;
+  redirectUri: string;
+}
+
 export interface SetupContext {
   prompt(question: string, options?: { secret?: boolean }): Promise<string>;
   confirm(question: string): Promise<boolean>;
   log(...parts: unknown[]): void;
+  openUrl(url: string): boolean;
+  oauth(options: OAuthSetupOptions): Promise<OAuthSetupResult>;
   fail(code: PluginErrorCode, message: string, suggestion?: string): never;
   fetch: typeof fetch;
 }
@@ -103,4 +118,3 @@ export interface AgentioPlugin<Credentials extends object = Record<string, unkno
   readonly profile?: ProfileSpec<Credentials>;
   readonly commands: readonly CommandSpec<Credentials>[];
 }
-

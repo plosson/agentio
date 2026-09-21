@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, mkdir } from 'fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -63,5 +63,13 @@ describe('command gating', () => {
   test('update bypasses gate', async () => {
     const res = await runCli(['update', '--help']);
     expect(res.exitCode).toBe(0);
+  });
+
+  test('plugin verification bypasses the vault gate', async () => {
+    const path = join(tempHome, 'plugin.ts');
+    await writeFile(path, `export default { apiVersion: 1, id: 'acme', displayName: 'Acme', description: 'Acme plugin', commands: [] };`);
+    const res = await runCli(['plugin', 'verify', path]);
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain('acme\tAPI 1\t0 commands\tvalid');
   });
 });

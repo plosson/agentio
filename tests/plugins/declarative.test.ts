@@ -9,6 +9,7 @@ import { addProfileFromPlugin } from '../../src/plugins/profile-host';
 import { executeDeclarativeCommand, registerDeclarativePlugin } from '../../src/plugins/declarative';
 import { loadExternalPlugins } from '../../src/plugins/external-loader';
 import { PluginRegistry } from '../../src/plugins/plugin-registry';
+import { registerProfileCommands } from '../../src/commands/profile';
 import { withTempVault } from '../helpers/vault';
 
 interface Credentials {
@@ -62,6 +63,15 @@ describe('declarative plugins', () => {
     expect(get.options.map((option) => option.long)).toContain('--profile');
     expect(get.options.map((option) => option.long)).toContain('--json');
     expect(root.commands.find((command) => command.name() === 'profile')?.commands.map((command) => command.name())).toContain('add');
+  });
+
+  test('projects profile-capable external plugins into the global profile command', () => {
+    const registry = new PluginRegistry([testPlugin()]);
+    const program = new Command();
+    registerProfileCommands(program, registry);
+    const profile = program.commands.find((command) => command.name() === 'profile')!;
+    const add = profile.commands.find((command) => command.name() === 'add')!;
+    expect(add.registeredArguments[0].description).toContain('acme-tasks');
   });
 
   test('passes parsed command input to the handler', async () => {

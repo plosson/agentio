@@ -4,9 +4,13 @@ import { loadExternalPlugins } from './plugins/external-loader';
 import { DEFAULT_PLUGIN_REGISTRY } from './plugins/registry';
 import { PluginRegistry } from './plugins/plugin-registry';
 
-const external = await loadExternalPlugins();
-const registry = external.length === 0
-  ? DEFAULT_PLUGIN_REGISTRY
-  : new PluginRegistry([...DEFAULT_PLUGIN_REGISTRY.plugins, ...external]);
-const program = createProgram(registry);
-program.parse();
+async function main(): Promise<void> {
+  const external = await loadExternalPlugins();
+  const registry = external.length === 0
+    ? DEFAULT_PLUGIN_REGISTRY
+    : new PluginRegistry([...DEFAULT_PLUGIN_REGISTRY.plugins, ...external]);
+  const program = createProgram(registry);
+  await program.parseAsync();
+}
+
+void main();

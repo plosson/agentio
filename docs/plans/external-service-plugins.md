@@ -1,6 +1,6 @@
 # External service plugins
 
-Status: proposal  
+Status: core runtime implemented on `feat/external-plugin-boundaries`; distribution phases remain proposed
 Target: post-3.1  
 Scope: public plugin contract, host integration, distribution, trust, and migration  
 
@@ -30,6 +30,31 @@ compile-time composition for production. Trusted runtime loading should exist as
 a development and private-plugin workflow. A no-code manifest format can cover
 simple HTTP services safely. Subprocess or WASM plugins should be deferred until
 there is demonstrated demand for untrusted or non-TypeScript extensions.
+
+## Implementation status
+
+The feature branch implements the contract and trusted-development path:
+
+- open string service IDs with unknown-plugin vault preservation and fail-closed
+  hub credential delivery;
+- one validated runtime registry for commands, profiles, status, refresh, skills,
+  and UI display metadata;
+- a types-only `@plosson/agentio/plugin-sdk` export with declarative commands,
+  setup/run contexts, browser/OAuth helpers, refresh declarations, and typed
+  failures;
+- host-owned setup persistence, profile naming, credential refresh, stdin/JSON
+  handling, output rendering, and declarative write enforcement;
+- explicit `AGENTIO_PLUGIN_PATHS` loading plus `AGENTIO_SAFE_MODE=1`;
+- an author guide, example plugin, `agentio plugin verify`, runtime validation,
+  boundary tests, and source, bundle, and native-binary coverage;
+- migration of every bundled profile setup away from direct vault writes,
+  isolation of GitHub's privileged vault-export commands, host-owned Google Chat
+  cache paths, and database-enforced SQL read-only execution.
+
+Compile-time recipes/lockfiles, a separately packaged verifier, declarative
+HTTP manifests, a marketplace, and subprocess/WASM isolation remain separate
+rollout phases. They are alternative distribution and isolation products, not
+required for the trusted in-process plugin API implemented here.
 
 ## Goals
 

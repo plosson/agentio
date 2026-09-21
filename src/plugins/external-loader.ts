@@ -24,7 +24,7 @@ async function pluginFiles(path: string): Promise<string[]> {
   if (extension === '.js' || extension === '.mjs' || extension === '.ts') return [absolute];
   const entries = await readdir(absolute, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isFile() && /\.(?:m?js|ts)$/.test(entry.name))
+    .filter((entry) => entry.isFile() && /\.(?:m?js|ts)$/.test(entry.name) && !entry.name.endsWith('.d.ts'))
     .map((entry) => resolve(absolute, entry.name))
     .sort();
 }
@@ -34,7 +34,13 @@ async function pluginFiles(path: string): Promise<string[]> {
  * AGENTIO_PLUGIN_PATHS is set. Paths use the platform PATH delimiter.
  */
 export async function loadExternalPlugins(raw = process.env.AGENTIO_PLUGIN_PATHS): Promise<AgentioPlugin<any>[]> {
-  if (!raw?.trim() || process.env.AGENTIO_SAFE_MODE === '1') return [];
+  if (process.env.AGENTIO_SAFE_MODE === '1') return [];
+  return loadPluginPaths(raw);
+}
+
+/** Load explicit paths regardless of safe mode, for the verifier command. */
+export async function loadPluginPaths(raw?: string): Promise<AgentioPlugin<any>[]> {
+  if (!raw?.trim()) return [];
   const paths = raw.split(delimiter).map((path) => path.trim()).filter(Boolean);
   const files = (await Promise.all(paths.map(pluginFiles))).flat();
   const plugins: AgentioPlugin<any>[] = [];

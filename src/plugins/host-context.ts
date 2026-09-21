@@ -1,4 +1,5 @@
 import { password } from '@inquirer/prompts';
+import { awaitOAuthCode, findAvailablePort, launchBrowser } from '../auth/oauth-server';
 import { CliError } from '../utils/errors';
 import { confirm, prompt } from '../utils/stdin';
 import type { RunContext, SetupContext } from '../plugin-sdk';
@@ -12,6 +13,18 @@ export function createSetupContext(): SetupContext {
     },
     confirm,
     log: (...parts) => console.error(...parts),
+    openUrl: launchBrowser,
+    async oauth(options) {
+      const port = await findAvailablePort();
+      const redirectUri = `http://localhost:${port}/callback`;
+      const result = await awaitOAuthCode({
+        port,
+        serviceName: options.serviceName,
+        expectedState: options.expectedState,
+        authUrl: options.authorizationUrl(redirectUri),
+      });
+      return { ...result, redirectUri };
+    },
     fail(code, message, suggestion): never {
       throw new CliError(code, message, suggestion);
     },
@@ -35,4 +48,3 @@ export function createRunContext<Credentials extends object>(
     },
   };
 }
-

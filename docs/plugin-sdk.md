@@ -81,6 +81,13 @@ The module must export the plugin as `default` or as a named `plugin` export.
 Plugin IDs use lowercase letters, digits, and hyphens, must begin with a letter,
 and cannot collide with another loaded plugin.
 
+Validate one or more modules without adding them to the normal startup set:
+
+```sh
+agentio plugin verify /absolute/path/acme.ts
+agentio plugin verify /absolute/path/plugin-a /absolute/path/plugin-b.ts
+```
+
 ## Host/plugin boundary
 
 Plugin code should only import the types from `@plosson/agentio/plugin-sdk`.
@@ -100,6 +107,9 @@ It must not import Agentio's `src/` modules or Commander.
   otherwise uses `format` when supplied.
 - Use `context.log` for progress and `context.fail` for stable, user-facing
   errors. Do not print results or terminate the process from a plugin.
+- `context.openUrl` launches a browser on a best-effort basis. For OAuth,
+  `context.oauth` reserves a localhost callback, opens the authorization URL,
+  validates state, and also supports a pasted redirect on headless machines.
 
 In-process plugins are a compatibility boundary, not a security sandbox. The
 host API prevents accidental vault and CLI coupling, but JavaScript code can

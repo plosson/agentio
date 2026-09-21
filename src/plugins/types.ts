@@ -38,6 +38,7 @@ export type RegisteredCredentialLifecycle = CredentialLifecycle<any>;
  */
 export interface ServiceRegistration {
   readonly id: string;
+  readonly brand?: { color?: string; iconPath?: string };
   readonly registerCommands: (program: Command) => void;
 }
 

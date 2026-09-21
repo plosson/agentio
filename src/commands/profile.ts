@@ -4,8 +4,9 @@ import { listProfileRefs, resolveProfile, type ProfileRef } from '../config/conf
 import { handleError, CliError, multipleProfilesError } from '../utils/errors';
 import { removeProfileForService, renameProfileForService } from '../utils/profile-commands';
 import { reauthProfile } from './reauth';
-import { findServicePlugin, SERVICE_REGISTRY } from '../plugins/registry';
+import { getPluginRegistry } from '../plugins/registry';
 import { addProfileFromPlugin } from '../plugins/profile-host';
+import type { PluginRegistry } from '../plugins/plugin-registry';
 
 export type ProfileSummary = ProfileRef;
 
@@ -30,19 +31,18 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
   return lines.join('\n');
 }
 
-const KNOWN_SERVICES = SERVICE_REGISTRY.filter((plugin) => 'profile' in plugin).map((plugin) => plugin.id);
-
-function assertKnownService(service: string): asserts service is ServiceName {
-  if (!findServicePlugin(service)?.profile) {
-    throw new CliError(
-      'INVALID_PARAMS',
-      `Unknown service: "${service}"`,
-      `Known services: ${KNOWN_SERVICES.join(', ')}`,
-    );
+export function registerProfileCommands(program: Command, registry: PluginRegistry = getPluginRegistry()): void {
+  const knownServices = registry.profilePlugins().map((plugin) => plugin.id);
+  function assertKnownService(service: string): asserts service is ServiceName {
+    if (!registry.find(service)?.profile) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Unknown service: "${service}"`,
+        `Known services: ${knownServices.join(', ')}`,
+      );
+    }
   }
-}
 
-export function registerProfileCommands(program: Command): void {
   const profile = program
     .command('profile')
     .description('Manage profiles across services');
@@ -63,14 +63,14 @@ export function registerProfileCommands(program: Command): void {
 
   profile
     .command('add')
-    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('<service>', `Service name (${knownServices.join(', ')})`)
     .description('Add a profile for a service')
     .option('--profile <name>', 'Profile name')
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
         assertKnownService(service);
-        const plugin = findServicePlugin(service);
+        const plugin = registry.find(service);
         if (!plugin?.profile) throw new Error(`No profile setup registered for ${service}`);
         await addProfileFromPlugin(plugin, opts);
       } catch (e) {
@@ -80,7 +80,7 @@ export function registerProfileCommands(program: Command): void {
 
   profile
     .command('rename')
-    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('<service>', `Service name (${knownServices.join(', ')})`)
     .argument('<name>', 'Current profile name')
     .argument('<new-name>', 'New profile name')
     .description('Rename a profile, keeping its credentials and key access')
@@ -95,7 +95,7 @@ export function registerProfileCommands(program: Command): void {
 
   profile
     .command('remove')
-    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('<service>', `Service name (${knownServices.join(', ')})`)
     .argument('<name>', 'Profile name to remove')
     .description('Remove a profile')
     .action(async (service: string, name: string) => {
@@ -109,7 +109,7 @@ export function registerProfileCommands(program: Command): void {
 
   profile
     .command('reauth')
-    .argument('<service>', `Service name (${KNOWN_SERVICES.join(', ')})`)
+    .argument('<service>', `Service name (${knownServices.join(', ')})`)
     .argument('[name]', 'Profile name (auto-resolves if exactly one exists)')
     .description('Re-authenticate an expired or invalid profile')
     .action(async (service: string, name: string | undefined) => {

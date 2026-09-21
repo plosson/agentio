@@ -47,8 +47,18 @@ describe('service plugin registry', () => {
     };
     expect(new PluginRegistry([valid]).find('acme-linear')).toBe(valid);
     expect(() => new PluginRegistry([{ ...valid, id: 'Bad Id' }])).toThrow(/Invalid service id/);
+    expect(() => new PluginRegistry([{ ...valid, id: 'vault' }])).toThrow(/reserved by Agentio/);
     expect(() => new PluginRegistry([valid, valid])).toThrow(/Duplicate service id/);
     expect(() => new PluginRegistry([{ ...valid, apiVersion: 2 as 1 }])).toThrow(/Unsupported plugin API version/);
+    const declarative = {
+      apiVersion: 1 as const,
+      id: 'acme',
+      displayName: 'Acme',
+      description: 'Acme service',
+      commands: [{ path: 'things list', description: 'List things', examples: ['agentio acme things list'], run: async () => [] }],
+    };
+    expect(() => new PluginRegistry([{ ...declarative, commands: [{ ...declarative.commands[0], path: 'profile add' }] }])).toThrow(/reserved/);
+    expect(() => new PluginRegistry([{ ...declarative, commands: [{ ...declarative.commands[0], path: 'Bad path' }] }])).toThrow(/invalid command path/);
   });
   test('is the complete, ordered service catalog', () => {
     const ids: string[] = SERVICE_REGISTRY.map((service) => service.id);
