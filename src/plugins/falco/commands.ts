@@ -195,10 +195,17 @@ export async function falcoProfileAdd(options: ProfileAddOptions): Promise<void>
   let result = await loginToFalco({ username: email, password });
   if (result.type === 'two_factor_required') {
     const code = await promptText('? Two-factor code:');
+    if (!code) throw new CliError('INVALID_PARAMS', 'A two-factor code is required');
     result = await loginToFalco({ username: email, password, twoFaCode: code });
   }
   if (result.type !== 'success') {
-    throw new CliError('AUTH_FAILED', 'Falco asked for a two-factor code that was not supplied');
+    // Reached only when Falco asks for a second factor again after one was
+    // entered, so do not claim the user supplied nothing.
+    throw new CliError(
+      'AUTH_FAILED',
+      'Falco is still asking for a two-factor code',
+      'Re-run the command and enter a fresh code.',
+    );
   }
 
   const now = Date.now();

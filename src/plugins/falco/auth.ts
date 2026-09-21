@@ -19,12 +19,27 @@ interface RawTokens {
   refresh_token_expires_in: number;
 }
 
-function toTokens(raw: RawTokens): FalcoTokens {
+/**
+ * Accept a token payload only when every field we persist is present. A blind
+ * cast here would store an undefined refresh token and a NaN expiry, which
+ * disables refresh permanently and silently.
+ */
+function requireTokens(raw: Partial<RawTokens>): FalcoTokens {
+  const missing = (['access_token', 'refresh_token', 'expires_in', 'refresh_token_expires_in'] as const).filter(
+    (field) => raw[field] === undefined || raw[field] === null,
+  );
+  if (missing.length > 0) {
+    throw new CliError(
+      'API_ERROR',
+      `Falco returned an incomplete token response (missing ${missing.join(', ')})`,
+      'Retry; if it persists the auth API has changed',
+    );
+  }
   return {
-    accessToken: raw.access_token,
-    refreshToken: raw.refresh_token,
-    expiresIn: raw.expires_in,
-    refreshTokenExpiresIn: raw.refresh_token_expires_in,
+    accessToken: raw.access_token!,
+    refreshToken: raw.refresh_token!,
+    expiresIn: raw.expires_in!,
+    refreshTokenExpiresIn: raw.refresh_token_expires_in!,
   };
 }
 
@@ -62,9 +77,15 @@ export async function loginToFalco(params: {
   const text = await response.text();
   if (response.ok) {
     try {
-      return { type: 'success', tokens: toTokens(JSON.parse(text) as RawTokens) };
-    } catch {
-      throw new CliError('API_ERROR', `Unexpected login response: ${text.slice(0, 200)}`);
+      // Never echo this body: on success it is the token payload itself.
+      return { type: 'success', tokens: requireTokens(JSON.parse(text) as Partial<RawTokens>) };
+    } catch (error) {
+      if (error instanceof CliError) throw error;
+      throw new CliError(
+        'API_ERROR',
+        'Falco returned a login response that could not be read',
+        'Retry; if it persists the login API has changed',
+      );
     }
   }
 
@@ -79,7 +100,11 @@ export async function loginToFalco(params: {
     throw new CliError('AUTH_FAILED', 'Invalid Falco credentials', 'Check the email and password');
   }
   if (parsed.error === 'invalid_two_factor_code') {
-    throw new CliError('AUTH_FAILED', 'Invalid two-factor code', 'Request a fresh code and retry');
+    throw new CliError(
+      'AUTH_FAILED',
+      'Falco rejected the two-factor code',
+      'Codes expire quickly. Re-run the command and enter a fresh one.',
+    );
   }
   throw new CliError('AUTH_FAILED', `Falco login failed (HTTP ${response.status}): ${text.slice(0, 200)}`);
 }
@@ -113,7 +138,7 @@ export async function refreshFalcoToken(refreshToken: string): Promise<FalcoToke
       'Run: agentio reauth',
     );
   }
-  return toTokens((await response.json()) as RawTokens);
+  return requireTokens((await response.json()) as Partial<RawTokens>);
 }
 
 /** Best-effort revocation; Falco does not report a useful failure here. */

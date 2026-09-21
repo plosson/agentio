@@ -67,10 +67,11 @@ export class FalcoClient implements ServiceClient {
   }
 
   private fail(status: number, body: string, what: string): never {
+    const detail = body.trim() ? `: ${body.slice(0, 200)}` : '';
     throw new CliError(
       httpStatusToErrorCode(status),
-      `Falco request failed while ${what} (HTTP ${status})`,
-      body.trim() ? body.slice(0, 200) : undefined,
+      `Falco request failed while ${what} (HTTP ${status})${detail}`,
+      status === 401 ? 'Run: agentio reauth' : undefined,
     );
   }
 
@@ -82,7 +83,7 @@ export class FalcoClient implements ServiceClient {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new CliError('API_ERROR', `Falco returned malformed JSON while ${what}`, text.slice(0, 200));
+      throw new CliError('API_ERROR', `Falco returned malformed JSON while ${what}: ${text.slice(0, 200)}`);
     }
   }
 
@@ -257,7 +258,7 @@ export class FalcoClient implements ServiceClient {
     try {
       return (JSON.parse(text) as { BillingDocuments?: BillingDocument[] }).BillingDocuments ?? [];
     } catch {
-      throw new CliError('API_ERROR', `Falco returned malformed JSON while ${what}`, text.slice(0, 200));
+      throw new CliError('API_ERROR', `Falco returned malformed JSON while ${what}: ${text.slice(0, 200)}`);
     }
   }
 

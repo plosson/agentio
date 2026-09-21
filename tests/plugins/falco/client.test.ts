@@ -74,6 +74,28 @@ describe('FalcoClient error mapping', () => {
   });
 });
 
+describe('FalcoClient error shape', () => {
+  test('puts the response body in the message, not in the suggestion', async () => {
+    // The third CliError argument is an action for the user; other plugins keep
+    // response bodies out of it.
+    stubFetch([new Response('{"error":"bad_request"}', { status: 400 })]);
+    const error = (await new FalcoClient(credentials).getUserMe().catch((e) => e)) as CliError;
+
+    expect(error.message).toContain('bad_request');
+    expect(error.suggestion ?? '').not.toContain('bad_request');
+  });
+
+  test('suggests reauth on 401 and suggests nothing on other statuses', async () => {
+    stubFetch([new Response('nope', { status: 401 })]);
+    expect(((await new FalcoClient(credentials).getUserMe().catch((e) => e)) as CliError).suggestion).toContain(
+      'agentio reauth',
+    );
+
+    stubFetch([new Response('nope', { status: 500 })]);
+    expect(((await new FalcoClient(credentials).getUserMe().catch((e) => e)) as CliError).suggestion).toBeUndefined();
+  });
+});
+
 describe('FalcoClient pagination', () => {
   test('walks the cursor and de-duplicates across pages', async () => {
     const { urls } = stubFetch([
