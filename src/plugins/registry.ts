@@ -19,7 +19,9 @@ import rss from './rss';
 import slack from './slack';
 import sql from './sql';
 import telegram from './telegram';
-import type { RegisteredServicePlugin } from './types';
+import { isLegacyServicePlugin, type RegisteredServicePlugin } from './types';
+import { PluginRegistry } from './plugin-registry';
+import { registerDeclarativePlugin } from './declarative';
 
 /** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
@@ -53,34 +55,24 @@ export const SERVICE_PLUGINS = [
  */
 export const SERVICE_REGISTRY = SERVICE_PLUGINS;
 
-validateRegistry(SERVICE_REGISTRY);
+export const DEFAULT_PLUGIN_REGISTRY = new PluginRegistry(SERVICE_REGISTRY);
+let activePluginRegistry = DEFAULT_PLUGIN_REGISTRY;
 
-export function registerServiceCommands(program: Command): void {
-  for (const service of SERVICE_REGISTRY) {
-    service.registerCommands(program);
+export function activatePluginRegistry(registry: PluginRegistry): void {
+  activePluginRegistry = registry;
+}
+
+export function getPluginRegistry(): PluginRegistry {
+  return activePluginRegistry;
+}
+
+export function registerServiceCommands(program: Command, registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): void {
+  for (const service of registry.plugins) {
+    if (isLegacyServicePlugin(service)) service.registerCommands(program);
+    else registerDeclarativePlugin(program, service);
   }
 }
 
 export function findServicePlugin(id: string): RegisteredServicePlugin | undefined {
-  return SERVICE_PLUGINS.find((plugin) => plugin.id === id);
-}
-
-function validateRegistry(services: readonly RegisteredServicePlugin[]): void {
-  const ids = new Set<string>();
-
-  for (const service of services) {
-    if (!/^[a-z][a-z0-9-]*$/.test(service.id)) {
-      throw new Error(`Invalid service id: ${service.id}`);
-    }
-    if (ids.has(service.id)) {
-      throw new Error(`Duplicate service id: ${service.id}`);
-    }
-    ids.add(service.id);
-  }
-
-  for (const plugin of SERVICE_PLUGINS) {
-    if (!ids.has(plugin.id)) {
-      throw new Error(`Plugin is missing from service registry: ${plugin.id}`);
-    }
-  }
+  return activePluginRegistry.find(id);
 }

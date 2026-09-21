@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { putProfileEntry, resolveProfile, updateConfig } from '../../src/config/config-manager';
+import { listProfileRefs, listProfiles, putProfileEntry, resolveProfile, updateConfig } from '../../src/config/config-manager';
 import { clearVaultCache, saveVault, CURRENT_VAULT_VERSION } from '../../src/vault/vault';
 import {
   clearPassphraseCache,
@@ -60,5 +60,20 @@ describe('resolveProfile multi-profile case', () => {
     } else {
       throw new Error(`Expected multiple profiles error, got: ${JSON.stringify(r)}`);
     }
+  });
+  test('lists stored plugin ids that are not built into this binary', async () => {
+    await updateConfig((config) => {
+      config.profiles['acme-linear'] = [{ name: 'work', readOnly: true }];
+    });
+
+    expect(await listProfiles('acme-linear')).toEqual([{
+      service: 'acme-linear',
+      profiles: [{ name: 'work', readOnly: true }],
+    }]);
+    expect(await listProfileRefs()).toContainEqual({
+      service: 'acme-linear',
+      name: 'work',
+      readOnly: true,
+    });
   });
 });

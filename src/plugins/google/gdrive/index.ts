@@ -14,7 +14,7 @@ export default defineServicePlugin<GDriveCredentials, GoogleCamelTokens>()({
   description: 'Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.',
   registerCommands: registerGDriveCommands,
   profile: {
-    add: gdriveProfileAdd,
+    setup: gdriveProfileAdd,
     createClient: (credentials) => new GDriveClient(credentials),
     async reauthenticate(credentials, profileName) {
       const existing = credentials;

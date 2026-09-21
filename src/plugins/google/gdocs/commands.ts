@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { writeFile, readFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GDocsClient } from './client';
@@ -295,14 +295,14 @@ https://developers.google.com/docs/api/reference/rest/v1/documents/request`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gdocsProfileAdd(options);
+        await addProfileWithSetup('gdocs', gdocsProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gdocsProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gdocsProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Docs...\n');
 
   const tokens = await performOAuthFlow('gdocs');
@@ -320,8 +320,6 @@ export async function gdocsProfileAdd(options: { profile?: string; readOnly?: bo
     );
   }
 
-  const profileName = await chooseProfileName('gdocs', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
-
   const credentials: GDocsCredentials = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
@@ -331,12 +329,5 @@ export async function gdocsProfileAdd(options: { profile?: string; readOnly?: bo
     email: userEmail,
   };
 
-  await saveProfile('gdocs', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${userEmail}`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio gdocs list --profile ${profileName}`);
+  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gdocs list` };
 }

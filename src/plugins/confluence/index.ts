@@ -11,7 +11,7 @@ export default defineServicePlugin<ConfluenceCredentials>()({
   description: 'Use when interacting with Confluence via the agentio CLI.',
   registerCommands: registerConfluenceCommands,
   profile: {
-    add: confluenceProfileAdd,
+    setup: confluenceProfileAdd,
     createClient: (credentials) => new ConfluenceClient(credentials),
     reauthenticate: reauthenticateConfluence,
   },

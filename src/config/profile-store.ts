@@ -25,9 +25,10 @@ export interface ProfileNameChoice {
 
 /**
  * The name a new profile gets. An explicit `--profile` wins. Otherwise the
- * derived name, unless the profile is read-only and that name is taken
- * already: then `<derived>-readonly`, so one account can have a full and a
- * read-only profile side by side without the second overwriting the first.
+ * derived name. A collision receives a deterministic numeric suffix; a
+ * read-only collision first tries `<derived>-readonly`. Only an explicit name
+ * may replace an existing profile, so plugin-provided names cannot silently
+ * overwrite unrelated credentials.
  * In remote mode only the key's allow-listed names are visible, so a name
  * taken outside the allow-list is not seen here and the hub refuses the write.
  */
@@ -36,8 +37,14 @@ export async function chooseProfileName(
   { explicit, derived, readOnly }: ProfileNameChoice,
 ): Promise<string> {
   if (explicit) return explicit;
-  if (readOnly && (await getProfile(service, derived))) return `${derived}-readonly`;
-  return derived;
+  if (!(await getProfile(service, derived))) return derived;
+
+  const base = readOnly ? `${derived}-readonly` : derived;
+  if (!(await getProfile(service, base))) return base;
+  for (let suffix = 2; ; suffix++) {
+    const candidate = `${base}-${suffix}`;
+    if (!(await getProfile(service, candidate))) return candidate;
+  }
 }
 
 /** Add or replace a profile and its credentials in one vault write, or one PUT to the hub. */

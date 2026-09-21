@@ -1,12 +1,15 @@
 import { Command } from 'commander';
-import { registerServiceCommands, SERVICE_REGISTRY } from './plugins/registry';
+import { activatePluginRegistry, DEFAULT_PLUGIN_REGISTRY, registerServiceCommands } from './plugins/registry';
+import type { PluginRegistry } from './plugins/plugin-registry';
 
 // Agentio utilities
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
 import { registerDoctorCommand } from './commands/doctor';
+import { registerGitHubVaultSecretCommands } from './commands/github-vault-secrets';
 import { registerKeyCommands } from './commands/key';
 import { registerLoginCommands } from './commands/login';
+import { registerPluginCommands } from './commands/plugin';
 import { registerProfileCommands } from './commands/profile';
 import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
@@ -27,7 +30,8 @@ function getVersion(): string {
   return require('../package.json').version;
 }
 
-export function createProgram(): Command {
+export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): Command {
+  activatePluginRegistry(registry);
   const program = new Command();
 
   function setGroup(name: string, group: string): void {
@@ -40,7 +44,8 @@ export function createProgram(): Command {
     .description('CLI for LLM agents to interact with communication and tracking services')
     .version(getVersion());
 
-  registerServiceCommands(program);
+  registerServiceCommands(program, registry);
+  registerGitHubVaultSecretCommands(program);
 
   // Agentio utilities
   registerDocsCommand(program);
@@ -48,7 +53,8 @@ export function createProgram(): Command {
   registerDoctorCommand(program);
   registerKeyCommands(program);
   registerLoginCommands(program);
-  registerProfileCommands(program);
+  registerPluginCommands(program);
+  registerProfileCommands(program, registry);
   registerReauthCommand(program);
   registerSkillCommand(program);
   registerStatusCommand(program);
@@ -73,7 +79,7 @@ export function createProgram(): Command {
       });
   }
 
-  const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout']);
+  const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout', 'plugin']);
   // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
   const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove']);
   // Owner-only on the hub host: they touch the vault or the daemon.
@@ -122,10 +128,10 @@ export function createProgram(): Command {
   ['vault', 'login', 'logout', 'status', 'doctor', 'update'].forEach((n) => setGroup(n, 'Setup'));
 
   // Services
-  SERVICE_REGISTRY.forEach(({ id }) => setGroup(id, 'Services'));
+  registry.plugins.forEach(({ id }) => setGroup(id, 'Services'));
 
   // Advanced
-  ['daemon', 'key', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['daemon', 'key', 'plugin', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

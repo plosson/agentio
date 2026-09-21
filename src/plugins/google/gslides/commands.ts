@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GSlidesClient } from './client';
@@ -273,14 +273,14 @@ https://developers.google.com/slides/api/reference/rest/v1/presentations/batchUp
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gslidesProfileAdd(options);
+        await addProfileWithSetup('gslides', gslidesProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gslidesProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gslidesProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Slides...\n');
 
   const tokens = await performOAuthFlow('gslides');
@@ -297,8 +297,6 @@ export async function gslidesProfileAdd(options: { profile?: string; readOnly?: 
     );
   }
 
-  const profileName = await chooseProfileName('gslides', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
-
   const credentials: GSlidesCredentials = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
@@ -308,10 +306,5 @@ export async function gslidesProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await saveProfile('gslides', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${userEmail}`);
-  if (options.readOnly) console.log(`   Access: read-only`);
-  console.log(`   Test with: agentio gslides list --profile ${profileName}`);
+  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gslides list` };
 }

@@ -24,33 +24,26 @@ export interface ApiKey {
 }
 
 export interface Config {
-  profiles: {
-    gdocs?: ProfileValue[];
-    gdrive?: ProfileValue[];
-    gmail?: ProfileValue[];
-    gcal?: ProfileValue[];
-    gtasks?: ProfileValue[];
-    gchat?: ProfileValue[];
-    gsheets?: ProfileValue[];
-    gslides?: ProfileValue[];
-    gscript?: ProfileValue[];
-    github?: ProfileValue[];
-    jira?: ProfileValue[];
-    confluence?: ProfileValue[];
-    slack?: ProfileValue[];
-    telegram?: ProfileValue[];
-    discourse?: ProfileValue[];
-    dropbox?: ProfileValue[];
-    sql?: ProfileValue[];
-    revolut?: ProfileValue[];
-    falco?: ProfileValue[];
-  };
+  /**
+   * Profile entries are keyed by the validated plugin id. Keep this open: a
+   * vault may outlive the binary that wrote it, or be shared with a build that
+   * has a different plugin catalog.
+   */
+  profiles: Record<string, ProfileValue[] | undefined>;
   apiKeys?: ApiKey[];
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut' | 'falco';
+/** Built-in profile service ids, useful only where compile-time narrowing helps. */
+export type BuiltInServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut' | 'falco';
 
-export const ALL_SERVICES: readonly ServiceName[] = [
+/**
+ * A plugin id after registry validation. External plugin ids make the service
+ * namespace open at runtime, so persistence and protocol code must not use a
+ * closed union here.
+ */
+export type ServiceName = string;
+
+export const ALL_SERVICES: readonly BuiltInServiceName[] = [
   'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides', 'gscript',
   'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'sql', 'revolut', 'falco',
 ];

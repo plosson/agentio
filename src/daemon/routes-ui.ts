@@ -20,6 +20,7 @@ import {
 import { INDEX_HTML } from './ui/assets';
 import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
+import { getPluginRegistry } from '../plugins/registry';
 
 export interface UiContext {
   version: string;
@@ -49,7 +50,14 @@ function securityHeaders(nonce: string): Record<string, string> {
 
 function page(): Response {
   const nonce = randomBytes(16).toString('base64');
-  const html = INDEX_HTML.replaceAll('__CSP_NONCE__', nonce);
+  const metadata = Object.fromEntries(getPluginRegistry().plugins.map((plugin) => [plugin.id, {
+    displayName: plugin.displayName,
+    color: plugin.brand?.color && /^#[0-9a-f]{6}$/i.test(plugin.brand.color) ? plugin.brand.color : undefined,
+  }]));
+  const serialized = JSON.stringify(metadata).replace(/[<>&]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  const html = INDEX_HTML
+    .replaceAll('__CSP_NONCE__', nonce)
+    .replace('__PLUGIN_METADATA__', serialized);
   return new Response(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(nonce) },
   });

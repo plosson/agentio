@@ -5,12 +5,22 @@ import { interactiveCheckbox } from '../utils/interactive';
 import { handleError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import { findServicePlugin } from '../plugins/registry';
+import { createSetupContext } from '../plugins/host-context';
+import { isDeclarativePlugin } from '../plugins/types';
 
 export async function reauthProfile(service: ServiceName, profileName: string): Promise<void> {
-  const pluginReauthenticate = findServicePlugin(service)?.profile?.reauthenticate;
+  const plugin = findServicePlugin(service);
+  const pluginReauthenticate = plugin?.profile?.reauthenticate;
   if (pluginReauthenticate) {
     const existing = await getCredentials<Record<string, unknown>>(service, profileName);
-    const replacement = await pluginReauthenticate(existing, profileName);
+    let replacement: Record<string, unknown>;
+    if (plugin && isDeclarativePlugin(plugin)) {
+      replacement = await plugin.profile!.reauthenticate!(existing, profileName, createSetupContext());
+    } else if (plugin) {
+      replacement = await plugin.profile!.reauthenticate!(existing, profileName);
+    } else {
+      return;
+    }
     await setCredentials(service, profileName, replacement);
     return;
   }

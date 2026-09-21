@@ -10,6 +10,7 @@ import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
+import { findServicePlugin } from '../plugins/registry';
 
 /**
  * The credential API remote agents call with `Authorization: Bearer agio1.…`.
@@ -132,6 +133,13 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   await requireStoredCredentials(service, name);
+  if (!findServicePlugin(service)?.profile) {
+    throw new CliError(
+      'NOT_FOUND',
+      `Plugin "${service}" is not installed on this hub`,
+      'Install a compatible plugin on the hub before requesting its credentials',
+    );
+  }
   const { credentials, refreshed } = await audited(key, 'credentials', service, name, () => hubCredentials(service, name), (r) => r.refreshed);
   return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
 }

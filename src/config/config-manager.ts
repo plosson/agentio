@@ -55,6 +55,16 @@ async function profilesOf(service: ServiceName): Promise<ProfileEntry[]> {
   return (config.profiles[service] || []).map(normalizeProfile);
 }
 
+/** Stable built-in ordering followed by external/stored plugin ids. */
+async function configuredServiceIds(): Promise<ServiceName[]> {
+  if (isRemoteMode()) {
+    const ids = new Set((await remoteProfiles()).map((profile) => profile.service));
+    return [...ALL_SERVICES.filter((service) => ids.delete(service)), ...[...ids].sort()];
+  }
+  const ids = new Set(Object.keys((await loadConfig()).profiles));
+  return [...ALL_SERVICES.filter((service) => ids.delete(service)), ...[...ids].sort()];
+}
+
 export async function getProfile(
   service: ServiceName,
   profileName: string
@@ -158,7 +168,7 @@ export async function listProfiles(service?: ServiceName): Promise<{
   service: ServiceName;
   profiles: ProfileEntry[];
 }[]> {
-  const services = service ? [service] : ALL_SERVICES;
+  const services = service ? [service] : await configuredServiceIds();
   return Promise.all(services.map(async (svc) => ({ service: svc, profiles: await profilesOf(svc) })));
 }
 

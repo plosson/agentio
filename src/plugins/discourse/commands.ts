@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { DiscourseClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { prompt } from '../../utils/stdin';
 import { addExamples } from '../../utils/command-tree';
 import type { DiscourseCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 import {
   printDiscourseTopicList,
   printDiscourseTopic,
@@ -121,14 +122,14 @@ export function registerDiscourseCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await discourseProfileAdd(options);
+        await addProfileWithSetup('discourse', discourseProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function discourseProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function discourseProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<DiscourseCredentials>> {
   console.error('\nDiscourse Setup\n');
 
   // Step 1: Get base URL
@@ -208,13 +209,5 @@ export async function discourseProfileAdd(options: { profile?: string; readOnly?
   console.error(`\nConnected to ${normalizedUrl}`);
   console.error(`Authenticated as ${username}\n`);
 
-  const profileName = await chooseProfileName('discourse', { explicit: options.profile, derived: username.trim(), readOnly: options.readOnly });
-
-  await saveProfile('discourse', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio discourse list --profile ${profileName}`);
+  return { credentials, suggestedProfileName: username.trim(), info: 'Test with: agentio discourse list' };
 }

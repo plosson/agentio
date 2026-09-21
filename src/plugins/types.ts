@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { ServiceClient } from '../types/service';
+import type { AgentioPlugin, SetupResult } from '../plugin-sdk';
 
 export interface ProfileAddOptions {
   profile?: string;
@@ -7,7 +8,8 @@ export interface ProfileAddOptions {
 }
 
 export interface ProfilePlugin<TCredentials extends object> {
-  add(options: ProfileAddOptions): Promise<void>;
+  /** Authenticate and return credentials; the host chooses the name and persists them. */
+  setup(options: ProfileAddOptions): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
   reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;
@@ -36,6 +38,7 @@ export type RegisteredCredentialLifecycle = CredentialLifecycle<any>;
  */
 export interface ServiceRegistration {
   readonly id: string;
+  readonly brand?: { color?: string; iconPath?: string };
   readonly registerCommands: (program: Command) => void;
 }
 
@@ -51,7 +54,15 @@ export interface ServicePlugin<
 }
 
 /** Type-erased shape used only after a plugin has crossed into the host registry. */
-export type RegisteredServicePlugin = ServicePlugin<any, any>;
+export type RegisteredServicePlugin = ServicePlugin<any, any> | AgentioPlugin<any>;
+
+export function isDeclarativePlugin(plugin: unknown): plugin is AgentioPlugin<any> {
+  return typeof plugin === 'object' && plugin !== null && 'commands' in plugin;
+}
+
+export function isLegacyServicePlugin(plugin: RegisteredServicePlugin): plugin is ServicePlugin<any, any> {
+  return 'registerCommands' in plugin;
+}
 
 /** Keep each plugin definition credential-typed without widening its literals. */
 export function defineServicePlugin<

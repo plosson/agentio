@@ -8,15 +8,26 @@ import type { ServiceName } from '../types/config';
 import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { findServicePlugin } from '../plugins/registry';
+import { createRunContext } from '../plugins/host-context';
+import { isDeclarativePlugin } from '../plugins/types';
 
 /**
  * Creates a ServiceClient for the given service and credentials. Refresh is
  * not this function's job; callers pass credentials from getFreshCredentials.
  */
 function createServiceClient(service: ServiceName, credentials: unknown): ServiceClient {
-  const pluginClient = findServicePlugin(service)?.profile?.createClient;
+  const plugin = findServicePlugin(service);
+  const pluginClient = plugin && !isDeclarativePlugin(plugin) ? plugin.profile?.createClient : undefined;
   if (!pluginClient) throw new Error(`${service} profile plugin is not registered`);
   return pluginClient(credentials);
+}
+
+async function validateProfileCredentials(service: ServiceName, profile: string, credentials: unknown): Promise<ValidationResult> {
+  const plugin = findServicePlugin(service);
+  if (plugin && isDeclarativePlugin(plugin) && plugin.profile) {
+    return plugin.profile.validate(createRunContext(credentials as object, profile));
+  }
+  return createServiceClient(service, credentials).validate();
 }
 
 export interface ProfileStatus {
@@ -77,14 +88,18 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
     return { ...ref, status: 'skipped' };
   }
 
+  if (!findServicePlugin(ref.service)?.profile) {
+    return { ...ref, status: 'invalid', error: 'plugin is not installed in this agentio build' };
+  }
+
   let result: ValidationResult;
   try {
     const { credentials } = await getFreshCredentials(ref.service, ref.profile);
-    result = await createServiceClient(ref.service, credentials).validate();
+    result = await validateProfileCredentials(ref.service, ref.profile, credentials);
     // A forced refresh cannot happen remotely: the hub keeps the refresh material.
     if (!result.valid && !isRemoteMode() && !result.error?.includes('re-authenticate')) {
       const forced = await getFreshCredentials(ref.service, ref.profile, { force: true });
-      if (forced.refreshed) result = await createServiceClient(ref.service, forced.credentials).validate();
+      if (forced.refreshed) result = await validateProfileCredentials(ref.service, ref.profile, forced.credentials);
     }
   } catch (err) {
     if (err instanceof CliError && SESSION_FAILURES.has(err.code)) throw err;

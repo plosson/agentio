@@ -14,7 +14,7 @@ export default defineServicePlugin<GChatCredentials, GoogleCamelTokens>()({
   description: 'Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.',
   registerCommands: registerGChatCommands,
   profile: {
-    add: gchatProfileAdd,
+    setup: gchatProfileAdd,
     createClient: (credentials) => new GChatClient(credentials),
     async reauthenticate(credentials, profileName) {
       const existing = credentials;

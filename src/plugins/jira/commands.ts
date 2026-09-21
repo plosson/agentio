@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { performJiraOAuthFlow } from './oauth';
 import { JiraClient } from './client';
@@ -18,6 +18,7 @@ import {
 } from './output';
 import { selectJiraSite } from './lifecycle';
 import type { JiraCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getJiraClient = createClientGetter<JiraCredentials, JiraClient>({
   service: 'jira',
@@ -224,14 +225,14 @@ Combine with AND / OR / NOT. Quote multi-word values.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await jiraProfileAdd(options);
+        await addProfileWithSetup('jira', jiraProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function jiraProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function jiraProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<JiraCredentials>> {
   console.error('\nJIRA OAuth Setup\n');
 
   const result = await performJiraOAuthFlow(selectJiraSite);
@@ -239,8 +240,6 @@ export async function jiraProfileAdd(options: { profile?: string; readOnly?: boo
   console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
 
   const siteHostname = new URL(result.siteUrl).hostname;
-  const profileName = await chooseProfileName('jira', { explicit: options.profile, derived: siteHostname, readOnly: options.readOnly });
-
   const credentials: JiraCredentials = {
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
@@ -249,11 +248,5 @@ export async function jiraProfileAdd(options: { profile?: string; readOnly?: boo
     siteUrl: result.siteUrl,
   };
 
-  await saveProfile('jira', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio jira projects --profile ${profileName}`);
+  return { credentials, suggestedProfileName: siteHostname, info: 'Test with: agentio jira projects' };
 }

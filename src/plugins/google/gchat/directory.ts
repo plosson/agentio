@@ -1,8 +1,5 @@
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
-import { existsSync } from 'fs';
-import { homedir } from 'os';
-import { join, dirname } from 'path';
 import { OAuth2Client } from 'google-auth-library';
+import { pluginCachePath, readPluginCache, writePluginCache } from '../../../config/plugin-cache';
 
 interface DirectoryEntry {
   displayName: string;
@@ -19,24 +16,18 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 const READ_MASK = 'names,emailAddresses';
 const SOURCE = 'DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE';
 
-function configDir(): string {
-  return join(process.env.HOME || homedir(), '.config', 'agentio');
-}
-
-function sanitize(key: string): string {
-  return key.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
 export function directoryPath(email: string): string {
-  return join(configDir(), `gchat-directory-${sanitize(email)}.json`);
+  return pluginCachePath('gchat', email.toLowerCase(), 'directory');
 }
 
 export class GChatDirectory {
   private path: string;
+  private readonly scope: string;
   private data: DirectoryFile | null = null;
   private loaded = false;
 
   constructor(email: string) {
+    this.scope = email.toLowerCase();
     this.path = directoryPath(email);
   }
 
@@ -95,22 +86,12 @@ export class GChatDirectory {
   private async load(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
-    if (!existsSync(this.path)) return;
-    try {
-      const content = await readFile(this.path, 'utf-8');
-      this.data = JSON.parse(content) as DirectoryFile;
-    } catch {
-      this.data = null;
-    }
+    this.data = await readPluginCache<DirectoryFile>('gchat', this.scope, 'directory');
   }
 
   private async save(): Promise<void> {
     if (!this.data) return;
-    const dir = dirname(this.path);
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true, mode: 0o700 });
-    }
-    await writeFile(this.path, JSON.stringify(this.data), { mode: 0o600 });
+    await writePluginCache('gchat', this.scope, 'directory', this.data);
   }
 
   private async fetchFull(auth: OAuth2Client): Promise<void> {

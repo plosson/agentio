@@ -10,7 +10,7 @@ const slack = defineServicePlugin<SlackCredentials>()({
   description: 'Use when sending Slack messages via the agentio CLI.',
   registerCommands: registerSlackCommands,
   profile: {
-    add: slackProfileAdd,
+    setup: slackProfileAdd,
     createClient: (credentials) => new SlackClient(credentials),
   },
 });

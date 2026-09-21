@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
 import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
@@ -1147,14 +1147,14 @@ Requires Chrome, Chromium, or Microsoft Edge installed locally.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gmailProfileAdd(options);
+        await addProfileWithSetup('gmail', gmailProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gmailProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gmailProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Gmail...\n');
 
   const tokens = await performOAuthFlow('gmail');
@@ -1167,13 +1167,5 @@ export async function gmailProfileAdd(options: { profile?: string; readOnly?: bo
     throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
   }
 
-  const profileName = await chooseProfileName('gmail', { explicit: options.profile, derived: email, readOnly: options.readOnly });
-
-  await saveProfile('gmail', profileName, { ...tokens, email }, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${email}`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
+  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
 }

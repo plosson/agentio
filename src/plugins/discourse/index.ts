@@ -10,7 +10,7 @@ export default defineServicePlugin<DiscourseCredentials>()({
   description: 'Use when interacting with Discourse forums via the agentio CLI.',
   registerCommands: registerDiscourseCommands,
   profile: {
-    add: discourseProfileAdd,
+    setup: discourseProfileAdd,
     createClient: (credentials) => new DiscourseClient(credentials),
   },
 });

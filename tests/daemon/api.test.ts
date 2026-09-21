@@ -100,6 +100,8 @@ describe('daemon HTTP surface', () => {
     const html = await page.text();
     // The placeholder is fully substituted, and the served nonce matches the CSP.
     expect(html).not.toContain('__CSP_NONCE__');
+    expect(html).not.toContain('__PLUGIN_METADATA__');
+    expect(html).toContain('"gmail":{"displayName":"Gmail"');
     expect(html).toContain(`<script nonce="${nonce}">`);
     expect(html).toContain(`<style nonce="${nonce}">`);
 

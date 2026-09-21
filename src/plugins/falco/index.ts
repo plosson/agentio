@@ -11,7 +11,7 @@ export default defineServicePlugin<FalcoCredentials>()({
   description: 'Use when interacting with Falco accounting and Peppol documents via the agentio CLI.',
   registerCommands: registerFalcoCommands,
   profile: {
-    add: falcoProfileAdd,
+    setup: falcoProfileAdd,
     createClient: (credentials) => new FalcoClient(credentials),
     reauthenticate: reauthenticateFalco,
   },

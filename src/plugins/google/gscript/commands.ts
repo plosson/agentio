@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
 import { fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GScriptClient } from './client';
@@ -447,14 +447,14 @@ file already exists in the project, its existing type is reused.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gscriptProfileAdd(options);
+        await addProfileWithSetup('gscript', gscriptProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gscriptProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gscriptProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Apps Script...\n');
 
   const tokens = await performOAuthFlow('gscript');
@@ -471,8 +471,6 @@ export async function gscriptProfileAdd(options: { profile?: string; readOnly?: 
     );
   }
 
-  const profileName = await chooseProfileName('gscript', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
-
   const credentials: GScriptCredentials = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
@@ -482,10 +480,5 @@ export async function gscriptProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await saveProfile('gscript', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${userEmail}`);
-  if (options.readOnly) console.log(`   Access: read-only`);
-  console.log(`   Test with: agentio gscript list --profile ${profileName}`);
+  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gscript list` };
 }

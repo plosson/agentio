@@ -1,15 +1,15 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { SqlClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { readStdin, prompt } from '../../utils/stdin';
 import { interactiveSelect } from '../../utils/interactive';
-import { enforceWriteAccess } from '../../utils/read-only';
 import { isProfileReadOnly } from '../../config/config-manager';
 import { addExamples } from '../../utils/command-tree';
 import type { SqlCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
   service: 'sql',
@@ -57,17 +57,8 @@ export function registerSqlCommands(program: Command): void {
         const { client: sqlClient, profile } = await getSqlClient(options.profile);
         client = sqlClient;
 
-        // Check if the query is a write operation when profile is read-only
-        const trimmedQuery = queryText.trim().toUpperCase();
-        const isWriteQuery = !trimmedQuery.startsWith('SELECT') &&
-                            !trimmedQuery.startsWith('SHOW') &&
-                            !trimmedQuery.startsWith('DESCRIBE') &&
-                            !trimmedQuery.startsWith('EXPLAIN');
-        if (isWriteQuery) {
-          await enforceWriteAccess('sql', profile, 'execute write query');
-        }
-
-        const result = await client.query({ query: queryText, limit });
+        const readOnly = await isProfileReadOnly('sql', profile);
+        const result = await client.query({ query: queryText, limit }, { readOnly });
         console.log(client.formatResult(result));
       } catch (error) {
         handleError(error);
@@ -105,14 +96,14 @@ export function registerSqlCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await sqlProfileAdd(options);
+        await addProfileWithSetup('sql', sqlProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<void> {
+export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<SetupResult<SqlCredentials>> {
   let url: string;
 
   if (options.interactive) {
@@ -151,20 +142,12 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
   const displayName = extractDisplayName(url);
   console.error(`\nConnected to: ${displayName}\n`);
 
-  const profileName = await chooseProfileName('sql', { explicit: options.profile, derived: displayName, readOnly: options.readOnly });
-
   const credentials: SqlCredentials = {
     url,
     displayName,
   };
 
-  await saveProfile('sql', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio sql query --profile ${profileName} "SELECT 1"`);
+  return { credentials, suggestedProfileName: displayName, info: 'Test with: agentio sql query "SELECT 1"' };
 }
 
 async function promptInteractiveConnection(): Promise<string> {
