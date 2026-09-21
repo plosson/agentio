@@ -1,10 +1,13 @@
 import { Command } from 'commander';
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { listProfiles } from '../../config/config-manager';
 import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { getCredentials } from '../../auth/token-store';
 import { addExamples } from '../../utils/command-tree';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
+import { confirm } from '../../utils/stdin';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import type { ProfileAddOptions } from '../types';
@@ -246,16 +249,68 @@ export async function falcoProfileAdd(options: ProfileAddOptions): Promise<void>
     userEmail: me.email,
   };
 
-  const profileName = await chooseProfileName('falco', {
-    explicit: options.profile,
-    derived: slugifyOrganization(organization.name),
-    readOnly: options.readOnly,
-  });
+  const profileName = await resolveNewProfileName(
+    options,
+    me.id,
+    organization.id,
+    slugifyOrganization(organization.name),
+  );
   await saveProfile('falco', profileName, credentials, { readOnly: options.readOnly });
 
   console.error(`\n  Profile "${profileName}" saved`);
   console.error(`  ${me.firstName} ${me.lastName} <${me.email}>`);
   console.error(`  Organization: ${organization.name} (${organization.id})`);
+}
+
+
+/**
+ * Pick the name a new profile is stored under without destroying an existing
+ * one. Two organizations can slugify to the same name — "Acme, BV" and
+ * "Acme BV", or identically named organizations on two different accounts —
+ * and saveProfile overwrites in place, so an unguarded derived name silently
+ * discards the other profile's credentials.
+ *
+ * Re-authenticating the same (account, organization) pair reuses its profile,
+ * which is the one case where overwriting is what the user meant.
+ */
+async function resolveNewProfileName(
+  options: ProfileAddOptions,
+  accountId: string,
+  organizationId: string,
+  derived: string,
+): Promise<string> {
+  const existing = (await listProfiles('falco'))[0]?.profiles ?? [];
+
+  for (const entry of existing) {
+    const credentials = await getCredentials<FalcoCredentials>('falco', entry.name);
+    if (credentials?.userId === accountId && credentials.organizationId === organizationId) {
+      if (!options.profile || options.profile === entry.name) {
+        console.error(`\n  Updating existing profile "${entry.name}" for this organization`);
+        return entry.name;
+      }
+    }
+  }
+
+  const name = await chooseProfileName('falco', {
+    explicit: options.profile,
+    derived,
+    readOnly: options.readOnly,
+  });
+
+  const clash = existing.find((entry) => entry.name === name);
+  if (clash) {
+    const credentials = await getCredentials<FalcoCredentials>('falco', name);
+    const owner = credentials ? `${credentials.userEmail} / ${credentials.organizationName ?? credentials.organizationId}` : 'another account';
+    console.error(`\n  A profile named "${name}" already exists (${owner}).`);
+    if (!(await confirm(`  Replace it?`))) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        'Cancelled to avoid overwriting an existing profile',
+        `Re-run with --profile <name> to store this login under a different name`,
+      );
+    }
+  }
+  return name;
 }
 
 /** "Acme BV" -> "acme-bv"; falls back to "falco" when nothing usable remains. */

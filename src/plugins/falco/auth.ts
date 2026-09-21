@@ -141,7 +141,15 @@ export async function refreshFalcoToken(refreshToken: string): Promise<FalcoToke
   return requireTokens((await response.json()) as Partial<RawTokens>);
 }
 
-/** Best-effort revocation; Falco does not report a useful failure here. */
+/**
+ * Best-effort revocation; Falco does not report a useful failure here.
+ *
+ * Called when reauthentication supersedes a token. It is NOT called when a
+ * profile is removed: ProfilePlugin has no teardown hook, so the host's generic
+ * remove path deletes the credentials without telling the service. A removed
+ * falco profile therefore leaves its refresh token live on Falco's servers
+ * until it expires. Closing that needs a hook in the plugin contract.
+ */
 export async function revokeFalcoToken(refreshToken: string): Promise<void> {
   try {
     await fetch(`${AUTH_URL}/revoke-refresh-token`, {

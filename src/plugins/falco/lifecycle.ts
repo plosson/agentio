@@ -1,6 +1,6 @@
 import { CliError } from '../../utils/errors';
 import type { CredentialLifecycle } from '../types';
-import { loginToFalco, refreshFalcoToken } from './auth';
+import { loginToFalco, refreshFalcoToken, revokeFalcoToken } from './auth';
 import { FalcoClient } from './client';
 import { promptPassword, promptText } from './prompts';
 import type { FalcoCredentials } from './types';
@@ -104,6 +104,11 @@ export async function reauthenticateFalco(
   const me = await client.getUserMe();
   const organization = me.organizations.find((org) => org.id === replacement.organizationId);
   if (organization) replacement.organizationName = organization.name;
+
+  // The replacement works, so the token it supersedes is now orphaned and
+  // would otherwise stay valid on Falco's servers for its full lifetime.
+  // Revoked only after validation, so a failed reauth leaves the old one usable.
+  await revokeFalcoToken(credentials.refreshToken);
 
   console.error(`  Done (${validation.info})`);
   return replacement;
