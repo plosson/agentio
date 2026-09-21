@@ -1,6 +1,7 @@
 import type { ServiceName } from '../types/config';
 import { confluenceCredentialLifecycle } from './confluence/lifecycle';
 import { dropboxCredentialLifecycle } from './dropbox/lifecycle';
+import { falcoCredentialLifecycle } from './falco/lifecycle';
 import { googleCamelCredentialLifecycle, googleSnakeCredentialLifecycle } from './google/shared';
 import { jiraCredentialLifecycle } from './jira/lifecycle';
 import { revolutCredentialLifecycle } from './revolut/lifecycle';
@@ -9,6 +10,7 @@ import type { RegisteredCredentialLifecycle } from './types';
 const PLUGIN_CREDENTIAL_LIFECYCLES: Partial<Record<ServiceName, RegisteredCredentialLifecycle>> = {
   confluence: confluenceCredentialLifecycle,
   dropbox: dropboxCredentialLifecycle,
+  falco: falcoCredentialLifecycle,
   gcal: googleSnakeCredentialLifecycle,
   gchat: googleCamelCredentialLifecycle,
   gdocs: googleCamelCredentialLifecycle,

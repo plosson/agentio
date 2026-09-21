@@ -1,0 +1,44 @@
+// Extract an embedded PDF from a UBL Invoice/CreditNote XML document.
+//
+// Peppol UBL invoices may include the rendered PDF as a base64-encoded
+// <cbc:EmbeddedDocumentBinaryObject mimeCode='application/pdf' filename='...'> element
+// inside an <cac:AdditionalDocumentReference> > <cac:Attachment>.
+
+const EMBEDDED_RE =
+  /<(?:[a-z]+:)?EmbeddedDocumentBinaryObject\b([^>]*)>([\s\S]*?)<\/(?:[a-z]+:)?EmbeddedDocumentBinaryObject>/gi;
+
+function readAttr(attrs: string, name: string): string | null {
+  const re = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i');
+  const m = re.exec(attrs);
+  return m ? m[1] ?? null : null;
+}
+
+export type EmbeddedPdf = {
+  filename: string | null;
+  bytes: Uint8Array;
+};
+
+/**
+ * Return the first embedded PDF (or image/*) in the given UBL XML.
+ * Returns null if no embedded binary with a PDF mime code is present.
+ */
+export function extractEmbeddedPdf(xml: string): EmbeddedPdf | null {
+  EMBEDDED_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = EMBEDDED_RE.exec(xml)) !== null) {
+    const attrs = m[1] ?? '';
+    const body = m[2] ?? '';
+    const mime = readAttr(attrs, 'mimeCode');
+    if (mime && !mime.toLowerCase().startsWith('application/pdf')) continue;
+    const filename = readAttr(attrs, 'filename');
+    const base64 = body.replace(/\s+/g, '');
+    if (!base64) continue;
+    try {
+      const bytes = Buffer.from(base64, 'base64');
+      return { filename, bytes: new Uint8Array(bytes) };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}

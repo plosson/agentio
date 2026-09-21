@@ -15,6 +15,7 @@ const SERVICE_ORDER = [
   'confluence',
   'discourse',
   'dropbox',
+  'falco',
   'gcal',
   'gchat',
   'gdocs',
@@ -70,6 +71,8 @@ describe('service plugin registry', () => {
     expect(findServicePlugin('dropbox')?.profile?.reauthenticate).toBeFunction();
     expect(findServicePlugin('github')?.profile?.reauthenticate).toBeFunction();
     expect(findServicePlugin('revolut')?.profile?.reauthenticate).toBeFunction();
+    expect(findServicePlugin('falco')?.profile?.reauthenticate).toBeFunction();
+    expect(findServicePlugin('falco')?.credentialLifecycle?.secretFields).toEqual(['refreshToken']);
     expect(findServicePlugin('missing')).toBeUndefined();
   });
 
@@ -80,6 +83,7 @@ describe('service plugin registry', () => {
     expect(findCredentialLifecycle('confluence')).toBe(findServicePlugin('confluence')?.credentialLifecycle);
     expect(findCredentialLifecycle('dropbox')).toBe(findServicePlugin('dropbox')?.credentialLifecycle);
     expect(findCredentialLifecycle('revolut')).toBe(findServicePlugin('revolut')?.credentialLifecycle);
+    expect(findCredentialLifecycle('falco')).toBe(findServicePlugin('falco')?.credentialLifecycle);
     expect(findCredentialLifecycle('slack')).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 import confluence from './confluence';
 import discourse from './discourse';
 import dropbox from './dropbox';
+import falco from './falco';
 import gcal from './google/gcal';
 import gchat from './google/gchat';
 import gdocs from './google/gdocs';
@@ -25,6 +26,7 @@ export const SERVICE_PLUGINS = [
   confluence,
   discourse,
   dropbox,
+  falco,
   gcal,
   gchat,
   gdocs,
