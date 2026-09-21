@@ -6,7 +6,6 @@ import { SqlClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { readStdin, prompt } from '../../utils/stdin';
 import { interactiveSelect } from '../../utils/interactive';
-import { enforceWriteAccess } from '../../utils/read-only';
 import { isProfileReadOnly } from '../../config/config-manager';
 import { addExamples } from '../../utils/command-tree';
 import type { SqlCredentials } from './types';
@@ -57,17 +56,8 @@ export function registerSqlCommands(program: Command): void {
         const { client: sqlClient, profile } = await getSqlClient(options.profile);
         client = sqlClient;
 
-        // Check if the query is a write operation when profile is read-only
-        const trimmedQuery = queryText.trim().toUpperCase();
-        const isWriteQuery = !trimmedQuery.startsWith('SELECT') &&
-                            !trimmedQuery.startsWith('SHOW') &&
-                            !trimmedQuery.startsWith('DESCRIBE') &&
-                            !trimmedQuery.startsWith('EXPLAIN');
-        if (isWriteQuery) {
-          await enforceWriteAccess('sql', profile, 'execute write query');
-        }
-
-        const result = await client.query({ query: queryText, limit });
+        const readOnly = await isProfileReadOnly('sql', profile);
+        const result = await client.query({ query: queryText, limit }, { readOnly });
         console.log(client.formatResult(result));
       } catch (error) {
         handleError(error);
