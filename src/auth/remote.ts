@@ -139,9 +139,30 @@ const KNOWN_CODES = new Set<string>([
  * configuration, not a locked local vault. A non-JSON body (a proxy page) falls
  * back to the status.
  */
-function hubError(status: number, body: { error?: string; code?: string; suggestion?: string }, url: string): CliError {
+function hubError(
+  status: number,
+  body: { error?: string; code?: string; suggestion?: string },
+  url: string,
+  request?: { method: string; path: string },
+): CliError {
   const code: ErrorCode = body.code && KNOWN_CODES.has(body.code) ? (body.code as ErrorCode) : httpStatusToErrorCode(status);
   const detail = body.error ?? `HTTP ${status}`;
+
+  // A PUT to a profile route creates it, so a 404 is not "no such profile" —
+  // the hub has no route for that service at all, which means it predates it.
+  // Without this the caller sees the hub's bare "Not found", with nothing to
+  // say that remote mode was even in play.
+  if (code === 'NOT_FOUND' && request?.method === 'PUT') {
+    const service = serviceOfProfileRoute(request.path);
+    if (service) {
+      return new CliError(
+        'CONFIG_ERROR',
+        `The vault hub at ${url} does not know the service "${service}"`,
+        `The hub is running an older agentio. Update it, or unset the hub token to store this profile in the local vault.`,
+      );
+    }
+  }
+
   switch (code) {
     case 'AUTH_FAILED':
       return new CliError('AUTH_FAILED', `The vault hub rejected this token: ${detail}`,
@@ -192,7 +213,12 @@ export async function hubCall<T>(url: string, path: string, { method = 'GET', bo
   const text = await response.text();
   let answer: unknown = null;
   try { answer = text ? JSON.parse(text) : null; } catch { answer = null; }
-  if (!response.ok) throw hubError(response.status, (answer ?? {}) as { error?: string; code?: string; suggestion?: string }, url);
+  if (!response.ok) {
+    throw hubError(response.status, (answer ?? {}) as { error?: string; code?: string; suggestion?: string }, url, {
+      method,
+      path,
+    });
+  }
   return answer as T;
 }
 
@@ -200,6 +226,12 @@ const hubRequest = <T>(path: string, method: HubCallOptions['method'] = 'GET', b
   hubCall<T>(hub().url, path, { method, body, token: remoteToken()! });
 
 const profileRoute = (service: ServiceName, name: string) => `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}`;
+
+/** The service segment of a profile route, or null when the path is not one. */
+function serviceOfProfileRoute(path: string): string | null {
+  const match = /^\/v1\/profiles\/([^/]+)\/[^/]+$/.exec(path);
+  return match ? decodeURIComponent(match[1]!) : null;
+}
 
 /** This key's view of the hub, fetched once per process and shared by both readers below. */
 function remoteListing(): Promise<RemoteListing> {

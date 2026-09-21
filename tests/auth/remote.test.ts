@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { encodeToken } from '../../src/auth/token';
-import { clearRemoteToken, hub, isRemoteMode, remoteProfiles, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
+import { clearRemoteToken, hub, isRemoteMode, remoteDeleteProfile, remoteProfiles, remoteSaveProfile, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
+import { CliError } from '../../src/utils/errors';
 import { getCredentials, setCredentials } from '../../src/auth/token-store';
 import { isProfileReadOnly, listProfileRefs, loadConfig, resolveProfile } from '../../src/config/config-manager';
 import { enforceWriteAccess } from '../../src/utils/read-only';
@@ -65,6 +66,43 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.AGENTIO_TOKEN;
   resetRemoteCache();
+});
+
+describe('a hub that does not know the service', () => {
+  test('explains the version mismatch instead of passing on a bare "Not found"', async () => {
+    // A hub predating a service has no route for it, so its router falls
+    // through to the generic 404. Relaying that verbatim told the user nothing
+    // — not that remote mode was in play, nor which hub, nor what was wrong.
+    script['PUT /v1/profiles/falco/acme'] = { status: 404, body: { error: 'Not found', code: 'NOT_FOUND' } };
+
+    const error = (await remoteSaveProfile('falco' as never, 'acme', { token: 'x' }, {}).catch((e) => e)) as CliError;
+
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('CONFIG_ERROR');
+    expect(error.message).toContain('does not know the service "falco"');
+    expect(error.message).toContain(url);
+    expect(error.suggestion).toContain('older agentio');
+  });
+
+  test('leaves a 404 on other methods alone, so a missing profile stays a missing profile', async () => {
+    // remoteDeleteProfile reads a 404 as "already gone"; re-coding it would
+    // turn an idempotent delete into a hard failure.
+    script['DELETE /v1/profiles/gmail/gone'] = { status: 404, body: { error: 'Not found', code: 'PROFILE_NOT_FOUND' } };
+
+    expect(await remoteDeleteProfile('gmail', 'gone')).toBe('absent');
+  });
+
+  test('keeps a real hub refusal on a PUT rather than blaming the hub version', async () => {
+    script['PUT /v1/profiles/gmail/work'] = {
+      status: 403,
+      body: { error: 'this key may not manage profiles', code: 'PERMISSION_DENIED' },
+    };
+
+    const error = (await remoteSaveProfile('gmail', 'work', { token: 'x' }, {}).catch((e) => e)) as CliError;
+
+    expect(error.code).toBe('PERMISSION_DENIED');
+    expect(error.message).toContain('may not manage profiles');
+  });
 });
 
 describe('remote mode', () => {
