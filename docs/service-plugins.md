@@ -53,6 +53,7 @@ src/plugins/
 ├── confluence/          # OAuth lifecycle owned by the service folder
 ├── discourse/
 ├── dropbox/
+├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
 ├── revolut/
 ├── sql/

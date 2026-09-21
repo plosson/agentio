@@ -178,6 +178,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
 | **Discourse** | API Key | `list`, `get`, `categories` |
+| **Falco** | Password + 2FA | `peppol list`, `peppol get`, `peppol sync`, `peppol mark-paid`, `invoices sync` |
 | **RSS** | None | `articles`, `get`, `info` |
 
 ## Usage Examples

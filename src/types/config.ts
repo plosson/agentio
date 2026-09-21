@@ -43,13 +43,14 @@ export interface Config {
     dropbox?: ProfileValue[];
     sql?: ProfileValue[];
     revolut?: ProfileValue[];
+    falco?: ProfileValue[];
   };
   apiKeys?: ApiKey[];
 }
 
-export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut';
+export type ServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'telegram' | 'discourse' | 'dropbox' | 'sql' | 'revolut' | 'falco';
 
 export const ALL_SERVICES: readonly ServiceName[] = [
   'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides', 'gscript',
-  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'sql', 'revolut',
+  'github', 'jira', 'confluence', 'slack', 'telegram', 'discourse', 'dropbox', 'sql', 'revolut', 'falco',
 ];

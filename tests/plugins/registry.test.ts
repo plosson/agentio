@@ -10,11 +10,13 @@ import {
   SERVICE_PLUGINS,
   SERVICE_REGISTRY,
 } from '../../src/plugins/registry';
+import type { RegisteredServicePlugin } from '../../src/plugins/types';
 
 const SERVICE_ORDER = [
   'confluence',
   'discourse',
   'dropbox',
+  'falco',
   'gcal',
   'gchat',
   'gdocs',
@@ -59,6 +61,24 @@ describe('service plugin registry', () => {
     expect(program.commands.map((command) => command.name())).toEqual(SERVICE_ORDER);
   });
 
+  test('every profile-backed plugin registers its own `profile add` command', () => {
+    const program = new Command();
+    registerServiceCommands(program);
+
+    // The host's global `profile add <service>` dispatches to the plugin hook,
+    // but each service must also surface `agentio <service> profile add`.
+    // The catalog is a const tuple, so widen to the host's own erased view
+    // before reaching for optional hooks.
+    const plugins: readonly RegisteredServicePlugin[] = SERVICE_REGISTRY;
+    const missing = plugins.filter((plugin) => plugin.profile?.add).filter((plugin) => {
+      const service = program.commands.find((command) => command.name() === plugin.id);
+      const profile = service?.commands.find((command) => command.name() === 'profile');
+      return !profile?.commands.some((command) => command.name() === 'add');
+    });
+
+    expect(missing.map((plugin) => plugin.id)).toEqual([]);
+  });
+
   test('exposes profile hooks only for authenticated plugins', () => {
     expect(findServicePlugin('rss')?.profile).toBeUndefined();
     expect(findServicePlugin('slack')?.profile?.createClient).toBeFunction();
@@ -70,6 +90,8 @@ describe('service plugin registry', () => {
     expect(findServicePlugin('dropbox')?.profile?.reauthenticate).toBeFunction();
     expect(findServicePlugin('github')?.profile?.reauthenticate).toBeFunction();
     expect(findServicePlugin('revolut')?.profile?.reauthenticate).toBeFunction();
+    expect(findServicePlugin('falco')?.profile?.reauthenticate).toBeFunction();
+    expect(findServicePlugin('falco')?.credentialLifecycle?.secretFields).toEqual(['refreshToken']);
     expect(findServicePlugin('missing')).toBeUndefined();
   });
 
@@ -80,6 +102,7 @@ describe('service plugin registry', () => {
     expect(findCredentialLifecycle('confluence')).toBe(findServicePlugin('confluence')?.credentialLifecycle);
     expect(findCredentialLifecycle('dropbox')).toBe(findServicePlugin('dropbox')?.credentialLifecycle);
     expect(findCredentialLifecycle('revolut')).toBe(findServicePlugin('revolut')?.credentialLifecycle);
+    expect(findCredentialLifecycle('falco')).toBe(findServicePlugin('falco')?.credentialLifecycle);
     expect(findCredentialLifecycle('slack')).toBeUndefined();
   });
 });
