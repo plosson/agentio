@@ -23,7 +23,7 @@ export default defineServicePlugin<GitHubCredentials>()({
   description: 'Use when interacting with GitHub via the agentio CLI.',
   registerCommands: registerGitHubCommands,
   profile: {
-    add: githubProfileAdd,
+    setup: githubProfileAdd,
     createClient: (credentials) => new GitHubClient(credentials),
     reauthenticate: reauthenticateGitHub,
   },

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
 import { GTasksClient } from './client';
 import {
@@ -431,14 +431,14 @@ At least one of --parent or --previous is required.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gtasksProfileAdd(options);
+        await addProfileWithSetup('gtasks', gtasksProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gtasksProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gtasksProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Tasks...\n');
 
   const tokens = await performOAuthFlow('gtasks');
@@ -451,13 +451,5 @@ export async function gtasksProfileAdd(options: { profile?: string; readOnly?: b
     throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
   }
 
-  const profileName = await chooseProfileName('gtasks', { explicit: options.profile, derived: email, readOnly: options.readOnly });
-
-  await saveProfile('gtasks', profileName, { ...tokens, email }, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${email}`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
+  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
 }

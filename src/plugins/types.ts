@@ -8,10 +8,8 @@ export interface ProfileAddOptions {
 }
 
 export interface ProfilePlugin<TCredentials extends object> {
-  /** Legacy fallback while bundled plugins migrate to host-owned persistence. */
-  add?(options: ProfileAddOptions): Promise<void>;
   /** Authenticate and return credentials; the host chooses the name and persists them. */
-  setup?(options: ProfileAddOptions): Promise<SetupResult<TCredentials>>;
+  setup(options: ProfileAddOptions): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
   reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildConsentUrl,
@@ -46,6 +46,7 @@ import type {
   RevolutCredentials,
   RevolutEnvironment,
 } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getRevolutClient = createClientGetter<RevolutCredentials, RevolutClient>({
   service: 'revolut',
@@ -978,7 +979,7 @@ export function registerRevolutCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await revolutProfileAdd(options);
+        await addProfileWithSetup('revolut', revolutProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
@@ -994,7 +995,7 @@ export interface RevolutProfileAddOptions {
   readOnly?: boolean;
 }
 
-export async function revolutProfileAdd(options: RevolutProfileAddOptions): Promise<void> {
+export async function revolutProfileAdd(options: RevolutProfileAddOptions): Promise<SetupResult<RevolutCredentials>> {
   console.error('\nRevolut Business Setup\n');
   console.error('Prerequisite: in the Revolut Business app, go to Settings > APIs > Business API,');
   console.error('upload your X.509 public certificate, and register an OAuth redirect URI.\n');
@@ -1055,13 +1056,5 @@ export async function revolutProfileAdd(options: RevolutProfileAddOptions): Prom
   console.error(`\nConnected to Revolut ${environment}`);
   console.error(`${validation.info}\n`);
 
-  const profileName = await chooseProfileName('revolut', { explicit: options.profile, derived: environment, readOnly: options.readOnly });
-
-  await saveProfile('revolut', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio revolut accounts --profile ${profileName}`);
+  return { credentials, suggestedProfileName: environment, info: 'Test with: agentio revolut accounts' };
 }

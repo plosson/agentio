@@ -11,7 +11,7 @@ export default defineServicePlugin<DropboxCredentials>()({
   description: 'Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.',
   registerCommands: registerDropboxCommands,
   profile: {
-    add: dropboxProfileAdd,
+    setup: dropboxProfileAdd,
     createClient: (credentials) => new DropboxClient(credentials),
     reauthenticate: reauthenticateDropbox,
   },

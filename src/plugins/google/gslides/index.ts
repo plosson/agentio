@@ -12,7 +12,7 @@ export default defineServicePlugin<GSlidesCredentials, GoogleCamelTokens>()({
   description: 'Use when interacting with Google Slides via the agentio CLI.',
   registerCommands: registerGSlidesCommands,
   profile: {
-    add: gslidesProfileAdd,
+    setup: gslidesProfileAdd,
     createClient: (credentials) => new GSlidesClient(credentials),
     reauthenticate: reauthenticateGoogleCamel<GSlidesCredentials>('gslides'),
   },

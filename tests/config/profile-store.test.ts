@@ -26,8 +26,9 @@ describe('chooseProfileName', () => {
     expect(await chooseProfileName('github', { derived: 'octocat', readOnly: true })).toBe('octocat-readonly');
   });
 
-  test('without --read-only the derived name is kept even when taken, as before', async () => {
-    expect(await chooseProfileName('gmail', { derived: 'me@example.com' })).toBe('me@example.com');
+  test('a derived name never silently overwrites an existing profile', async () => {
+    expect(await chooseProfileName('gmail', { derived: 'me@example.com' })).toBe('me@example.com-2');
+    expect(await chooseProfileName('gmail', { explicit: 'me@example.com', derived: 'ignored' })).toBe('me@example.com');
   });
 });
 

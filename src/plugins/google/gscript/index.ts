@@ -12,7 +12,7 @@ export default defineServicePlugin<GScriptCredentials, GoogleCamelTokens>()({
   description: 'Use when interacting with Google Apps Script via the agentio CLI.',
   registerCommands: registerGScriptCommands,
   profile: {
-    add: gscriptProfileAdd,
+    setup: gscriptProfileAdd,
     createClient: (credentials) => new GScriptClient(credentials),
     reauthenticate: reauthenticateGoogleCamel<GScriptCredentials>('gscript'),
   },

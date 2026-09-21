@@ -10,7 +10,7 @@ export default defineServicePlugin<SqlCredentials>()({
   description: 'Use when running SQL queries via the agentio CLI.',
   registerCommands: registerSqlCommands,
   profile: {
-    add: sqlProfileAdd,
+    setup: sqlProfileAdd,
     createClient: (credentials) => new SqlClient(credentials),
   },
 });

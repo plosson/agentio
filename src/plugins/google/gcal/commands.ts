@@ -3,7 +3,7 @@ import { calendar } from '@googleapis/calendar';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
 import { GCalClient } from './client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from './output';
@@ -484,14 +484,14 @@ export function registerGCalCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gcalProfileAdd(options);
+        await addProfileWithSetup('gcal', gcalProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gcalProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gcalProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Calendar...\n');
 
   const tokens = await performOAuthFlow('gcal');
@@ -504,13 +504,5 @@ export async function gcalProfileAdd(options: { profile?: string; readOnly?: boo
     throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
   }
 
-  const profileName = await chooseProfileName('gcal', { explicit: options.profile, derived: email, readOnly: options.readOnly });
-
-  await saveProfile('gcal', profileName, { ...tokens, email }, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${email}`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
+  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
 }

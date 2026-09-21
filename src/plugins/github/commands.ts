@@ -1,10 +1,11 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { GitHubClient } from './client';
 import { performGitHubOAuthFlow } from './oauth';
 import { handleError } from '../../utils/errors';
 import type { GitHubCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 export function registerGitHubCommands(program: Command): void {
   const github = program
@@ -25,14 +26,14 @@ export function registerGitHubCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await githubProfileAdd(options);
+        await addProfileWithSetup('github', githubProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function githubProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function githubProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<GitHubCredentials>> {
   console.error('\nGitHub Setup\n');
   console.error('This will open your browser to authorize agentio with GitHub.');
   console.error('You will need to grant access to repositories where you want to set secrets.\n');
@@ -54,15 +55,6 @@ export async function githubProfileAdd(options: { profile?: string; readOnly?: b
   credentials.username = user.login;
   credentials.email = user.email;
 
-  const profileName = await chooseProfileName('github', { explicit: options.profile, derived: user.login, readOnly: options.readOnly });
-
   console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
-
-  await saveProfile('github', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`  Access: read-only`);
-  }
-  console.log(`  Install secrets: agentio github install owner/repo --profile ${profileName}`);
+  return { credentials, suggestedProfileName: user.login, info: 'Install secrets: agentio github install owner/repo' };
 }

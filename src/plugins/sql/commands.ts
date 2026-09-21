@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { SqlClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
@@ -9,6 +9,7 @@ import { interactiveSelect } from '../../utils/interactive';
 import { isProfileReadOnly } from '../../config/config-manager';
 import { addExamples } from '../../utils/command-tree';
 import type { SqlCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
   service: 'sql',
@@ -95,14 +96,14 @@ export function registerSqlCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await sqlProfileAdd(options);
+        await addProfileWithSetup('sql', sqlProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<void> {
+export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<SetupResult<SqlCredentials>> {
   let url: string;
 
   if (options.interactive) {
@@ -141,20 +142,12 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
   const displayName = extractDisplayName(url);
   console.error(`\nConnected to: ${displayName}\n`);
 
-  const profileName = await chooseProfileName('sql', { explicit: options.profile, derived: displayName, readOnly: options.readOnly });
-
   const credentials: SqlCredentials = {
     url,
     displayName,
   };
 
-  await saveProfile('sql', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio sql query --profile ${profileName} "SELECT 1"`);
+  return { credentials, suggestedProfileName: displayName, info: 'Test with: agentio sql query "SELECT 1"' };
 }
 
 async function promptInteractiveConnection(): Promise<string> {

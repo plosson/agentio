@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveProfile } from '../../config/config-manager';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { TelegramClient } from './client';
 import { CliError, handleError, multipleProfilesError } from '../../utils/errors';
@@ -9,6 +9,7 @@ import { readStdin, prompt } from '../../utils/stdin';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addExamples } from '../../utils/command-tree';
 import type { TelegramCredentials, TelegramSendOptions } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getTelegramClient = createClientGetter<TelegramCredentials, TelegramClient>({
   service: 'telegram',
@@ -91,7 +92,7 @@ export function registerTelegramCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await telegramProfileAdd(options);
+        await addProfileWithSetup('telegram', telegramProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
@@ -99,7 +100,7 @@ export function registerTelegramCommands(program: Command): void {
 
 }
 
-export async function telegramProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function telegramProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<TelegramCredentials>> {
   console.error('\nTelegram Bot Setup\n');
 
   // Step 1: Create bot
@@ -177,8 +178,6 @@ export async function telegramProfileAdd(options: { profile?: string; readOnly?:
   console.error('    /setuserpic - Set bot photo');
   console.error('    /setdescription - Set bot description\n');
 
-  const profileName = await chooseProfileName('telegram', { explicit: options.profile, derived: botInfo.username, readOnly: options.readOnly });
-
   const credentials: TelegramCredentials = {
     botToken: botToken,
     channelId: channelId,
@@ -186,11 +185,5 @@ export async function telegramProfileAdd(options: { profile?: string; readOnly?:
     channelName: channelName,
   };
 
-  await saveProfile('telegram', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio telegram send --profile ${profileName} "Hello world"`);
+  return { credentials, suggestedProfileName: botInfo.username, info: 'Test with: agentio telegram send "Hello world"' };
 }

@@ -12,7 +12,7 @@ export default defineServicePlugin<GCalCredentials, OAuthTokens>()({
   description: 'Use when interacting with Google Calendar via the agentio CLI.',
   registerCommands: registerGCalCommands,
   profile: {
-    add: gcalProfileAdd,
+    setup: gcalProfileAdd,
     createClient: (credentials) => new GCalClient(googleAuthFromSnakeCredentials(credentials)),
     reauthenticate: reauthenticateGoogleSnake('gcal'),
   },

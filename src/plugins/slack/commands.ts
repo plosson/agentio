@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { addExamples } from '../../utils/command-tree';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
@@ -10,6 +10,7 @@ import { prompt, readStdin } from '../../utils/stdin';
 import { SlackClient } from './client';
 import { printSlackSendResult } from './output';
 import type { SlackCredentials, SlackWebhookCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
   service: 'slack',
@@ -121,21 +122,14 @@ export function registerSlackCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await slackProfileAdd(options);
+        await addProfileWithSetup('slack', slackProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function slackProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
-  if (!options.profile) {
-    throw new CliError('INVALID_PARAMS', 'Profile name is required', 'Use --profile <name>');
-  }
-  await setupWebhookProfile(options.profile, options.readOnly);
-}
-
-async function setupWebhookProfile(profileName: string, readOnly?: boolean): Promise<void> {
+export async function slackProfileAdd(_options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<SlackCredentials>> {
   console.error('\nSlack Webhook Setup\n');
   console.error('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
   console.error('2. Enable "Incoming Webhooks" in Features');
@@ -190,11 +184,9 @@ async function setupWebhookProfile(profileName: string, readOnly?: boolean): Pro
     channelName: channelName || undefined,
   };
 
-  await saveProfile('slack', profileName, credentials, { readOnly });
-
-  console.log(`\nSuccess! Webhook profile "${profileName}" configured.`);
-  if (readOnly) {
-    console.log('   Access: read-only');
-  }
-  console.log(`   Test with: agentio slack send --profile ${profileName} "Hello from agentio"`);
+  return {
+    credentials,
+    suggestedProfileName: channelName || 'webhook',
+    info: 'Test with: agentio slack send "Hello from agentio"',
+  };
 }

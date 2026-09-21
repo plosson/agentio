@@ -72,8 +72,9 @@ src/plugins/
 
 Every plugin exports one object created with `defineServicePlugin`. The object
 provides stable metadata and a Commander registration function. A service that
-stores profiles also provides `profile.add` and `profile.createClient`; the host
-uses these hooks for the global `profile add` and `status` commands.
+stores profiles also provides `profile.setup` and `profile.createClient`; setup
+returns credentials and a suggested name, while the host chooses the final name
+and persists them. The global `profile add` and `status` commands use these hooks.
 
 An OAuth plugin can also expose `profile.reauthenticate` and
 `credentialLifecycle`. The plugin owns its credential shape, expiry rule,

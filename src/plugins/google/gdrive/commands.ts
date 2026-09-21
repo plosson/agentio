@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GDriveClient } from './client';
@@ -573,14 +573,14 @@ before Google deletes them permanently.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gdriveProfileAdd(options);
+        await addProfileWithSetup('gdrive', gdriveProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gdriveProfileAdd(options: { profile?: string; readonly?: boolean; full?: boolean; readOnly?: boolean }): Promise<void> {
+export async function gdriveProfileAdd(options: { profile?: string; readonly?: boolean; full?: boolean; readOnly?: boolean }) {
   console.error('Google Drive Setup\n');
 
   let accessLevel: GDriveAccessLevel;
@@ -615,8 +615,6 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
     );
   }
 
-  const profileName = await chooseProfileName('gdrive', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
-
   const credentials: GDriveCredentials = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
@@ -627,13 +625,9 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
     accessLevel,
   };
 
-  await saveProfile('gdrive', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${userEmail}`);
-  console.log(`   API Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}`);
-  if (options.readOnly) {
-    console.log(`   Profile Access: read-only`);
-  }
-  console.log(`   Test with: agentio gdrive list --profile ${profileName}`);
+  return {
+    credentials,
+    suggestedProfileName: userEmail,
+    info: `Email: ${userEmail}\nAPI Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}\nTest with: agentio gdrive list`,
+  };
 }

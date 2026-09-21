@@ -11,7 +11,7 @@ export default defineServicePlugin<RevolutCredentials>()({
   description: 'Use when interacting with Revolut Business via the agentio CLI.',
   registerCommands: registerRevolutCommands,
   profile: {
-    add: revolutProfileAdd,
+    setup: revolutProfileAdd,
     createClient: (credentials) => new RevolutClient(credentials),
     reauthenticate: reauthenticateRevolut,
   },

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../../config/profile-store';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GSheetsClient } from './client';
@@ -588,14 +588,14 @@ Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.`,
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await gsheetsProfileAdd(options);
+        await addProfileWithSetup('gsheets', gsheetsProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
     });
 }
 
-export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<void> {
+export async function gsheetsProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
   console.error('Starting OAuth flow for Google Sheets...\n');
 
   const tokens = await performOAuthFlow('gsheets');
@@ -609,8 +609,6 @@ export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: 
     throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
   }
 
-  const profileName = await chooseProfileName('gsheets', { explicit: options.profile, derived: userEmail, readOnly: options.readOnly });
-
   const credentials: GSheetsCredentials = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
@@ -620,12 +618,5 @@ export async function gsheetsProfileAdd(options: { profile?: string; readOnly?: 
     email: userEmail,
   };
 
-  await saveProfile('gsheets', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nSuccess! Profile "${profileName}" configured.`);
-  console.log(`   Email: ${userEmail}`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio gsheets list --profile ${profileName}`);
+  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gsheets list` };
 }

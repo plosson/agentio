@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   performConfluenceOAuthFlow,
@@ -23,6 +23,7 @@ import {
   printConfluenceCommentResult,
 } from './output';
 import type { ConfluenceCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getConfluenceClient = createClientGetter<ConfluenceCredentials, ConfluenceClient>({
   service: 'confluence',
@@ -349,7 +350,7 @@ export function registerConfluenceCommands(program: Command): void {
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await confluenceProfileAdd(options);
+        await addProfileWithSetup('confluence', confluenceProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
@@ -359,7 +360,7 @@ export function registerConfluenceCommands(program: Command): void {
 export async function confluenceProfileAdd(options: {
   profile?: string;
   readOnly?: boolean;
-}): Promise<void> {
+}): Promise<SetupResult<ConfluenceCredentials>> {
   console.error('\nConfluence OAuth Setup\n');
 
   const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
@@ -378,7 +379,6 @@ export async function confluenceProfileAdd(options: {
   console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
 
   const siteHostname = new URL(result.siteUrl).hostname;
-  const profileName = await chooseProfileName('confluence', { explicit: options.profile, derived: siteHostname, readOnly: options.readOnly });
 
   const credentials: ConfluenceCredentials = {
     accessToken: result.accessToken,
@@ -388,11 +388,5 @@ export async function confluenceProfileAdd(options: {
     siteUrl: result.siteUrl,
   };
 
-  await saveProfile('confluence', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio confluence spaces --profile ${profileName}`);
+  return { credentials, suggestedProfileName: siteHostname, info: 'Test with: agentio confluence spaces' };
 }

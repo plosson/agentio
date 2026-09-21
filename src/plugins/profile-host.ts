@@ -35,14 +35,9 @@ export async function addProfileFromPlugin(
   options: ProfileAddOptions,
 ): Promise<void> {
   if (!plugin.profile) throw new Error(`No profile setup registered for ${plugin.id}`);
-  if (!isDeclarativePlugin(plugin) && !plugin.profile.setup) {
-    if (!plugin.profile.add) throw new Error(`No profile setup registered for ${plugin.id}`);
-    await plugin.profile.add(options);
-    return;
-  }
 
   const result = isDeclarativePlugin(plugin)
     ? await plugin.profile.setup({ ...options }, createSetupContext())
-    : await plugin.profile.setup!(options);
+    : await plugin.profile.setup(options);
   await persistSetupResult(plugin.id, result, options);
 }

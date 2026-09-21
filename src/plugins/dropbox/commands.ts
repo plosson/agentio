@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { chooseProfileName, saveProfile } from '../../config/profile-store';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildAuthorizeUrl,
@@ -22,6 +22,7 @@ import {
   printDropboxUploaded,
 } from './output';
 import type { DropboxCredentials } from './types';
+import type { SetupResult } from '../../plugin-sdk';
 
 const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
   service: 'dropbox',
@@ -401,7 +402,7 @@ Deleted items go to the Dropbox trash and stay recoverable for 30 days
     .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
-        await dropboxProfileAdd(options);
+        await addProfileWithSetup('dropbox', dropboxProfileAdd, options);
       } catch (error) {
         handleError(error);
       }
@@ -414,7 +415,7 @@ export interface DropboxProfileAddOptions {
   readOnly?: boolean;
 }
 
-export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Promise<void> {
+export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Promise<SetupResult<DropboxCredentials>> {
   console.error('\nDropbox Setup\n');
   console.error('Prerequisite: create an app at https://www.dropbox.com/developers/apps');
   console.error('  1. Choose "Scoped access" and "Full Dropbox"');
@@ -460,14 +461,9 @@ export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Prom
   credentials.name = account.name;
   credentials.accountId = account.accountId;
 
-  const profileName = await chooseProfileName('dropbox', { explicit: options.profile, derived: account.email, readOnly: options.readOnly });
-
-  await saveProfile('dropbox', profileName, credentials, { readOnly: options.readOnly });
-
-  console.log(`\nProfile "${profileName}" configured!`);
-  console.log(`   Account: ${account.name} <${account.email}>`);
-  if (options.readOnly) {
-    console.log(`   Access: read-only`);
-  }
-  console.log(`   Test with: agentio dropbox list --profile ${profileName}`);
+  return {
+    credentials,
+    suggestedProfileName: account.email,
+    info: `Account: ${account.name} <${account.email}>\nTest with: agentio dropbox list`,
+  };
 }

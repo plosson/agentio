@@ -10,7 +10,7 @@ export default defineServicePlugin<TelegramCredentials>()({
   description: 'Use when sending Telegram messages via the agentio CLI.',
   registerCommands: registerTelegramCommands,
   profile: {
-    add: telegramProfileAdd,
+    setup: telegramProfileAdd,
     createClient: (credentials) => new TelegramClient(credentials.botToken, credentials.channelId),
   },
 });

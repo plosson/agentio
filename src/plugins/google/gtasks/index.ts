@@ -12,7 +12,7 @@ export default defineServicePlugin<GTasksCredentials, OAuthTokens>()({
   description: 'Use when interacting with Google Tasks via the agentio CLI.',
   registerCommands: registerGTasksCommands,
   profile: {
-    add: gtasksProfileAdd,
+    setup: gtasksProfileAdd,
     createClient: (credentials) => new GTasksClient(googleAuthFromSnakeCredentials(credentials)),
     reauthenticate: reauthenticateGoogleSnake('gtasks'),
   },
