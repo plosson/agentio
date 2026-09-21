@@ -24,7 +24,7 @@ import {
 import { promptChoice, promptPassword, promptText } from './prompts';
 import { extractEmbeddedPdf } from './ubl';
 import { renderUblXmlToPdf } from './ubl-render';
-import type { BillingDocument, FalcoCredentials, InvoicePaymentStatus, PeppolDocument } from './types';
+import type { BillingDocument, FalcoCredentials, Invoice, InvoicePaymentStatus, PeppolDocument } from './types';
 
 const getFalcoClient = createClientGetter<FalcoCredentials, FalcoClient>({
   service: 'falco',
@@ -626,10 +626,12 @@ interface MarkPaidOptions {
 }
 
 async function runMarkPaid(ref: string, options: MarkPaidOptions): Promise<void> {
-  const status: InvoicePaymentStatus = options.unpaid ? 'NotPaid' : (options.status as InvoicePaymentStatus);
-  if (status !== 'Paid' && status !== 'NotPaid') {
+  // Validate what was typed before --unpaid overrides it, so a bad --status is
+  // never silently discarded by the shortcut.
+  if (options.status !== 'Paid' && options.status !== 'NotPaid') {
     throw new CliError('INVALID_PARAMS', `--status must be Paid or NotPaid, got: ${options.status}`);
   }
+  const status: InvoicePaymentStatus = options.unpaid ? 'NotPaid' : options.status;
 
   const { client, profile } = await getFalcoClient(options.profile);
   await enforceWriteAccess('falco', profile, 'mark an invoice as paid');
@@ -662,14 +664,23 @@ async function runMarkPaid(ref: string, options: MarkPaidOptions): Promise<void>
 
   await client.setInvoicePaymentStatus(invoice.id, status);
 
-  // Falco accepts the write before it is visible, so confirm by re-reading.
-  const after = await client.listAllInvoices();
-  const updated = after.find((i) => i.id === invoice.id);
+  // The write has landed. Everything below only confirms it, so a failure here
+  // must never be reported as though the change did not happen.
+  let updated: Invoice | undefined;
+  try {
+    updated = (await client.listAllInvoices()).find((i) => i.id === invoice.id);
+  } catch (error) {
+    console.error(`  could not re-read to confirm: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const confirmed = updated?.paymentStatus === status;
 
   printPaymentStatusChange(label, invoice.paymentStatus, updated?.paymentStatus ?? status, confirmed);
   if (options.format === 'json' && updated) console.log(JSON.stringify(updated, null, 2));
   if (!confirmed) {
-    throw new CliError('API_ERROR', 'Falco accepted the change but it is not visible yet', 'Re-run to check');
+    throw new CliError(
+      'API_ERROR',
+      `Falco accepted the change to ${status} but it is not visible yet`,
+      'The write was sent; nothing needs redoing. Re-run to confirm it landed.',
+    );
   }
 }

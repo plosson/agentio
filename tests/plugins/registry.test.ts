@@ -10,6 +10,7 @@ import {
   SERVICE_PLUGINS,
   SERVICE_REGISTRY,
 } from '../../src/plugins/registry';
+import type { RegisteredServicePlugin } from '../../src/plugins/types';
 
 const SERVICE_ORDER = [
   'confluence',
@@ -66,7 +67,10 @@ describe('service plugin registry', () => {
 
     // The host's global `profile add <service>` dispatches to the plugin hook,
     // but each service must also surface `agentio <service> profile add`.
-    const missing = SERVICE_PLUGINS.filter((plugin) => plugin.profile?.add).filter((plugin) => {
+    // The catalog is a const tuple, so widen to the host's own erased view
+    // before reaching for optional hooks.
+    const plugins: readonly RegisteredServicePlugin[] = SERVICE_REGISTRY;
+    const missing = plugins.filter((plugin) => plugin.profile?.add).filter((plugin) => {
       const service = program.commands.find((command) => command.name() === plugin.id);
       const profile = service?.commands.find((command) => command.name() === 'profile');
       return !profile?.commands.some((command) => command.name() === 'add');
