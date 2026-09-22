@@ -83,8 +83,9 @@ Three hosts, all reached over HTTPS with a bearer access token (`falcio/src/lib/
 | `/peppol/document/{documentId}` | GET | `peppol get`, `peppol sync`. Serves **raw UBL XML**, not JSON |
 | `/api.billing/billing-documents/period/{orgId}` | POST | `invoices sync` |
 | `/api.billing/billing-documents/src/{docId}` | GET | `invoices sync` — PDF bytes |
-| `/document/invoices?…` | GET | `peppol mark-paid` — locates the invoice |
-| `/document/invoices/status` | PUT | `peppol mark-paid` — body `{ DocumentId, PaymentStatus }` |
+| `/document/invoices?…` | GET | `peppol mark-paid` — locates the invoice in the local register |
+| `/document/invoices/status` | PUT | `peppol mark-paid` — body `{ DocumentId, PaymentStatus }` when found in the register |
+| `/peppol/document/{id}/status` | PUT | `peppol mark-paid` fallback — body `{ Status }` when the inbox row is absent from `/document/invoices` (fiduciary / NotImported) |
 
 Two pagination walkers wrap the list endpoints (`listAllPeppolDocuments`, `listAllInvoices`) and must be preserved; both take a progress callback that the sync commands use for per-page output.
 

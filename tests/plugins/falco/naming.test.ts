@@ -25,6 +25,9 @@ function peppolDocument(overrides: Partial<PeppolDocument> = {}): PeppolDocument
     importDate: null,
     fiduciaryDocumentId: null,
     lastInvoiceResponse: null,
+    paymentStatus: 'NotPaid',
+    comment: null,
+    documentType: 'Invoice',
     ...overrides,
   };
 }

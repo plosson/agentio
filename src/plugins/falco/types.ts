@@ -90,6 +90,10 @@ export interface PeppolDocument {
   importDate: string | null;
   fiduciaryDocumentId: string | null;
   lastInvoiceResponse: unknown;
+  /** Bookkeeping flag on the Peppol inbox row itself (Paid / NotPaid). */
+  paymentStatus: string | null;
+  comment: string | null;
+  documentType: string | null;
 }
 
 export type BillingDocumentType =

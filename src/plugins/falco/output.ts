@@ -57,6 +57,13 @@ export function describeInvoice(invoice: Invoice): string {
   return `${invoice.invoiceReference ?? invoice.id} (${invoice.supplierName ?? '?'}, ${amount})`;
 }
 
+/** Same shape as describeInvoice, for Peppol inbox rows that never reach /document/invoices. */
+export function describePeppolPaymentTarget(document: PeppolDocument): string {
+  const amount = fmtAmount(document.amount, document.currency);
+  const ref = document.invoiceReference ?? document.documentNumber ?? document.id;
+  return `${ref} (${document.supplierName ?? '?'}, ${amount})`;
+}
+
 export function printPaymentStatusChange(label: string, from: string | null, to: string, confirmed: boolean): void {
   console.error(`${label}: ${from ?? '?'} -> ${to}${confirmed ? ' ✓' : ' (unverified)'}`);
 }

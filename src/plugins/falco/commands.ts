@@ -17,6 +17,7 @@ import {
   describeBillingDocument,
   describeInvoice,
   describePeppolDocument,
+  describePeppolPaymentTarget,
   printFileWritten,
   printPaymentStatusChange,
   printPeppolDocuments,
@@ -403,7 +404,7 @@ export function registerFalcoCommands(program: Command): void {
     peppol
       .command('mark-paid')
       .description('Set the payment status of an invoice')
-      .argument('<ref>', 'Peppol document ID, invoice ID, or invoice reference')
+      .argument('<ref>', 'Peppol document ID, invoice ID, invoice reference, or fiduciary document ID')
       .option('--profile <name>', PROFILE_OPTION)
       .option('--status <status>', 'Paid or NotPaid', 'Paid')
       .option('--unpaid', 'Shortcut for --status NotPaid')
@@ -665,6 +666,70 @@ async function runInvoicesSync(options: InvoicesSyncOptions): Promise<void> {
   failIfAnyFailed(tally.failed, documents.length);
 }
 
+export type MarkPaidTarget =
+  | { source: 'invoice'; invoice: Invoice }
+  | { source: 'peppol'; document: PeppolDocument };
+
+/**
+ * Prefer the local invoice register (Losson-style standalone accounts). Fall
+ * back to the Peppol inbox when the register has no match — LETSCHILL imports
+ * many Peppol docs into a fiduciary, so they never appear under
+ * `/document/invoices` even though the inbox row still has a paymentStatus.
+ */
+export function resolveMarkPaidTarget(
+  ref: string,
+  invoices: Invoice[],
+  peppolDocuments: PeppolDocument[],
+): MarkPaidTarget {
+  const invoiceMatches = invoices.filter(
+    (i) => i.id === ref || i.peppolInvoiceId === ref || i.invoiceReference === ref,
+  );
+  if (invoiceMatches.length > 1) {
+    const lines = invoiceMatches
+      .map((i) => `  ${i.invoiceReference ?? '(no ref)'}  id=${i.id}  peppol=${i.peppolInvoiceId ?? '-'}`)
+      .join('\n');
+    throw new CliError(
+      'INVALID_PARAMS',
+      `"${ref}" matches ${invoiceMatches.length} invoices:\n${lines}`,
+      'Re-run with the invoice id',
+    );
+  }
+  if (invoiceMatches.length === 1) {
+    return { source: 'invoice', invoice: invoiceMatches[0]! };
+  }
+
+  const peppolMatches = peppolDocuments.filter(
+    (d) =>
+      d.id === ref ||
+      d.invoiceReference === ref ||
+      d.documentNumber === ref ||
+      d.fiduciaryDocumentId === ref ||
+      d.paymentReference === ref,
+  );
+  if (peppolMatches.length > 1) {
+    const lines = peppolMatches
+      .map(
+        (d) =>
+          `  ${d.invoiceReference ?? d.documentNumber ?? '(no ref)'}  id=${d.id}  fiduciary=${d.fiduciaryDocumentId ?? '-'}`,
+      )
+      .join('\n');
+    throw new CliError(
+      'INVALID_PARAMS',
+      `"${ref}" matches ${peppolMatches.length} Peppol documents:\n${lines}`,
+      'Re-run with the Peppol document id',
+    );
+  }
+  if (peppolMatches.length === 1) {
+    return { source: 'peppol', document: peppolMatches[0]! };
+  }
+
+  throw new CliError(
+    'NOT_FOUND',
+    `No invoice or Peppol document matches "${ref}"`,
+    'Pass a Peppol document id, invoice id, invoice reference, or fiduciary document id. Run: agentio falco peppol list',
+  );
+}
+
 interface MarkPaidOptions {
   profile?: string;
   status: string;
@@ -684,44 +749,69 @@ async function runMarkPaid(ref: string, options: MarkPaidOptions): Promise<void>
   await enforceWriteAccess('falco', profile, 'mark an invoice as paid');
 
   const invoices = await client.listAllInvoices();
-  const matches = invoices.filter((i) => i.id === ref || i.peppolInvoiceId === ref || i.invoiceReference === ref);
+  const invoiceHits = invoices.filter(
+    (i) => i.id === ref || i.peppolInvoiceId === ref || i.invoiceReference === ref,
+  );
+  // Only hit the Peppol inbox when the invoice register has nothing — keeps the
+  // Losson path on one list call, and covers fiduciary / NotImported rows.
+  const peppolDocuments =
+    invoiceHits.length === 0 ? await client.listAllPeppolDocuments() : ([] as PeppolDocument[]);
+  const target = resolveMarkPaidTarget(ref, invoices, peppolDocuments);
 
-  if (matches.length === 0) {
-    throw new CliError(
-      'NOT_FOUND',
-      `No invoice matches "${ref}"`,
-      'Pass a Peppol document id, invoice id, or invoice reference. Run: agentio falco peppol list',
-    );
-  }
-  if (matches.length > 1) {
-    const lines = matches
-      .map((i) => `  ${i.invoiceReference ?? '(no ref)'}  id=${i.id}  peppol=${i.peppolInvoiceId ?? '-'}`)
-      .join('\n');
-    throw new CliError('INVALID_PARAMS', `"${ref}" matches ${matches.length} invoices:\n${lines}`, 'Re-run with the invoice id');
-  }
+  if (target.source === 'invoice') {
+    const invoice = target.invoice;
+    const label = describeInvoice(invoice);
 
-  const invoice = matches[0]!;
-  const label = describeInvoice(invoice);
+    if (invoice.paymentStatus === status) {
+      console.error(`${label} is already ${status}; nothing to do.`);
+      if (options.format === 'json') console.log(JSON.stringify(invoice, null, 2));
+      return;
+    }
 
-  if (invoice.paymentStatus === status) {
-    console.error(`${label} is already ${status}; nothing to do.`);
-    if (options.format === 'json') console.log(JSON.stringify(invoice, null, 2));
+    await client.setInvoicePaymentStatus(invoice.id, status);
+
+    // The write has landed. Everything below only confirms it, so a failure here
+    // must never be reported as though the change did not happen.
+    let updated: Invoice | undefined;
+    try {
+      updated = (await client.listAllInvoices()).find((i) => i.id === invoice.id);
+    } catch (error) {
+      console.error(`  could not re-read to confirm: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const confirmed = updated?.paymentStatus === status;
+
+    printPaymentStatusChange(label, invoice.paymentStatus, updated?.paymentStatus ?? status, confirmed);
+    if (options.format === 'json' && updated) console.log(JSON.stringify(updated, null, 2));
+    if (!confirmed) {
+      throw new CliError(
+        'API_ERROR',
+        `Falco accepted the change to ${status} but it is not visible yet`,
+        'The write was sent; nothing needs redoing. Re-run to confirm it landed.',
+      );
+    }
     return;
   }
 
-  await client.setInvoicePaymentStatus(invoice.id, status);
+  const document = target.document;
+  const label = describePeppolPaymentTarget(document);
 
-  // The write has landed. Everything below only confirms it, so a failure here
-  // must never be reported as though the change did not happen.
-  let updated: Invoice | undefined;
+  if (document.paymentStatus === status) {
+    console.error(`${label} is already ${status}; nothing to do.`);
+    if (options.format === 'json') console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  await client.setPeppolDocumentPaymentStatus(document.id, status);
+
+  let updated: PeppolDocument | undefined;
   try {
-    updated = (await client.listAllInvoices()).find((i) => i.id === invoice.id);
+    updated = (await client.listAllPeppolDocuments()).find((d) => d.id === document.id);
   } catch (error) {
     console.error(`  could not re-read to confirm: ${error instanceof Error ? error.message : String(error)}`);
   }
   const confirmed = updated?.paymentStatus === status;
 
-  printPaymentStatusChange(label, invoice.paymentStatus, updated?.paymentStatus ?? status, confirmed);
+  printPaymentStatusChange(label, document.paymentStatus, updated?.paymentStatus ?? status, confirmed);
   if (options.format === 'json' && updated) console.log(JSON.stringify(updated, null, 2));
   if (!confirmed) {
     throw new CliError(
