@@ -236,6 +236,28 @@ export class FalcoClient implements ServiceClient {
     if (!response.ok) this.fail(response.status, await response.text().catch(() => ''), what);
   }
 
+  /**
+   * Flip the payment flag on a Peppol inbox row. Used when the document is not
+   * present in `/document/invoices` (common for orgs that import Peppol docs
+   * into a fiduciary rather than the local invoice register).
+   *
+   * Body shape is `{ Status }` — not `{ PaymentStatus }` — matching
+   * `UpdatePeppolInvoiceStatus` on the Falco API.
+   */
+  async setPeppolDocumentPaymentStatus(documentId: string, status: InvoicePaymentStatus): Promise<void> {
+    const what = `updating Peppol payment status for ${documentId}`;
+    const response = await this.send(
+      `${API_URL}/peppol/document/${encodeURIComponent(documentId)}/status`,
+      {
+        method: 'PUT',
+        headers: this.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ Status: status }),
+      },
+      what,
+    );
+    if (!response.ok) this.fail(response.status, await response.text().catch(() => ''), what);
+  }
+
   // --- Billing (outbound sales documents, a separate host) ------------------
 
   private async billing(method: 'GET' | 'POST', path: string, body: unknown, what: string): Promise<Response> {

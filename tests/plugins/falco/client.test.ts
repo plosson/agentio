@@ -192,3 +192,37 @@ describe('FalcoClient requests', () => {
     expect(result.error).toBeTruthy();
   });
 });
+
+describe('FalcoClient payment status writes', () => {
+  test('setInvoicePaymentStatus PUTs DocumentId and PaymentStatus', async () => {
+    const urls: string[] = [];
+    const bodies: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(typeof input === 'string' ? input : input.toString());
+      bodies.push(String(init?.body ?? ''));
+      expect(init?.method).toBe('PUT');
+      return new Response('', { status: 200 });
+    }) as typeof fetch;
+
+    await new FalcoClient(credentials).setInvoicePaymentStatus('inv-1', 'Paid');
+
+    expect(urls[0]).toContain('/document/invoices/status');
+    expect(JSON.parse(bodies[0]!)).toEqual({ DocumentId: 'inv-1', PaymentStatus: 'Paid' });
+  });
+
+  test('setPeppolDocumentPaymentStatus PUTs Status on the Peppol document path', async () => {
+    const urls: string[] = [];
+    const bodies: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(typeof input === 'string' ? input : input.toString());
+      bodies.push(String(init?.body ?? ''));
+      expect(init?.method).toBe('PUT');
+      return new Response('', { status: 200 });
+    }) as typeof fetch;
+
+    await new FalcoClient(credentials).setPeppolDocumentPaymentStatus('doc/1', 'NotPaid');
+
+    expect(urls[0]).toContain('/peppol/document/doc%2F1/status');
+    expect(JSON.parse(bodies[0]!)).toEqual({ Status: 'NotPaid' });
+  });
+});
