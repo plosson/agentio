@@ -80,6 +80,29 @@ Examples:
   agentio falco peppol sync --output ./peppol --force
 ```
 
+## agentio falco peppol import <ref>
+
+Import a Peppol document into the Falco invoice register
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--dry-run`: Resolve the document and report what would be imported, without writing
+- `--format <format>`: Output format: text or json (default: text)
+
+```
+Examples:
+
+  # import one inbox document into /document/invoices
+  agentio falco peppol import 7f2c1e90-...
+
+  # by invoice reference
+  agentio falco peppol import DT20261730 --profile letschill-srl
+
+  # show the match without writing
+  agentio falco peppol import DT20261730 --dry-run
+```
+
 ## agentio falco peppol mark-paid <ref>
 
 Set the payment status of an invoice
