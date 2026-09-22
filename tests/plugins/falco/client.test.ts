@@ -226,3 +226,57 @@ describe('FalcoClient payment status writes', () => {
     expect(JSON.parse(bodies[0]!)).toEqual({ Status: 'NotPaid' });
   });
 });
+
+describe('FalcoClient Peppol import', () => {
+  test('importPeppolDocumentToFalco POSTs PeppolDocumentId to /peppol/transfer-falco', async () => {
+    const urls: string[] = [];
+    const bodies: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(typeof input === 'string' ? input : input.toString());
+      bodies.push(String(init?.body ?? ''));
+      expect(init?.method).toBe('POST');
+      return json({
+        id: 'doc/1',
+        importState: 'Imported',
+        doNotImport: false,
+        companyName: null,
+        documentNumber: null,
+        creationDate: null,
+        documentDate: null,
+        dueDate: null,
+        downloadDate: null,
+        amount: null,
+        currency: null,
+        supplierVatNumber: null,
+        supplierParticipant: null,
+        supplierName: null,
+        isCreditNote: false,
+        invoiceReference: null,
+        paymentReference: null,
+        bankAccountNumber: null,
+        importDate: '2026-09-22T12:00:00Z',
+        fiduciaryDocumentId: null,
+        lastInvoiceResponse: null,
+        paymentStatus: 'NotPaid',
+        comment: null,
+        documentType: 'Invoice',
+      });
+    }) as typeof fetch;
+
+    const updated = await new FalcoClient(credentials).importPeppolDocumentToFalco('doc/1');
+
+    expect(urls[0]).toContain('/peppol/transfer-falco');
+    expect(JSON.parse(bodies[0]!)).toEqual({ PeppolDocumentId: 'doc/1' });
+    expect(updated.importState).toBe('Imported');
+  });
+
+  test('maps already_imported to INVALID_PARAMS', async () => {
+    stubFetch([new Response('{"errorType":"already_imported"}', { status: 400 })]);
+    const error = (await new FalcoClient(credentials)
+      .importPeppolDocumentToFalco('doc-1')
+      .catch((e) => e)) as CliError;
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('INVALID_PARAMS');
+    expect(error.message).toContain('already imported');
+  });
+});

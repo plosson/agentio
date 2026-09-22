@@ -428,6 +428,33 @@ export function registerFalcoCommands(program: Command): void {
   agentio falco peppol mark-paid 7f2c1e90-... --format json`,
   );
 
+  addExamples(
+    peppol
+      .command('import')
+      .description('Import a Peppol document into the Falco invoice register')
+      .argument('<ref>', 'Peppol document ID, invoice reference, document number, or fiduciary document ID')
+      .option('--profile <name>', PROFILE_OPTION)
+      .option('--dry-run', 'Resolve the document and report what would be imported, without writing')
+      .option('--format <format>', 'Output format: text or json', 'text')
+      .action(async (ref: string, options) => {
+        try {
+          await runPeppolImport(ref, options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # import one inbox document into /document/invoices
+  agentio falco peppol import 7f2c1e90-...
+
+  # by invoice reference
+  agentio falco peppol import DT20261730 --profile letschill-srl
+
+  # show the match without writing
+  agentio falco peppol import DT20261730 --dry-run`,
+  );
+
   const invoices = falco.command('invoices').description('Outbound billing documents');
 
   addExamples(
@@ -664,6 +691,110 @@ async function runInvoicesSync(options: InvoicesSyncOptions): Promise<void> {
   await saveManifest(options.output, manifest);
   printSyncSummary(tally, options.output);
   failIfAnyFailed(tally.failed, documents.length);
+}
+
+
+/**
+ * Resolve a Peppol inbox row for import. Matches the same refs as mark-paid's
+ * Peppol fallback, but never looks at `/document/invoices` — that register is
+ * the destination of the import, not the source.
+ */
+export function resolveImportPeppolDocument(ref: string, peppolDocuments: PeppolDocument[]): PeppolDocument {
+  const matches = peppolDocuments.filter(
+    (d) =>
+      d.id === ref ||
+      d.invoiceReference === ref ||
+      d.documentNumber === ref ||
+      d.fiduciaryDocumentId === ref ||
+      d.paymentReference === ref,
+  );
+  if (matches.length > 1) {
+    const lines = matches
+      .map(
+        (d) =>
+          `  ${d.invoiceReference ?? d.documentNumber ?? '(no ref)'}  id=${d.id}  state=${d.importState ?? '-'}`,
+      )
+      .join('\n');
+    throw new CliError(
+      'INVALID_PARAMS',
+      `"${ref}" matches ${matches.length} Peppol documents:\n${lines}`,
+      'Re-run with the Peppol document id',
+    );
+  }
+  if (matches.length === 1) return matches[0]!;
+  throw new CliError(
+    'NOT_FOUND',
+    `No Peppol document matches "${ref}"`,
+    'Pass a Peppol document id, invoice reference, document number, or fiduciary document id. Run: agentio falco peppol list',
+  );
+}
+
+interface PeppolImportOptions {
+  profile?: string;
+  dryRun?: boolean;
+  format: string;
+}
+
+async function runPeppolImport(ref: string, options: PeppolImportOptions): Promise<void> {
+  const { client, profile } = await getFalcoClient(options.profile);
+  if (!options.dryRun) {
+    await enforceWriteAccess('falco', profile, 'import a Peppol document into the invoice register');
+  }
+
+  const documents = await client.listAllPeppolDocuments();
+  const document = resolveImportPeppolDocument(ref, documents);
+  const label = describePeppolPaymentTarget(document);
+
+  if (document.doNotImport) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `${label} is marked do-not-import`,
+      'Clear that flag in Falco before importing, or pick another document',
+    );
+  }
+  if (document.importState === 'Imported') {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `${label} is already imported`,
+      'Nothing to do. Run: agentio falco peppol list',
+    );
+  }
+
+  if (options.dryRun) {
+    console.error(`Would import ${label} (id=${document.id}, state=${document.importState ?? '—'})`);
+    if (options.format === 'json') console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  const updated = await client.importPeppolDocumentToFalco(document.id);
+  const confirmed = updated.importState === 'Imported';
+  console.error(
+    `${label}: ${document.importState ?? '?'} -> ${updated.importState ?? '?'}${confirmed ? ' ✓' : ' (unverified)'}`,
+  );
+
+  // Best-effort: show the register row when Falco has finished creating it.
+  let invoice: Invoice | undefined;
+  try {
+    invoice = (await client.listAllInvoices()).find((i) => i.peppolInvoiceId === document.id);
+  } catch (error) {
+    console.error(`  could not re-read invoice register: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (invoice) {
+    console.error(`  invoice register: ${describeInvoice(invoice)}  id=${invoice.id}`);
+  } else if (confirmed) {
+    console.error('  invoice register: not visible yet (import accepted)');
+  }
+
+  if (options.format === 'json') {
+    console.log(JSON.stringify({ document: updated, invoice: invoice ?? null }, null, 2));
+  }
+  if (!confirmed) {
+    throw new CliError(
+      'API_ERROR',
+      `Falco accepted the import but importState is ${updated.importState ?? 'unknown'}`,
+      'Re-run with the same ref to confirm, or check the Falco purchase-invoices view',
+    );
+  }
 }
 
 export type MarkPaidTarget =

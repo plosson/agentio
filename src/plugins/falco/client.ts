@@ -258,6 +258,47 @@ export class FalcoClient implements ServiceClient {
     if (!response.ok) this.fail(response.status, await response.text().catch(() => ''), what);
   }
 
+  /**
+   * Import one Peppol inbox document into the local purchase-invoice register
+   * (`/document/invoices`). Matches the Falco desktop `transferToFalcoDocument`
+   * call: POST `/peppol/transfer-falco` with `{ PeppolDocumentId }`.
+   *
+   * Orgs that forward Peppol docs to a Horus fiduciary use a different host
+   * (`transfer-documents`); this method is the standalone Falco register path.
+   * Falco answers already-imported docs with HTTP 400 `already_imported`.
+   */
+  async importPeppolDocumentToFalco(documentId: string): Promise<PeppolDocument> {
+    const what = `importing Peppol document ${documentId} into the invoice register`;
+    const response = await this.send(
+      `${API_URL}/peppol/transfer-falco`,
+      {
+        method: 'POST',
+        headers: this.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ PeppolDocumentId: documentId }),
+      },
+      what,
+    );
+    const text = await response.text().catch(() => '');
+    if (!response.ok) {
+      if (response.status === 400 && /already_imported/i.test(text)) {
+        throw new CliError(
+          'INVALID_PARAMS',
+          `Peppol document ${documentId} is already imported`,
+          'Nothing to do. Run: agentio falco peppol list',
+        );
+      }
+      this.fail(response.status, text, what);
+    }
+    if (!text) {
+      throw new CliError('API_ERROR', `Falco returned an empty body while ${what}`);
+    }
+    try {
+      return JSON.parse(text) as PeppolDocument;
+    } catch {
+      throw new CliError('API_ERROR', `Falco returned malformed JSON while ${what}: ${text.slice(0, 200)}`);
+    }
+  }
+
   // --- Billing (outbound sales documents, a separate host) ------------------
 
   private async billing(method: 'GET' | 'POST', path: string, body: unknown, what: string): Promise<Response> {

@@ -11,6 +11,7 @@ order: 190
 
 - List inbound Peppol documents, filtered by date, sender or import state
 - Download one document's UBL XML, or sync every matching document into a directory
+- Import a Peppol inbox document into the purchase-invoice register
 - Set the payment status of a purchase invoice
 - Sync outbound billing document PDFs — invoices, credit notes, estimates, proformas
 

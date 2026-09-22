@@ -86,6 +86,7 @@ Three hosts, all reached over HTTPS with a bearer access token (`falcio/src/lib/
 | `/document/invoices?…` | GET | `peppol mark-paid` — locates the invoice in the local register |
 | `/document/invoices/status` | PUT | `peppol mark-paid` — body `{ DocumentId, PaymentStatus }` when found in the register |
 | `/peppol/document/{id}/status` | PUT | `peppol mark-paid` fallback — body `{ Status }` when the inbox row is absent from `/document/invoices` (fiduciary / NotImported) |
+| `/peppol/transfer-falco` | POST | `peppol import` — body `{ PeppolDocumentId }`; creates the `/document/invoices` row and sets `importState` to Imported |
 
 Two pagination walkers wrap the list endpoints (`listAllPeppolDocuments`, `listAllInvoices`) and must be preserved; both take a progress callback that the sync commands use for per-page output.
 
