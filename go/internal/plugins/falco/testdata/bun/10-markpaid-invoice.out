@@ -1,0 +1,33 @@
+{
+  "id": "inv-1",
+  "peppolInvoiceId": "pep-1111-aaaa",
+  "type": "PurchaseInvoice",
+  "status": null,
+  "paymentStatus": "Paid",
+  "peppolStatus": null,
+  "origin": "Peppol",
+  "createdAt": "2026-07-15T08:00:00Z",
+  "invoiceDate": "2026-07-14",
+  "invoiceDueDate": null,
+  "amount": "1210.00",
+  "invoiceCurrency": "EUR",
+  "invoiceReference": "INV/2026/9",
+  "paymentReference": null,
+  "bankAccountNumber": null,
+  "supplierId": null,
+  "supplierName": "Acme BV",
+  "customerName": null,
+  "name": null,
+  "category": null,
+  "fiduciaryId": null,
+  "fiduciaryStatus": null,
+  "files": [
+    {
+      "id": "f-1",
+      "fileName": "a.pdf",
+      "contentType": "application/pdf",
+      "order": 0,
+      "fileSize": 1234
+    }
+  ]
+}

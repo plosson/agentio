@@ -1,0 +1,1 @@
+api.my-falco.be GET /peppol/documents/org-1?showNotImported=true&showImported=true&showProcessing=true&showAccepted=true&showRejected=true&showNoResponse=true&selfBilling=false Bearer at-live 

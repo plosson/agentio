@@ -1,0 +1,5 @@
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc Bearer at-live 
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc&last=inv-1 Bearer at-live 
+api.my-falco.be PUT /document/invoices/status Bearer at-live {"DocumentId":"inv-1","PaymentStatus":"Paid"}
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc Bearer at-live 
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc&last=inv-1 Bearer at-live 

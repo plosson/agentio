@@ -1,0 +1,5 @@
+api.my-falco.be GET /peppol/documents/org-1?showNotImported=true&showImported=true&showProcessing=true&showAccepted=true&showRejected=true&showNoResponse=true&selfBilling=false Bearer at-live 
+api.my-falco.be GET /peppol/documents/org-1?showNotImported=true&showImported=true&showProcessing=true&showAccepted=true&showRejected=true&showNoResponse=true&selfBilling=false&last=pep-3333-cccc Bearer at-live 
+api.my-falco.be POST /peppol/transfer-falco Bearer at-live {"PeppolDocumentId":"pep-2222-bbbb"}
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc Bearer at-live 
+api.my-falco.be GET /document/invoices?organizationId=org-1&take=100&sortBy=createdAt&sortDirection=desc&last=inv-2 Bearer at-live 

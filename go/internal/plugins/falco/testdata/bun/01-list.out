@@ -1,0 +1,7 @@
+DATE       NUMBER            SUPPLIER                                        AMOUNT  STATE         ID
+-----------------------------------------------------------------------------------------------------
+2026-07-14 2026-0042         Acme BV (BE0123456789)                       1210.00 €  Imported      pep-1111-aaaa
+2026-08-18 DT20261474        Silversquare Belgium — Très long nom de…    366.03 USD  NotImported   pep-2222-bbbb
+—          —                 ?                                                    —  —             pep-3333-cccc
+
+3 document(s)

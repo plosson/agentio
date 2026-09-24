@@ -1,0 +1,2 @@
+Error [PERMISSION_DENIED]: Cannot mark an invoice as paid: profile "ro" is read-only
+Suggestion: To modify this profile's access: agentio falco profile update --profile ro --no-read-only

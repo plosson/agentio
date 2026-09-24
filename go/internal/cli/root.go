@@ -23,6 +23,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
 	"github.com/plosson/agentio/go/internal/plugins/dropbox"
+	"github.com/plosson/agentio/go/internal/plugins/falco"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -39,6 +40,7 @@ func init() {
 	plugins.Default.MustRegister(confluence.New())
 	plugins.Default.MustRegister(discourse.New())
 	plugins.Default.MustRegister(dropbox.New())
+	plugins.Default.MustRegister(falco.New())
 }
 
 func Main(args []string) int {
@@ -237,10 +239,16 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				in.Stdin = stdin
 			}
 			result, err := host.Execute(context.Background(), reg, pluginCopy, &specCopy, in)
+			asJSON, _ := c.Flags().GetBool("json")
 			if err != nil {
+				// Bun prints what a command produced and then throws (a sync
+				// summary before "N documents failed"), so a value returned with
+				// an error is printed before the error is rendered.
+				if result != nil {
+					_ = host.PrintResult(c.OutOrStdout(), &specCopy, result, asJSON)
+				}
 				return err
 			}
-			asJSON, _ := c.Flags().GetBool("json")
 			return host.PrintResult(c.OutOrStdout(), &specCopy, result, asJSON)
 		}
 	}

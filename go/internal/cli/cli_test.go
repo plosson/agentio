@@ -217,3 +217,52 @@ func TestProfileAddPassesServiceSetupOptions(t *testing.T) {
 		t.Fatal("top-level profile add accepted a service flag")
 	}
 }
+
+// Bun falco sync prints its summary and then throws when a download failed.
+// A value returned with an error reaches stdout before the error is rendered;
+// an error alone prints nothing.
+func TestResultReturnedWithAnErrorIsPrintedFirst(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Commands: []plugins.CommandSpec{
+			{
+				Path: "partial", Description: "partial", Examples: []string{"agentio desk partial"},
+				Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
+					return map[string]any{"done": 1}, run.Fail("API_ERROR", "1 of 2 failed", "Re-run")
+				},
+				Format: func(v any) string { return "summary" },
+			},
+			{
+				Path: "broken", Description: "broken", Examples: []string{"agentio desk broken"},
+				Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
+					return nil, run.Fail("API_ERROR", "nothing", "")
+				},
+				Format: func(v any) string { return "never" },
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := Execute(reg, []string{"desk", "partial"}, &out, &errOut, strings.NewReader(""))
+	if code != 5 || out.String() != "summary\n" || errOut.String() != "Error [API_ERROR]: 1 of 2 failed\nSuggestion: Re-run\n" {
+		t.Fatalf("code %d\n%q\n%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Execute(reg, []string{"desk", "partial", "--json"}, &out, &errOut, strings.NewReader(""))
+	if code != 5 || out.String() != "{\n  \"done\": 1\n}\n" {
+		t.Fatalf("code %d\n%q", code, out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Execute(reg, []string{"desk", "broken"}, &out, &errOut, strings.NewReader(""))
+	if code != 5 || out.String() != "" {
+		t.Fatalf("code %d\n%q", code, out.String())
+	}
+}

@@ -1,0 +1,2 @@
+Error [PERMISSION_DENIED]: Cannot import a Peppol document into the invoice register: profile "ro" is read-only
+Suggestion: To modify this profile's access: agentio falco profile update --profile ro --no-read-only

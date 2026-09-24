@@ -1,0 +1,4 @@
+  [page 1] +3 (total so far: 3)
+  ✗ 2026-06-01_unknown_pep-3333 — Falco request failed while downloading document pep-3333-cccc (HTTP 500): boom
+Error [API_ERROR]: 1 of 3 document(s) could not be downloaded
+Suggestion: Everything else was written. Re-run to retry only what is missing.

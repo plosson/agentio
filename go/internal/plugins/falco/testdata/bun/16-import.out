@@ -1,0 +1,61 @@
+{
+  "document": {
+    "id": "pep-2222-bbbb",
+    "companyName": null,
+    "documentNumber": "DT20261474",
+    "creationDate": null,
+    "documentDate": "2026-08-18",
+    "dueDate": null,
+    "downloadDate": null,
+    "amount": "366.03",
+    "currency": "USD",
+    "supplierVatNumber": null,
+    "supplierParticipant": null,
+    "supplierName": "Silversquare Belgium — Très long nom de fournisseur SA",
+    "isCreditNote": false,
+    "invoiceReference": "DT20261474",
+    "paymentReference": "+++123/456/789+++",
+    "bankAccountNumber": null,
+    "doNotImport": false,
+    "importState": "Imported",
+    "importDate": "2026-09-22T12:00:00Z",
+    "fiduciaryDocumentId": "fid-2",
+    "lastInvoiceResponse": null,
+    "paymentStatus": "NotPaid",
+    "comment": null,
+    "documentType": "Invoice"
+  },
+  "invoice": {
+    "id": "inv-2",
+    "peppolInvoiceId": "pep-2222-bbbb",
+    "type": "PurchaseInvoice",
+    "status": null,
+    "paymentStatus": "NotPaid",
+    "peppolStatus": null,
+    "origin": "Peppol",
+    "createdAt": "2026-07-15T08:00:00Z",
+    "invoiceDate": "2026-07-14",
+    "invoiceDueDate": null,
+    "amount": "366.03",
+    "invoiceCurrency": "USD",
+    "invoiceReference": "DT20261474",
+    "paymentReference": null,
+    "bankAccountNumber": null,
+    "supplierId": null,
+    "supplierName": "Silversquare Belgium",
+    "customerName": null,
+    "name": null,
+    "category": null,
+    "fiduciaryId": null,
+    "fiduciaryStatus": null,
+    "files": [
+      {
+        "id": "f-1",
+        "fileName": "a.pdf",
+        "contentType": "application/pdf",
+        "order": 0,
+        "fileSize": 1234
+      }
+    ]
+  }
+}

@@ -111,8 +111,11 @@ type CommandSpec struct {
 	// Empty uses Path.
 	Operation string
 	Examples  []string
-	Run       func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
-	Format    func(value any) string
+	// Run returns the value the host prints. A non-nil value returned together
+	// with an error is printed first, then the error is rendered (Bun: output,
+	// then throw).
+	Run    func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
+	Format func(value any) string
 }
 
 // RefreshSpec is profile.refresh. Run must not persist; the host does.

@@ -1,0 +1,3 @@
+horusapi-billing.azurewebsites.net POST /api.billing/billing-documents/period/org-1 Bearer at-live {"Invoices":true,"CreditNotes":true,"Estimates":false,"AdvancePayments":false,"Proformas":false,"Offset":0}
+horusapi-billing.azurewebsites.net GET /api.billing/billing-documents/src/bill-0001-xxxx Bearer at-live 
+horusapi-billing.azurewebsites.net GET /api.billing/billing-documents/src/bill-0002-yyyy Bearer at-live 

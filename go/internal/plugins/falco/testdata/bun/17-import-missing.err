@@ -1,0 +1,2 @@
+Error [NOT_FOUND]: No Peppol document matches "nope"
+Suggestion: Pass a Peppol document id, invoice reference, document number, or fiduciary document id. Run: agentio falco peppol list

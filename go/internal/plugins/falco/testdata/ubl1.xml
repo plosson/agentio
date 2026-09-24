@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>INV/2026/9</cbc:ID>
+  <cbc:IssueDate>2026-07-14</cbc:IssueDate>
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cac:AdditionalDocumentReference><cbc:ID>att</cbc:ID><cac:Attachment>
+    <cbc:EmbeddedDocumentBinaryObject mimeCode='application/pdf' filename='INV-2026-9.pdf'>JVBERi0xLjQg
+ZmFrZQ==</cbc:EmbeddedDocumentBinaryObject>
+  </cac:Attachment></cac:AdditionalDocumentReference>
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyName><cbc:Name>Acme BV</cbc:Name></cac:PartyName></cac:Party></cac:AccountingSupplierParty>
+  <cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="EUR">1210.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>

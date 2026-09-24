@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017</cbc:CustomizationID>
+  <cbc:ID>DT20261474</cbc:ID>
+  <cbc:IssueDate>2026-08-18</cbc:IssueDate>
+  <cbc:DueDate>2026-09-17</cbc:DueDate>
+  <cbc:Note>Merci pour votre confiance. Paiement à 30 jours.</cbc:Note>
+  <cbc:DocumentCurrencyCode>USD</cbc:DocumentCurrencyCode>
+  <cbc:BuyerReference>PO-77</cbc:BuyerReference>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyName><cbc:Name>Silversquare Belgium</cbc:Name></cac:PartyName>
+    <cac:PostalAddress><cbc:StreetName>Avenue Louise 1</cbc:StreetName><cbc:CityName>Bruxelles</cbc:CityName><cbc:PostalZone>1050</cbc:PostalZone><cac:Country><cbc:IdentificationCode>BE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    <cac:PartyTaxScheme><cbc:CompanyID>BE0999999999</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>
+    <cac:PartyLegalEntity><cbc:RegistrationName>Silversquare SA</cbc:RegistrationName><cbc:CompanyID>0999999999</cbc:CompanyID></cac:PartyLegalEntity>
+    <cac:Contact><cbc:Telephone>+32 2 000 00 00</cbc:Telephone><cbc:ElectronicMail>billing@silversquare.example</cbc:ElectronicMail></cac:Contact>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyName><cbc:Name>Losson &amp; Associ&#233;s</cbc:Name></cac:PartyName>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:PaymentMeans>
+    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+    <cbc:PaymentID>+++123/456/789+++</cbc:PaymentID>
+    <cac:PayeeFinancialAccount><cbc:ID>BE68539007547034</cbc:ID><cbc:Name>Silversquare</cbc:Name><cac:FinancialInstitutionBranch><cbc:ID>GEBABEBB</cbc:ID></cac:FinancialInstitutionBranch></cac:PayeeFinancialAccount>
+  </cac:PaymentMeans>
+  <cac:TaxTotal><cbc:TaxAmount currencyID="USD">63.52</cbc:TaxAmount>
+    <cac:TaxSubtotal><cbc:TaxableAmount currencyID="USD">302.51</cbc:TaxableAmount><cbc:TaxAmount currencyID="USD">63.52</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>21</cbc:Percent></cac:TaxCategory></cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="USD">302.51</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="USD">302.51</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="USD">366.03</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="USD">366.03</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="MON">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="USD">300.00</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>Flex desk membership — August, including meeting room credits and a very long description that must wrap across several lines in the table</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>21.0</cbc:Percent></cac:ClassifiedTaxCategory></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="USD">300</cbc:PriceAmount></cac:Price></cac:InvoiceLine>
+  <cac:InvoiceLine><cbc:ID>2</cbc:ID><cbc:InvoicedQuantity unitCode="C62">2.50</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="USD">2.51</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>Coffee</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>21</cbc:Percent></cac:ClassifiedTaxCategory></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="USD">1.005</cbc:PriceAmount></cac:Price></cac:InvoiceLine>
+</Invoice>

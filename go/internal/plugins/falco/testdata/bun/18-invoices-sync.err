@@ -1,0 +1,3 @@
+  ✗ 2026-07-03_acme-bv_CN_7 — Falco request failed while downloading billing document bill-0002-yyyy (HTTP 404): not found
+Error [API_ERROR]: 1 of 2 document(s) could not be downloaded
+Suggestion: Everything else was written. Re-run to retry only what is missing.
