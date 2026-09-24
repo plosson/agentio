@@ -428,3 +428,33 @@ func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
 		t.Fatal("RunContext has no Confirm")
 	}
 }
+
+// Bun sql query runs on a read-only profile and restricts itself: the handler
+// sees the profile's flag, and a read (the omitted access) is not refused.
+func TestRunContextCarriesTheReadOnlyFlag(t *testing.T) {
+	r := vaultUp(t)
+	for name, ro := range map[string]bool{"ro": true, "rw": false} {
+		if err := profile.Save("acme", name, map[string]any{
+			"account": name, "accessToken": "tok", "refreshToken": "rt", "expiryDate": int64(9_000_000_000_000),
+		}, profile.SaveOptions{ReadOnlySet: ro, ReadOnly: ro}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []bool
+	spec := &plugins.CommandSpec{Path: "peek", Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
+		seen = append(seen, run.ReadOnly)
+		return nil, nil
+	}}
+	p := r.Find("acme")
+	for _, name := range []string{"ro", "rw"} {
+		if _, err := Execute(context.Background(), r, p, spec, plugins.CommandInput{Options: map[string]any{"profile": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) != 2 || !seen[0] || seen[1] {
+		t.Fatalf("read-only flags seen: %v", seen)
+	}
+	if NewRunContext(nil, "p", nil).ReadOnly {
+		t.Fatal("a bare run context is read-only")
+	}
+}

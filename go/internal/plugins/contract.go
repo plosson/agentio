@@ -92,6 +92,10 @@ type RunContext struct {
 	// Confirm asks a yes/no question on the terminal (Bun utils/stdin confirm).
 	Confirm func(question string) (bool, error)
 	Fail    func(code ErrorCode, message, suggestion string) error
+	// ReadOnly is the profile's read-only flag, for a command that runs on a
+	// read-only profile under its own restrictions instead of being refused
+	// (Bun sql query: isProfileReadOnly, then a read-only transaction).
+	ReadOnly bool
 }
 
 type ArgumentSpec struct {

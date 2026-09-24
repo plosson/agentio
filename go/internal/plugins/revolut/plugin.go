@@ -3,7 +3,6 @@ package revolut
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"math"
 	"os"
@@ -660,15 +659,6 @@ func findAccount(accounts []*jsvalue.Object, id string) *jsvalue.Object {
 	return nil
 }
 
-// randomUUID is crypto.randomUUID(): a version 4 UUID.
-func randomUUID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-}
-
 func payCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "pay",
@@ -757,7 +747,7 @@ func runPay(ctx context.Context, in plugins.CommandInput, run *plugins.RunContex
 		// retry after a network error cannot move the money twice.
 		requestID := jsvalue.Trim(in.Option("request-id"))
 		if requestID == "" {
-			requestID = randomUUID()
+			requestID = jsvalue.RandomUUID()
 		}
 		summary := fmt.Sprintf("Move %s from %s to %s (your own account)",
 			formatAmount(p.amount, p.currency), describeAccount(source), describeAccount(target))

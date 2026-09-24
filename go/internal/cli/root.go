@@ -39,6 +39,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/revolut"
 	"github.com/plosson/agentio/go/internal/plugins/rss"
 	"github.com/plosson/agentio/go/internal/plugins/slack"
+	sqlplugin "github.com/plosson/agentio/go/internal/plugins/sql"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
@@ -69,6 +70,7 @@ func init() {
 	plugins.Default.MustRegister(revolut.New())
 	plugins.Default.MustRegister(rss.New())
 	plugins.Default.MustRegister(slack.New())
+	plugins.Default.MustRegister(sqlplugin.New())
 }
 
 func Main(args []string) int {

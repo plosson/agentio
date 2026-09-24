@@ -35,6 +35,7 @@ func EnforceWrite(service, profileName, operation string) error {
 func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec *plugins.CommandSpec, in plugins.CommandInput) (any, error) {
 	creds := map[string]any{}
 	profileName := ""
+	readOnly := false
 	if p.Profile != nil {
 		flag, _ := in.Options["profile"].(string)
 		name, err := profile.Require(p.ID, flag)
@@ -63,8 +64,13 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 			return nil, err
 		}
 		creds = fresh.Credentials
+		// Bun reads the flag after the client is built (isProfileReadOnly).
+		if readOnly, err = profile.IsReadOnly(p.ID, profileName); err != nil {
+			return nil, err
+		}
 	}
 	run := NewRunContext(creds, profileName, ctx)
+	run.ReadOnly = readOnly
 	return spec.Run(ctx, in, run)
 }
 

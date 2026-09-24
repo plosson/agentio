@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"encoding/json"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -612,4 +613,12 @@ func ordered(kv ...any) *Object {
 		o.Set(kv[i].(string), kv[i+1])
 	}
 	return o
+}
+
+func TestRandomUUIDIsVersion4(t *testing.T) {
+	shape := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	a, b := RandomUUID(), RandomUUID()
+	if !shape.MatchString(a) || !shape.MatchString(b) || a == b {
+		t.Fatalf("%q %q", a, b)
+	}
 }
