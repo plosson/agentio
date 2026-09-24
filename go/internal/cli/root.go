@@ -21,6 +21,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
+	"github.com/plosson/agentio/go/internal/plugins/discourse"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -35,6 +36,7 @@ func init() {
 	plugins.Default.MustRegister(board.New())
 	plugins.Default.MustRegister(ping.New())
 	plugins.Default.MustRegister(confluence.New())
+	plugins.Default.MustRegister(discourse.New())
 }
 
 func Main(args []string) int {
