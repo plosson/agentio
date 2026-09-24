@@ -128,3 +128,16 @@ func TestWriteUnlessInvalidReadsOnlyForRejectedInput(t *testing.T) {
 		t.Fatalf("check ran %d times", calls)
 	}
 }
+
+// Bun httpStatusToErrorCode: four statuses have their own code, every other
+// status (including a success one and a 5xx) is API_ERROR.
+func TestHTTPStatusToErrorCodeMatchesBun(t *testing.T) {
+	for status, want := range map[int]ErrorCode{
+		401: "AUTH_FAILED", 403: "PERMISSION_DENIED", 404: "NOT_FOUND", 429: "RATE_LIMITED",
+		400: "API_ERROR", 402: "API_ERROR", 410: "API_ERROR", 500: "API_ERROR", 503: "API_ERROR", 200: "API_ERROR", 0: "API_ERROR",
+	} {
+		if got := HTTPStatusToErrorCode(status); got != want {
+			t.Errorf("%d: %q, want %q", status, got, want)
+		}
+	}
+}

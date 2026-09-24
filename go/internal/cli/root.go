@@ -38,6 +38,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/plugins/revolut"
 	"github.com/plosson/agentio/go/internal/plugins/rss"
+	"github.com/plosson/agentio/go/internal/plugins/slack"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
@@ -67,6 +68,7 @@ func init() {
 	plugins.Default.MustRegister(jira.New())
 	plugins.Default.MustRegister(revolut.New())
 	plugins.Default.MustRegister(rss.New())
+	plugins.Default.MustRegister(slack.New())
 }
 
 func Main(args []string) int {
@@ -496,11 +498,19 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		Use:   "add",
 		Short: "Add a new " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Commander's requiredOption: only an absent flag fails; a given "" is present.
+			if p.Profile.RequireProfile && !cmd.Flags().Changed("profile") {
+				return clierr.New(clierr.InvalidParams, "required option '--profile <name>' not specified", "")
+			}
 			opts := plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly, Options: optionValues(cmd.Flags(), p.Profile.SetupOptions)}
 			return host.AddProfile(context.Background(), p, opts, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
 		},
 	}
-	add.Flags().StringVar(&profileName, "profile", "", "Profile name")
+	profileUsage := "Profile name"
+	if p.Profile.RequireProfile {
+		profileUsage = "Profile name (required)"
+	}
+	add.Flags().StringVar(&profileName, "profile", "", profileUsage)
 	declareOptions(add.Flags(), p.Profile.SetupOptions)
 	add.Flags().BoolVar(&readOnly, "read-only", false, "Create as read-only profile (blocks write operations)")
 	list := &cobra.Command{

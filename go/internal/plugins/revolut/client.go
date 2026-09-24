@@ -55,21 +55,6 @@ func failed(fail func(plugins.ErrorCode, string, string) error, err error) error
 	return err
 }
 
-// httpStatusToErrorCode is src/utils/errors.ts httpStatusToErrorCode.
-func httpStatusToErrorCode(status int) plugins.ErrorCode {
-	switch status {
-	case 401:
-		return "AUTH_FAILED"
-	case 403:
-		return "PERMISSION_DENIED"
-	case 404:
-		return "NOT_FOUND"
-	case 429:
-		return "RATE_LIMITED"
-	}
-	return "API_ERROR"
-}
-
 const reauthorise = "Run: agentio revolut profile add to re-authorise"
 
 // parseJSONBody is Response#json(): the body decoded as UTF-8, then JSON.parse.
@@ -149,7 +134,7 @@ func (c *client) request(method, path string, body any) (any, error) {
 			suggestion = reauthorise
 		}
 		return nil, &apiError{
-			code:       httpStatusToErrorCode(resp.StatusCode),
+			code:       plugins.HTTPStatusToErrorCode(resp.StatusCode),
 			message:    fmt.Sprintf("Revolut API error (%d): %s", resp.StatusCode, jsvalue.DecodeUTF8(raw)),
 			suggestion: suggestion,
 		}
@@ -182,7 +167,7 @@ func (c *client) requestBinary(path string) (binary, error) {
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return binary{}, &apiError{
-			code:       httpStatusToErrorCode(resp.StatusCode),
+			code:       plugins.HTTPStatusToErrorCode(resp.StatusCode),
 			message:    fmt.Sprintf("Revolut API error (%d): %s", resp.StatusCode, jsvalue.DecodeUTF8(raw)),
 			suggestion: receiptErrorSuggestion(resp.StatusCode),
 		}

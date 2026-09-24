@@ -54,21 +54,6 @@ func failed(fail func(plugins.ErrorCode, string, string) error, err error) error
 	return err
 }
 
-// httpStatusToErrorCode is src/utils/errors.ts httpStatusToErrorCode.
-func httpStatusToErrorCode(status int) plugins.ErrorCode {
-	switch status {
-	case 401:
-		return "AUTH_FAILED"
-	case 403:
-		return "PERMISSION_DENIED"
-	case 404:
-		return "NOT_FOUND"
-	case 429:
-		return "RATE_LIMITED"
-	}
-	return "API_ERROR"
-}
-
 // client is FalcoClient: one access token scoped to one organization.
 type client struct {
 	ctx            context.Context
@@ -136,7 +121,7 @@ func (c *client) fail(status int, body, what string) error {
 		suggestion = "Run: agentio reauth"
 	}
 	return &apiError{
-		code:       httpStatusToErrorCode(status),
+		code:       plugins.HTTPStatusToErrorCode(status),
 		message:    fmt.Sprintf("Falco request failed while %s (HTTP %d)%s", what, status, detail),
 		suggestion: suggestion,
 	}

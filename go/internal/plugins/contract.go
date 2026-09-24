@@ -149,6 +149,21 @@ func (in CommandInput) List(name string) []string {
 	return values
 }
 
+// HTTPStatusToErrorCode is Bun src/utils/errors.ts httpStatusToErrorCode.
+func HTTPStatusToErrorCode(status int) ErrorCode {
+	switch status {
+	case 401:
+		return "AUTH_FAILED"
+	case 403:
+		return "PERMISSION_DENIED"
+	case 404:
+		return "NOT_FOUND"
+	case 429:
+		return "RATE_LIMITED"
+	}
+	return "API_ERROR"
+}
+
 // FailFunc is RunContext.Fail. Input checks take it so they also run from an
 // AccessFor, before a RunContext exists (WriteUnlessInvalid).
 type FailFunc = func(code ErrorCode, message, suggestion string) error
@@ -269,6 +284,10 @@ type ProfileSpec struct {
 	Refresh        *RefreshSpec
 	// SetupOptions are extra `<service> profile add` flags (Bun: dropbox --app-key).
 	SetupOptions []OptionSpec
+	// RequireProfile makes --profile a required option of `<service> profile
+	// add` (Bun slack `requiredOption('--profile <name>')`). The top-level
+	// `profile add <service>` keeps it optional, as in Bun.
+	RequireProfile bool
 	// ListInfo is appended to a profile's line in `profile list` (Bun getExtraInfo).
 	ListInfo func(credentials map[string]any) string
 }

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins"
 )
 
 var consentBase = map[string]string{
@@ -211,7 +212,7 @@ func postTokenRequest(ctx context.Context, do fetchFunc, environment any, body *
 			suggestion = "Check the client ID, the private key, and that the JWT issuer matches your registered redirect URI host"
 		}
 		return nil, &apiError{
-			code:       httpStatusToErrorCode(resp.StatusCode),
+			code:       plugins.HTTPStatusToErrorCode(resp.StatusCode),
 			message:    fmt.Sprintf("Revolut token request failed (%d): %s", resp.StatusCode, text),
 			suggestion: suggestion,
 		}

@@ -221,6 +221,76 @@ func TestProfileAddPassesServiceSetupOptions(t *testing.T) {
 	}
 }
 
+// Bun slack `profile add` declares requiredOption('--profile <name>'): an
+// absent --profile fails before setup runs, a given "" is present (setup runs
+// and the suggested name is used), and the top-level `profile add <service>`
+// keeps --profile optional.
+func TestProfileAddRequireProfile(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	setups := 0
+	newReg := func(require bool) *plugins.Registry {
+		reg, err := plugins.NewRegistry(&plugins.Plugin{
+			APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+			Profile: &plugins.ProfileSpec{
+				RequireProfile: require,
+				Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+					setups++
+					return &plugins.SetupResult{Credentials: map[string]any{"k": "v"}, SuggestedProfileName: "auto"}, nil
+				},
+				Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+					return plugins.ValidationResult{Valid: true}, nil
+				},
+			},
+			Commands: []plugins.CommandSpec{{
+				Path: "ping", Description: "ping", Examples: []string{"agentio desk ping"},
+				Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) { return "pong", nil },
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reg
+	}
+	reg := newReg(true)
+	exec := func(args ...string) (int, string, string) {
+		var out, errOut bytes.Buffer
+		code := Execute(reg, args, &out, &errOut, strings.NewReader(""))
+		return code, out.String(), errOut.String()
+	}
+	code, out, errOut := exec("desk", "profile", "add", "--read-only")
+	if code == 0 || setups != 0 || out != "" || errOut != "Error [INVALID_PARAMS]: required option '--profile <name>' not specified\n" {
+		t.Fatalf("absent --profile: code %d setups %d\n%q\n%q", code, setups, out, errOut)
+	}
+	if refs, _ := profile.List("desk", nil); len(refs) != 0 {
+		t.Fatalf("absent --profile saved %v", refs)
+	}
+	code, out, errOut = exec("desk", "profile", "add", "--profile", "")
+	if code != 0 || setups != 1 || out != "Profile \"auto\" configured!\n" {
+		t.Fatalf("given \"\": code %d setups %d\n%q\n%q", code, setups, out, errOut)
+	}
+	code, out, errOut = exec("desk", "profile", "add", "--profile=mine")
+	if code != 0 || setups != 2 || out != "Profile \"mine\" configured!\n" {
+		t.Fatalf("given name: code %d\n%q\n%q", code, out, errOut)
+	}
+	code, _, errOut = exec("profile", "add", "desk")
+	if code != 0 || setups != 3 {
+		t.Fatalf("top-level profile add: code %d %s", code, errOut)
+	}
+	code, out, _ = exec("desk", "profile", "add", "--help")
+	if code != 0 || !strings.Contains(out, "Profile name (required)") {
+		t.Fatalf("help:\n%s", out)
+	}
+	// Without the hook --profile stays optional.
+	reg = newReg(false)
+	code, _, errOut = exec("desk", "profile", "add")
+	if code != 0 || setups != 4 {
+		t.Fatalf("optional --profile: code %d %s", code, errOut)
+	}
+}
+
 // Bun falco sync prints its summary and then throws when a download failed.
 // A value returned with an error reaches stdout before the error is rendered;
 // an error alone prints nothing.
