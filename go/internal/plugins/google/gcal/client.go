@@ -215,7 +215,10 @@ func (a *api) getEvent(calendarID, eventID string) (*event, error) {
 	return &parsed, nil
 }
 
+// createOptions and updateOptions carry in given the calendar.Event fields
+// sent even when empty (givenFields).
 type createOptions struct {
+	given                                                  []string
 	calendarID, summary, description, location, start, end string
 	allDay                                                 bool
 	attendees, recurrence                                  []string
@@ -231,6 +234,8 @@ func (a *api) createEvent(o createOptions) (*event, error) {
 		Location:    o.location,
 		Start:       dateTime(o.start, o.allDay),
 		End:         dateTime(o.end, o.allDay),
+		// Summary, Description and Location are sent even when empty.
+		ForceSendFields: o.given,
 	}
 	for _, email := range o.attendees {
 		body.Attendees = append(body.Attendees, &calendar.EventAttendee{Email: email})
@@ -261,6 +266,7 @@ func (a *api) createEvent(o createOptions) (*event, error) {
 }
 
 type updateOptions struct {
+	given                                                           []string
 	calendarID, eventID, summary, description, location, start, end string
 	allDay                                                          bool
 	attendees, addAttendees                                         []string
@@ -283,6 +289,8 @@ func (a *api) updateEvent(o updateOptions) (*event, error) {
 		ColorId:      o.colorID,
 		Visibility:   o.visibility,
 		Transparency: o.transparency,
+		// Summary, Description, Location and ColorId are sent even when empty.
+		ForceSendFields: o.given,
 	}
 	if o.start != "" {
 		patch.Start = dateTime(o.start, o.allDay)
@@ -423,7 +431,7 @@ func parseReminders(specs []string, fail google.FailFunc) ([]*calendar.EventRemi
 
 // dateTime is buildEventDateTime: a date without "T" (or --all-day) is all-day.
 func dateTime(value string, allDay bool) *calendar.EventDateTime {
-	trimmed := strings.TrimSpace(value)
+	trimmed := jsvalue.Trim(value)
 	if allDay || !strings.Contains(trimmed, "T") {
 		return &calendar.EventDateTime{Date: trimmed}
 	}

@@ -323,6 +323,8 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 	}{
 		{[]string{"1", hook}, "Webhook validation failed: 400", "Check the webhook URL and try again"},
 		{[]string{"1", "  "}, "Webhook URL is required", ""},
+		// Bun's prompt() trims with String#trim, which strips U+FEFF.
+		{[]string{"1", "\ufeff"}, "Webhook URL is required", ""},
 		{[]string{"1", "::not a url"}, "", "Check that the URL is correct and accessible"},
 		{nil, "Interactive input required but not running in terminal", "Run this command in an interactive terminal"},
 		{[]string{"3"}, `Unknown profile type "3"`, "Choose one of the listed types"},
@@ -1299,6 +1301,45 @@ func TestParseDateIsJavaScriptsForISOForms(t *testing.T) {
 		"2026-04-01T10:00:00.", "2026/4/32", "13/01/2026"} {
 		if _, ok := parseDate(in); ok {
 			t.Errorf("%q parsed", in)
+		}
+	}
+}
+
+// Bun checks the space and message ids with String#trim, which strips U+FEFF
+// and keeps U+0085; strings.TrimSpace does the opposite.
+func TestIDChecksTrimLikeJavaScript(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteAPIError(w, 404, "nope")
+	})
+	for _, c := range []struct {
+		path  string
+		args  map[string]any
+		space string
+		msg   string
+	}{
+		{"list", nil, "\ufeff", "spaceId is required for listing messages"},
+		{"get", map[string]any{"message-id": "M1"}, "\ufeff", "Both spaceId and messageId are required"},
+		{"get", map[string]any{"message-id": "\ufeff"}, "S1", "Both spaceId and messageId are required"},
+	} {
+		_, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, c.args, map[string]any{"space": c.space}))
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != c.msg {
+			t.Fatalf("%s %q: %#v", c.path, c.space, ce)
+		}
+	}
+	if n := len(fake.Recorded()); n != 0 {
+		t.Fatalf("%d requests", n)
+	}
+	// U+0085 is not JavaScript whitespace: the ids pass the check and reach the API.
+	for _, c := range []struct {
+		path string
+		args map[string]any
+	}{{"list", nil}, {"get", map[string]any{"message-id": "\u0085"}}} {
+		before := len(fake.Recorded())
+		_, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, c.args, map[string]any{"space": "\u0085"}))
+		if ce := googletest.CliErr(t, err); ce.Code == clierr.InvalidParams || len(fake.Recorded()) == before {
+			t.Fatalf("%s: %#v", c.path, ce)
 		}
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	chat "google.golang.org/api/chat/v1"
@@ -205,7 +206,7 @@ func (o sendOptions) body() any {
 
 func (a *api) sendViaWebhook(o sendOptions) (*sendResult, error) {
 	webhookURL, _ := a.Credentials["webhookUrl"].(string)
-	if strings.TrimSpace(webhookURL) == "" || !strings.HasPrefix(webhookURL, "https://") {
+	if jsvalue.Trim(webhookURL) == "" || !strings.HasPrefix(webhookURL, "https://") {
 		return nil, a.Fail("INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration")
 	}
 	resp, err := postJSON(a.Ctx, a.Fetch, webhookURL, o.body())
@@ -309,7 +310,7 @@ type listOptions struct {
 
 // list returns the newest messages first and whether --limit cut the range.
 func (a *api) list(o listOptions) ([]message, bool, error) {
-	if strings.TrimSpace(o.spaceID) == "" {
+	if jsvalue.Trim(o.spaceID) == "" {
 		return nil, false, a.Fail("INVALID_PARAMS", "spaceId is required for listing messages", "Specify with --space or configure default in profile")
 	}
 	if err := a.ensureOAuth("Listing messages"); err != nil {
@@ -386,7 +387,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 }
 
 func (a *api) get(spaceID, messageID string) (*message, error) {
-	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(messageID) == "" {
+	if jsvalue.Trim(spaceID) == "" || jsvalue.Trim(messageID) == "" {
 		return nil, a.Fail("INVALID_PARAMS", "Both spaceId and messageId are required", "Specify with --space and message ID")
 	}
 	if err := a.ensureOAuth("Getting messages"); err != nil {

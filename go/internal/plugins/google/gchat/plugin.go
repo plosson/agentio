@@ -83,7 +83,7 @@ func setupWebhook(ctx context.Context, suggested string, setup *plugins.SetupCon
 	setup.Log("2. Go to Space Settings → Webhooks")
 	setup.Log("3. Create a new webhook and copy the URL\n")
 	webhookURL, _ := setup.Prompt("? Paste your webhook URL: ", false)
-	webhookURL = strings.TrimSpace(webhookURL)
+	webhookURL = jsvalue.Trim(webhookURL)
 	if webhookURL == "" {
 		return nil, setup.Fail("INVALID_PARAMS", "Webhook URL is required", "")
 	}

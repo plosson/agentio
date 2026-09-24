@@ -48,7 +48,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		format, accessFor, verbatim    bool
 	}
 	want := map[string]row{
-		"create":   {"", "--title <title> --parent <containerId>", "write", "create script project", "", true, false, false},
+		"create":   {"", "--title <title> --parent <containerId>", "write", "create script project", "", true, true, false},
 		"metadata": {"<id>", "", "read", "", "", true, false, false},
 		"list":     {"", "--parent <containerId> --limit <n>=25", "read", "", "", true, false, false},
 		"delete":   {"<id>", "--force", "write", "delete script project", "", false, false, false},
@@ -355,8 +355,13 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
+	// Bun checks create's required --title before enforceWriteAccess.
+	_, err := product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, map[string]any{"parent": "P1"}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "required option '--title <title>' not specified" || ce.Suggestion != "" {
+		t.Fatalf("%#v", ce)
+	}
 	// Bun checks the push and put input before enforceWriteAccess.
-	_, err := product.Exec(fake.Ctx(), t, reg, "put", product.Input(t, "put", args, nil))
+	_, err = product.Exec(fake.Ctx(), t, reg, "put", product.Input(t, "put", args, nil))
 	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "No content provided" {
 		t.Fatalf("%#v", ce)
 	}

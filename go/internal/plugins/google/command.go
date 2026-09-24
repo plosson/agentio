@@ -30,13 +30,19 @@ func Stdin(in plugins.CommandInput) string {
 	return jsvalue.Trim(jsvalue.BufferString([]byte(text)))
 }
 
-// OptionOrStdin is Bun `options.<name> || await readStdin()`: the <value>
-// option when it is not empty, else Stdin.
-func OptionOrStdin(in plugins.CommandInput, name string) string {
-	if value := in.Option(name); value != "" {
-		return value
+// OptionOrStdin is a <value> option with Bun's readStdin() fallback, and
+// whether it is set. With emptyReadsStdin (Bun `if (!x) x = stdin`) an empty
+// option reads stdin; without it (Bun `if (x === undefined)`) only an absent
+// one does. Empty stdin leaves the option as given.
+func OptionOrStdin(in plugins.CommandInput, name string, emptyReadsStdin bool) (string, bool) {
+	value, given := in.LookupOption(name)
+	if given && (value != "" || !emptyReadsStdin) {
+		return value, true
 	}
-	return Stdin(in)
+	if piped := Stdin(in); piped != "" {
+		return piped, true
+	}
+	return value, given
 }
 
 // RequireOptions is Commander's requiredOption check, in declaration order.

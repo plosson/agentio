@@ -799,3 +799,85 @@ func TestEventJSONKeepsBunsShape(t *testing.T) {
 		t.Fatalf("%s", raw)
 	}
 }
+
+// Bun trims with String#trim, which strips U+FEFF and keeps U+0085;
+// strings.TrimSpace does the opposite. The freebusy ids and the event times
+// are trimmed Bun's way.
+func TestTrimIsJavaScripts(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFakeAt(t, "/calendar/v3/", func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"id": "e1", "calendars": map[string]any{}})
+	})
+	span := map[string]any{"from": "2024-04-15T00:00:00Z", "to": "2024-04-16T00:00:00Z"}
+	_, err := product.Exec(fake.Ctx(), t, reg, "freebusy", product.Input(t, "freebusy", map[string]any{"calendar-ids": "\ufeff,\ufeff"}, span))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "At least one calendar ID is required" {
+		t.Fatalf("%#v", ce)
+	}
+	if n := len(fake.Recorded()); n != 0 {
+		t.Fatalf("%d requests", n)
+	}
+	if _, err := product.Exec(fake.Ctx(), t, reg, "freebusy", product.Input(t, "freebusy", map[string]any{"calendar-ids": "primary,\u0085"}, span)); err != nil {
+		t.Fatal(err)
+	}
+	if got := googletest.JSONText(fake.Last().JSON["items"]); got != "[{\"id\":\"primary\"},{\"id\":\"\u0085\"}]" {
+		t.Fatalf("items %s", got)
+	}
+	_, err = product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, map[string]any{
+		"summary": "S", "from": "\ufeff2024-04-15\ufeff", "to": "\u00852024-04-16T10:00:00Z",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := fake.Last().JSON
+	if start, end := googletest.JSONText(body["start"]), googletest.JSONText(body["end"]); start != `{"date":"2024-04-15"}` || end != "{\"dateTime\":\"\u00852024-04-16T10:00:00Z\"}" {
+		t.Fatalf("start %s end %s", start, end)
+	}
+}
+
+// Bun sends a given option even when it is empty (update `!== undefined`,
+// create's `{ summary, description, location }` literal), sends visibility,
+// color on create and the times only when non-empty, and reads stdin for
+// --description only when it is empty (create) or absent (update).
+func TestGivenEmptyOptionsAreSentLikeBun(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFakeAt(t, "/calendar/v3/", func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"id": "e1", "start": map[string]any{}, "end": map[string]any{}})
+	})
+	event := map[string]any{"calendar-id": "primary", "event-id": "e1"}
+	times := map[string]any{"summary": "S", "from": "2024-04-15", "to": "2024-04-16"}
+	for _, c := range []struct {
+		path  string
+		set   map[string]any
+		stdin any
+		want  string
+	}{
+		{"update", map[string]any{"description": ""}, "piped", `{"description":""}`},
+		{"update", map[string]any{"summary": "", "location": "", "color": ""}, nil, `{"colorId":"","location":"","summary":""}`},
+		{"update", map[string]any{"visibility": "", "from": "", "to": "", "show-as": ""}, nil, `{}`},
+		{"update", nil, "  piped \n", `{"description":"piped"}`},
+		{"update", nil, nil, `{}`},
+		{"create", map[string]any{"description": ""}, nil, `{"description":"","end":{"date":"2024-04-16"},"start":{"date":"2024-04-15"},"summary":"S"}`},
+		{"create", map[string]any{"description": ""}, "piped", `{"description":"piped","end":{"date":"2024-04-16"},"start":{"date":"2024-04-15"},"summary":"S"}`},
+		{"create", map[string]any{"location": "", "color": "", "visibility": ""}, nil, `{"end":{"date":"2024-04-16"},"location":"","start":{"date":"2024-04-15"},"summary":"S"}`},
+	} {
+		set := map[string]any{}
+		if c.path == "create" {
+			for k, v := range times {
+				set[k] = v
+			}
+		}
+		for k, v := range c.set {
+			set[k] = v
+		}
+		in := product.Input(t, c.path, event, set)
+		in.Stdin = c.stdin
+		if _, err := product.Exec(fake.Ctx(), t, reg, c.path, in); err != nil {
+			t.Fatalf("%s %v: %v", c.path, c.set, err)
+		}
+		if got := fake.Last().Body; got != c.want {
+			t.Errorf("%s %v %q:\n got %s\nwant %s", c.path, c.set, c.stdin, got, c.want)
+		}
+	}
+}

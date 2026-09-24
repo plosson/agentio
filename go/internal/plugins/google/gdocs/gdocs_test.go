@@ -308,6 +308,26 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
+	// Bun checks create's --title, then its content (--content, else trimmed
+	// stdin), before enforceWriteAccess; piped content satisfies it.
+	for _, c := range []struct {
+		set   map[string]any
+		stdin any
+		code  clierr.Code
+		msg   string
+	}{
+		{map[string]any{"content": "# x"}, nil, clierr.InvalidParams, "required option '--title <title>' not specified"},
+		{map[string]any{"title": "T"}, nil, clierr.InvalidParams, "No content provided"},
+		{map[string]any{"title": "T", "content": ""}, " \n\t\ufeff", clierr.InvalidParams, "No content provided"},
+		{map[string]any{"title": "T"}, "# piped", clierr.PermissionDenied, `Cannot create document: profile "ro" is read-only`},
+	} {
+		in := product.Input(t, "create", nil, c.set)
+		in.Stdin = c.stdin
+		_, err := product.Exec(fake.Ctx(), t, reg, "create", in)
+		if ce := googletest.CliErr(t, err); ce.Code != c.code || ce.Message != c.msg {
+			t.Fatalf("%v %q: %#v", c.set, c.stdin, ce)
+		}
+	}
 	// Bun checks the batch input before enforceWriteAccess.
 	_, err := product.Exec(fake.Ctx(), t, reg, "batch", product.Input(t, "batch", map[string]any{"doc-id-or-url": "d1"}, nil))
 	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "Provide --requests-json or --file" {

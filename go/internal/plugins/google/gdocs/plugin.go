@@ -84,11 +84,24 @@ func getCmd() plugins.CommandSpec {
 	}
 }
 
+// createInputError is the input Bun rejects before enforceWriteAccess
+// (google.WriteUnlessInvalid): the required --title, then the content.
+func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
+	if err := google.RequireOptions(in, fail, "--title <title>"); err != nil {
+		return err
+	}
+	if content, _ := google.OptionOrStdin(in, "content", true); content == "" {
+		return fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
+	}
+	return nil
+}
+
 func createCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "create",
 		Description: "Create a new document from Markdown",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(createInputError),
 		Operation:   "create document",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
@@ -105,13 +118,10 @@ func createCmd() plugins.CommandSpec {
 			`agentio gdocs create --title "Spec" --content "# Spec" --folder 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--title <title>"); err != nil {
+			if err := createInputError(in, run.Fail); err != nil {
 				return nil, err
 			}
-			content := google.OptionOrStdin(in, "content")
-			if content == "" {
-				return nil, run.Fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
-			}
+			content, _ := google.OptionOrStdin(in, "content", true)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

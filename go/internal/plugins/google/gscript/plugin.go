@@ -32,11 +32,18 @@ func New() *plugins.Plugin {
 
 var idArg = plugins.ArgumentSpec{Name: "id", Description: "Script project ID", Required: true}
 
+// createInputError is Commander's requiredOption on --title, which Bun
+// reports before enforceWriteAccess (google.WriteUnlessInvalid).
+func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
+	return google.RequireOptions(in, fail, "--title <title>")
+}
+
 func createCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "create",
 		Description: "Create a new Apps Script project (standalone or container-bound)",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(createInputError),
 		Operation:   "create script project",
 		Options: []plugins.OptionSpec{
 			{Flags: "--title <title>", Description: "Script project title"},
@@ -53,7 +60,7 @@ func createCmd() plugins.CommandSpec {
 			"The --parent ID is the container's Drive file ID (Sheet/Doc/Form/Slides).",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--title <title>"); err != nil {
+			if err := createInputError(in, run.Fail); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)

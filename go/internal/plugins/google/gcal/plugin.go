@@ -76,6 +76,20 @@ func respondInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	return fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
 }
 
+// givenFields names the calendar.Event field of each option (pairs of option
+// and field) given on the command line. Bun sends those even when empty:
+// create builds `{ summary, description, location }` and JSON keeps "" while
+// dropping undefined, update checks `!== undefined`.
+func givenFields(in plugins.CommandInput, pairs ...string) []string {
+	var fields []string
+	for i := 0; i < len(pairs); i += 2 {
+		if _, given := in.LookupOption(pairs[i]); given {
+			fields = append(fields, pairs[i+1])
+		}
+	}
+	return fields
+}
+
 // transparency is Bun's --show-as mapping.
 func transparency(showAs string) string {
 	switch showAs {
@@ -230,10 +244,17 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
+			// Bun create reads stdin when --description is empty.
+			description, descriptionGiven := google.OptionOrStdin(in, "description", true)
+			given := givenFields(in, "summary", "Summary", "location", "Location")
+			if descriptionGiven {
+				given = append(given, "Description")
+			}
 			return google.Result(a.createEvent(createOptions{
 				calendarID:   cmp.Or(in.Arg("calendar-id"), "primary"),
+				given:        given,
 				summary:      in.Option("summary"),
-				description:  google.OptionOrStdin(in, "description"),
+				description:  description,
 				location:     in.Option("location"),
 				start:        in.Option("from"),
 				end:          in.Option("to"),
@@ -297,11 +318,18 @@ func updateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
+			// Bun update reads stdin only when --description is absent.
+			description, descriptionGiven := google.OptionOrStdin(in, "description", false)
+			given := givenFields(in, "summary", "Summary", "location", "Location", "color", "ColorId")
+			if descriptionGiven {
+				given = append(given, "Description")
+			}
 			return google.Result(a.updateEvent(updateOptions{
 				calendarID:   in.Arg("calendar-id"),
 				eventID:      in.Arg("event-id"),
+				given:        given,
 				summary:      in.Option("summary"),
-				description:  google.OptionOrStdin(in, "description"),
+				description:  description,
 				location:     in.Option("location"),
 				start:        in.Option("from"),
 				end:          in.Option("to"),
@@ -458,7 +486,7 @@ func freebusyCmd() plugins.CommandSpec {
 			}
 			var ids []string
 			for _, id := range strings.Split(in.Arg("calendar-ids"), ",") {
-				if id = strings.TrimSpace(id); id != "" {
+				if id = jsvalue.Trim(id); id != "" {
 					ids = append(ids, id)
 				}
 			}

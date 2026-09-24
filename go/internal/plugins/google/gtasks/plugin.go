@@ -42,19 +42,6 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: true, Info: "tasks access ok"}, nil
 }
 
-// notes is Bun's --notes with the trimmed stdin as fallback: add reads stdin
-// when --notes is empty, update only when --notes is absent.
-func notes(in plugins.CommandInput, emptyReadsStdin bool) (string, bool) {
-	value, given := in.LookupOption("notes")
-	if given && (value != "" || !emptyReadsStdin) {
-		return value, true
-	}
-	if piped := google.Stdin(in); piped != "" {
-		return piped, true
-	}
-	return value, given
-}
-
 // addInputError is Commander's requiredOption check on --title.
 func addInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	if in.Option("title") == "" {
@@ -258,7 +245,7 @@ func addCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			text, given := notes(in, true)
+			text, given := google.OptionOrStdin(in, "notes", true)
 			return google.Result(a.createTask(createOptions{
 				tasklistID: in.Arg("tasklist-id"),
 				title:      in.Option("title"),
@@ -308,7 +295,7 @@ func updateCmd() plugins.CommandSpec {
 			}
 			o := updateOptions{tasklistID: in.Arg("tasklist-id"), taskID: in.Arg("task-id")}
 			o.title, o.titleGiven = in.LookupOption("title")
-			o.notes, o.notesGiven = notes(in, false)
+			o.notes, o.notesGiven = google.OptionOrStdin(in, "notes", false)
 			o.due, o.dueGiven = in.LookupOption("due")
 			o.status, o.statusGiven = in.LookupOption("status")
 			return google.Result(a.updateTask(o))
