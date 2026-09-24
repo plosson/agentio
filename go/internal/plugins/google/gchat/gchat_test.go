@@ -1343,3 +1343,21 @@ func TestIDChecksTrimLikeJavaScript(t *testing.T) {
 		}
 	}
 }
+
+// Commander treats --space "" as present: list rejects it with Bun's client
+// message before any request, members looks "" up as Bun does.
+func TestEmptySpaceReachesTheClient(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{}})
+	})
+	_, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, map[string]any{"space": ""}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "spaceId is required for listing messages" || len(fake.Recorded()) != 0 {
+		t.Fatalf("%#v", ce)
+	}
+	_, err = product.Exec(fake.Ctx(), t, reg, "members", product.Input(t, "members", nil, map[string]any{"space": ""}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.NotFound || ce.Message != `Space not found: ""` || len(fake.Recorded()) == 0 {
+		t.Fatalf("%#v", ce)
+	}
+}

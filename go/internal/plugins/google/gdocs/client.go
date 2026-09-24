@@ -76,7 +76,8 @@ func extractDocID(docIDOrURL string) string {
 }
 
 func (a *api) create(title, markdown, folderID string) (*created, error) {
-	file := &drive.File{Name: title, MimeType: docMimeType}
+	// Bun sends name as given, "" included.
+	file := &drive.File{Name: title, MimeType: docMimeType, ForceSendFields: []string{"Name"}}
 	if folderID != "" {
 		file.Parents = []string{folderID}
 	}

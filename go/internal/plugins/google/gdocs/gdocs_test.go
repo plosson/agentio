@@ -838,3 +838,26 @@ func TestAPIErrorsMatchBun(t *testing.T) {
 		}
 	}
 }
+
+// Commander treats --title "" as present: Bun sends name "" to Drive, and on a
+// read-only profile the read-only refusal is the answer.
+func TestEmptyTitleIsSentAsGiven(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh(), false)
+	product.SaveProfile(t, "ro", fresh(), true)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"id": "new1"})
+	})
+	in := product.Input(t, "create", nil, map[string]any{"title": "", "content": "# x", "profile": "acme"})
+	if _, err := product.Exec(fake.Ctx(), t, reg, "create", in); err != nil {
+		t.Fatal(err)
+	}
+	if raw := fake.Last().Raw; !strings.Contains(raw, `"name":""`) {
+		t.Fatalf("metadata without an empty name: %q", raw)
+	}
+	in = product.Input(t, "create", nil, map[string]any{"title": "", "content": "# x", "profile": "ro"})
+	_, err := product.Exec(fake.Ctx(), t, reg, "create", in)
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.PermissionDenied {
+		t.Fatalf("%#v", ce)
+	}
+}

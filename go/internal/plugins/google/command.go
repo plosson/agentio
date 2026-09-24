@@ -45,12 +45,14 @@ func OptionOrStdin(in plugins.CommandInput, name string, emptyReadsStdin bool) (
 	return value, given
 }
 
-// RequireOptions is Commander's requiredOption check, in declaration order.
+// RequireOptions is Commander's requiredOption check, in declaration order:
+// only an absent option fails. A given "" is present, as Commander checks
+// `=== undefined`, and the command then handles the empty value as Bun does.
 // flags are the Bun declarations ("--space <id>").
 func RequireOptions(in plugins.CommandInput, fail FailFunc, flags ...string) error {
 	for _, f := range flags {
 		name := strings.TrimPrefix(strings.Fields(f)[0], "--")
-		if s, _ := in.Options[name].(string); s == "" {
+		if _, given := in.LookupOption(name); !given {
 			return fail("INVALID_PARAMS", fmt.Sprintf("required option '%s' not specified", f), "")
 		}
 	}

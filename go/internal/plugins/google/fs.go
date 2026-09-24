@@ -81,3 +81,13 @@ func MkdirAll(path string) error {
 	}
 	return nil
 }
+
+// WriteFile is fs.promises.writeFile(path, data): a failure is Node's,
+// naming path ("ENOENT: no such file or directory, open 'x'"; an empty path
+// names none, as in Node).
+func WriteFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o666); err != nil {
+		return NodeFSError("open", path, err)
+	}
+	return nil
+}

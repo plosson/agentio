@@ -765,13 +765,20 @@ func TestDownloadWritesBytesAndExportsWorkspaceFiles(t *testing.T) {
 		{"missing", "x", "", clierr.NotFound, "Failed to get file: File not found: missing.", ""},
 		{"pdf1", filepath.Join(dir, "nodir", "x"), "", "API_ERROR", "Failed to download file: ENOENT: no such file or directory, open '" + filepath.Join(dir, "nodir", "x") + "'", ""},
 		{"pdf1", dir, "", "API_ERROR", "Failed to download file: EISDIR: illegal operation on a directory, open '" + dir + "'", ""},
-		{"pdf1", "", "", clierr.InvalidParams, "required option '--output <path>' not specified", ""},
+		// A given "" passes Commander's requiredOption; Bun's writeFile('') fails.
+		{"pdf1", "", "", "API_ERROR", "Failed to download file: ENOENT: no such file or directory, open", ""},
 	} {
 		v, err := run(c.id, c.output, c.export)
 		ce := googletest.CliErr(t, err)
 		if v != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggestion {
 			t.Fatalf("%s %s: %#v", c.id, c.export, ce)
 		}
+	}
+	// An absent --output is Commander's required-option error, before any request.
+	requests := len(fake.Recorded())
+	_, err = product.Exec(fake.Ctx(), t, reg, "download", product.Input(t, "download", map[string]any{"file-id-or-url": "pdf1"}, nil))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "required option '--output <path>' not specified" || len(fake.Recorded()) != requests {
+		t.Fatalf("%#v", ce)
 	}
 	for _, h := range fake.Recorded()[before:] {
 		if strings.HasSuffix(h.Path, "/export") {
@@ -1206,5 +1213,21 @@ func TestFormatMatchesBun(t *testing.T) {
 	}
 	if got := product.Printed(t, "move", &file{ID: "pdf1", Name: "report <final>.pdf"}, false); got != "Moved: report <final>.pdf (pdf1)\n" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// Commander treats --query "" as present: Bun searches fullText for an empty string
+// (list() adds its own "trashed = false" in front, as for any query).
+func TestEmptySearchQueryIsSent(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("readonly"), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"files": []any{}})
+	})
+	if _, err := product.Exec(fake.Ctx(), t, reg, "search", product.Input(t, "search", nil, map[string]any{"query": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if q := fake.Last().Query.Get("q"); q != "trashed = false and trashed = false and fullText contains ''" {
+		t.Fatalf("%q", q)
 	}
 }

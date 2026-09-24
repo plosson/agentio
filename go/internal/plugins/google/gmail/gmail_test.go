@@ -1352,3 +1352,19 @@ func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
 	_, err, _ = runDirect(t, fake.Ctx(), "export", product.Input(t, "export", map[string]any{"message-id": "m1"}, map[string]any{"output": "/abs/x.pdf"}))
 	wantErr(t, err, clierr.APIError, "Chrome failed: boom\n", "")
 }
+
+// Commander treats --query "" as present: Bun sends `q.trim() || undefined`,
+// so an empty query lists without q.
+func TestEmptySearchQueryListsWithoutQ(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"messages": []any{}, "resultSizeEstimate": 0})
+	})
+	if _, err := product.Exec(fake.Ctx(), t, reg, "search", product.Input(t, "search", nil, map[string]any{"query": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if q, ok := fake.Recorded()[0].Query["q"]; ok || len(fake.Recorded()) == 0 {
+		t.Fatalf("q sent: %q", q)
+	}
+}

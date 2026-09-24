@@ -479,15 +479,17 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 	if err := RequireOptions(in, run.Fail, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
 		t.Fatal("a bool where a string is required passed")
 	}
-	if err := RequireOptions(in, run.Fail, "--space <id>"); err == nil {
-		t.Fatal("an empty string passed")
+	// Commander's requiredOption checks `=== undefined`: a given "" is present,
+	// while an absent option (nil, as the host leaves it) still fails after it.
+	if err := RequireOptions(in, run.Fail, "--space <id>"); err != nil {
+		t.Fatalf("a given empty string failed: %v", err)
 	}
-	if err := RequireOptions(in, run.Fail, "--missing <x>"); err == nil {
-		t.Fatal("an absent option passed")
+	in.Options["missing"] = nil
+	if err := RequireOptions(in, run.Fail, "--space <id>", "--missing <x>"); err == nil {
+		t.Fatal("an absent option after a given empty one passed")
 	}
 	want := []string{
 		"INVALID_PARAMS|required option '--limit <n>' not specified|",
-		"INVALID_PARAMS|required option '--space <id>' not specified|",
 		"INVALID_PARAMS|required option '--missing <x>' not specified|",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

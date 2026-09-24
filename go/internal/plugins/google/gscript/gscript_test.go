@@ -360,6 +360,11 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "required option '--title <title>' not specified" || ce.Suggestion != "" {
 		t.Fatalf("%#v", ce)
 	}
+	// Commander treats --title "" as present, so the read-only refusal wins.
+	_, err = product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, map[string]any{"title": ""}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.PermissionDenied {
+		t.Fatalf("%#v", ce)
+	}
 	// Bun checks the push and put input before enforceWriteAccess.
 	_, err = product.Exec(fake.Ctx(), t, reg, "put", product.Input(t, "put", args, nil))
 	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "No content provided" {

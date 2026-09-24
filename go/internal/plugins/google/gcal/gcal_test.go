@@ -861,6 +861,8 @@ func TestGivenEmptyOptionsAreSentLikeBun(t *testing.T) {
 		{"create", map[string]any{"description": ""}, nil, `{"description":"","end":{"date":"2024-04-16"},"start":{"date":"2024-04-15"},"summary":"S"}`},
 		{"create", map[string]any{"description": ""}, "piped", `{"description":"piped","end":{"date":"2024-04-16"},"start":{"date":"2024-04-15"},"summary":"S"}`},
 		{"create", map[string]any{"location": "", "color": "", "visibility": ""}, nil, `{"end":{"date":"2024-04-16"},"location":"","start":{"date":"2024-04-15"},"summary":"S"}`},
+		// A given "" passes Commander's requiredOption and is sent as Bun sends it.
+		{"create", map[string]any{"summary": "", "from": "", "to": " "}, nil, `{"end":{"date":""},"start":{"date":""},"summary":""}`},
 	} {
 		set := map[string]any{}
 		if c.path == "create" {
@@ -879,5 +881,43 @@ func TestGivenEmptyOptionsAreSentLikeBun(t *testing.T) {
 		if got := fake.Last().Body; got != c.want {
 			t.Errorf("%s %v %q:\n got %s\nwant %s", c.path, c.set, c.stdin, got, c.want)
 		}
+	}
+}
+
+// Commander treats a required option given as "" as present: freebusy sends
+// the empty times, respond reports "" as an invalid status, and on a read-only
+// profile create with an empty --summary reaches the read-only refusal.
+func TestEmptyRequiredOptionsReachTheCommand(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	product.SaveProfile(t, "ro", storedCreds(time.Now().Add(time.Hour).UnixMilli()), true)
+	fake := googletest.NewFakeAt(t, "/calendar/v3/", func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"calendars": map[string]any{}})
+	})
+	in := product.Input(t, "freebusy", map[string]any{"calendar-ids": "primary"}, map[string]any{"from": "", "to": "", "profile": "acme"})
+	if _, err := product.Exec(fake.Ctx(), t, reg, "freebusy", in); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.Last().Body; got != `{"items":[{"id":"primary"}],"timeMax":"","timeMin":""}` {
+		t.Fatalf("%s", got)
+	}
+	requests := len(fake.Recorded())
+	for _, c := range []struct {
+		path string
+		set  map[string]any
+		code clierr.Code
+		msg  string
+	}{
+		{"respond", map[string]any{"status": ""}, clierr.InvalidParams, "Invalid status: "},
+		{"create", map[string]any{"summary": "", "from": "2024-04-15", "to": "2024-04-16"}, clierr.PermissionDenied, `Cannot create event: profile "ro" is read-only`},
+	} {
+		c.set["profile"] = "ro"
+		_, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, map[string]any{"calendar-id": "primary", "event-id": "e1"}, c.set))
+		if ce := googletest.CliErr(t, err); ce.Code != c.code || ce.Message != c.msg {
+			t.Fatalf("%s: %#v", c.path, ce)
+		}
+	}
+	if len(fake.Recorded()) != requests {
+		t.Fatal("a refused command reached the API")
 	}
 }

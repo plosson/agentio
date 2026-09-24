@@ -112,13 +112,13 @@ func writePull(root, claspPath, scriptID string, files []file) (*pulled, error) 
 	out := &pulled{RootDir: root, ScriptID: scriptID, Files: []pulledFile{}}
 	for _, f := range files {
 		localPath := filepath.Join(root, localFilename(f))
-		if err := os.WriteFile(localPath, []byte(f.Source), 0o666); err != nil {
-			return nil, google.NodeFSError("open", localPath, err)
+		if err := google.WriteFile(localPath, []byte(f.Source)); err != nil {
+			return nil, err
 		}
 		out.Files = append(out.Files, pulledFile{LocalPath: localPath, Type: f.Type})
 	}
-	if err := os.WriteFile(claspPath, claspJSON(scriptID), 0o666); err != nil {
-		return nil, google.NodeFSError("open", claspPath, err)
+	if err := google.WriteFile(claspPath, claspJSON(scriptID)); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

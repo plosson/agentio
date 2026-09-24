@@ -4,7 +4,6 @@ package gdocs
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -76,7 +75,7 @@ func getCmd() plugins.CommandSpec {
 			if output == "" {
 				return string(content), nil
 			}
-			if err := os.WriteFile(output, content, 0o666); err != nil {
+			if err := google.WriteFile(output, content); err != nil {
 				return nil, err
 			}
 			return "Exported to " + output, nil

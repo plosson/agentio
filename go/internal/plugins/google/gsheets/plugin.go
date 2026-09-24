@@ -4,7 +4,6 @@ package gsheets
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -546,7 +545,7 @@ func exportCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			output := in.Option("output")
-			if err := os.WriteFile(output, data, 0o666); err != nil {
+			if err := google.WriteFile(output, data); err != nil {
 				return nil, err
 			}
 			return fmt.Sprintf("Exported to %s\n  Format: %s\n  Size: %d bytes", output, format, len(data)), nil

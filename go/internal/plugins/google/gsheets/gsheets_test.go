@@ -966,3 +966,21 @@ func TestAPIErrorsMatchBun(t *testing.T) {
 		t.Fatal("a failed export wrote the file")
 	}
 }
+
+// Commander treats --output "" as present; the export then fails in
+// fs.promises.writeFile with Node's message, as a missing directory does.
+func TestExportWriteFailsLikeNode(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh(), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) { _, _ = io.WriteString(w, "DATA") })
+	missing := filepath.Join(t.TempDir(), "nodir", "out")
+	for output, want := range map[string]string{
+		"":      "ENOENT: no such file or directory, open",
+		missing: "ENOENT: no such file or directory, open '" + missing + "'",
+	} {
+		v, err := product.Exec(fake.Ctx(), t, reg, "export", product.Input(t, "export", map[string]any{"spreadsheet-id-or-url": "x1"}, map[string]any{"output": output}))
+		if v != nil || err == nil || err.Error() != want {
+			t.Fatalf("%q: %v %v", output, v, err)
+		}
+	}
+}

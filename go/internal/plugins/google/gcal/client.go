@@ -363,7 +363,8 @@ func (a *api) respond(calendarID, eventID, status, comment string) (*event, erro
 }
 
 func (a *api) freeBusy(ids []string, timeMin, timeMax string) (*freeBusy, error) {
-	req := &calendar.FreeBusyRequest{TimeMin: timeMin, TimeMax: timeMax}
+	// Bun sends the times as given, "" included.
+	req := &calendar.FreeBusyRequest{TimeMin: timeMin, TimeMax: timeMax, ForceSendFields: []string{"TimeMin", "TimeMax"}}
 	for _, id := range ids {
 		req.Items = append(req.Items, &calendar.FreeBusyRequestItem{Id: id})
 	}
@@ -430,12 +431,13 @@ func parseReminders(specs []string, fail google.FailFunc) ([]*calendar.EventRemi
 }
 
 // dateTime is buildEventDateTime: a date without "T" (or --all-day) is all-day.
+// The value is sent even when empty (date ""), as in Bun.
 func dateTime(value string, allDay bool) *calendar.EventDateTime {
 	trimmed := jsvalue.Trim(value)
 	if allDay || !strings.Contains(trimmed, "T") {
-		return &calendar.EventDateTime{Date: trimmed}
+		return &calendar.EventDateTime{Date: trimmed, ForceSendFields: []string{"Date"}}
 	}
-	return &calendar.EventDateTime{DateTime: trimmed}
+	return &calendar.EventDateTime{DateTime: trimmed, ForceSendFields: []string{"DateTime"}}
 }
 
 func parseEvent(e *calendar.Event) event {

@@ -421,8 +421,8 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 	if err != nil {
 		return nil, a.Failed("download file", err)
 	}
-	if err := os.WriteFile(outputPath, body, 0o666); err != nil {
-		return nil, a.Failed("download file", google.NodeFSError("open", outputPath, err))
+	if err := google.WriteFile(outputPath, body); err != nil {
+		return nil, a.Failed("download file", err)
 	}
 	return &downloaded{Filename: f.Name, Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
 }
