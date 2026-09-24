@@ -6,7 +6,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 )
 
@@ -27,7 +27,7 @@ var sessionFailures = map[clierr.Code]bool{
 
 // Statuses checks every configured profile. A single expired credential stays
 // in its row; a dead hub or a locked vault aborts the whole run.
-func Statuses(ctx context.Context, reg *plugin.Registry, preferred []string, test bool) ([]ProfileStatus, error) {
+func Statuses(ctx context.Context, reg *plugins.Registry, preferred []string, test bool) ([]ProfileStatus, error) {
 	refs, err := profile.List("", preferred)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func Statuses(ctx context.Context, reg *plugin.Registry, preferred []string, tes
 	return out, nil
 }
 
-func OneStatus(ctx context.Context, reg *plugin.Registry, service, name string, test bool) (ProfileStatus, error) {
+func OneStatus(ctx context.Context, reg *plugins.Registry, service, name string, test bool) (ProfileStatus, error) {
 	refs, err := profile.List(service, nil)
 	if err != nil {
 		return ProfileStatus{}, err
@@ -56,7 +56,7 @@ func OneStatus(ctx context.Context, reg *plugin.Registry, service, name string, 
 	return ProfileStatus{}, clierr.ProfileNotFoundError(service, name)
 }
 
-func check(ctx context.Context, reg *plugin.Registry, ref profile.Ref, test bool) (ProfileStatus, error) {
+func check(ctx context.Context, reg *plugins.Registry, ref profile.Ref, test bool) (ProfileStatus, error) {
 	row := ProfileStatus{Service: ref.Service, Profile: ref.Name, ReadOnly: ref.ReadOnly}
 	has, err := auth.HasCredentials(ref.Service, ref.Name)
 	if err != nil {

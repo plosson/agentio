@@ -11,7 +11,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 )
@@ -63,7 +63,7 @@ func IntervalHours(raw string) int {
 
 // RunRefreshPass refreshes every stored profile that is near expiry.
 // It always returns. A locked vault or an overlapping pass is a skip.
-func RunRefreshPass(ctx context.Context, reg *plugin.Registry, preferred []string) PassResult {
+func RunRefreshPass(ctx context.Context, reg *plugins.Registry, preferred []string) PassResult {
 	if !vault.Unlocked() {
 		log.Printf("keepalive outcome=skipped reason=%q", "vault is locked")
 		return PassResult{}
@@ -96,7 +96,7 @@ func RunRefreshPass(ctx context.Context, reg *plugin.Registry, preferred []strin
 	return result
 }
 
-func walk(ctx context.Context, reg *plugin.Registry, preferred []string) (PassResult, error) {
+func walk(ctx context.Context, reg *plugins.Registry, preferred []string) (PassResult, error) {
 	var result PassResult
 	refs, err := profile.List("", preferred)
 	if err != nil {
@@ -130,7 +130,7 @@ func walk(ctx context.Context, reg *plugin.Registry, preferred []string) (PassRe
 	return result, nil
 }
 
-func StartKeepalive(ctx context.Context, reg *plugin.Registry, preferred []string, hours int) {
+func StartKeepalive(ctx context.Context, reg *plugins.Registry, preferred []string, hours int) {
 	StopKeepalive()
 	if hours == 0 {
 		log.Printf("Token keepalive is off (AGENTIO_KEEPALIVE_HOURS=0)")
@@ -141,7 +141,7 @@ func StartKeepalive(ctx context.Context, reg *plugin.Registry, preferred []strin
 	schedule(ctx, reg, preferred, 0)
 }
 
-func schedule(ctx context.Context, reg *plugin.Registry, preferred []string, delay time.Duration) {
+func schedule(ctx context.Context, reg *plugins.Registry, preferred []string, delay time.Duration) {
 	timer = time.AfterFunc(delay, func() {
 		RunRefreshPass(ctx, reg, preferred)
 		keepMu.Lock()
@@ -168,6 +168,6 @@ func KeepaliveRunning() bool {
 	return timer != nil
 }
 
-func KeepaliveFromEnv(ctx context.Context, reg *plugin.Registry, preferred []string) {
+func KeepaliveFromEnv(ctx context.Context, reg *plugins.Registry, preferred []string) {
 	StartKeepalive(ctx, reg, preferred, IntervalHours(os.Getenv("AGENTIO_KEEPALIVE_HOURS")))
 }

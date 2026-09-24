@@ -5,26 +5,26 @@ package board
 import (
 	"context"
 
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 )
 
 const ServiceID = "board"
 
-func New() *plugin.Plugin {
-	return &plugin.Plugin{
-		APIVersion:  plugin.APIVersion,
+func New() *plugins.Plugin {
+	return &plugins.Plugin{
+		APIVersion:  plugins.APIVersion,
 		ID:          ServiceID,
 		DisplayName: "Board",
 		Description: "Fake static-token service with no refresh lifecycle",
-		Profile: &plugin.ProfileSpec{
+		Profile: &plugins.ProfileSpec{
 			Setup:    setup,
 			Validate: validate,
 		},
-		Commands: []plugin.CommandSpec{cardsList(), cardsCreate()},
+		Commands: []plugins.CommandSpec{cardsList(), cardsCreate()},
 	}
 }
 
-func setup(_ context.Context, _ plugin.SetupOptions, setup *plugin.SetupContext) (*plugin.SetupResult, error) {
+func setup(_ context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
 	token, err := setup.Prompt("API token", true)
 	if err != nil {
 		return nil, err
@@ -39,39 +39,39 @@ func setup(_ context.Context, _ plugin.SetupOptions, setup *plugin.SetupContext)
 	if workspace == "" {
 		workspace = "default"
 	}
-	return &plugin.SetupResult{
+	return &plugins.SetupResult{
 		Credentials:          map[string]any{"token": token, "workspace": workspace},
 		SuggestedProfileName: workspace,
 		Info:                 "Workspace: " + workspace,
 	}, nil
 }
 
-func validate(_ context.Context, run *plugin.RunContext) (plugin.ValidationResult, error) {
+func validate(_ context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
 	token, _ := run.Credentials["token"].(string)
 	workspace, _ := run.Credentials["workspace"].(string)
 	if token == "" || token == "expired" {
-		return plugin.ValidationResult{Valid: false, Error: "token rejected"}, nil
+		return plugins.ValidationResult{Valid: false, Error: "token rejected"}, nil
 	}
-	return plugin.ValidationResult{Valid: true, Info: "Workspace: " + workspace}, nil
+	return plugins.ValidationResult{Valid: true, Info: "Workspace: " + workspace}, nil
 }
 
-func cardsList() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func cardsList() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "cards list", Description: "List cards in the workspace",
 		Access: "read", Examples: []string{"agentio board cards list"},
-		Run: func(_ context.Context, _ plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			return map[string]any{"workspace": run.Credentials["workspace"], "cards": []string{}}, nil
 		},
 	}
 }
 
-func cardsCreate() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func cardsCreate() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "cards create", Description: "Create a card",
 		Access:    "write",
-		Arguments: []plugin.ArgumentSpec{{Name: "title", Description: "Card title", Required: true}},
+		Arguments: []plugins.ArgumentSpec{{Name: "title", Description: "Card title", Required: true}},
 		Examples:  []string{"agentio board cards create Hello"},
-		Run: func(_ context.Context, in plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			title, _ := in.Args["title"].(string)
 			return map[string]any{"created": title, "token": run.Credentials["token"]}, nil
 		},

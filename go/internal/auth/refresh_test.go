@@ -9,28 +9,28 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-func newReg(t *testing.T, spec *plugin.RefreshSpec) *plugin.Registry {
+func newReg(t *testing.T, spec *plugins.RefreshSpec) *plugins.Registry {
 	t.Helper()
-	reg, err := plugin.NewRegistry(&plugin.Plugin{
-		APIVersion: plugin.APIVersion, ID: "acme", DisplayName: "Acme", Description: "demo",
-		Profile: &plugin.ProfileSpec{
-			Setup: func(context.Context, plugin.SetupOptions, *plugin.SetupContext) (*plugin.SetupResult, error) {
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "acme", DisplayName: "Acme", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
 				return nil, nil
 			},
-			Validate: func(context.Context, *plugin.RunContext) (plugin.ValidationResult, error) {
-				return plugin.ValidationResult{Valid: true}, nil
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
 			},
 			Refresh: spec,
 		},
-		Commands: []plugin.CommandSpec{{
+		Commands: []plugins.CommandSpec{{
 			Path: "whoami", Description: "who", Examples: []string{"agentio acme whoami"},
-			Run: func(context.Context, plugin.CommandInput, *plugin.RunContext) (any, error) { return nil, nil },
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) { return nil, nil },
 		}},
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ func store(t *testing.T, creds map[string]any) {
 func TestRefreshPersistsBeforeReturnAndRotatesOnce(t *testing.T) {
 	initVault(t)
 	var calls atomic.Int32
-	reg := newReg(t, &plugin.RefreshSpec{
+	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
 		Applies:      func(c map[string]any) bool { s, _ := c["refreshToken"].(string); return s != "" },
 		IsStale: func(c map[string]any, now, buffer int64) bool {
@@ -127,7 +127,7 @@ func TestRefreshPersistsBeforeReturnAndRotatesOnce(t *testing.T) {
 
 func TestFailedRefreshDoesNotPersist(t *testing.T) {
 	initVault(t)
-	reg := newReg(t, &plugin.RefreshSpec{
+	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
 		Applies:      func(map[string]any) bool { return true },
 		IsStale:      func(map[string]any, int64, int64) bool { return true },
@@ -151,7 +151,7 @@ func TestFailedRefreshDoesNotPersist(t *testing.T) {
 }
 
 func TestRedactCopiesAndStripsOnlyDeclaredFields(t *testing.T) {
-	reg := newReg(t, &plugin.RefreshSpec{
+	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
 		Applies:      func(map[string]any) bool { return false },
 		IsStale:      func(map[string]any, int64, int64) bool { return false },
@@ -168,11 +168,11 @@ func TestRedactCopiesAndStripsOnlyDeclaredFields(t *testing.T) {
 	if out["accessToken"] != "a" {
 		t.Fatal("non-secret dropped")
 	}
-	bare, _ := plugin.NewRegistry(&plugin.Plugin{
+	bare, _ := plugins.NewRegistry(&plugins.Plugin{
 		APIVersion: 1, ID: "ping", DisplayName: "Ping", Description: "x",
-		Commands: []plugin.CommandSpec{{
+		Commands: []plugins.CommandSpec{{
 			Path: "once", Description: "p", Examples: []string{"agentio ping once"},
-			Run: func(context.Context, plugin.CommandInput, *plugin.RunContext) (any, error) { return nil, nil },
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) { return nil, nil },
 		}},
 	})
 	static := map[string]any{"token": "whole"}

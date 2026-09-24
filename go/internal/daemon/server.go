@@ -16,7 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 )
@@ -42,7 +42,7 @@ func ResetLimiters() {
 
 // Server is the local hub: health, the credential API, and the admin UI.
 type Server struct {
-	Registry *plugin.Registry
+	Registry *plugins.Registry
 	Version  string
 	Now      func() time.Time
 }

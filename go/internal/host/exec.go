@@ -9,7 +9,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 )
 
@@ -32,7 +32,7 @@ func EnforceWrite(service, profileName, operation string) error {
 }
 
 // Execute runs one declarative command through host-owned profile and access policy.
-func Execute(ctx context.Context, reg *plugin.Registry, p *plugin.Plugin, spec *plugin.CommandSpec, in plugin.CommandInput) (any, error) {
+func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec *plugins.CommandSpec, in plugins.CommandInput) (any, error) {
 	creds := map[string]any{}
 	profileName := ""
 	if p.Profile != nil {
@@ -58,7 +58,7 @@ func Execute(ctx context.Context, reg *plugin.Registry, p *plugin.Plugin, spec *
 }
 
 // PrintResult writes a command result. --json wins; otherwise format, then JSON.
-func PrintResult(w io.Writer, spec *plugin.CommandSpec, result any, asJSON bool) error {
+func PrintResult(w io.Writer, spec *plugins.CommandSpec, result any, asJSON bool) error {
 	if asJSON {
 		raw, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
@@ -91,7 +91,7 @@ func PrintResult(w io.Writer, spec *plugin.CommandSpec, result any, asJSON bool)
 }
 
 // ParseStdin turns raw stdin into the command's declared input.
-func ParseStdin(spec *plugin.CommandSpec, raw string, present bool) (any, error) {
+func ParseStdin(spec *plugins.CommandSpec, raw string, present bool) (any, error) {
 	if spec.Input == "" || spec.Input == "none" || !present {
 		return nil, nil
 	}
@@ -109,7 +109,7 @@ func ParseStdin(spec *plugin.CommandSpec, raw string, present bool) (any, error)
 }
 
 // AddProfile runs plugin setup and lets the host name and persist the result.
-func AddProfile(ctx context.Context, p *plugin.Plugin, opts plugin.SetupOptions, setup *plugin.SetupContext, out io.Writer) error {
+func AddProfile(ctx context.Context, p *plugins.Plugin, opts plugins.SetupOptions, setup *plugins.SetupContext, out io.Writer) error {
 	if p.Profile == nil || p.Profile.Setup == nil {
 		return fmt.Errorf("no profile setup registered for %s", p.ID)
 	}
@@ -141,7 +141,7 @@ func AddProfile(ctx context.Context, p *plugin.Plugin, opts plugin.SetupOptions,
 
 // Reauth replaces credentials through the plugin hook and persists them.
 // A plugin without the hook is skipped, not failed.
-func Reauth(ctx context.Context, reg *plugin.Registry, service, profileName string, setup *plugin.SetupContext, errOut io.Writer) error {
+func Reauth(ctx context.Context, reg *plugins.Registry, service, profileName string, setup *plugins.SetupContext, errOut io.Writer) error {
 	p := reg.Find(service)
 	if p == nil || p.Profile == nil || p.Profile.Reauthenticate == nil {
 		fmt.Fprintf(errOut, "\nSkipping %s / %s: no automatic reauthentication is registered. Run 'agentio %s profile add --profile %s' to update.\n", service, profileName, service, profileName)

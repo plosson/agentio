@@ -11,7 +11,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/oauth"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/term"
 )
 
@@ -40,7 +40,7 @@ func (s Streams) err() io.Writer {
 	return os.Stderr
 }
 
-func fail(code plugin.ErrorCode, message, suggestion string) error {
+func fail(code plugins.ErrorCode, message, suggestion string) error {
 	return clierr.New(clierr.Code(code), message, suggestion)
 }
 
@@ -52,16 +52,16 @@ func fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 }
 
 // NewSetupContext builds the host surface a profile.setup receives.
-func NewSetupContext(s Streams) *plugin.SetupContext {
-	return &plugin.SetupContext{
+func NewSetupContext(s Streams) *plugins.SetupContext {
+	return &plugins.SetupContext{
 		Prompt:  func(q string, secret bool) (string, error) { return prompt(s, q, secret) },
 		Confirm: func(q string) (bool, error) { return confirm(s, q) },
 		Log:     func(parts ...any) { fmt.Fprintln(s.err(), parts...) },
 		OpenURL: oauth.LaunchBrowser,
-		OAuth: func(ctx context.Context, opts plugin.OAuthSetupOptions) (plugin.OAuthSetupResult, error) {
+		OAuth: func(ctx context.Context, opts plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 			port, err := oauth.FindPort()
 			if err != nil {
-				return plugin.OAuthSetupResult{}, err
+				return plugins.OAuthSetupResult{}, err
 			}
 			redirect := fmt.Sprintf("http://localhost:%d/callback", port)
 			authURL := ""
@@ -73,20 +73,20 @@ func NewSetupContext(s Streams) *plugin.SetupContext {
 				AuthURL: authURL, In: s.in(), Err: s.err(),
 			})
 			if err != nil {
-				return plugin.OAuthSetupResult{}, err
+				return plugins.OAuthSetupResult{}, err
 			}
-			return plugin.OAuthSetupResult{Code: res.Code, State: res.State, RedirectURI: redirect}, nil
+			return plugins.OAuthSetupResult{Code: res.Code, State: res.State, RedirectURI: redirect}, nil
 		},
 		Fail:  fail,
 		Fetch: fetch,
 	}
 }
 
-func NewRunContext(creds map[string]any, profileName string, ctx context.Context) *plugin.RunContext {
+func NewRunContext(creds map[string]any, profileName string, ctx context.Context) *plugins.RunContext {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &plugin.RunContext{
+	return &plugins.RunContext{
 		Credentials: creds,
 		Profile:     profileName,
 		Signal:      ctx,

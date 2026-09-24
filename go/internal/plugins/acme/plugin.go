@@ -13,38 +13,38 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/obscure"
-	"github.com/plosson/agentio/go/internal/plugin"
 	"github.com/plosson/agentio/go/internal/plugincache"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
 const ServiceID = "acme"
 
-func New() *plugin.Plugin {
-	return &plugin.Plugin{
-		APIVersion:  plugin.APIVersion,
+func New() *plugins.Plugin {
+	return &plugins.Plugin{
+		APIVersion:  plugins.APIVersion,
 		ID:          ServiceID,
 		DisplayName: "Acme",
 		Description: "Fake refreshable service used to exercise the agentio host",
-		Brand:       &plugin.Brand{Color: "#336699"},
-		Profile: &plugin.ProfileSpec{
+		Brand:       &plugins.Brand{Color: "#336699"},
+		Profile: &plugins.ProfileSpec{
 			Setup:          setup,
 			Validate:       validate,
 			Reauthenticate: reauth,
-			Refresh: &plugin.RefreshSpec{
+			Refresh: &plugins.RefreshSpec{
 				SecretFields: []string{"refreshToken"},
 				Applies:      applies,
 				IsStale:      stale,
 				Run:          refresh,
 			},
 		},
-		Commands: []plugin.CommandSpec{
+		Commands: []plugins.CommandSpec{
 			whoami(), itemsList(), itemsAdd(), notesPut(), batchApply(), itemsDrop(), widgetsGet(),
 		},
 	}
 }
 
-func setup(ctx context.Context, opts plugin.SetupOptions, setup *plugin.SetupContext) (*plugin.SetupResult, error) {
+func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
 	_ = opts
 	account, err := setup.Prompt("Account", false)
 	if err != nil {
@@ -62,7 +62,7 @@ func setup(ctx context.Context, opts plugin.SetupOptions, setup *plugin.SetupCon
 		return nil, err
 	}
 	setup.Log("Acme client", clientID)
-	oauth, err := setup.OAuth(ctx, plugin.OAuthSetupOptions{
+	oauth, err := setup.OAuth(ctx, plugins.OAuthSetupOptions{
 		ServiceName: "Acme",
 		AuthorizationURL: func(redirect string) string {
 			return "https://acme.invalid/authorize?redirect_uri=" + redirect
@@ -72,7 +72,7 @@ func setup(ctx context.Context, opts plugin.SetupOptions, setup *plugin.SetupCon
 		return nil, err
 	}
 	access, refreshTok, expiry := parseCode(oauth.Code)
-	return &plugin.SetupResult{
+	return &plugins.SetupResult{
 		Credentials: map[string]any{
 			"account": account, "accessToken": access, "refreshToken": refreshTok,
 			"expiryDate": jsonNumber(expiry),
@@ -127,7 +127,7 @@ func refresh(_ context.Context, creds map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
-func reauth(_ context.Context, creds map[string]any, profileName string, setup *plugin.SetupContext) (map[string]any, error) {
+func reauth(_ context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
 	setup.Log("Re-authenticating acme /", profileName)
 	token, err := setup.Prompt("Refresh token", true)
 	if err != nil {
@@ -146,37 +146,37 @@ func reauth(_ context.Context, creds map[string]any, profileName string, setup *
 	return out, nil
 }
 
-func validate(ctx context.Context, run *plugin.RunContext) (plugin.ValidationResult, error) {
+func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
 	account, _ := run.Credentials["account"].(string)
 	access, _ := run.Credentials["accessToken"].(string)
 	if account == "" {
-		return plugin.ValidationResult{Valid: false, Error: "missing account"}, nil
+		return plugins.ValidationResult{Valid: false, Error: "missing account"}, nil
 	}
 	if access == "bad" {
-		return plugin.ValidationResult{Valid: false, Error: "token rejected"}, nil
+		return plugins.ValidationResult{Valid: false, Error: "token rejected"}, nil
 	}
 	if ep, ok := run.Credentials["endpoint"].(string); ok && ep != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
 		if err != nil {
-			return plugin.ValidationResult{Valid: false, Error: err.Error()}, nil
+			return plugins.ValidationResult{Valid: false, Error: err.Error()}, nil
 		}
 		resp, err := run.Fetch(ctx, req)
 		if err != nil {
-			return plugin.ValidationResult{Valid: false, Error: err.Error()}, nil
+			return plugins.ValidationResult{Valid: false, Error: err.Error()}, nil
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return plugin.ValidationResult{Valid: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode)}, nil
+			return plugins.ValidationResult{Valid: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode)}, nil
 		}
 	}
-	return plugin.ValidationResult{Valid: true, Info: "Account: " + account}, nil
+	return plugins.ValidationResult{Valid: true, Info: "Account: " + account}, nil
 }
 
-func whoami() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func whoami() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "whoami", Description: "Show the authenticated Acme account",
 		Access: "read", Examples: []string{"agentio acme whoami"},
-		Run: func(_ context.Context, _ plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			return map[string]any{
 				"account": run.Credentials["account"], "accessToken": run.Credentials["accessToken"], "profile": run.Profile,
 			}, nil
@@ -188,13 +188,13 @@ func whoami() plugin.CommandSpec {
 	}
 }
 
-func itemsList() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func itemsList() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "items list", Description: "List Acme items",
 		Access:   "read",
-		Options:  []plugin.OptionSpec{{Flags: "--limit <number>", Description: "Maximum results", DefaultValue: "20"}},
+		Options:  []plugins.OptionSpec{{Flags: "--limit <number>", Description: "Maximum results", DefaultValue: "20"}},
 		Examples: []string{"agentio acme items list --limit 5"},
-		Run: func(_ context.Context, in plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			limit := 20
 			if raw, ok := in.Options["limit"].(string); ok && raw != "" {
 				n, err := strconv.Atoi(raw)
@@ -216,13 +216,13 @@ func itemsList() plugin.CommandSpec {
 	}
 }
 
-func itemsAdd() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func itemsAdd() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "items add", Description: "Add an Acme item",
 		Access:    "write",
-		Arguments: []plugin.ArgumentSpec{{Name: "title", Description: "Item title", Required: true}},
+		Arguments: []plugins.ArgumentSpec{{Name: "title", Description: "Item title", Required: true}},
 		Examples:  []string{"agentio acme items add Widget"},
-		Run: func(_ context.Context, in plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			title, _ := in.Args["title"].(string)
 			if title == "" {
 				return nil, run.Fail("INVALID_PARAMS", "title is required", "")
@@ -232,12 +232,12 @@ func itemsAdd() plugin.CommandSpec {
 	}
 }
 
-func notesPut() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func notesPut() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "notes put", Description: "Store a note from stdin in the plugin cache",
 		Access: "write", Input: "text",
 		Examples: []string{"echo hello | agentio acme notes put"},
-		Run: func(_ context.Context, in plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			text, _ := in.Stdin.(string)
 			account, _ := run.Credentials["account"].(string)
 			if err := plugincache.Write(ServiceID, account, "note", map[string]string{"text": text}); err != nil {
@@ -248,12 +248,12 @@ func notesPut() plugin.CommandSpec {
 	}
 }
 
-func batchApply() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func batchApply() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "batch apply", Description: "Apply a JSON batch from stdin",
 		Access: "write", Input: "json",
 		Examples: []string{`echo '{"ops":["a"]}' | agentio acme batch apply`},
-		Run: func(_ context.Context, in plugin.CommandInput, run *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			obj, ok := in.Stdin.(map[string]any)
 			if !ok {
 				return nil, run.Fail("INVALID_PARAMS", "stdin JSON must be an object", "")
@@ -263,28 +263,28 @@ func batchApply() plugin.CommandSpec {
 	}
 }
 
-func itemsDrop() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func itemsDrop() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "items drop", Description: "Drop one or more items",
 		Access:    "write",
-		Arguments: []plugin.ArgumentSpec{{Name: "id", Description: "Item ids", Required: true, Variadic: true}},
+		Arguments: []plugins.ArgumentSpec{{Name: "id", Description: "Item ids", Required: true, Variadic: true}},
 		Examples:  []string{"agentio acme items drop a b"},
-		Run: func(_ context.Context, in plugin.CommandInput, _ *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, _ *plugins.RunContext) (any, error) {
 			return map[string]any{"dropped": in.Args["id"]}, nil
 		},
 	}
 }
 
-func widgetsGet() plugin.CommandSpec {
-	return plugin.CommandSpec{
+func widgetsGet() plugins.CommandSpec {
+	return plugins.CommandSpec{
 		Path: "widgets get", Description: "Fetch a widget, with an optional extra",
 		Access: "read",
-		Arguments: []plugin.ArgumentSpec{
+		Arguments: []plugins.ArgumentSpec{
 			{Name: "id", Description: "Widget id", Required: true},
 			{Name: "extra", Description: "Optional extra", Required: false},
 		},
 		Examples: []string{"agentio acme widgets get w1"},
-		Run: func(_ context.Context, in plugin.CommandInput, _ *plugin.RunContext) (any, error) {
+		Run: func(_ context.Context, in plugins.CommandInput, _ *plugins.RunContext) (any, error) {
 			return map[string]any{"id": in.Args["id"], "extra": in.Args["extra"]}, nil
 		},
 	}

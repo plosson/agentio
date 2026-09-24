@@ -17,7 +17,7 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/daemon"
 	"github.com/plosson/agentio/go/internal/host"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
@@ -30,16 +30,16 @@ import (
 const Version = "0.0.0-foundation"
 
 func init() {
-	plugin.Default.MustRegister(acme.New())
-	plugin.Default.MustRegister(board.New())
-	plugin.Default.MustRegister(ping.New())
+	plugins.Default.MustRegister(acme.New())
+	plugins.Default.MustRegister(board.New())
+	plugins.Default.MustRegister(ping.New())
 }
 
 func Main(args []string) int {
-	return Execute(plugin.Default, args, os.Stdout, os.Stderr, os.Stdin)
+	return Execute(plugins.Default, args, os.Stdout, os.Stderr, os.Stdin)
 }
 
-func Execute(reg *plugin.Registry, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
+func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	root := NewRoot(reg)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -61,7 +61,7 @@ func Execute(reg *plugin.Registry, args []string, stdout, stderr io.Writer, stdi
 	return 1
 }
 
-func NewRoot(reg *plugin.Registry) *cobra.Command {
+func NewRoot(reg *plugins.Registry) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "agentio",
 		Short: "CLI for LLM agents to interact with communication and tracking services",
@@ -94,7 +94,7 @@ var (
 	managed   = map[string]bool{"add": true, "rename": true, "remove": true}
 )
 
-func gate(cmd *cobra.Command, _ *plugin.Registry) error {
+func gate(cmd *cobra.Command, _ *plugins.Registry) error {
 	if cmd.Parent() == nil {
 		return nil
 	}
@@ -148,7 +148,7 @@ func topName(cmd *cobra.Command) string {
 	return cur.Name()
 }
 
-func serviceCmd(reg *plugin.Registry, p *plugin.Plugin) *cobra.Command {
+func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	cmd := &cobra.Command{Use: p.ID, Short: p.Description}
 	for i := range p.Commands {
 		spec := p.Commands[i]
@@ -205,7 +205,7 @@ func serviceCmd(reg *plugin.Registry, p *plugin.Plugin) *cobra.Command {
 		specCopy := spec
 		pluginCopy := p
 		leaf.RunE = func(c *cobra.Command, args []string) error {
-			in := plugin.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
+			in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
 			for i, arg := range specCopy.Arguments {
 				if arg.Variadic {
 					if i < len(args) {
@@ -285,7 +285,7 @@ func longName(flags string) string {
 	return flags
 }
 
-func serviceProfile(reg *plugin.Registry, p *plugin.Plugin) *cobra.Command {
+func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	group := &cobra.Command{Use: "profile", Short: "Manage " + p.DisplayName + " profiles"}
 	var profileName string
 	var readOnly bool
@@ -293,7 +293,7 @@ func serviceProfile(reg *plugin.Registry, p *plugin.Plugin) *cobra.Command {
 		Use:   "add",
 		Short: "Add a new " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return host.AddProfile(context.Background(), p, plugin.SetupOptions{Profile: profileName, ReadOnly: readOnly}, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
+			return host.AddProfile(context.Background(), p, plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly}, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
 		},
 	}
 	add.Flags().StringVar(&profileName, "profile", "", "Profile name")
@@ -412,7 +412,7 @@ func removeCmd(service string) *cobra.Command {
 	return cmd
 }
 
-func profileCmd(reg *plugin.Registry) *cobra.Command {
+func profileCmd(reg *plugins.Registry) *cobra.Command {
 	cmd := &cobra.Command{Use: "profile", Short: "Manage profiles across services"}
 	known := func() string {
 		var ids []string
@@ -473,7 +473,7 @@ func profileCmd(reg *plugin.Registry) *cobra.Command {
 			if err := assertKnown(args[0]); err != nil {
 				return err
 			}
-			return host.AddProfile(context.Background(), reg.Find(args[0]), plugin.SetupOptions{Profile: profileName, ReadOnly: readOnly}, host.NewSetupContext(streams(c)), c.OutOrStdout())
+			return host.AddProfile(context.Background(), reg.Find(args[0]), plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly}, host.NewSetupContext(streams(c)), c.OutOrStdout())
 		},
 	}
 	add.Flags().StringVar(&profileName, "profile", "", "Profile name")
@@ -548,7 +548,7 @@ func profileCmd(reg *plugin.Registry) *cobra.Command {
 	return cmd
 }
 
-func ids(reg *plugin.Registry) []string {
+func ids(reg *plugins.Registry) []string {
 	var out []string
 	for _, p := range reg.Plugins() {
 		out = append(out, p.ID)
@@ -668,7 +668,7 @@ func keyCmd() *cobra.Command {
 	return cmd
 }
 
-func daemonCmd(reg *plugin.Registry) *cobra.Command {
+func daemonCmd(reg *plugins.Registry) *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "Run the local credential hub"}
 	start := &cobra.Command{
 		Use: "start", Short: "Start the daemon in the foreground",
@@ -775,7 +775,7 @@ func logoutCmd() *cobra.Command {
 	}
 }
 
-func statusCmd(reg *plugin.Registry) *cobra.Command {
+func statusCmd(reg *plugins.Registry) *cobra.Command {
 	var asJSON bool
 	var noTest bool
 	cmd := &cobra.Command{
@@ -819,7 +819,7 @@ func statusCmd(reg *plugin.Registry) *cobra.Command {
 	return cmd
 }
 
-func reauthCmd(reg *plugin.Registry) *cobra.Command {
+func reauthCmd(reg *plugins.Registry) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:    "reauth",
@@ -857,7 +857,7 @@ func reauthCmd(reg *plugin.Registry) *cobra.Command {
 	return cmd
 }
 
-func docsCmd(reg *plugin.Registry) *cobra.Command {
+func docsCmd(reg *plugins.Registry) *cobra.Command {
 	return &cobra.Command{
 		Use:   "docs",
 		Short: "Machine-readable command index",
@@ -886,7 +886,7 @@ func docsCmd(reg *plugin.Registry) *cobra.Command {
 	}
 }
 
-func skillCmd(reg *plugin.Registry) *cobra.Command {
+func skillCmd(reg *plugins.Registry) *cobra.Command {
 	return &cobra.Command{
 		Use:   "skill <service>",
 		Short: "Print a SKILL.md for one service",
@@ -914,7 +914,7 @@ func skillCmd(reg *plugin.Registry) *cobra.Command {
 	}
 }
 
-func pluginCmd(reg *plugin.Registry) *cobra.Command {
+func pluginCmd(reg *plugins.Registry) *cobra.Command {
 	cmd := &cobra.Command{Use: "plugin", Short: "Inspect the plugin catalog"}
 	cmd.AddCommand(&cobra.Command{
 		Use: "list", Short: "List registered plugins",

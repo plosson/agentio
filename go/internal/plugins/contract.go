@@ -1,11 +1,11 @@
-// Package plugin is the contract a service implements. The host owns vault
+// Package plugins is the contract a service implements. The host owns vault
 // writes, profile names, refresh persistence, read-only enforcement, JSON
 // output, and error rendering. A plugin returns data and credentials.
 //
 // This is the Go form of src/plugin-sdk/index.ts (the declarative contract).
 // In-tree Commander registration is a TypeScript adapter and is not part of
 // the contract offered to a service.
-package plugin
+package plugins
 
 import (
 	"context"

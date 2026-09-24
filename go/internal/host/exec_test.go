@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
@@ -16,16 +16,16 @@ import (
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-func reg(t *testing.T) *plugin.Registry {
+func reg(t *testing.T) *plugins.Registry {
 	t.Helper()
-	r, err := plugin.NewRegistry(acme.New(), board.New(), ping.New())
+	r, err := plugins.NewRegistry(acme.New(), board.New(), ping.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return r
 }
 
-func vaultUp(t *testing.T) *plugin.Registry {
+func vaultUp(t *testing.T) *plugins.Registry {
 	t.Helper()
 	testbox.Isolate(t)
 	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
@@ -44,7 +44,7 @@ func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 	}
 	p := r.Find("acme")
 	spec := command(p, "items add")
-	_, err := Execute(context.Background(), r, p, spec, plugin.CommandInput{
+	_, err := Execute(context.Background(), r, p, spec, plugins.CommandInput{
 		Args: map[string]any{"title": "nope"}, Options: map[string]any{},
 	})
 	ce, ok := err.(*clierr.Error)
@@ -61,7 +61,7 @@ func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 	}
 	// Omitted access is read, so a read-only profile can still run it.
 	who := command(p, "whoami")
-	res, err := Execute(context.Background(), r, p, who, plugin.CommandInput{Options: map[string]any{}})
+	res, err := Execute(context.Background(), r, p, who, plugins.CommandInput{Options: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,12 +80,12 @@ func TestStdinAndProfileSelection(t *testing.T) {
 	if err := profile.Save("acme", "bea", freshCreds("bea"), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Execute(context.Background(), r, p, command(p, "whoami"), plugin.CommandInput{Options: map[string]any{}})
+	_, err := Execute(context.Background(), r, p, command(p, "whoami"), plugins.CommandInput{Options: map[string]any{}})
 	if ce, ok := err.(*clierr.Error); !ok || ce.Code != clierr.InvalidParams || !strings.Contains(ce.Message, "ada") {
 		t.Fatalf("multiple profiles = %#v", err)
 	}
 	spec := command(p, "batch apply")
-	_, err = Execute(context.Background(), r, p, spec, plugin.CommandInput{
+	_, err = Execute(context.Background(), r, p, spec, plugins.CommandInput{
 		Options: map[string]any{"profile": "ada"}, Stdin: nil,
 	})
 	// stdin nil with input json: ParseStdin is the CLI's job. Execute itself
@@ -97,7 +97,7 @@ func TestStdinAndProfileSelection(t *testing.T) {
 	if bad != nil || err == nil || !strings.Contains(err.Error(), "Invalid JSON") {
 		t.Fatalf("parse = %#v %v", bad, err)
 	}
-	res, err := Execute(context.Background(), r, p, spec, plugin.CommandInput{
+	res, err := Execute(context.Background(), r, p, spec, plugins.CommandInput{
 		Options: map[string]any{"profile": "bea"},
 		Stdin:   map[string]any{"ops": []any{"a"}},
 	})
@@ -112,7 +112,7 @@ func TestStdinAndProfileSelection(t *testing.T) {
 func TestCredentialLessCommandDoesNotTouchTheVault(t *testing.T) {
 	r := vaultUp(t)
 	p := r.Find("ping")
-	res, err := Execute(context.Background(), r, p, command(p, "once"), plugin.CommandInput{})
+	res, err := Execute(context.Background(), r, p, command(p, "once"), plugins.CommandInput{})
 	if err != nil || res != "pong" {
 		t.Fatalf("%#v %v", res, err)
 	}
@@ -122,7 +122,7 @@ func TestSetupPersistsThroughTheHost(t *testing.T) {
 	r := vaultUp(t)
 	p := r.Find("board")
 	var prompts []string
-	setup := &plugin.SetupContext{
+	setup := &plugins.SetupContext{
 		Prompt: func(q string, secret bool) (string, error) {
 			prompts = append(prompts, q)
 			if secret {
@@ -131,12 +131,12 @@ func TestSetupPersistsThroughTheHost(t *testing.T) {
 			return "desk", nil
 		},
 		Log: func(...any) {},
-		Fail: func(code plugin.ErrorCode, message, suggestion string) error {
+		Fail: func(code plugins.ErrorCode, message, suggestion string) error {
 			return clierr.New(clierr.Code(code), message, suggestion)
 		},
 	}
 	var out bytes.Buffer
-	if err := AddProfile(context.Background(), p, plugin.SetupOptions{ReadOnly: true}, setup, &out); err != nil {
+	if err := AddProfile(context.Background(), p, plugins.SetupOptions{ReadOnly: true}, setup, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "read-only") || !strings.Contains(strings.Join(prompts, " "), "API token") {
@@ -152,7 +152,7 @@ func TestSetupPersistsThroughTheHost(t *testing.T) {
 	}
 }
 
-func command(p *plugin.Plugin, path string) *plugin.CommandSpec {
+func command(p *plugins.Plugin, path string) *plugins.CommandSpec {
 	for i := range p.Commands {
 		if p.Commands[i].Path == path {
 			return &p.Commands[i]

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/auth"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
@@ -30,7 +30,7 @@ func isolate(t *testing.T) {
 	StopKeepalive()
 }
 
-func setup(t *testing.T) (*httptest.Server, *plugin.Registry, profile.IssuedKey) {
+func setup(t *testing.T) (*httptest.Server, *plugins.Registry, profile.IssuedKey) {
 	t.Helper()
 	isolate(t)
 	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
@@ -42,7 +42,7 @@ func setup(t *testing.T) (*httptest.Server, *plugin.Registry, profile.IssuedKey)
 	}, profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	reg, err := plugin.NewRegistry(acme.New(), ping.New())
+	reg, err := plugins.NewRegistry(acme.New(), ping.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestKeepaliveSkipsEmptyAndRefreshesStale(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	reg, err := plugin.NewRegistry(acme.New())
+	reg, err := plugins.NewRegistry(acme.New())
 	if err != nil {
 		t.Fatal(err)
 	}

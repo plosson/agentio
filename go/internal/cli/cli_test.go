@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -14,7 +14,7 @@ import (
 func run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, err bytes.Buffer
-	code := Execute(plugin.Default, args, &out, &err, strings.NewReader(""))
+	code := Execute(plugins.Default, args, &out, &err, strings.NewReader(""))
 	return code, out.String(), err.String()
 }
 

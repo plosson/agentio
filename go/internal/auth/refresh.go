@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugin"
+	"github.com/plosson/agentio/go/internal/plugins"
 )
 
 const (
@@ -60,7 +60,7 @@ func serialized(key string, task func() (Fresh, error)) (Fresh, error) {
 
 // GetFresh loads credentials, refreshes them when stale or forced, and
 // persists the replacement before returning it.
-func GetFresh(ctx context.Context, reg *plugin.Registry, service, profileName string, opt RefreshOptions) (Fresh, error) {
+func GetFresh(ctx context.Context, reg *plugins.Registry, service, profileName string, opt RefreshOptions) (Fresh, error) {
 	return serialized(service+"/"+profileName, func() (Fresh, error) {
 		stored, err := GetCredentials(service, profileName)
 		if err != nil {
@@ -104,7 +104,7 @@ func GetFresh(ctx context.Context, reg *plugin.Registry, service, profileName st
 // RedactForRemote strips refresh material. A service with no refresher is a
 // transparent vault: the hub hands the whole object over. The returned map is
 // a shallow copy so the caller's object is left intact.
-func RedactForRemote(reg *plugin.Registry, service string, credentials map[string]any) map[string]any {
+func RedactForRemote(reg *plugins.Registry, service string, credentials map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range credentials {
 		out[k] = v
