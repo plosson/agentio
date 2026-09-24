@@ -114,7 +114,7 @@ func setupOAuth(ctx context.Context, setup *plugins.SetupContext) (*plugins.Setu
 	}
 	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
 	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
+		return nil, google.EmailFailure(setup, err)
 	}
 	creds := google.Camel.Merge(map[string]any{"type": "oauth"}, tokens)
 	creds["email"] = email
@@ -207,12 +207,6 @@ func textOrJSON(in plugins.CommandInput, run *plugins.RunContext) (bool, error) 
 	}
 }
 
-// piped is Bun readStdin(): the trimmed text, empty when nothing was piped.
-func piped(stdin any) string {
-	text, _ := stdin.(string)
-	return strings.TrimSpace(text)
-}
-
 func sendCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "send",
@@ -248,14 +242,14 @@ func sendCmd() plugins.CommandSpec {
 					return nil, run.Fail("INVALID_PARAMS", "Cannot use both text message and --json option",
 						"Use either: agentio gchat send \"text\" OR agentio gchat send --json file.json")
 				}
-				payload, err := readPayload(source, in.Stdin, run)
+				payload, err := readPayload(source, in, run)
 				if err != nil {
 					return nil, err
 				}
 				o.payload = payload
 			} else {
 				if text == "" {
-					text = piped(in.Stdin)
+					text = google.Stdin(in)
 				}
 				if text == "" && len(o.attachments) == 0 {
 					return nil, run.Fail("INVALID_PARAMS", "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", "")
@@ -275,7 +269,7 @@ func sendCmd() plugins.CommandSpec {
 
 // readPayload is the --json branch: a file when --json has a value, stdin
 // otherwise, parsed as JSON.
-func readPayload(source any, stdin any, run *plugins.RunContext) (any, error) {
+func readPayload(source any, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 	var raw []byte
 	if file, ok := source.(string); ok {
 		content, err := os.ReadFile(file)
@@ -284,7 +278,7 @@ func readPayload(source any, stdin any, run *plugins.RunContext) (any, error) {
 		}
 		raw = content
 	} else {
-		text := piped(stdin)
+		text := google.Stdin(in)
 		if text == "" {
 			return nil, run.Fail("INVALID_PARAMS", "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json")
 		}
@@ -327,7 +321,7 @@ func listCmd() plugins.CommandSpec {
 			"agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--space <id>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
 				return nil, err
 			}
 			asJSON, err := textOrJSON(in, run)
@@ -377,7 +371,7 @@ func getCmd() plugins.CommandSpec {
 			"agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--space <id>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
 				return nil, err
 			}
 			asJSON, err := textOrJSON(in, run)
@@ -459,7 +453,7 @@ func membersCmd() plugins.CommandSpec {
 			`agentio gchat members --space "Engineering"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--space <id-or-name>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--space <id-or-name>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)

@@ -53,7 +53,7 @@ func createCmd() plugins.CommandSpec {
 			"The --parent ID is the container's Drive file ID (Sheet/Doc/Form/Slides).",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--title <title>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--title <title>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -343,7 +343,7 @@ func putCmd() plugins.CommandSpec {
 // putFile replaces the source of the existing file named bare, or appends a
 // new one typed by its extension (SERVER_JS without one). Only appsscript may
 // be JSON.
-func putFile(existing []file, bare, ext, source string, fail failFunc) ([]file, error) {
+func putFile(existing []file, bare, ext, source string, fail google.FailFunc) ([]file, error) {
 	next := make([]file, 0, len(existing)+1)
 	found := false
 	for _, f := range existing {

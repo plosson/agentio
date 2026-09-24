@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -107,4 +108,59 @@ func ValidateDriveFiles(mimeType string) func(context.Context, *plugins.RunConte
 		email, _ := run.Credentials["email"].(string)
 		return plugins.ValidationResult{Valid: true, Info: email}, nil
 	}
+}
+
+// ExportDriveFile is the export of the Drive-backed products (gdocs, gsheets,
+// gslides): the file's bytes as mimeType. A failure is Failed(operation).
+func (a API) ExportDriveFile(svc *drive.Service, fileID, mimeType, operation string) ([]byte, error) {
+	resp, err := svc.Files.Export(fileID, mimeType).Context(a.Ctx).Download()
+	if err != nil {
+		return nil, a.Failed(operation, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, a.Failed(operation, err)
+	}
+	return body, nil
+}
+
+// CreatedFile is what gsheets and gslides return from create and copy (Bun
+// GSheetsCreateResult, GSlidesCreateResult).
+type CreatedFile struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
+
+// CopyDriveFile is their copy(): Drive files.copy of fileID named title, into
+// parentFolderID when given. The title is kept, and linkPrefix + id is the URL,
+// when Drive returns none. A failure is Failed(operation).
+func (a API) CopyDriveFile(svc *drive.Service, fileID, title, parentFolderID, operation, linkPrefix string) (*CreatedFile, error) {
+	file := &drive.File{Name: title}
+	if parentFolderID != "" {
+		file.Parents = []string{parentFolderID}
+	}
+	f, err := svc.Files.Copy(fileID, file).Fields("id,name,webViewLink").Context(a.Ctx).Do()
+	if err != nil {
+		return nil, a.Failed(operation, err)
+	}
+	out := &CreatedFile{ID: f.Id, Title: f.Name, URL: f.WebViewLink}
+	if out.Title == "" {
+		out.Title = title
+	}
+	if out.URL == "" {
+		out.URL = linkPrefix + f.Id
+	}
+	return out, nil
+}
+
+// FormatCreatedFile is their printXCreated: heading is the first line
+// ("Spreadsheet created").
+func FormatCreatedFile(v any, heading string) string {
+	c, _ := v.(*CreatedFile)
+	if c == nil {
+		return ""
+	}
+	return strings.Join([]string{heading, "ID: " + c.ID, "Title: " + c.Title, "URL: " + c.URL}, "\n")
 }

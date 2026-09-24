@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
 // emuPerInch converts page size magnitudes (EMU) to inches.
@@ -56,13 +57,7 @@ func formatContent(v any) string {
 }
 
 // formatCreated is printGSlidesCreated (create and copy).
-func formatCreated(v any) string {
-	c, _ := v.(*created)
-	if c == nil {
-		return ""
-	}
-	return strings.Join([]string{"Presentation created", "ID: " + c.ID, "Title: " + c.Title, "URL: " + c.URL}, "\n")
-}
+func formatCreated(v any) string { return google.FormatCreatedFile(v, "Presentation created") }
 
 // formatBatch is printGSlidesBatchResult.
 func formatBatch(v any) string {

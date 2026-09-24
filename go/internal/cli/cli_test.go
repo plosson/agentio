@@ -3,13 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
+	"github.com/spf13/pflag"
 )
 
 func run(t *testing.T, args ...string) (int, string, string) {
@@ -488,5 +491,32 @@ func TestDefaultSubcommandAndAbsentOptions(t *testing.T) {
 	}
 	if exec("desk", "lists"); got[len(got)-1].Option("limit") != "100" {
 		t.Fatalf("a default value must still be given: %#v", got[len(got)-1].Options)
+	}
+}
+
+// The Google product tests run commands on googletest's Input. It must be the
+// map this CLI builds when no flag is given, or a test passes on input the host
+// never produces ("" where Commander leaves an option undefined).
+func TestGoogleTestInputIsWhatTheCLIBuildsWithoutFlags(t *testing.T) {
+	checked := 0
+	for _, p := range plugins.Default.Plugins() {
+		plugin := p
+		harness := googletest.For(func() *plugins.Plugin { return plugin })
+		for _, spec := range plugin.Commands {
+			flags := pflag.NewFlagSet(spec.Path, pflag.ContinueOnError)
+			declareOptions(flags, spec.Options)
+			if err := flags.Parse(nil); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]any{}
+			flags.VisitAll(func(f *pflag.Flag) { want[f.Name] = flagValue(flags, f) })
+			if got := harness.Input(t, spec.Path, nil, nil).Options; !reflect.DeepEqual(got, want) {
+				t.Errorf("%s %s:\n got %#v\nwant %#v", plugin.ID, spec.Path, got, want)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no commands checked")
 	}
 }

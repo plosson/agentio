@@ -8,7 +8,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,85 +21,12 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/google"
-	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-// hit is one request that reached the fake Google.
-type hit struct {
-	Method string
-	Path   string
-	Query  url.Values
-	Auth   string
-	Type   string
-	Raw    string
-	JSON   map[string]any
-	Form   url.Values
-}
-
-type fakeGoogle struct {
-	mu     sync.Mutex
-	hits   []hit
-	handle func(w http.ResponseWriter, h hit)
-	srv    *httptest.Server
-}
-
-func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeGoogle {
-	t.Helper()
-	f := &fakeGoogle{handle: handle}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		h := hit{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Auth: r.Header.Get("Authorization"), Type: r.Header.Get("Content-Type"), Raw: string(raw)}
-		if strings.HasPrefix(h.Type, "application/json") {
-			if err := json.Unmarshal(raw, &h.JSON); err != nil {
-				t.Errorf("non-JSON body %q", raw)
-			}
-		} else if strings.HasPrefix(h.Type, "application/x-www-form-urlencoded") {
-			h.Form, _ = url.ParseQuery(string(raw))
-		}
-		f.mu.Lock()
-		f.hits = append(f.hits, h)
-		f.mu.Unlock()
-		f.handle(w, h)
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-// ctx points drive/v3 (paths /files, /upload/drive/v3/files) at the fake.
-func (f *fakeGoogle) ctx() context.Context {
-	return google.WithEndpoints(context.Background(), google.Endpoints{
-		API: f.srv.URL + "/", Token: f.srv.URL + "/token", UserInfo: f.srv.URL + "/userinfo",
-	})
-}
-
-func (f *fakeGoogle) recorded() []hit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]hit(nil), f.hits...)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func setupVault(t *testing.T) *plugins.Registry {
-	t.Helper()
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := plugins.NewRegistry(New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
+// product drives New() through the shared Google test harness.
+var product = googletest.For(New)
 
 // storedCreds is a Bun GDriveCredentials object (camelCase keys).
 func storedCreds(expiry int64, accessLevel string) map[string]any {
@@ -120,89 +46,6 @@ func storedCreds(expiry int64, accessLevel string) map[string]any {
 
 func fresh(accessLevel string) map[string]any {
 	return storedCreds(time.Now().Add(time.Hour).UnixMilli(), accessLevel)
-}
-
-func saveProfile(t *testing.T, name string, creds map[string]any, readOnly bool) {
-	t.Helper()
-	opts := profile.SaveOptions{}
-	if readOnly {
-		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
-	}
-	if err := profile.Save("gdrive", name, creds, opts); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func loadCreds(t *testing.T, name string) map[string]any {
-	t.Helper()
-	c, err := vault.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.Credentials["gdrive"][name]
-}
-
-func spec(t *testing.T, path string) *plugins.CommandSpec {
-	t.Helper()
-	p := New()
-	for i := range p.Commands {
-		if p.Commands[i].Path == path {
-			return &p.Commands[i]
-		}
-	}
-	t.Fatalf("no command %q", path)
-	return nil
-}
-
-// input fills the defaults the way the host does, then applies set.
-func input(t *testing.T, path string, args map[string]any, set map[string]any) plugins.CommandInput {
-	t.Helper()
-	in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
-	for _, o := range spec(t, path).Options {
-		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
-		if !strings.Contains(o.Flags, "<") {
-			in.Options[name] = false
-			continue
-		}
-		d, _ := o.DefaultValue.(string)
-		in.Options[name] = d
-	}
-	for k, v := range args {
-		in.Args[k] = v
-	}
-	for k, v := range set {
-		in.Options[k] = v
-	}
-	return in
-}
-
-func exec(ctx context.Context, t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
-	t.Helper()
-	return host.Execute(ctx, reg, reg.Find("gdrive"), spec(t, path), in)
-}
-
-// printed is what the CLI writes to stdout for the result.
-func printed(t *testing.T, path string, v any, asJSON bool) string {
-	t.Helper()
-	var b bytes.Buffer
-	if err := host.PrintResult(&b, spec(t, path), v, asJSON); err != nil {
-		t.Fatal(err)
-	}
-	return b.String()
-}
-
-func cliErr(t *testing.T, err error) *clierr.Error {
-	t.Helper()
-	ce, ok := err.(*clierr.Error)
-	if !ok {
-		t.Fatalf("not a CLI error: %#v", err)
-	}
-	return ce
-}
-
-func jsonText(v any) string {
-	raw, _ := json.Marshal(v)
-	return string(raw)
 }
 
 // The command table is the Bun surface: `bun run src/index.ts gdrive --help`
@@ -306,17 +149,17 @@ const (
 	readonlyScopes = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email"
 )
 
-func tokenAndEmail(t *testing.T) *fakeGoogle {
-	return newFake(t, func(w http.ResponseWriter, h hit) {
+func tokenAndEmail(t *testing.T) *googletest.Fake {
+	return googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/token":
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/drive"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/drive"})
 		case "/userinfo":
 			if h.Auth != "Bearer at-1" {
 				w.WriteHeader(401)
 				return
 			}
-			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"email": "user@example.com"})
 		default:
 			w.WriteHeader(404)
 		}
@@ -324,24 +167,24 @@ func tokenAndEmail(t *testing.T) *fakeGoogle {
 }
 
 func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
-	setupVault(t)
+	product.SetupVault(t)
 	fake := tokenAndEmail(t)
 	var scopes string
 	var logs []string
 	var out bytes.Buffer
 	before := time.Now().UnixMilli()
-	err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{Options: map[string]any{"full": true, "readonly": false}}, oauthSetup(t, "", &scopes, &logs), &out)
+	err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{Options: map[string]any{"full": true, "readonly": false}}, oauthSetup(t, "", &scopes, &logs), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if scopes != fullScopes {
 		t.Fatalf("scopes %q", scopes)
 	}
-	token := fake.recorded()[0].Form
+	token := fake.Recorded()[0].Form
 	if token.Get("grant_type") != "authorization_code" || token.Get("code") != "code-1" || token.Get("redirect_uri") != "http://localhost:3001/callback" {
 		t.Fatalf("token request %v", token)
 	}
-	stored := loadCreds(t, "user@example.com")
+	stored := product.LoadCreds(t, "user@example.com")
 	var keys []string
 	for k := range stored {
 		keys = append(keys, k)
@@ -393,7 +236,7 @@ func TestSetupAccessLevelFromPromptAndFlags(t *testing.T) {
 			fake := tokenAndEmail(t)
 			var scopes string
 			var logs []string
-			res, err := New().Profile.Setup(fake.ctx(), c.opts, oauthSetup(t, c.answer, &scopes, &logs))
+			res, err := New().Profile.Setup(fake.Ctx(), c.opts, oauthSetup(t, c.answer, &scopes, &logs))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -416,18 +259,18 @@ func TestSetupAccessLevelFromPromptAndFlags(t *testing.T) {
 }
 
 func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": "123"})
+		googletest.WriteJSON(w, 200, map[string]any{"id": "123"})
 	})
 	var scopes string
 	var logs []string
-	err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{Options: map[string]any{"full": true}}, oauthSetup(t, "", &scopes, &logs), io.Discard)
-	ce := cliErr(t, err)
+	err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{Options: map[string]any{"full": true}}, oauthSetup(t, "", &scopes, &logs), io.Discard)
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.AuthFailed || ce.Message != "Failed to fetch user email: No email returned from userinfo endpoint" || ce.Suggestion != "Ensure the account has an email address" {
 		t.Fatalf("%#v", ce)
 	}
@@ -439,22 +282,22 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 // Bun never rotates a Google refresh token: a rotated one in the response is
 // dropped, and every other stored field (accessLevel included) is kept.
 func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
-	reg := setupVault(t)
+	reg := product.SetupVault(t)
 	creds := storedCreds(1, "full")
 	creds["legacy"] = "kept"
-	saveProfile(t, "acme", creds, false)
+	product.SaveProfile(t, "acme", creds, false)
 	var mu sync.Mutex
 	refreshes := 0
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
 			mu.Lock()
 			refreshes++
 			mu.Unlock()
 			time.Sleep(50 * time.Millisecond)
-			writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"files": []any{}})
+		googletest.WriteJSON(w, 200, map[string]any{"files": []any{}})
 	})
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -462,7 +305,7 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = auth.GetFresh(fake.ctx(), reg, "gdrive", "acme", auth.RefreshOptions{})
+			_, errs[i] = auth.GetFresh(fake.Ctx(), reg, "gdrive", "acme", auth.RefreshOptions{})
 		}(i)
 	}
 	wg.Wait()
@@ -474,11 +317,11 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if refreshes != 1 {
 		t.Fatalf("%d refreshes, want 1", refreshes)
 	}
-	form := fake.recorded()[0].Form
+	form := fake.Recorded()[0].Form
 	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt-old" {
 		t.Fatalf("refresh request %v", form)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["accessToken"] != "at-new" || stored["refreshToken"] != "rt-old" || stored["email"] != "me@example.com" ||
 		stored["legacy"] != "kept" || stored["accessLevel"] != "full" || stored["scope"] != "https://www.googleapis.com/auth/drive" {
 		t.Fatalf("%#v", stored)
@@ -489,53 +332,53 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if _, ok := stored["access_token"]; ok {
 		t.Fatal("refresh wrote a snake_case key")
 	}
-	if _, err := exec(fake.ctx(), t, reg, "list", input(t, "list", nil, nil)); err != nil {
+	if _, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	all := fake.recorded()
+	all := fake.Recorded()
 	if last := all[len(all)-1]; last.Auth != "Bearer at-new" || refreshes != 1 {
 		t.Fatalf("auth %q refreshes %d", last.Auth, refreshes)
 	}
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(1, "full"), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(1, "full"), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			googletest.WriteJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
 			return
 		}
 		t.Errorf("API called after a failed refresh: %s", h.Path)
 	})
-	_, err := exec(fake.ctx(), t, reg, "list", input(t, "list", nil, nil))
-	ce := cliErr(t, err)
+	_, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, nil))
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.TokenExpired || ce.Message != `Token refresh failed for gdrive profile "acme": invalid_grant` ||
 		ce.Suggestion != "Re-authenticate with: agentio gdrive profile add --profile acme" {
 		t.Fatalf("%#v", ce)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["accessToken"] != "at-old" || stored["refreshToken"] != "rt-old" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
 }
 
 // driveFake answers every Drive call a command makes with a plausible body.
-func driveFake(t *testing.T) *fakeGoogle {
-	return newFake(t, func(w http.ResponseWriter, h hit) {
+func driveFake(t *testing.T) *googletest.Fake {
+	return googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case strings.HasSuffix(h.Path, "/permissions") && h.Method == "GET":
-			writeJSON(w, 200, map[string]any{"permissions": []any{map[string]any{"id": "anyoneWithLink", "type": "anyone", "role": "reader"}}})
+			googletest.WriteJSON(w, 200, map[string]any{"permissions": []any{map[string]any{"id": "anyoneWithLink", "type": "anyone", "role": "reader"}}})
 		case strings.Contains(h.Path, "/permissions") && h.Method == "DELETE":
 			w.WriteHeader(204)
 		case strings.HasSuffix(h.Path, "/permissions"):
-			writeJSON(w, 200, map[string]any{"id": "perm-1", "type": "anyone", "role": "reader"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "perm-1", "type": "anyone", "role": "reader"})
 		case h.Query.Get("alt") == "media":
 			_, _ = io.WriteString(w, "bytes")
 		case h.Path == "/files" && h.Method == "GET":
-			writeJSON(w, 200, map[string]any{"files": []any{}})
+			googletest.WriteJSON(w, 200, map[string]any{"files": []any{}})
 		default:
-			writeJSON(w, 200, map[string]any{"id": "f1", "name": "F", "mimeType": "application/pdf"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "f1", "name": "F", "mimeType": "application/pdf"})
 		}
 	})
 }
@@ -559,8 +402,8 @@ func writeInputs(t *testing.T) (string, map[string]map[string]any) {
 }
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "ro", fresh("full"), true)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", fresh("full"), true)
 	fake := driveFake(t)
 	_, writeArgs := writeInputs(t)
 	ops := map[string]string{
@@ -568,28 +411,28 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 		"move": "move file", "trash": "trash file", "share": "share file", "unshare": "remove permission",
 	}
 	for path, op := range ops {
-		in := input(t, path, writeArgs[path], map[string]any{"anyone": true})
-		v, err := exec(fake.ctx(), t, reg, path, in)
-		ce := cliErr(t, err)
+		in := product.Input(t, path, writeArgs[path], map[string]any{"anyone": true})
+		v, err := product.Exec(fake.Ctx(), t, reg, path, in)
+		ce := googletest.CliErr(t, err)
 		if v != nil || ce.Code != clierr.PermissionDenied || ce.Message != `Cannot `+op+`: profile "ro" is read-only` ||
 			ce.Suggestion != "To modify this profile's access: agentio gdrive profile update --profile ro --no-read-only" {
 			t.Fatalf("%s: %#v", path, ce)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
 	out := filepath.Join(t.TempDir(), "out.bin")
 	reads := map[string]plugins.CommandInput{
-		"list":        input(t, "list", nil, nil),
-		"folders":     input(t, "folders", nil, nil),
-		"get":         input(t, "get", map[string]any{"file-id-or-url": "f1"}, nil),
-		"search":      input(t, "search", nil, map[string]any{"query": "q"}),
-		"download":    input(t, "download", map[string]any{"file-id-or-url": "f1"}, map[string]any{"output": out}),
-		"permissions": input(t, "permissions", map[string]any{"file-id-or-url": "f1"}, nil),
+		"list":        product.Input(t, "list", nil, nil),
+		"folders":     product.Input(t, "folders", nil, nil),
+		"get":         product.Input(t, "get", map[string]any{"file-id-or-url": "f1"}, nil),
+		"search":      product.Input(t, "search", nil, map[string]any{"query": "q"}),
+		"download":    product.Input(t, "download", map[string]any{"file-id-or-url": "f1"}, map[string]any{"output": out}),
+		"permissions": product.Input(t, "permissions", map[string]any{"file-id-or-url": "f1"}, nil),
 	}
 	for path, in := range reads {
-		if _, err := exec(fake.ctx(), t, reg, path, in); err != nil {
+		if _, err := product.Exec(fake.Ctx(), t, reg, path, in); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 	}
@@ -602,28 +445,28 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 // is refused by the client before any request for put, copy, mkdir, rename
 // and move. Bun's trash, share and unshare never check it.
 func TestReadonlyAccessLevelRefusesBunsClientWrites(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "rol", fresh("readonly"), false)
-	saveProfile(t, "legacy", fresh(""), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "rol", fresh("readonly"), false)
+	product.SaveProfile(t, "legacy", fresh(""), false)
 	fake := driveFake(t)
 	_, writeArgs := writeInputs(t)
 	for _, name := range []string{"rol", "legacy"} {
 		for _, path := range []string{"put", "copy", "mkdir", "rename", "move"} {
-			in := input(t, path, writeArgs[path], map[string]any{"profile": name})
-			v, err := exec(fake.ctx(), t, reg, path, in)
-			ce := cliErr(t, err)
+			in := product.Input(t, path, writeArgs[path], map[string]any{"profile": name})
+			v, err := product.Exec(fake.Ctx(), t, reg, path, in)
+			ce := googletest.CliErr(t, err)
 			if v != nil || ce.Code != clierr.PermissionDenied || ce.Message != "This profile has read-only access" ||
 				ce.Suggestion != "Create a new profile with full access: agentio gdrive profile add --full" {
 				t.Fatalf("%s %s: %#v", name, path, ce)
 			}
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
 	for _, path := range []string{"trash", "share", "unshare"} {
-		in := input(t, path, writeArgs[path], map[string]any{"profile": "rol", "anyone": true})
-		if _, err := exec(fake.ctx(), t, reg, path, in); err != nil {
+		in := product.Input(t, path, writeArgs[path], map[string]any{"profile": "rol", "anyone": true})
+		if _, err := product.Exec(fake.Ctx(), t, reg, path, in); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 	}
@@ -632,8 +475,8 @@ func TestReadonlyAccessLevelRefusesBunsClientWrites(t *testing.T) {
 // Bun validates share and unshare flags before it looks at the profile, so a
 // bad flag on a read-only profile is INVALID_PARAMS, not PERMISSION_DENIED.
 func TestShareFlagErrorsWinOverTheReadOnlyCheck(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "ro", fresh("full"), true)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", fresh("full"), true)
 	fake := driveFake(t)
 	cases := []struct {
 		path                string
@@ -656,13 +499,13 @@ func TestShareFlagErrorsWinOverTheReadOnlyCheck(t *testing.T) {
 		for k, v := range c.set {
 			set[k] = v
 		}
-		v, err := exec(fake.ctx(), t, reg, c.path, input(t, c.path, map[string]any{"file-id-or-url": "f1"}, set))
-		ce := cliErr(t, err)
+		v, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, map[string]any{"file-id-or-url": "f1"}, set))
+		ce := googletest.CliErr(t, err)
 		if v != nil || ce.Code != clierr.InvalidParams || ce.Message != c.message || ce.Suggestion != c.suggestion {
 			t.Fatalf("%s %v: %#v", c.path, c.set, ce)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("invalid input reached the API %d times", n)
 	}
 }
@@ -670,24 +513,24 @@ func TestShareFlagErrorsWinOverTheReadOnlyCheck(t *testing.T) {
 func TestValidate(t *testing.T) {
 	var status int
 	var body any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path != "/files" || h.Auth != "Bearer at-old" || h.Query.Get("pageSize") != "1" || h.Query.Get("q") != "" {
 			t.Errorf("validate called %s %v with %q", h.Path, h.Query, h.Auth)
 		}
-		writeJSON(w, status, body)
+		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1, "full"), "acme", fake.ctx())
+	run := host.NewRunContext(storedCreds(1, "full"), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
-	v, err := New().Profile.Validate(fake.ctx(), run)
+	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v %v", v, err)
 	}
 	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 400, map[string]any{"error": map[string]any{"code": 400, "message": "Token has been expired or revoked."}}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
 		t.Fatalf("%#v", v)
 	}
 }
@@ -731,18 +574,18 @@ func TestReauthenticateKeepsTheAccessLevel(t *testing.T) {
 		{"readonly", "readonly", readonlyScopes},
 		{"", "readonly", readonlyScopes},
 	} {
-		fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 			if h.Path == "/token" {
-				writeJSON(w, 200, map[string]any{"access_token": "at-2", "expires_in": 60})
+				googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-2", "expires_in": 60})
 				return
 			}
-			writeJSON(w, 200, map[string]any{"email": "new@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"email": "new@example.com"})
 		})
 		var scopes string
 		var logs []string
 		prev := storedCreds(1, c.stored)
 		prev["extra"] = "kept"
-		got, err := New().Profile.Reauthenticate(fake.ctx(), prev, "work", oauthSetup(t, "", &scopes, &logs))
+		got, err := New().Profile.Reauthenticate(fake.Ctx(), prev, "work", oauthSetup(t, "", &scopes, &logs))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -763,9 +606,9 @@ func TestReauthenticateKeepsTheAccessLevel(t *testing.T) {
 // Bun pages with pageSize min(limit - collected, 100) until it has limit
 // files or no next page, then slices to limit.
 func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		start := 0
 		if tok := h.Query.Get("pageToken"); tok != "" {
 			start = int(tok[0] - '0')
@@ -778,7 +621,7 @@ func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
 		if start+2 < 5 {
 			resp["nextPageToken"] = string(rune('0' + start + 2))
 		}
-		writeJSON(w, 200, resp)
+		googletest.WriteJSON(w, 200, resp)
 	})
 	fields := "nextPageToken,files(" + fileFields + ")"
 	cases := []struct {
@@ -801,13 +644,13 @@ func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
 			`trashed = false and trashed = false and fullText contains 'it\'s' and mimeType = 'application/pdf' and 'f9' in parents`, "modifiedTime desc", "a"},
 	}
 	for _, c := range cases {
-		before := len(fake.recorded())
-		v, err := exec(fake.ctx(), t, reg, c.path, input(t, c.path, nil, c.set))
+		before := len(fake.Recorded())
+		v, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, nil, c.set))
 		if err != nil {
 			t.Fatalf("%v: %v", c.set, err)
 		}
 		var sizes []string
-		for _, h := range fake.recorded()[before:] {
+		for _, h := range fake.Recorded()[before:] {
 			if h.Method != "GET" || h.Path != "/files" || h.Query.Get("q") != c.q || h.Query.Get("orderBy") != c.order || h.Query.Get("fields") != fields {
 				t.Fatalf("%s %v: %s %s %v", c.path, c.set, h.Method, h.Path, h.Query)
 			}
@@ -822,15 +665,15 @@ func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
 		}
 	}
 	// No filter at all sends no q.
-	before := len(fake.recorded())
-	if _, err := exec(fake.ctx(), t, reg, "list", input(t, "list", nil, map[string]any{"trash": true, "limit": "1"})); err != nil {
+	before := len(fake.Recorded())
+	if _, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, map[string]any{"trash": true, "limit": "1"})); err != nil {
 		t.Fatal(err)
 	}
-	if h := fake.recorded()[before]; h.Query.Has("q") {
+	if h := fake.Recorded()[before]; h.Query.Has("q") {
 		t.Fatalf("q %q", h.Query.Get("q"))
 	}
-	v, err := exec(fake.ctx(), t, reg, "search", input(t, "search", nil, nil))
-	ce := cliErr(t, err)
+	v, err := product.Exec(fake.Ctx(), t, reg, "search", product.Input(t, "search", nil, nil))
+	ce := googletest.CliErr(t, err)
 	if v != nil || ce.Code != clierr.InvalidParams || ce.Message != "required option '--query <text>' not specified" {
 		t.Fatalf("%#v", ce)
 	}
@@ -856,15 +699,15 @@ func TestIDsComeFromDriveURLs(t *testing.T) {
 }
 
 func TestDownloadWritesBytesAndExportsWorkspaceFiles(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
 	meta := map[string]map[string]any{
 		"pdf1":   {"id": "pdf1", "name": "report.pdf", "mimeType": "application/pdf"},
 		"doc1":   {"id": "doc1", "name": "Plan", "mimeType": "application/vnd.google-apps.document"},
 		"sheet1": {"id": "sheet1", "name": "Budget", "mimeType": "application/vnd.google-apps.spreadsheet"},
 		"form1":  {"id": "form1", "name": "Survey", "mimeType": "application/vnd.google-apps.form"},
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		id := strings.Split(strings.TrimPrefix(h.Path, "/files/"), "/")[0]
 		switch {
 		case strings.HasSuffix(h.Path, "/export"):
@@ -872,27 +715,27 @@ func TestDownloadWritesBytesAndExportsWorkspaceFiles(t *testing.T) {
 		case h.Query.Get("alt") == "media":
 			_, _ = io.WriteString(w, "BINARY")
 		case id == "missing":
-			writeJSON(w, 404, map[string]any{"error": map[string]any{"code": 404, "message": "File not found: missing."}})
+			googletest.WriteJSON(w, 404, map[string]any{"error": map[string]any{"code": 404, "message": "File not found: missing."}})
 		default:
-			writeJSON(w, 200, meta[id])
+			googletest.WriteJSON(w, 200, meta[id])
 		}
 	})
 	dir := t.TempDir()
 	run := func(id, output, export string) (any, error) {
-		return exec(fake.ctx(), t, reg, "download", input(t, "download", map[string]any{"file-id-or-url": id}, map[string]any{"output": output, "export": export}))
+		return product.Exec(fake.Ctx(), t, reg, "download", product.Input(t, "download", map[string]any{"file-id-or-url": id}, map[string]any{"output": output, "export": export}))
 	}
 	out := filepath.Join(dir, "r.pdf")
 	v, err := run("https://drive.google.com/file/d/pdf1/view", out, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := printed(t, "download", v, false); got != "Downloaded: report.pdf\n  Path: "+out+"\n  Size: 6 B\n  Type: application/pdf\n" {
+	if got := product.Printed(t, "download", v, false); got != "Downloaded: report.pdf\n  Path: "+out+"\n  Size: 6 B\n  Type: application/pdf\n" {
 		t.Fatalf("%q", got)
 	}
 	if b, _ := os.ReadFile(out); string(b) != "BINARY" {
 		t.Fatalf("%q", b)
 	}
-	h := fake.recorded()
+	h := fake.Recorded()
 	if h[0].Query.Get("fields") != fileFields || h[1].Path != "/files/pdf1" || h[1].Query.Get("alt") != "media" {
 		t.Fatalf("%v %v", h[0].Query, h[1])
 	}
@@ -901,13 +744,13 @@ func TestDownloadWritesBytesAndExportsWorkspaceFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if jsonText(v) != `{"filename":"Budget","path":"`+out+`","size":15,"mimeType":"text/csv"}` {
-		t.Fatalf("%s", jsonText(v))
+	if googletest.JSONText(v) != `{"filename":"Budget","path":"`+out+`","size":15,"mimeType":"text/csv"}` {
+		t.Fatalf("%s", googletest.JSONText(v))
 	}
 	if b, _ := os.ReadFile(out); string(b) != "EXPORT:text/csv" {
 		t.Fatalf("%q", b)
 	}
-	before := len(fake.recorded())
+	before := len(fake.Recorded())
 	for _, c := range []struct {
 		id, output, export  string
 		code                clierr.Code
@@ -925,19 +768,19 @@ func TestDownloadWritesBytesAndExportsWorkspaceFiles(t *testing.T) {
 		{"pdf1", "", "", clierr.InvalidParams, "required option '--output <path>' not specified", ""},
 	} {
 		v, err := run(c.id, c.output, c.export)
-		ce := cliErr(t, err)
+		ce := googletest.CliErr(t, err)
 		if v != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggestion {
 			t.Fatalf("%s %s: %#v", c.id, c.export, ce)
 		}
 	}
-	for _, h := range fake.recorded()[before:] {
+	for _, h := range fake.Recorded()[before:] {
 		if strings.HasSuffix(h.Path, "/export") {
 			t.Fatalf("an invalid export reached the API: %v", h)
 		}
 	}
 }
 
-func multipartParts(t *testing.T, h hit) (map[string]any, string, string) {
+func multipartParts(t *testing.T, h googletest.Hit) (map[string]any, string, string) {
 	t.Helper()
 	_, params, err := mime.ParseMediaType(h.Type)
 	if err != nil {
@@ -953,15 +796,15 @@ func multipartParts(t *testing.T, h hit) (map[string]any, string, string) {
 }
 
 func TestPutUploadsWithBunsMetadataAndConversion(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
 	var respond map[string]any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if strings.HasSuffix(h.Path, "/permissions") {
-			writeJSON(w, 403, map[string]any{"error": map[string]any{"code": 403, "message": "Sharing is disabled."}})
+			googletest.WriteJSON(w, 403, map[string]any{"error": map[string]any{"code": 403, "message": "Sharing is disabled."}})
 			return
 		}
-		writeJSON(w, 200, respond)
+		googletest.WriteJSON(w, 200, respond)
 	})
 	dir := t.TempDir()
 	file := func(name, body string) string {
@@ -972,7 +815,7 @@ func TestPutUploadsWithBunsMetadataAndConversion(t *testing.T) {
 		return p
 	}
 	put := func(path string, set map[string]any) (any, error) {
-		return exec(fake.ctx(), t, reg, "put", input(t, "put", map[string]any{"file-path": path}, set))
+		return product.Exec(fake.Ctx(), t, reg, "put", product.Input(t, "put", map[string]any{"file-path": path}, set))
 	}
 	cases := []struct {
 		path      string
@@ -991,12 +834,12 @@ func TestPutUploadsWithBunsMetadataAndConversion(t *testing.T) {
 		if _, err := put(c.path, c.set); err != nil {
 			t.Fatalf("%s: %v", c.path, err)
 		}
-		h := fake.recorded()[i]
+		h := fake.Recorded()[i]
 		if h.Method != "POST" || h.Path != "/upload/drive/v3/files" || h.Query.Get("uploadType") != "multipart" || h.Query.Get("fields") != "id,name,mimeType,size,webViewLink" {
 			t.Fatalf("%s %s %v", h.Method, h.Path, h.Query)
 		}
 		meta, mediaType, _ := multipartParts(t, h)
-		if jsonText(meta) != c.meta || mediaType != c.mediaType {
+		if googletest.JSONText(meta) != c.meta || mediaType != c.mediaType {
 			t.Fatalf("%s: %v %q", c.path, meta, mediaType)
 		}
 	}
@@ -1006,25 +849,25 @@ func TestPutUploadsWithBunsMetadataAndConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := printed(t, "put", v, false); got != "Uploaded: x.odt\n  ID: up2\n  Size: 8 B\n  Type: application/vnd.oasis.opendocument.text\n" {
+	if got := product.Printed(t, "put", v, false); got != "Uploaded: x.odt\n  ID: up2\n  Size: 8 B\n  Type: application/vnd.oasis.opendocument.text\n" {
 		t.Fatalf("%q", got)
 	}
 	// --public prints the upload, then the failed share, as Bun did.
 	respond = map[string]any{"id": "up3", "name": "p.png", "mimeType": "image/png"}
 	v, err = put(file("p.png", "img"), map[string]any{"public": true})
-	ce := cliErr(t, err)
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.PermissionDenied || ce.Message != "Failed to share file: Sharing is disabled." {
 		t.Fatalf("%#v", ce)
 	}
-	if got := printed(t, "put", v, false); got != "Uploaded: p.png\n  ID: up3\n  Size: 3 B\n  Type: image/png\n" {
+	if got := product.Printed(t, "put", v, false); got != "Uploaded: p.png\n  ID: up3\n  Size: 3 B\n  Type: image/png\n" {
 		t.Fatalf("%q", got)
 	}
-	last := fake.recorded()[len(fake.recorded())-1]
-	if last.Path != "/files/up3/permissions" || jsonText(last.JSON) != `{"allowFileDiscovery":false,"role":"reader","type":"anyone"}` ||
+	last := fake.Recorded()[len(fake.Recorded())-1]
+	if last.Path != "/files/up3/permissions" || googletest.JSONText(last.JSON) != `{"allowFileDiscovery":false,"role":"reader","type":"anyone"}` ||
 		last.Query.Get("sendNotificationEmail") != "false" || last.Query.Get("supportsAllDrives") != "true" {
 		t.Fatalf("%v %v", last.JSON, last.Query)
 	}
-	before := len(fake.recorded())
+	before := len(fake.Recorded())
 	missing := filepath.Join(dir, "missing.txt")
 	for _, c := range []struct {
 		path                string
@@ -1040,29 +883,29 @@ func TestPutUploadsWithBunsMetadataAndConversion(t *testing.T) {
 		{dir, nil, "API_ERROR", "Failed to upload file: EISDIR: illegal operation on a directory, read", ""},
 	} {
 		v, err := put(c.path, c.set)
-		ce := cliErr(t, err)
+		ce := googletest.CliErr(t, err)
 		if v != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggestion {
 			t.Fatalf("%s: %#v", c.path, ce)
 		}
 	}
-	if n := len(fake.recorded()); n != before {
+	if n := len(fake.Recorded()); n != before {
 		t.Fatalf("a failed put reached the API %d times", n-before)
 	}
 }
 
 func TestFileWritesSendBunsBodies(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Method == "GET" && h.Path == "/files/multi":
-			writeJSON(w, 200, map[string]any{"parents": []string{"p1", "p2"}})
+			googletest.WriteJSON(w, 200, map[string]any{"parents": []string{"p1", "p2"}})
 		case h.Method == "GET":
-			writeJSON(w, 200, map[string]any{})
+			googletest.WriteJSON(w, 200, map[string]any{})
 		case strings.HasSuffix(h.Path, "/copy"):
-			writeJSON(w, 200, map[string]any{"id": "c1", "parents": []string{"dest"}})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "c1", "parents": []string{"dest"}})
 		default:
-			writeJSON(w, 200, map[string]any{"id": "r1", "name": "Result", "parents": []string{"dest"}, "webViewLink": "https://x/r1"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "r1", "name": "Result", "parents": []string{"dest"}, "webViewLink": "https://x/r1"})
 		}
 	})
 	type want struct {
@@ -1101,12 +944,12 @@ func TestFileWritesSendBunsBodies(t *testing.T) {
 			[]want{{"GET", "/files/orphan", "", nil}, {"PATCH", "/files/orphan", `{}`, map[string]string{"addParents": "root", "removeParents": ""}}}, ""},
 	}
 	for _, c := range cases {
-		before := len(fake.recorded())
-		v, err := exec(fake.ctx(), t, reg, c.path, input(t, c.path, c.args, c.set))
+		before := len(fake.Recorded())
+		v, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, c.args, c.set))
 		if err != nil {
 			t.Fatalf("%s: %v", c.path, err)
 		}
-		got := fake.recorded()[before:]
+		got := fake.Recorded()[before:]
 		if len(got) != len(c.sent) {
 			t.Fatalf("%s: %d requests", c.path, len(got))
 		}
@@ -1114,7 +957,7 @@ func TestFileWritesSendBunsBodies(t *testing.T) {
 			h := got[i]
 			body := ""
 			if h.JSON != nil {
-				body = jsonText(h.JSON)
+				body = googletest.JSONText(h.JSON)
 			}
 			if h.Method != w.method || h.Path != w.path || body != w.body {
 				t.Fatalf("%s: %s %s %s", c.path, h.Method, h.Path, body)
@@ -1126,7 +969,7 @@ func TestFileWritesSendBunsBodies(t *testing.T) {
 			}
 		}
 		if c.printed != "" {
-			if p := printed(t, c.path, v, false); p != c.printed {
+			if p := product.Printed(t, c.path, v, false); p != c.printed {
 				t.Fatalf("%s: %q", c.path, p)
 			}
 		}
@@ -1136,16 +979,16 @@ func TestFileWritesSendBunsBodies(t *testing.T) {
 // Ported from tests/plugins/google/gdrive/client.test.ts: allowFileDiscovery
 // is only sent for anyone shares.
 func TestShareSendsBunsPermissionBody(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		resp := map[string]any{"id": "perm-1", "type": h.JSON["type"], "role": h.JSON["role"]}
 		for _, k := range []string{"emailAddress", "domain"} {
 			if v, ok := h.JSON[k]; ok {
 				resp[k] = v
 			}
 		}
-		writeJSON(w, 200, resp)
+		googletest.WriteJSON(w, 200, resp)
 	})
 	cases := []struct {
 		arg     string
@@ -1170,15 +1013,15 @@ func TestShareSendsBunsPermissionBody(t *testing.T) {
 			"Permission created\n  Permission ID: perm-1\n  Type: domain\n  Role: commenter\n  Domain: example.com\n"},
 	}
 	for _, c := range cases {
-		before := len(fake.recorded())
-		v, err := exec(fake.ctx(), t, reg, "share", input(t, "share", map[string]any{"file-id-or-url": c.arg}, c.set))
+		before := len(fake.Recorded())
+		v, err := product.Exec(fake.Ctx(), t, reg, "share", product.Input(t, "share", map[string]any{"file-id-or-url": c.arg}, c.set))
 		if err != nil {
 			t.Fatal(err)
 		}
-		h := fake.recorded()[before]
-		if h.Method != "POST" || h.Path != "/files/"+extractFileID(c.arg)+"/permissions" || jsonText(h.JSON) != c.body ||
+		h := fake.Recorded()[before]
+		if h.Method != "POST" || h.Path != "/files/"+extractFileID(c.arg)+"/permissions" || googletest.JSONText(h.JSON) != c.body ||
 			h.Query.Get("supportsAllDrives") != "true" || h.Query.Get("fields") != "id,type,role,emailAddress,domain" {
-			t.Fatalf("%v: %s %s %s %v", c.set, h.Method, h.Path, jsonText(h.JSON), h.Query)
+			t.Fatalf("%v: %s %s %s %v", c.set, h.Method, h.Path, googletest.JSONText(h.JSON), h.Query)
 		}
 		for k, want := range c.query {
 			if h.Query.Get(k) != want {
@@ -1189,7 +1032,7 @@ func TestShareSendsBunsPermissionBody(t *testing.T) {
 			t.Fatal("an empty message was sent")
 		}
 		if c.printed != "" {
-			if got := printed(t, "share", v, false); got != c.printed {
+			if got := product.Printed(t, "share", v, false); got != c.printed {
 				t.Fatalf("%q", got)
 			}
 		}
@@ -1197,46 +1040,46 @@ func TestShareSendsBunsPermissionBody(t *testing.T) {
 }
 
 func TestUnshareFindsTheAnyonePermission(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
 	perms := map[string][]any{
 		"f1": {map[string]any{"id": "u1", "type": "user", "role": "owner"}, map[string]any{"id": "anyoneWithLink", "type": "anyone", "role": "reader"}},
 		"f2": {map[string]any{"id": "u1", "type": "user", "role": "owner"}},
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Method == "DELETE" {
 			w.WriteHeader(204)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"permissions": perms[strings.Split(h.Path, "/")[2]]})
+		googletest.WriteJSON(w, 200, map[string]any{"permissions": perms[strings.Split(h.Path, "/")[2]]})
 	})
 	unshare := func(id string, set map[string]any) (any, error) {
-		return exec(fake.ctx(), t, reg, "unshare", input(t, "unshare", map[string]any{"file-id-or-url": id}, set))
+		return product.Exec(fake.Ctx(), t, reg, "unshare", product.Input(t, "unshare", map[string]any{"file-id-or-url": id}, set))
 	}
 	v, err := unshare("https://drive.google.com/file/d/f1/view", map[string]any{"anyone": true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := fake.recorded()
+	h := fake.Recorded()
 	if len(h) != 2 || h[0].Path != "/files/f1/permissions" || h[1].Method != "DELETE" || h[1].Path != "/files/f1/permissions/anyoneWithLink" ||
 		h[1].Query.Get("supportsAllDrives") != "true" {
 		t.Fatalf("%v", h)
 	}
-	if got := printed(t, "unshare", v, false); got != "Permission anyoneWithLink removed\n" {
+	if got := product.Printed(t, "unshare", v, false); got != "Permission anyoneWithLink removed\n" {
 		t.Fatalf("%q", got)
 	}
 	if _, err := unshare("f2", map[string]any{"permission-id": "u1"}); err != nil {
 		t.Fatal(err)
 	}
-	if last := fake.recorded()[2]; last.Method != "DELETE" || last.Path != "/files/f2/permissions/u1" {
+	if last := fake.Recorded()[2]; last.Method != "DELETE" || last.Path != "/files/f2/permissions/u1" {
 		t.Fatalf("%v", last)
 	}
 	v, err = unshare("f2", map[string]any{"anyone": true})
-	ce := cliErr(t, err)
+	ce := googletest.CliErr(t, err)
 	if v != nil || ce.Code != clierr.NotFound || ce.Message != "No anyone-with-link permission found on this file" {
 		t.Fatalf("%#v", ce)
 	}
-	if n := len(fake.recorded()); n != 4 {
+	if n := len(fake.Recorded()); n != 4 {
 		t.Fatalf("a missing permission was deleted: %d requests", n)
 	}
 }
@@ -1244,12 +1087,12 @@ func TestUnshareFindsTheAnyonePermission(t *testing.T) {
 // gdrive prefers the API's own message; the fixed status text is only the
 // fallback for a blank one.
 func TestAPIErrorsPreferTheAPIMessage(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", fresh("full"), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
 	var status int
 	var message string
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": message}})
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": message}})
 	})
 	cmds := []struct {
 		path, operation string
@@ -1285,8 +1128,8 @@ func TestAPIErrorsPreferTheAPIMessage(t *testing.T) {
 	} {
 		status, message = c.status, c.message
 		for _, cmd := range cmds {
-			v, err := exec(fake.ctx(), t, reg, cmd.path, input(t, cmd.path, cmd.args, cmd.set))
-			ce := cliErr(t, err)
+			v, err := product.Exec(fake.Ctx(), t, reg, cmd.path, product.Input(t, cmd.path, cmd.args, cmd.set))
+			ce := googletest.CliErr(t, err)
 			if v != nil || ce.Code != c.code || ce.Message != "Failed to "+cmd.operation+": "+c.want || ce.Suggestion != "" {
 				t.Fatalf("%d %q %s: %v %#v", c.status, c.message, cmd.path, v, ce)
 			}
@@ -1311,13 +1154,13 @@ func TestFormatMatchesBun(t *testing.T) {
 		"gsheet         -                 Budget\n  sheet1\n" +
 		"image       5 GB                 Untitled\n  img1\n" +
 		"video       1 MB              *  clip.mov\n  vid1\n"
-	if got := printed(t, "list", list, false); got != wantList {
+	if got := product.Printed(t, "list", list, false); got != wantList {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "search", fileList{Title: "Search Results"}, false); got != "No files found\n" {
+	if got := product.Printed(t, "search", fileList{Title: "Search Results"}, false); got != "No files found\n" {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "folders", list, true); !strings.HasPrefix(got, "[\n  {\n    \"id\": \"doc1\"") || !strings.Contains(got, `"report <final>.pdf"`) {
+	if got := product.Printed(t, "folders", list, true); !strings.HasPrefix(got, "[\n  {\n    \"id\": \"doc1\"") || !strings.Contains(got, `"report <final>.pdf"`) {
 		t.Fatalf("%q", got)
 	}
 	if shortMimeType("text/markdown") != "text" || shortMimeType("audio/mpeg") != "audio" || shortMimeType("application/json") != "file" || shortMimeType("image/jpeg") != "jpg" {
@@ -1330,7 +1173,7 @@ func TestFormatMatchesBun(t *testing.T) {
 	wantFile := "ID: pdf1\nName: report <final>.pdf\nType: application/pdf\nSize: 1.5 KB\nDescription: Café & co\nOwners: bob@example.com, Unknown\n" +
 		"Parents: fold1, fold2\nStarred: no\nShared: no\nTrashed: no\nModified: 2026-02-01T00:00:00.000Z\nView: https://drive.google.com/file/d/pdf1/view\n" +
 		"Download: https://drive.google.com/uc?id=pdf1&export=download\n"
-	if got := printed(t, "get", pdf, false); got != wantFile {
+	if got := product.Printed(t, "get", pdf, false); got != wantFile {
 		t.Fatalf("%q", got)
 	}
 
@@ -1342,26 +1185,26 @@ func TestFormatMatchesBun(t *testing.T) {
 	}
 	wantPerms := "Permissions (4)\n\n  owner      alice@example.com\n    ID: p-owner\n    Name: Alice\n  reader     anyone (discoverable)\n" +
 		"    ID: anyoneWithLink\n  commenter  example.com\n    ID: p-dom\n  writer     group\n    ID: p-grp\n"
-	if got := printed(t, "permissions", perms, false); got != wantPerms {
+	if got := product.Printed(t, "permissions", perms, false); got != wantPerms {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "permissions", []permission{}, false); got != "No permissions found\n" {
+	if got := product.Printed(t, "permissions", []permission{}, false); got != "No permissions found\n" {
 		t.Fatalf("%q", got)
 	}
 
 	up := &uploaded{ID: "up1", Name: "a.txt", MimeType: "text/plain", Size: 5, WebViewLink: "https://drive.google.com/file/d/up1/view",
 		Share: &shared{PermissionID: "perm-new", Type: "anyone", Role: "reader", FileID: "up1"}}
-	if got := printed(t, "put", up, false); got != "Uploaded: a.txt\n  ID: up1\n  Size: 5 B\n  Type: text/plain\n  Link: https://drive.google.com/file/d/up1/view\n"+
+	if got := product.Printed(t, "put", up, false); got != "Uploaded: a.txt\n  ID: up1\n  Size: 5 B\n  Type: text/plain\n  Link: https://drive.google.com/file/d/up1/view\n"+
 		"Permission created\n  Permission ID: perm-new\n  Type: anyone\n  Role: reader\n  Public URL: https://drive.google.com/uc?id=up1\n" {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "put", up, true); !strings.Contains(got, `"share": {`) || strings.Contains(got, "FileID") || strings.Contains(got, "fileId") {
+	if got := product.Printed(t, "put", up, true); !strings.Contains(got, `"share": {`) || strings.Contains(got, "FileID") || strings.Contains(got, "fileId") {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "mkdir", &file{ID: "new1", Name: "nolink"}, false); got != "Created folder: nolink (new1)\n" {
+	if got := product.Printed(t, "mkdir", &file{ID: "new1", Name: "nolink"}, false); got != "Created folder: nolink (new1)\n" {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "move", &file{ID: "pdf1", Name: "report <final>.pdf"}, false); got != "Moved: report <final>.pdf (pdf1)\n" {
+	if got := product.Printed(t, "move", &file{ID: "pdf1", Name: "report <final>.pdf"}, false); got != "Moved: report <final>.pdf (pdf1)\n" {
 		t.Fatalf("%q", got)
 	}
 }

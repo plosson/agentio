@@ -2,6 +2,7 @@
 package gcal
 
 import (
+	"cmp"
 	"context"
 	"strings"
 
@@ -17,7 +18,7 @@ func New() *plugins.Plugin {
 		DisplayName: "Google Calendar",
 		Description: "Use when interacting with Google Calendar via the agentio CLI.",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
+			Setup:          google.SnakeSetup("gcal", "Google Calendar", "Could not fetch email from Calendar"),
 			Validate:       validate,
 			Reauthenticate: google.Reauthenticate("gcal", google.Snake),
 			Refresh:        google.Snake.RefreshSpec(),
@@ -28,21 +29,6 @@ func New() *plugins.Plugin {
 			deleteCmd(), searchCmd(), respondCmd(), freebusyCmd(),
 		},
 	}
-}
-
-func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
-	setup.Log("Starting OAuth flow for Google Calendar...\n")
-	tokens, err := google.PerformOAuth(ctx, setup, "gcal")
-	if err != nil {
-		return nil, err
-	}
-	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
-	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Could not fetch email from Calendar", "Try again or specify --profile manually")
-	}
-	creds := google.Snake.Merge(nil, tokens)
-	creds["email"] = email
-	return &plugins.SetupResult{Credentials: creds, SuggestedProfileName: email, Info: "Email: " + email}, nil
 }
 
 // validate is GCalClient.validate: the primary calendar's id is the account.
@@ -62,13 +48,32 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: true, Info: info}, nil
 }
 
-// piped is Bun `options.description` falling back to trimmed stdin.
-func piped(value string, stdin any) string {
-	if value != "" {
-		return value
+// createInputError, updateInputError and respondInputError are the input
+// rejections Bun reports before enforceWriteAccess (google.WriteUnlessInvalid).
+func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
+	if err := google.RequireOptions(in, fail, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
+		return err
 	}
-	text, _ := stdin.(string)
-	return strings.TrimSpace(text)
+	_, err := parseReminders(in.List("reminder"), fail)
+	return err
+}
+
+func updateInputError(in plugins.CommandInput, fail google.FailFunc) error {
+	if len(in.List("attendee")) > 0 && len(in.List("add-attendee")) > 0 {
+		return fail("INVALID_PARAMS", "Cannot use both --attendee and --add-attendee", "")
+	}
+	return nil
+}
+
+func respondInputError(in plugins.CommandInput, fail google.FailFunc) error {
+	if err := google.RequireOptions(in, fail, "--status <status>"); err != nil {
+		return err
+	}
+	switch strings.ToLower(in.Option("status")) {
+	case "accepted", "declined", "tentative":
+		return nil
+	}
+	return fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
 }
 
 // transparency is Bun's --show-as mapping.
@@ -81,13 +86,6 @@ func transparency(showAs string) string {
 	default:
 		return ""
 	}
-}
-
-func orPrimary(id string) string {
-	if id == "" {
-		return "primary"
-	}
-	return id
 }
 
 func calendarsCmd() plugins.CommandSpec {
@@ -149,7 +147,7 @@ func eventsCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			timeMin, timeMax := timeRange(in)
-			return google.Result(a.listEvents(orPrimary(in.Arg("calendar-id")), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Option("query")))
+			return google.Result(a.listEvents(cmp.Or(in.Arg("calendar-id"), "primary"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Option("query")))
 		},
 		Format: formatEventList,
 	}
@@ -187,6 +185,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new event",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(createInputError),
 		Operation:   "create event",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-id", Description: "Calendar ID (default: primary)"}},
@@ -220,10 +219,10 @@ func createCmd() plugins.CommandSpec {
 			`  --to 2024-04-15T10:30:00-07:00 --visibility private --send-updates none`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
+			if err := createInputError(in, run.Fail); err != nil {
 				return nil, err
 			}
-			reminders, err := parseReminders(in.List("reminder"), run)
+			reminders, err := parseReminders(in.List("reminder"), run.Fail)
 			if err != nil {
 				return nil, err
 			}
@@ -232,9 +231,9 @@ func createCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			return google.Result(a.createEvent(createOptions{
-				calendarID:   orPrimary(in.Arg("calendar-id")),
+				calendarID:   cmp.Or(in.Arg("calendar-id"), "primary"),
 				summary:      in.Option("summary"),
-				description:  piped(in.Option("description"), in.Stdin),
+				description:  google.OptionOrStdin(in, "description"),
 				location:     in.Option("location"),
 				start:        in.Option("from"),
 				end:          in.Option("to"),
@@ -258,6 +257,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update an existing event",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(updateInputError),
 		Operation:   "update event",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -290,8 +290,8 @@ func updateCmd() plugins.CommandSpec {
 			"agentio gcal update primary abc123def456 --show-as free",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if len(in.List("attendee")) > 0 && len(in.List("add-attendee")) > 0 {
-				return nil, run.Fail("INVALID_PARAMS", "Cannot use both --attendee and --add-attendee", "")
+			if err := updateInputError(in, run.Fail); err != nil {
+				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
@@ -301,7 +301,7 @@ func updateCmd() plugins.CommandSpec {
 				calendarID:   in.Arg("calendar-id"),
 				eventID:      in.Arg("event-id"),
 				summary:      in.Option("summary"),
-				description:  piped(in.Option("description"), in.Stdin),
+				description:  google.OptionOrStdin(in, "description"),
 				location:     in.Option("location"),
 				start:        in.Option("from"),
 				end:          in.Option("to"),
@@ -398,6 +398,7 @@ func respondCmd() plugins.CommandSpec {
 		Path:        "respond",
 		Description: "Respond to an event invitation",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(respondInputError),
 		Operation:   "respond to event",
 		Arguments: []plugins.ArgumentSpec{
 			{Name: "calendar-id", Description: "Calendar ID", Required: true},
@@ -416,15 +417,10 @@ func respondCmd() plugins.CommandSpec {
 			"agentio gcal respond primary abc123def456 --status tentative",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--status <status>"); err != nil {
+			if err := respondInputError(in, run.Fail); err != nil {
 				return nil, err
 			}
 			status := strings.ToLower(in.Option("status"))
-			switch status {
-			case "accepted", "declined", "tentative":
-			default:
-				return nil, run.Fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -457,7 +453,7 @@ func freebusyCmd() plugins.CommandSpec {
 			`  --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--from <datetime>", "--to <datetime>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--from <datetime>", "--to <datetime>"); err != nil {
 				return nil, err
 			}
 			var ids []string

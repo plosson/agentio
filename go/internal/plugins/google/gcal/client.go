@@ -153,9 +153,8 @@ func (f freeBusy) MarshalJSON() ([]byte, error) {
 }
 
 type api struct {
-	ctx  context.Context
-	svc  *calendar.Service
-	fail func(code plugins.ErrorCode, message, suggestion string) error
+	google.API
+	svc *calendar.Service
 }
 
 func service(ctx context.Context, run *plugins.RunContext) (*calendar.Service, error) {
@@ -167,26 +166,13 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, svc: svc, fail: run.Fail}, nil
-}
-
-// apiError is Bun `throw new CliError('API_ERROR', `${prefix}: ${message}`)`.
-func (a *api) apiError(prefix string, err error) error {
-	return a.fail("API_ERROR", prefix+": "+google.Message(err), "")
-}
-
-// notFoundOr is the Bun isNotFoundError branch before the generic API error.
-func (a *api) notFoundOr(prefix, eventID string, err error) error {
-	if google.IsNotFound(err) {
-		return a.fail("NOT_FOUND", "Event not found: "+eventID, "")
-	}
-	return a.apiError(prefix, err)
+	return &api{API: google.API{Ctx: ctx, RunContext: run}, svc: svc}, nil
 }
 
 func (a *api) listCalendars(limit float64) ([]calendarEntry, error) {
-	resp, err := a.svc.CalendarList.List().Context(a.ctx).Do(google.MaxResults(limit, 250))
+	resp, err := a.svc.CalendarList.List().Context(a.Ctx).Do(google.MaxResults(limit, 250))
 	if err != nil {
-		return nil, a.apiError("Calendar API error", err)
+		return nil, a.APIError("Calendar API error", err)
 	}
 	out := []calendarEntry{}
 	for _, c := range resp.Items {
@@ -199,7 +185,7 @@ func (a *api) listCalendars(limit float64) ([]calendarEntry, error) {
 }
 
 func (a *api) listEvents(calendarID string, limit float64, timeMin, timeMax, query string) (*eventList, error) {
-	call := a.svc.Events.List(calendarID).SingleEvents(true).OrderBy("startTime").Context(a.ctx)
+	call := a.svc.Events.List(calendarID).SingleEvents(true).OrderBy("startTime").Context(a.Ctx)
 	if timeMin != "" {
 		call.TimeMin(timeMin)
 	}
@@ -211,7 +197,7 @@ func (a *api) listEvents(calendarID string, limit float64, timeMin, timeMax, que
 	}
 	resp, err := call.Do(google.MaxResults(limit, 250))
 	if err != nil {
-		return nil, a.apiError("Calendar API error", err)
+		return nil, a.APIError("Calendar API error", err)
 	}
 	out := &eventList{Events: []event{}, NextPageToken: resp.NextPageToken}
 	for _, e := range resp.Items {
@@ -221,9 +207,9 @@ func (a *api) listEvents(calendarID string, limit float64, timeMin, timeMax, que
 }
 
 func (a *api) getEvent(calendarID, eventID string) (*event, error) {
-	e, err := a.svc.Events.Get(calendarID, eventID).Context(a.ctx).Do()
+	e, err := a.svc.Events.Get(calendarID, eventID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Calendar API error", eventID, err)
+		return nil, a.NotFoundOr("Event", eventID, "Calendar API error", err)
 	}
 	parsed := parseEvent(e)
 	return &parsed, nil
@@ -258,7 +244,7 @@ func (a *api) createEvent(o createOptions) (*event, error) {
 	body.ColorId = o.colorID
 	body.Visibility = o.visibility
 	body.Transparency = o.transparency
-	call := a.svc.Events.Insert(o.calendarID, body).SendUpdates(o.sendUpdates).Context(a.ctx)
+	call := a.svc.Events.Insert(o.calendarID, body).SendUpdates(o.sendUpdates).Context(a.Ctx)
 	if o.withMeet {
 		body.ConferenceData = &calendar.ConferenceData{CreateRequest: &calendar.CreateConferenceRequest{
 			RequestId:             fmt.Sprintf("agentio-%d", now().UnixMilli()),
@@ -268,7 +254,7 @@ func (a *api) createEvent(o createOptions) (*event, error) {
 	}
 	e, err := call.Do()
 	if err != nil {
-		return nil, a.apiError("Failed to create event", err)
+		return nil, a.APIError("Failed to create event", err)
 	}
 	parsed := parseEvent(e)
 	return &parsed, nil
@@ -284,9 +270,9 @@ type updateOptions struct {
 func (a *api) updateEvent(o updateOptions) (*event, error) {
 	var existing []*calendar.EventAttendee
 	if len(o.addAttendees) > 0 {
-		current, err := a.svc.Events.Get(o.calendarID, o.eventID).Context(a.ctx).Do()
+		current, err := a.svc.Events.Get(o.calendarID, o.eventID).Context(a.Ctx).Do()
 		if err != nil {
-			return nil, a.notFoundOr("Failed to update event", o.eventID, err)
+			return nil, a.NotFoundOr("Event", o.eventID, "Failed to update event", err)
 		}
 		existing = current.Attendees
 	}
@@ -320,28 +306,28 @@ func (a *api) updateEvent(o updateOptions) (*event, error) {
 			}
 		}
 	}
-	e, err := a.svc.Events.Patch(o.calendarID, o.eventID, patch).SendUpdates(o.sendUpdates).Context(a.ctx).Do()
+	e, err := a.svc.Events.Patch(o.calendarID, o.eventID, patch).SendUpdates(o.sendUpdates).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Failed to update event", o.eventID, err)
+		return nil, a.NotFoundOr("Event", o.eventID, "Failed to update event", err)
 	}
 	parsed := parseEvent(e)
 	return &parsed, nil
 }
 
 func (a *api) deleteEvent(calendarID, eventID, sendUpdates string) error {
-	if err := a.svc.Events.Delete(calendarID, eventID).SendUpdates(sendUpdates).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Failed to delete event", eventID, err)
+	if err := a.svc.Events.Delete(calendarID, eventID).SendUpdates(sendUpdates).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Event", eventID, "Failed to delete event", err)
 	}
 	return nil
 }
 
 func (a *api) respond(calendarID, eventID, status, comment string) (*event, error) {
-	current, err := a.svc.Events.Get(calendarID, eventID).Context(a.ctx).Do()
+	current, err := a.svc.Events.Get(calendarID, eventID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Failed to respond to event", eventID, err)
+		return nil, a.NotFoundOr("Event", eventID, "Failed to respond to event", err)
 	}
 	if len(current.Attendees) == 0 {
-		return nil, a.fail("INVALID_PARAMS", "Event has no attendees", "")
+		return nil, a.Fail("INVALID_PARAMS", "Event has no attendees", "")
 	}
 	var self *calendar.EventAttendee
 	for _, at := range current.Attendees {
@@ -351,18 +337,18 @@ func (a *api) respond(calendarID, eventID, status, comment string) (*event, erro
 		}
 	}
 	if self == nil {
-		return nil, a.fail("INVALID_PARAMS", "You are not an attendee of this event", "")
+		return nil, a.Fail("INVALID_PARAMS", "You are not an attendee of this event", "")
 	}
 	if self.Organizer {
-		return nil, a.fail("INVALID_PARAMS", "Cannot respond to your own event (you are the organizer)", "")
+		return nil, a.Fail("INVALID_PARAMS", "Cannot respond to your own event (you are the organizer)", "")
 	}
 	self.ResponseStatus = status
 	if comment != "" {
 		self.Comment = comment
 	}
-	e, err := a.svc.Events.Patch(calendarID, eventID, &calendar.Event{Attendees: current.Attendees}).Context(a.ctx).Do()
+	e, err := a.svc.Events.Patch(calendarID, eventID, &calendar.Event{Attendees: current.Attendees}).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Failed to respond to event", eventID, err)
+		return nil, a.NotFoundOr("Event", eventID, "Failed to respond to event", err)
 	}
 	parsed := parseEvent(e)
 	return &parsed, nil
@@ -373,9 +359,9 @@ func (a *api) freeBusy(ids []string, timeMin, timeMax string) (*freeBusy, error)
 	for _, id := range ids {
 		req.Items = append(req.Items, &calendar.FreeBusyRequestItem{Id: id})
 	}
-	resp, err := a.svc.Freebusy.Query(req).Context(a.ctx).Do()
+	resp, err := a.svc.Freebusy.Query(req).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Calendar API error", err)
+		return nil, a.APIError("Calendar API error", err)
 	}
 	var order []string
 	seen := map[string]bool{}
@@ -412,7 +398,7 @@ func (a *api) freeBusy(ids []string, timeMin, timeMax string) (*freeBusy, error)
 }
 
 // parseReminders is Bun's `method:minutes` check for --reminder.
-func parseReminders(specs []string, run *plugins.RunContext) ([]*calendar.EventReminder, error) {
+func parseReminders(specs []string, fail google.FailFunc) ([]*calendar.EventReminder, error) {
 	var out []*calendar.EventReminder
 	for _, spec := range specs {
 		parts := strings.Split(spec, ":")
@@ -421,7 +407,7 @@ func parseReminders(specs []string, run *plugins.RunContext) ([]*calendar.EventR
 			minutes = parts[1]
 		}
 		if (method != "email" && method != "popup") || minutes == "" {
-			return nil, run.Fail("INVALID_PARAMS", "Invalid reminder format: "+spec, "Use format: method:minutes (e.g., popup:30)")
+			return nil, fail("INVALID_PARAMS", "Invalid reminder format: "+spec, "Use format: method:minutes (e.g., popup:30)")
 		}
 		r := &calendar.EventReminder{Method: method, ForceSendFields: []string{"Minutes"}}
 		if n := jsvalue.ParseInt(minutes); math.IsNaN(n) {

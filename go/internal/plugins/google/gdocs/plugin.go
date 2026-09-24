@@ -31,15 +31,6 @@ func New() *plugins.Plugin {
 	}
 }
 
-// piped is Bun `options.content` falling back to readStdin() (trimmed).
-func piped(value string, stdin any) string {
-	if value != "" {
-		return value
-	}
-	text, _ := stdin.(string)
-	return strings.TrimSpace(text)
-}
-
 func getCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "get",
@@ -78,7 +69,7 @@ func getCmd() plugins.CommandSpec {
 			if format == "docx" {
 				mimeType, operation = docxMimeType, "export document as docx"
 			}
-			content, err := a.export(in.Arg("doc-id-or-url"), mimeType, operation)
+			content, err := a.ExportDriveFile(a.drive, extractDocID(in.Arg("doc-id-or-url")), mimeType, operation)
 			if err != nil {
 				return nil, err
 			}
@@ -114,10 +105,10 @@ func createCmd() plugins.CommandSpec {
 			`agentio gdocs create --title "Spec" --content "# Spec" --folder 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--title <title>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--title <title>"); err != nil {
 				return nil, err
 			}
-			content := piped(in.Option("content"), in.Stdin)
+			content := google.OptionOrStdin(in, "content")
 			if content == "" {
 				return nil, run.Fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
 			}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
 // formatValues is printGSheetsValues: cells tab-separated, `String(cell ?? ”)`.
@@ -82,13 +83,7 @@ func formatMetadata(v any) string {
 }
 
 // formatCreated is printGSheetsCreated (create and copy).
-func formatCreated(v any) string {
-	c, _ := v.(*created)
-	if c == nil {
-		return ""
-	}
-	return strings.Join([]string{"Spreadsheet created", "ID: " + c.ID, "Title: " + c.Title, "URL: " + c.URL}, "\n")
-}
+func formatCreated(v any) string { return google.FormatCreatedFile(v, "Spreadsheet created") }
 
 // formatFormatted is printGSheetsFormatResult.
 func formatFormatted(v any) string {

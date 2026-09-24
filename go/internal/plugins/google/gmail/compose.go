@@ -9,10 +9,8 @@ import (
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
-
-// failFunc is RunContext.Fail; the compose checks also run from AccessFor.
-type failFunc = func(code plugins.ErrorCode, message, suggestion string) error
 
 // subjectMaxLength is Bun SUBJECT_MAX_LENGTH: longer subjects almost always
 // mean shell-quoting garbage.
@@ -35,7 +33,7 @@ var (
 
 // assertSubjectSane is Bun assertSubjectSane: refuse subjects that look like
 // mangled shell, heredoc or CLI crumbs.
-func assertSubjectSane(subject string, fail failFunc) error {
+func assertSubjectSane(subject string, fail google.FailFunc) error {
 	if n := jsvalue.Length(subject); n > subjectMaxLength {
 		return fail("INVALID_PARAMS",
 			fmt.Sprintf("Subject is absurdly long (%d chars; max %d).", n, subjectMaxLength),
@@ -61,7 +59,7 @@ func assertSubjectSane(subject string, fail failFunc) error {
 }
 
 // readUTF8TextFile is Bun readUtf8TextFile (readFile(path, 'utf-8')).
-func readUTF8TextFile(path, label string, fail failFunc) (string, error) {
+func readUTF8TextFile(path, label string, fail google.FailFunc) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", fail("INVALID_PARAMS", fmt.Sprintf("Failed to read %s: %s", label, path),
@@ -72,7 +70,7 @@ func readUTF8TextFile(path, label string, fail failFunc) (string, error) {
 
 // asStringArray is Bun asStringArray: a string is one trimmed recipient (none
 // when blank), an array must hold strings only.
-func asStringArray(value any, present bool, field string, fail failFunc) ([]string, error) {
+func asStringArray(value any, present bool, field string, fail google.FailFunc) ([]string, error) {
 	if !present || value == nil {
 		return nil, nil
 	}
@@ -97,7 +95,7 @@ func asStringArray(value any, present bool, field string, fail failFunc) ([]stri
 }
 
 // loadComposeSpec is Bun loadComposeSpec, with its checks in Bun's order.
-func loadComposeSpec(path string, fail failFunc) (*composeSpec, error) {
+func loadComposeSpec(path string, fail google.FailFunc) (*composeSpec, error) {
 	raw, err := readUTF8TextFile(path, "spec file", fail)
 	if err != nil {
 		return nil, err
@@ -174,7 +172,7 @@ type resolvedText struct {
 }
 
 // resolveComposeText is Bun resolveComposeText.
-func resolveComposeText(subject, subjectFile, body, bodyFile string, spec *composeSpec, fail failFunc) (resolvedText, error) {
+func resolveComposeText(subject, subjectFile, body, bodyFile string, spec *composeSpec, fail google.FailFunc) (resolvedText, error) {
 	if spec == nil {
 		spec = &composeSpec{}
 	}
@@ -236,7 +234,7 @@ type attachmentFile struct {
 
 // parseSendOptions is Bun parseSendOptions: the compose flags, the spec file
 // and the stdin fallback for the body, checked in Bun's order.
-func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, error) {
+func parseSendOptions(in plugins.CommandInput, fail google.FailFunc) (*sendOptions, error) {
 	var spec *composeSpec
 	if path := in.Option("spec"); path != "" {
 		var err error
@@ -280,9 +278,7 @@ func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, err
 
 	body := resolved.body
 	if !resolved.bodyFromFileOrSpec && (body == "" || body == "-") {
-		// Bun readStdin: the trimmed text, or null for a terminal or no input.
-		text, _ := in.Stdin.(string)
-		body = jsvalue.Trim(text)
+		body = google.Stdin(in)
 	}
 	if body == "" {
 		return nil, fail("INVALID_PARAMS", "Body is required. Use --body, --body-file, --spec, or pipe via stdin.", "")

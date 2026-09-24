@@ -2,7 +2,6 @@ package gsheets
 
 import (
 	"context"
-	"io"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -15,7 +14,10 @@ import (
 	sheets "google.golang.org/api/sheets/v4"
 )
 
-const sheetMimeType = "application/vnd.google-apps.spreadsheet"
+const (
+	sheetMimeType  = "application/vnd.google-apps.spreadsheet"
+	spreadsheetURL = "https://docs.google.com/spreadsheets/d/"
+)
 
 // exportMimeTypes is GSheetsClient.export's formatMap.
 var exportMimeTypes = map[string]string{
@@ -72,13 +74,6 @@ type spreadsheet struct {
 	Sheets   []sheet `json:"sheets"`
 }
 
-// created is GSheetsCreateResult (create and copy).
-type created struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
-
 // formatted is GSheetsFormatResult.
 type formatted struct {
 	Range         string   `json:"range"`
@@ -123,11 +118,9 @@ type formatOptions struct {
 // (values, CellFormat, batchUpdate requests) send ordered JSON at the sheets
 // client's BasePath, as the typed structs would drop or reorder it.
 type api struct {
-	ctx    context.Context
-	run    *plugins.RunContext
+	google.API
 	sheets *sheets.Service
 	drive  *drive.Service
-	fail   func(code plugins.ErrorCode, message, suggestion string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
@@ -139,18 +132,15 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, run: run, sheets: sheetsSvc, drive: driveSvc, fail: run.Fail}, nil
+	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, sheets: sheetsSvc, drive: driveSvc}, nil
 }
 
-// apiError is GSheetsClient.throwApiError.
-func (a *api) apiError(operation string, err error) error {
-	message := google.StatusMessage(err, "Insufficient permissions to access this spreadsheet", "Spreadsheet not found")
-	return a.fail(google.ErrorCode(err), "Failed to "+operation+": "+message, "")
-}
+// errorMessage is GSheetsClient.getErrorMessage.
+var errorMessage = google.StatusText("Insufficient permissions to access this spreadsheet", "Spreadsheet not found")
 
 // callJSON sends body to the Sheets API and returns the reply object.
 func (a *api) callJSON(method, path string, body any) (*jsvalue.Object, error) {
-	v, err := google.CallJSON(a.ctx, a.run, google.Camel, method, a.sheets.BasePath, path, jsvalue.Stringify(body))
+	v, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, method, a.sheets.BasePath, path, jsvalue.Stringify(body))
 	if err != nil {
 		return nil, err
 	}
@@ -184,9 +174,9 @@ func valuesPath(spreadsheetID, a1 string) string {
 }
 
 func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
-	files, err := google.ListDriveFiles(a.ctx, a.drive, sheetMimeType, query, limit, "https://docs.google.com/spreadsheets/d/")
+	files, err := google.ListDriveFiles(a.Ctx, a.drive, sheetMimeType, query, limit, spreadsheetURL)
 	if err != nil {
-		return nil, a.apiError("list spreadsheets", err)
+		return nil, a.Failed("list spreadsheets", err)
 	}
 	return files, nil
 }
@@ -200,9 +190,9 @@ func (a *api) get(idOrURL, a1, dimension, render string) (*values, error) {
 	if render != "" {
 		call.ValueRenderOption(render)
 	}
-	resp, err := call.Context(a.ctx).Do()
+	resp, err := call.Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get values", err)
+		return nil, a.Failed("get values", err)
 	}
 	out := &values{Range: resp.Range, Values: resp.Values}
 	if out.Range == "" {
@@ -246,7 +236,7 @@ func (a *api) update(idOrURL, a1 string, rows []any, inputOption string) (*updat
 	q.Set("valueInputOption", inputOption)
 	obj, err := a.callJSON("PUT", valuesPath(extractSpreadsheetID(idOrURL), r)+"?"+q.String(), valuesBody(rows))
 	if err != nil {
-		return nil, a.apiError("update values", err)
+		return nil, a.Failed("update values", err)
 	}
 	out := counts(obj, r)
 	return &out, nil
@@ -264,7 +254,7 @@ func (a *api) append(idOrURL, a1 string, rows []any, inputOption, insertOption s
 	}
 	obj, err := a.callJSON("POST", valuesPath(extractSpreadsheetID(idOrURL), r)+":append?"+q.String(), valuesBody(rows))
 	if err != nil {
-		return nil, a.apiError("append values", err)
+		return nil, a.Failed("append values", err)
 	}
 	updates, _ := obj.Get("updates")
 	inner, _ := updates.(*jsvalue.Object)
@@ -274,9 +264,9 @@ func (a *api) append(idOrURL, a1 string, rows []any, inputOption, insertOption s
 
 func (a *api) clear(idOrURL, a1 string) (*cleared, error) {
 	r := cleanRange(a1)
-	resp, err := a.sheets.Spreadsheets.Values.Clear(extractSpreadsheetID(idOrURL), r, &sheets.ClearValuesRequest{}).Context(a.ctx).Do()
+	resp, err := a.sheets.Spreadsheets.Values.Clear(extractSpreadsheetID(idOrURL), r, &sheets.ClearValuesRequest{}).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("clear values", err)
+		return nil, a.Failed("clear values", err)
 	}
 	out := &cleared{ClearedRange: resp.ClearedRange}
 	if out.ClearedRange == "" {
@@ -287,9 +277,9 @@ func (a *api) clear(idOrURL, a1 string) (*cleared, error) {
 
 func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
 	id := extractSpreadsheetID(idOrURL)
-	resp, err := a.sheets.Spreadsheets.Get(id).Context(a.ctx).Do()
+	resp, err := a.sheets.Spreadsheets.Get(id).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get metadata", err)
+		return nil, a.Failed("get metadata", err)
 	}
 	props := resp.Properties
 	if props == nil {
@@ -300,7 +290,7 @@ func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
 		out.Title = "Untitled"
 	}
 	if out.URL == "" {
-		out.URL = "https://docs.google.com/spreadsheets/d/" + id
+		out.URL = spreadsheetURL + id
 	}
 	for _, s := range resp.Sheets {
 		item := sheet{Title: "Untitled"}
@@ -318,56 +308,23 @@ func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
 	return out, nil
 }
 
-func (a *api) create(title string, sheetNames []string) (*created, error) {
+func (a *api) create(title string, sheetNames []string) (*google.CreatedFile, error) {
 	body := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: title}}
 	for _, name := range sheetNames {
 		body.Sheets = append(body.Sheets, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: jsvalue.Trim(name)}})
 	}
-	resp, err := a.sheets.Spreadsheets.Create(body).Context(a.ctx).Do()
+	resp, err := a.sheets.Spreadsheets.Create(body).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("create spreadsheet", err)
+		return nil, a.Failed("create spreadsheet", err)
 	}
-	out := &created{ID: resp.SpreadsheetId, Title: title, URL: resp.SpreadsheetUrl}
+	out := &google.CreatedFile{ID: resp.SpreadsheetId, Title: title, URL: resp.SpreadsheetUrl}
 	if resp.Properties != nil && resp.Properties.Title != "" {
 		out.Title = resp.Properties.Title
 	}
 	if out.URL == "" {
-		out.URL = "https://docs.google.com/spreadsheets/d/" + resp.SpreadsheetId
+		out.URL = spreadsheetURL + resp.SpreadsheetId
 	}
 	return out, nil
-}
-
-func (a *api) copy(idOrURL, title, parentFolderID string) (*created, error) {
-	file := &drive.File{Name: title}
-	if parentFolderID != "" {
-		file.Parents = []string{parentFolderID}
-	}
-	f, err := a.drive.Files.Copy(extractSpreadsheetID(idOrURL), file).Fields("id,name,webViewLink").Context(a.ctx).Do()
-	if err != nil {
-		return nil, a.apiError("copy spreadsheet", err)
-	}
-	out := &created{ID: f.Id, Title: f.Name, URL: f.WebViewLink}
-	if out.Title == "" {
-		out.Title = title
-	}
-	if out.URL == "" {
-		out.URL = "https://docs.google.com/spreadsheets/d/" + f.Id
-	}
-	return out, nil
-}
-
-// export is the Drive export bytes of the spreadsheet as mimeType.
-func (a *api) export(idOrURL, mimeType string) ([]byte, error) {
-	resp, err := a.drive.Files.Export(extractSpreadsheetID(idOrURL), mimeType).Context(a.ctx).Download()
-	if err != nil {
-		return nil, a.apiError("export spreadsheet", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, a.apiError("export spreadsheet", err)
-	}
-	return body, nil
 }
 
 // batchUpdate is spreadsheets.batchUpdate with requests sent as given.
@@ -380,11 +337,11 @@ func (a *api) batchUpdate(spreadsheetID string, requests []any) (*jsvalue.Object
 func (a *api) batch(idOrURL string, requests []any) (*batched, error) {
 	id := extractSpreadsheetID(idOrURL)
 	if len(requests) == 0 {
-		return nil, a.fail("INVALID_PARAMS", "requests must be a non-empty array", "")
+		return nil, a.Fail("INVALID_PARAMS", "requests must be a non-empty array", "")
 	}
 	resp, err := a.batchUpdate(id, requests)
 	if err != nil {
-		return nil, a.apiError("execute batch update", err)
+		return nil, a.Failed("execute batch update", err)
 	}
 	replies, _ := resp.Get("replies")
 	items, _ := replies.([]any)
@@ -395,9 +352,9 @@ func (a *api) batch(idOrURL string, requests []any) (*batched, error) {
 // named sheet, or the first one when the range names none. A failed call is
 // reported as operation, the command's.
 func (a *api) targetSheet(spreadsheetID, title, operation string) (*sheets.SheetProperties, error) {
-	resp, err := a.sheets.Spreadsheets.Get(spreadsheetID).Context(a.ctx).Do()
+	resp, err := a.sheets.Spreadsheets.Get(spreadsheetID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError(operation, err)
+		return nil, a.Failed(operation, err)
 	}
 	var found *sheets.Sheet
 	if title != "" {
@@ -415,7 +372,7 @@ func (a *api) targetSheet(spreadsheetID, title, operation string) (*sheets.Sheet
 		if name == "" {
 			name = "(first sheet)"
 		}
-		return nil, a.fail("NOT_FOUND", "Sheet not found: "+name, "")
+		return nil, a.Fail("NOT_FOUND", "Sheet not found: "+name, "")
 	}
 	return found.Properties, nil
 }
@@ -428,7 +385,7 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 	if err != nil {
 		return nil, err
 	}
-	bounds, err := parseCellRange(cells, a.fail)
+	bounds, err := parseCellRange(cells, a.Fail)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +400,7 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 	cellFormat := jsvalue.NewObject()
 	var mask []string
 	if o.background != "" {
-		c, err := parseHexColor(o.background, a.fail)
+		c, err := parseHexColor(o.background, a.Fail)
 		if err != nil {
 			return nil, err
 		}
@@ -483,7 +440,7 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 		textMask = append(textMask, "fontFamily")
 	}
 	if o.textColor != "" {
-		c, err := parseHexColor(o.textColor, a.fail)
+		c, err := parseHexColor(o.textColor, a.Fail)
 		if err != nil {
 			return nil, err
 		}
@@ -532,10 +489,10 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 		requests = append(requests, obj("mergeCells", obj("range", grid, "mergeType", "MERGE_ALL")))
 	}
 	if len(requests) == 0 {
-		return nil, a.fail("INVALID_PARAMS", "No formatting options specified", "Pass at least one format flag or --clear-format")
+		return nil, a.Fail("INVALID_PARAMS", "No formatting options specified", "Pass at least one format flag or --clear-format")
 	}
 	if _, err := a.batchUpdate(id, requests); err != nil {
-		return nil, a.apiError("format range", err)
+		return nil, a.Failed("format range", err)
 	}
 	return &formatted{Range: r, SheetTitle: props.Title, AppliedFields: applied, Merged: o.merge, Cleared: o.clearFormat}, nil
 }
@@ -544,29 +501,29 @@ func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resize
 	id := extractSpreadsheetID(idOrURL)
 	r := cleanRange(a1)
 	if !auto && pixelSize == nil {
-		return nil, a.fail("INVALID_PARAMS", "Specify --size <pixels> or --auto", "")
+		return nil, a.Fail("INVALID_PARAMS", "Specify --size <pixels> or --auto", "")
 	}
 	if auto && pixelSize != nil {
-		return nil, a.fail("INVALID_PARAMS", "--size and --auto are mutually exclusive", "")
+		return nil, a.Fail("INVALID_PARAMS", "--size and --auto are mutually exclusive", "")
 	}
 	title, cells := parseA1Range(r)
 	if cells == "" {
-		return nil, a.fail("INVALID_PARAMS", "Resize range must reference columns or rows (e.g. Sheet1!A:C or Sheet1!1:10)", "")
+		return nil, a.Fail("INVALID_PARAMS", "Resize range must reference columns or rows (e.g. Sheet1!A:C or Sheet1!1:10)", "")
 	}
 	props, err := a.targetSheet(id, title, "resize dimension")
 	if err != nil {
 		return nil, err
 	}
-	b, err := parseCellRange(cells, a.fail)
+	b, err := parseCellRange(cells, a.Fail)
 	if err != nil {
 		return nil, err
 	}
 	hasCols, hasRows := b.startCol != nil, b.startRow != nil
 	if hasCols && hasRows {
-		return nil, a.fail("INVALID_PARAMS", "Resize range must be columns-only (A:C) or rows-only (1:10), got "+cells, "")
+		return nil, a.Fail("INVALID_PARAMS", "Resize range must be columns-only (A:C) or rows-only (1:10), got "+cells, "")
 	}
 	if !hasCols && !hasRows {
-		return nil, a.fail("INVALID_PARAMS", "Could not parse resize range: "+cells, "")
+		return nil, a.Fail("INVALID_PARAMS", "Could not parse resize range: "+cells, "")
 	}
 	dimension, start, end := "COLUMNS", b.startCol, b.endCol
 	if !hasCols {
@@ -582,7 +539,7 @@ func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resize
 		request = obj("updateDimensionProperties", obj("range", dimRange, "properties", obj("pixelSize", *pixelSize), "fields", "pixelSize"))
 	}
 	if _, err := a.batchUpdate(id, []any{request}); err != nil {
-		return nil, a.apiError("resize dimension", err)
+		return nil, a.Failed("resize dimension", err)
 	}
 	out := &resized{Range: r, SheetTitle: props.Title, Dimension: dimension, Count: deref(end) - deref(start), Auto: auto}
 	if pixelSize != nil {
@@ -619,7 +576,7 @@ func deref(index *int) int {
 var hexColorPattern = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
 // parseHexColor is Bun parseHexColor: #rrggbb as 0-1 channel fractions.
-func parseHexColor(hex string, fail func(plugins.ErrorCode, string, string) error) (*jsvalue.Object, error) {
+func parseHexColor(hex string, fail google.FailFunc) (*jsvalue.Object, error) {
 	cleaned := strings.TrimPrefix(jsvalue.Trim(hex), "#")
 	if !hexColorPattern.MatchString(cleaned) {
 		return nil, fail("INVALID_PARAMS", "Invalid hex color: "+hex, "Use format #rrggbb (e.g., #ff0000)")
@@ -683,7 +640,7 @@ type bounds struct {
 }
 
 // parseCellRange is Bun parseCellRange.
-func parseCellRange(cells string, fail func(plugins.ErrorCode, string, string) error) (bounds, error) {
+func parseCellRange(cells string, fail google.FailFunc) (bounds, error) {
 	if cells == "" {
 		return bounds{}, nil
 	}

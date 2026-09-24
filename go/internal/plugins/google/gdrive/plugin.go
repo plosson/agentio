@@ -70,7 +70,7 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	}
 	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
 	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
+		return nil, google.EmailFailure(setup, err)
 	}
 	creds := google.Camel.Merge(nil, tokens)
 	creds["email"] = email
@@ -256,7 +256,7 @@ func searchCmd() plugins.CommandSpec {
 			`agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--query <text>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -293,7 +293,7 @@ func downloadCmd() plugins.CommandSpec {
 			"Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--output <path>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -537,7 +537,7 @@ func shareTarget(in plugins.CommandInput) (kind string, count int) {
 }
 
 // shareInputError is the checks Bun makes before it resolves the profile.
-func shareInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func shareInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	_, count := shareTarget(in)
 	if count == 0 {
 		return fail("INVALID_PARAMS", "Specify one of --anyone, --user, --domain, or --group", "")
@@ -631,7 +631,7 @@ func shareCmd() plugins.CommandSpec {
 }
 
 // unshareInputError is the checks Bun makes before it resolves the profile.
-func unshareInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func unshareInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	byID, anyone := in.Option("permission-id") != "", in.Flag("anyone")
 	if !byID && !anyone {
 		return fail("INVALID_PARAMS", "Specify --permission-id or --anyone", "")

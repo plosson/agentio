@@ -148,7 +148,7 @@ func exportCmd() plugins.CommandSpec {
 			"Formats: pptx (default), pdf, odp.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--output <path>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -160,7 +160,7 @@ func exportCmd() plugins.CommandSpec {
 			if !ok {
 				return nil, run.Fail("INVALID_PARAMS", "Unknown format: "+format, "Use pptx, pdf, or odp")
 			}
-			data, err := a.export(in.Arg("id-or-url"), mimeType)
+			data, err := a.ExportDriveFile(a.drive, extractPresentationID(in.Arg("id-or-url")), mimeType, "export presentation")
 			if err != nil {
 				return nil, err
 			}
@@ -218,7 +218,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.copy(in.Arg("id-or-url"), in.Arg("title"), in.Option("parent")))
+			return google.Result(a.CopyDriveFile(a.drive, extractPresentationID(in.Arg("id-or-url")), in.Arg("title"), in.Option("parent"), "copy presentation", presentationURL))
 		},
 		Format: formatCreated,
 	}

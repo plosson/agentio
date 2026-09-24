@@ -2,6 +2,7 @@ package google
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -155,7 +156,7 @@ func PerformOAuth(ctx context.Context, setup *plugins.SetupContext, service stri
 		AccessToken:  tok.AccessToken,
 		RefreshToken: tok.RefreshToken,
 		ExpiryDate:   expiryMs(tok),
-		TokenType:    orBearer(tok.TokenType),
+		TokenType:    cmp.Or(tok.TokenType, "Bearer"),
 		Scope:        scopeOf(tok),
 	}, nil
 }
@@ -183,7 +184,7 @@ func refreshTokens(ctx context.Context, stored Tokens) (Tokens, error) {
 		AccessToken:  tok.AccessToken,
 		RefreshToken: stored.RefreshToken,
 		ExpiryDate:   expiryMs(tok),
-		TokenType:    orBearer(tok.TokenType),
+		TokenType:    cmp.Or(tok.TokenType, "Bearer"),
 		Scope:        scope,
 	}, nil
 }
@@ -249,6 +250,30 @@ func Reauthenticate(service string, keys Keys) func(context.Context, map[string]
 // before the OAuth flow (gdocs, gsheets, gslides, gscript): service is both
 // the Scopes key and the CLI noun, displayName the product name Bun logs.
 func Setup(service, displayName string) func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+	return oauthSetup(service, displayName, Camel, EmailFailure, func(email string) string {
+		return "Email: " + email + "\nTest with: agentio " + service + " list"
+	})
+}
+
+// SnakeSetup is the Bun profile.setup of the snake_case products (gmail,
+// gcal, gtasks): Setup's flow under Snake keys, where a failed userinfo call
+// is the product's emailFailure text, without its cause.
+func SnakeSetup(service, displayName, emailFailure string) func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+	fail := func(setup *plugins.SetupContext, _ error) error {
+		return setup.Fail("AUTH_FAILED", emailFailure, "Try again or specify --profile manually")
+	}
+	return oauthSetup(service, displayName, Snake, fail, func(email string) string { return "Email: " + email })
+}
+
+// EmailFailure is the error Bun's camelCase setups (and gchat's and gdrive's)
+// throw when the userinfo call fails.
+func EmailFailure(setup *plugins.SetupContext, err error) error {
+	return setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
+}
+
+// oauthSetup logs the start, runs the OAuth flow for service and names the
+// profile after the account email, stored beside the tokens under keys.
+func oauthSetup(service, displayName string, keys Keys, emailFailure func(*plugins.SetupContext, error) error, info func(email string) string) func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
 	return func(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
 		setup.Log("Starting OAuth flow for " + displayName + "...\n")
 		tokens, err := PerformOAuth(ctx, setup, service)
@@ -257,15 +282,11 @@ func Setup(service, displayName string) func(context.Context, plugins.SetupOptio
 		}
 		email, err := FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
 		if err != nil {
-			return nil, setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
+			return nil, emailFailure(setup, err)
 		}
-		creds := Camel.Merge(nil, tokens)
+		creds := keys.Merge(nil, tokens)
 		creds["email"] = email
-		return &plugins.SetupResult{
-			Credentials:          creds,
-			SuggestedProfileName: email,
-			Info:                 "Email: " + email + "\nTest with: agentio " + service + " list",
-		}, nil
+		return &plugins.SetupResult{Credentials: creds, SuggestedProfileName: email, Info: info(email)}, nil
 	}
 }
 
@@ -279,13 +300,6 @@ func expiryMs(tok *oauth2.Token) int64 {
 func scopeOf(tok *oauth2.Token) string {
 	s, _ := tok.Extra("scope").(string)
 	return s
-}
-
-func orBearer(tokenType string) string {
-	if tokenType == "" {
-		return "Bearer"
-	}
-	return tokenType
 }
 
 // tokenError gives a token endpoint failure the message google-auth-library

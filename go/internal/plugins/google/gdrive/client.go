@@ -198,10 +198,9 @@ var workspaceTypeNames = map[string]string{
 
 // api is GDriveClient.
 type api struct {
-	ctx         context.Context
+	google.API
 	svc         *drive.Service
 	accessLevel string
-	fail        func(code plugins.ErrorCode, message, suggestion string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
@@ -210,24 +209,23 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 		return nil, err
 	}
 	level, _ := run.Credentials["accessLevel"].(string)
-	return &api{ctx: ctx, svc: svc, accessLevel: level, fail: run.Fail}, nil
+	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, svc: svc, accessLevel: level}, nil
 }
 
-// apiError is GDriveClient.throwApiError. Unlike the other Google clients,
-// gdrive prefers the API's own message and uses the fixed status text only
-// when that message is blank.
-func (a *api) apiError(operation string, err error) error {
-	message := google.Message(err)
-	if jsvalue.Trim(message) == "" {
-		message = google.StatusMessage(err, "Insufficient permissions to access this file", "File not found")
+// errorMessage is GDriveClient.getErrorMessage. Unlike the other Google
+// clients, gdrive prefers the API's own message and uses the fixed status
+// text only when that message is blank.
+func errorMessage(err error) string {
+	if message := google.Message(err); jsvalue.Trim(message) != "" {
+		return message
 	}
-	return a.fail(google.ErrorCode(err), "Failed to "+operation+": "+message, "")
+	return google.StatusMessage(err, "Insufficient permissions to access this file", "File not found")
 }
 
 // assertWriteAccess treats a missing accessLevel as readonly, as Bun does.
 func (a *api) assertWriteAccess() error {
 	if a.accessLevel == "" || a.accessLevel == "readonly" {
-		return a.fail("PERMISSION_DENIED", "This profile has read-only access", "Create a new profile with full access: agentio gdrive profile add --full")
+		return a.Fail("PERMISSION_DENIED", "This profile has read-only access", "Create a new profile with full access: agentio gdrive profile add --full")
 	}
 	return nil
 }
@@ -304,9 +302,9 @@ func (a *api) list(o listOptions) ([]file, error) {
 		if pageToken != "" {
 			call = call.PageToken(pageToken)
 		}
-		resp, err := call.Context(a.ctx).Do(google.PageSize(o.limit - float64(len(all))))
+		resp, err := call.Context(a.Ctx).Do(google.PageSize(o.limit - float64(len(all))))
 		if err != nil {
-			return nil, a.apiError("list files", err)
+			return nil, a.Failed("list files", err)
 		}
 		for _, f := range resp.Files {
 			all = append(all, parseFile(f))
@@ -356,9 +354,9 @@ func (a *api) search(query, mimeType string, limit float64, folderID string) ([]
 }
 
 func (a *api) get(fileIDOrURL string) (*file, error) {
-	f, err := a.svc.Files.Get(extractFileID(fileIDOrURL)).Fields(fileFields).Context(a.ctx).Do()
+	f, err := a.svc.Files.Get(extractFileID(fileIDOrURL)).Fields(fileFields).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get file", err)
+		return nil, a.Failed("get file", err)
 	}
 	out := parseFile(f)
 	return &out, nil
@@ -401,30 +399,30 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 	if strings.HasPrefix(f.MimeType, "application/vnd.google-apps.") {
 		typeName := workspaceTypeName(f.MimeType)
 		if format == "" {
-			return nil, a.fail("INVALID_PARAMS", "Cannot download Google "+typeName+" directly", "Use --export with one of: "+supportedFormats(f.MimeType))
+			return nil, a.Fail("INVALID_PARAMS", "Cannot download Google "+typeName+" directly", "Use --export with one of: "+supportedFormats(f.MimeType))
 		}
 		mimeType = exportMimeType(f.MimeType, format)
 		if mimeType == "" {
-			return nil, a.fail("INVALID_PARAMS", "Cannot export Google "+typeName+" to "+format, "Supported formats: "+supportedFormats(f.MimeType))
+			return nil, a.Fail("INVALID_PARAMS", "Cannot export Google "+typeName+" to "+format, "Supported formats: "+supportedFormats(f.MimeType))
 		}
-		call = a.svc.Files.Export(fileID, mimeType).Context(a.ctx)
+		call = a.svc.Files.Export(fileID, mimeType).Context(a.Ctx)
 	} else {
 		if format != "" {
-			return nil, a.fail("INVALID_PARAMS", "Export format is only for Google Workspace files", "Remove --export flag for regular files")
+			return nil, a.Fail("INVALID_PARAMS", "Export format is only for Google Workspace files", "Remove --export flag for regular files")
 		}
-		call = a.svc.Files.Get(fileID).Context(a.ctx)
+		call = a.svc.Files.Get(fileID).Context(a.Ctx)
 	}
 	resp, err := call.Download()
 	if err != nil {
-		return nil, a.apiError("download file", err)
+		return nil, a.Failed("download file", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, a.apiError("download file", err)
+		return nil, a.Failed("download file", err)
 	}
 	if err := os.WriteFile(outputPath, body, 0o666); err != nil {
-		return nil, a.apiError("download file", google.NodeFSError("open", outputPath, err))
+		return nil, a.Failed("download file", google.NodeFSError("open", outputPath, err))
 	}
 	return &downloaded{Filename: f.Name, Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
 }
@@ -437,7 +435,7 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return nil, a.apiError("upload file", google.NodeFSError("stat", filePath, err))
+		return nil, a.Failed("upload file", google.NodeFSError("stat", filePath, err))
 	}
 	fileName := name
 	if fileName == "" {
@@ -459,7 +457,7 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 			if what == "" {
 				what = "this file type"
 			}
-			return nil, a.fail("INVALID_PARAMS", "Cannot convert "+what+" to Google Workspace format",
+			return nil, a.Fail("INVALID_PARAMS", "Cannot convert "+what+" to Google Workspace format",
 				"Supported: docx, doc, odt, txt, html, rtf, xlsx, xls, ods, csv, tsv, pptx, ppt, odp")
 		}
 		// The extension is dropped when converting.
@@ -470,19 +468,19 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 		target.Parents = []string{folderID}
 	}
 	if info.IsDir() {
-		return nil, a.apiError("upload file", google.NodeFSError("read", "", syscall.EISDIR))
+		return nil, a.Failed("upload file", google.NodeFSError("read", "", syscall.EISDIR))
 	}
 	body, err := os.Open(filePath)
 	if err != nil {
-		return nil, a.apiError("upload file", google.NodeFSError("open", filePath, err))
+		return nil, a.Failed("upload file", google.NodeFSError("open", filePath, err))
 	}
 	defer body.Close()
 	// ChunkSize(0) sends one multipart request whatever the size, as Bun does.
 	f, err := a.svc.Files.Create(target).
 		Media(body, googleapi.ContentType(sourceMimeType), googleapi.ChunkSize(0)).
-		Fields("id,name,mimeType,size,webViewLink").Context(a.ctx).Do()
+		Fields("id,name,mimeType,size,webViewLink").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("upload file", err)
+		return nil, a.Failed("upload file", err)
 	}
 	out := &uploaded{ID: f.Id, Name: f.Name, MimeType: f.MimeType, Size: info.Size(), WebViewLink: f.WebViewLink}
 	if out.Name == "" {
@@ -503,9 +501,9 @@ func (a *api) copy(fileIDOrURL, name, folderID string) (*copied, error) {
 		body.Parents = []string{folderID}
 	}
 	f, err := a.svc.Files.Copy(extractFileID(fileIDOrURL), body).SupportsAllDrives(true).
-		Fields("id,name,mimeType,parents,webViewLink").Context(a.ctx).Do()
+		Fields("id,name,mimeType,parents,webViewLink").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("copy file", err)
+		return nil, a.Failed("copy file", err)
 	}
 	out := &copied{ID: f.Id, Name: f.Name, MimeType: f.MimeType, Parents: f.Parents, WebViewLink: f.WebViewLink}
 	if out.Name == "" {
@@ -519,9 +517,9 @@ func (a *api) copy(fileIDOrURL, name, folderID string) (*copied, error) {
 
 // update is files.update with supportsAllDrives and the full file fields.
 func (a *api) update(operation string, call *drive.FilesUpdateCall) (*file, error) {
-	f, err := call.SupportsAllDrives(true).Fields(fileFields).Context(a.ctx).Do()
+	f, err := call.SupportsAllDrives(true).Fields(fileFields).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError(operation, err)
+		return nil, a.Failed(operation, err)
 	}
 	out := parseFile(f)
 	return &out, nil
@@ -544,9 +542,9 @@ func (a *api) move(fileIDOrURL, folderIDOrURL string) (*file, error) {
 		return nil, err
 	}
 	fileID, folderID := extractFileID(fileIDOrURL), extractFileID(folderIDOrURL)
-	current, err := a.svc.Files.Get(fileID).SupportsAllDrives(true).Fields("parents").Context(a.ctx).Do()
+	current, err := a.svc.Files.Get(fileID).SupportsAllDrives(true).Fields("parents").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("move file", err)
+		return nil, a.Failed("move file", err)
 	}
 	call := a.svc.Files.Update(fileID, &drive.File{}).AddParents(folderID)
 	if previous := strings.Join(current.Parents, ","); previous != "" {
@@ -563,9 +561,9 @@ func (a *api) mkdir(name, parentIDOrURL string) (*file, error) {
 	if parentIDOrURL != "" {
 		body.Parents = []string{extractFileID(parentIDOrURL)}
 	}
-	f, err := a.svc.Files.Create(body).SupportsAllDrives(true).Fields(fileFields).Context(a.ctx).Do()
+	f, err := a.svc.Files.Create(body).SupportsAllDrives(true).Fields(fileFields).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("create folder", err)
+		return nil, a.Failed("create folder", err)
 	}
 	out := parseFile(f)
 	return &out, nil
@@ -573,9 +571,9 @@ func (a *api) mkdir(name, parentIDOrURL string) (*file, error) {
 
 func (a *api) permissions(fileIDOrURL string) ([]permission, error) {
 	resp, err := a.svc.Permissions.List(extractFileID(fileIDOrURL)).SupportsAllDrives(true).
-		Fields("permissions(id,type,role,emailAddress,domain,displayName,allowFileDiscovery)").Context(a.ctx).Do()
+		Fields("permissions(id,type,role,emailAddress,domain,displayName,allowFileDiscovery)").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("list permissions", err)
+		return nil, a.Failed("list permissions", err)
 	}
 	out := []permission{}
 	for _, p := range resp.Permissions {
@@ -608,16 +606,16 @@ func (a *api) share(fileIDOrURL, printedID string, o shareOptions) (*shared, err
 	if o.emailMessage != "" {
 		call = call.EmailMessage(o.emailMessage)
 	}
-	p, err := call.Context(a.ctx).Do()
+	p, err := call.Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("share file", err)
+		return nil, a.Failed("share file", err)
 	}
 	return &shared{PermissionID: p.Id, Type: p.Type, Role: p.Role, EmailAddress: p.EmailAddress, Domain: p.Domain, FileID: printedID}, nil
 }
 
 func (a *api) unshare(fileIDOrURL, permissionID string) error {
-	if err := a.svc.Permissions.Delete(extractFileID(fileIDOrURL), permissionID).SupportsAllDrives(true).Context(a.ctx).Do(); err != nil {
-		return a.apiError("remove permission", err)
+	if err := a.svc.Permissions.Delete(extractFileID(fileIDOrURL), permissionID).SupportsAllDrives(true).Context(a.Ctx).Do(); err != nil {
+		return a.Failed("remove permission", err)
 	}
 	return nil
 }

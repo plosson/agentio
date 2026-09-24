@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,85 +21,12 @@ import (
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
-	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-// hit is one request that reached the fake Google.
-type hit struct {
-	Method string
-	Path   string
-	Query  url.Values
-	Auth   string
-	JSON   map[string]any
-	Form   url.Values
-}
-
-type fakeGoogle struct {
-	mu     sync.Mutex
-	hits   []hit
-	handle func(w http.ResponseWriter, h hit)
-	srv    *httptest.Server
-}
-
-func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeGoogle {
-	t.Helper()
-	f := &fakeGoogle{handle: handle}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		h := hit{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Auth: r.Header.Get("Authorization")}
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-			if err := json.Unmarshal(raw, &h.JSON); err != nil {
-				t.Errorf("non-JSON body %q", raw)
-			}
-		} else if len(raw) > 0 {
-			h.Form, _ = url.ParseQuery(string(raw))
-		}
-		f.mu.Lock()
-		f.hits = append(f.hits, h)
-		f.mu.Unlock()
-		f.handle(w, h)
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-func (f *fakeGoogle) ctx() context.Context {
-	return google.WithEndpoints(context.Background(), google.Endpoints{
-		API: f.srv.URL + "/", Token: f.srv.URL + "/token", UserInfo: f.srv.URL + "/userinfo",
-	})
-}
-
-func (f *fakeGoogle) recorded() []hit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]hit(nil), f.hits...)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func apiErr(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": message}})
-}
-
-func setupVault(t *testing.T) *plugins.Registry {
-	t.Helper()
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := plugins.NewRegistry(New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
+// product drives New() through the shared Google test harness.
+var product = googletest.For(New)
 
 func storedCreds(expiry int64) map[string]any {
 	return map[string]any{
@@ -111,69 +37,6 @@ func storedCreds(expiry int64) map[string]any {
 		"scope":         "https://www.googleapis.com/auth/gmail.readonly",
 		"email":         "me@example.com",
 	}
-}
-
-func saveProfile(t *testing.T, name string, creds map[string]any, readOnly bool) {
-	t.Helper()
-	opts := profile.SaveOptions{}
-	if readOnly {
-		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
-	}
-	if err := profile.Save("gmail", name, creds, opts); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func loadCreds(t *testing.T, name string) map[string]any {
-	t.Helper()
-	c, err := vault.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.Credentials["gmail"][name]
-}
-
-func spec(t *testing.T, path string) *plugins.CommandSpec {
-	t.Helper()
-	p := New()
-	for i := range p.Commands {
-		if p.Commands[i].Path == path {
-			return &p.Commands[i]
-		}
-	}
-	t.Fatalf("no command %q", path)
-	return nil
-}
-
-// input fills the repeatable flags with [] and the defaults the way the host
-// does, then applies set.
-func input(t *testing.T, path string, args map[string]any, set map[string]any) plugins.CommandInput {
-	t.Helper()
-	in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
-	for _, o := range spec(t, path).Options {
-		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
-		switch {
-		case o.Repeatable:
-			in.Options[name] = []string{}
-		case !strings.Contains(o.Flags, "<"):
-			in.Options[name] = false
-		default:
-			d, _ := o.DefaultValue.(string)
-			in.Options[name] = d
-		}
-	}
-	for k, v := range args {
-		in.Args[k] = v
-	}
-	for k, v := range set {
-		in.Options[k] = v
-	}
-	return in
-}
-
-func exec(ctx context.Context, t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
-	t.Helper()
-	return host.Execute(ctx, reg, reg.Find("gmail"), spec(t, path), in)
 }
 
 // runDirect runs a command's handler with fresh credentials and captures
@@ -187,30 +50,16 @@ func runDirect(t *testing.T, ctx context.Context, path string, in plugins.Comman
 			logs = append(logs, p.(string))
 		}
 	}
-	v, err := spec(t, path).Run(ctx, in, run)
+	v, err := product.Spec(t, path).Run(ctx, in, run)
 	return v, err, logs
-}
-
-func cliErr(t *testing.T, err error) *clierr.Error {
-	t.Helper()
-	ce, ok := err.(*clierr.Error)
-	if !ok {
-		t.Fatalf("not a CLI error: %#v", err)
-	}
-	return ce
 }
 
 func wantErr(t *testing.T, err error, code clierr.Code, message, suggestion string) {
 	t.Helper()
-	ce := cliErr(t, err)
+	ce := googletest.CliErr(t, err)
 	if ce.Code != code || ce.Message != message || ce.Suggestion != suggestion {
 		t.Fatalf("got %s %q %q\nwant %s %q %q", ce.Code, ce.Message, ce.Suggestion, code, message, suggestion)
 	}
-}
-
-func jsonText(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }
 
 // rawMessage decodes the base64url RFC 822 text a send or draft carried.
@@ -321,17 +170,17 @@ func TestCommandTableMatchesBun(t *testing.T) {
 }
 
 func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/token":
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/gmail.readonly"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/gmail.readonly"})
 		case "/userinfo":
 			if h.Auth != "Bearer at-1" {
 				w.WriteHeader(401)
 				return
 			}
-			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"email": "user@example.com"})
 		default:
 			w.WriteHeader(404)
 		}
@@ -345,7 +194,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:3001/callback"}, nil
 	}
 	var out bytes.Buffer
-	if err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
+	if err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
 		t.Fatal(err)
 	}
 	authURL, _ := url.Parse(opts.AuthorizationURL("http://localhost:3001/callback"))
@@ -356,7 +205,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	if strings.Join(logs, "|") != "Starting OAuth flow for Gmail...\n" {
 		t.Fatalf("logs %q", logs)
 	}
-	stored := loadCreds(t, "user@example.com")
+	stored := product.LoadCreds(t, "user@example.com")
 	var keys []string
 	for k := range stored {
 		keys = append(keys, k)
@@ -377,10 +226,10 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 }
 
 func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
 			return
 		}
 		w.WriteHeader(500)
@@ -389,7 +238,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, io.Discard)
+	err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, io.Discard)
 	wantErr(t, err, clierr.AuthFailed, "Could not fetch email from Gmail", "Try again or specify --profile manually")
 	if c, _ := vault.Load(); len(c.Credentials["gmail"]) != 0 {
 		t.Fatal("a failed setup saved a profile")
@@ -398,22 +247,22 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 
 // Bun never rotates a Google refresh token: the stored one is kept.
 func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
-	reg := setupVault(t)
+	reg := product.SetupVault(t)
 	creds := storedCreds(1)
 	creds["legacy"] = "kept"
-	saveProfile(t, "acme", creds, false)
+	product.SaveProfile(t, "acme", creds, false)
 	var mu sync.Mutex
 	refreshes := 0
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
 			mu.Lock()
 			refreshes++
 			mu.Unlock()
 			time.Sleep(50 * time.Millisecond)
-			writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"labels": []any{}})
+		googletest.WriteJSON(w, 200, map[string]any{"labels": []any{}})
 	})
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -421,7 +270,7 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = auth.GetFresh(fake.ctx(), reg, "gmail", "acme", auth.RefreshOptions{})
+			_, errs[i] = auth.GetFresh(fake.Ctx(), reg, "gmail", "acme", auth.RefreshOptions{})
 		}(i)
 	}
 	wg.Wait()
@@ -433,7 +282,7 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if refreshes != 1 {
 		t.Fatalf("%d refreshes, want 1", refreshes)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["access_token"] != "at-new" || stored["refresh_token"] != "rt-old" || stored["legacy"] != "kept" ||
 		stored["scope"] != "https://www.googleapis.com/auth/gmail.readonly" {
 		t.Fatalf("%#v", stored)
@@ -441,29 +290,29 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if _, ok := stored["expiry_date"].(json.Number); !ok {
 		t.Fatalf("expiry_date %T", stored["expiry_date"])
 	}
-	if _, err := exec(fake.ctx(), t, reg, "labels list", input(t, "labels list", nil, nil)); err != nil {
+	if _, err := product.Exec(fake.Ctx(), t, reg, "labels list", product.Input(t, "labels list", nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	all := fake.recorded()
+	all := fake.Recorded()
 	if last := all[len(all)-1]; last.Auth != "Bearer at-new" || last.Path != "/gmail/v1/users/me/labels" || refreshes != 1 {
 		t.Fatalf("auth %q path %s refreshes %d", last.Auth, last.Path, refreshes)
 	}
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(1), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(1), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			googletest.WriteJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
 			return
 		}
 		t.Errorf("API called after a failed refresh: %s", h.Path)
 	})
-	_, err := exec(fake.ctx(), t, reg, "list", input(t, "list", nil, nil))
+	_, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, nil))
 	wantErr(t, err, clierr.TokenExpired, `Token refresh failed for gmail profile "acme": invalid_grant`,
 		"Re-authenticate with: agentio gmail profile add --profile acme")
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["access_token"] != "at-old" || stored["refresh_token"] != "rt-old" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
@@ -473,10 +322,10 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 // gets the input error; valid input is refused with Bun's operation, and a
 // dry run is never a write.
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "ro", storedCreds(time.Now().Add(24*time.Hour).UnixMilli()), true)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, 200, map[string]any{"labels": []any{}, "filter": []any{}, "messages": []any{}})
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", storedCreds(time.Now().Add(24*time.Hour).UnixMilli()), true)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"labels": []any{}, "filter": []any{}, "messages": []any{}})
 	})
 	compose := map[string]any{"to": []string{"a@example.com"}, "subject": "Hi", "body": "Hello"}
 	cases := []struct {
@@ -499,36 +348,36 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 		{"label", map[string]any{"id": []string{"m1"}}, map[string]any{"apply": []string{"X"}}, "modify labels"},
 	}
 	for _, c := range cases {
-		_, err := exec(fake.ctx(), t, reg, c.path, input(t, c.path, c.args, c.set))
+		_, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, c.args, c.set))
 		wantErr(t, err, clierr.PermissionDenied, `Cannot `+c.op+`: profile "ro" is read-only`,
 			"To modify this profile's access: agentio gmail profile update --profile ro --no-read-only")
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
 	// Input Bun rejects first answers with the input error, not the refusal.
-	_, err := exec(fake.ctx(), t, reg, "send", input(t, "send", nil, map[string]any{"subject": "Hi", "body": "x"}))
+	_, err := product.Exec(fake.Ctx(), t, reg, "send", product.Input(t, "send", nil, map[string]any{"subject": "Hi", "body": "x"}))
 	wantErr(t, err, clierr.InvalidParams, "--to is required (unless using --reply-to)", "")
-	_, err = exec(fake.ctx(), t, reg, "mark", input(t, "mark", map[string]any{"message-id": []string{"m1"}}, nil))
+	_, err = product.Exec(fake.Ctx(), t, reg, "mark", product.Input(t, "mark", map[string]any{"message-id": []string{"m1"}}, nil))
 	wantErr(t, err, clierr.InvalidParams, "Specify --read or --unread", "")
-	_, err = exec(fake.ctx(), t, reg, "archive", input(t, "archive", nil, nil))
+	_, err = product.Exec(fake.Ctx(), t, reg, "archive", product.Input(t, "archive", nil, nil))
 	wantErr(t, err, clierr.InvalidParams, "No message IDs provided", "Pass IDs as args or pipe via stdin")
-	_, err = exec(fake.ctx(), t, reg, "label", input(t, "label", map[string]any{"id": []string{"m1"}}, nil))
+	_, err = product.Exec(fake.Ctx(), t, reg, "label", product.Input(t, "label", map[string]any{"id": []string{"m1"}}, nil))
 	wantErr(t, err, clierr.InvalidParams, "Specify at least one --apply or --remove", "")
-	_, err = exec(fake.ctx(), t, reg, "filters create", input(t, "filters create", nil, map[string]any{"apply": []string{"X"}}))
+	_, err = product.Exec(fake.Ctx(), t, reg, "filters create", product.Input(t, "filters create", nil, map[string]any{"apply": []string{"X"}}))
 	wantErr(t, err, clierr.InvalidParams, "At least one criterion is required",
 		"Use --from, --to, --subject, --query, --negated-query, --has-attachment, --exclude-chats, or --size")
 	// A dry run plans without the API, even on a read-only profile.
-	v, err := exec(fake.ctx(), t, reg, "archive", input(t, "archive", map[string]any{"message-id": []string{"a", "b"}}, map[string]any{"dry-run": true}))
+	v, err := product.Exec(fake.Ctx(), t, reg, "archive", product.Input(t, "archive", map[string]any{"message-id": []string{"a", "b"}}, map[string]any{"dry-run": true}))
 	if err != nil || render(v) != "[dry-run] archive\n  ids: 2\n  chunk size: 1000\n  chunks: 1\n  remove labels: INBOX\n  no API calls made" {
 		t.Fatalf("dry run %q %v", render(v), err)
 	}
 	for _, path := range []string{"list", "labels list", "filters list"} {
-		if _, err := exec(fake.ctx(), t, reg, path, input(t, path, nil, nil)); err != nil {
+		if _, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, nil, nil)); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 	}
-	if n := len(fake.recorded()); n == 0 {
+	if n := len(fake.Recorded()); n == 0 {
 		t.Fatal("reads did not run")
 	}
 }
@@ -536,27 +385,27 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 func TestValidate(t *testing.T) {
 	var status int
 	var body any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path != "/gmail/v1/users/me/profile" || h.Auth != "Bearer at-old" {
 			t.Errorf("validate called %s with %q", h.Path, h.Auth)
 		}
-		writeJSON(w, status, body)
+		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.ctx())
+	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"emailAddress": "me@example.com"}
-	if v, err := New().Profile.Validate(fake.ctx(), run); err != nil || !v.Valid || v.Info != "me@example.com" {
+	if v, err := New().Profile.Validate(fake.Ctx(), run); err != nil || !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v %v", v, err)
 	}
 	status, body = 200, map[string]any{}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); !v.Valid || v.Info != "me" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); !v.Valid || v.Info != "me" {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 400, map[string]any{"error": "invalid_grant"}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
 		t.Fatalf("%#v", v)
 	}
 }
@@ -580,12 +429,12 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	if google.EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || google.EmailListInfo(map[string]any{}) != "" {
 		t.Fatal("list info")
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"email": "me@example.com"})
+		googletest.WriteJSON(w, 200, map[string]any{"email": "me@example.com"})
 	})
 	var logs []string
 	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
@@ -593,7 +442,7 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := New().Profile.Reauthenticate(fake.ctx(), storedCreds(1), "work", sc)
+	got, err := New().Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +478,7 @@ func TestAssertSubjectSane(t *testing.T) {
 		"oops agentio gmail draft --to x": `Subject contains shell crumb "agentio gmail". Refusing to create a garbage draft.`,
 		"AGENTIO\u00a0GMAIL":              `Subject contains shell crumb "agentio gmail". Refusing to create a garbage draft.`,
 	} {
-		if ce := cliErr(t, assertSubjectSane(subject, fail)); ce.Code != clierr.InvalidParams || ce.Message != want {
+		if ce := googletest.CliErr(t, assertSubjectSane(subject, fail)); ce.Code != clierr.InvalidParams || ce.Message != want {
 			t.Errorf("%q: %q", subject, ce.Message)
 		}
 	}
@@ -687,7 +536,7 @@ func TestComposeFilesAndSpec(t *testing.T) {
 	}
 	// The guardrail runs on a file subject too.
 	bad := tempFile(t, dir, "bad-subject.txt", "Hello\nEOF\nagentio gmail draft")
-	if _, err = resolveComposeText("", bad, "", "", nil, fail); cliErr(t, err).Code != clierr.InvalidParams {
+	if _, err = resolveComposeText("", bad, "", "", nil, fail); googletest.CliErr(t, err).Code != clierr.InvalidParams {
 		t.Fatal(err)
 	}
 	_, err = resolveComposeText("", "", "", "/tmp/does-not-exist-agentio-body.txt", nil, fail)
@@ -711,7 +560,7 @@ func TestComposeFilesAndSpec(t *testing.T) {
 		`{"subject":"s","body":1,"attachments":true}`: `Spec field "attachments" must be a string or array of strings`,
 	} {
 		_, err := loadComposeSpec(tempFile(t, dir, "s.json", content), fail)
-		if ce := cliErr(t, err); ce.Message != want {
+		if ce := googletest.CliErr(t, err); ce.Message != want {
 			t.Errorf("%s: %q", content, ce.Message)
 		}
 	}
@@ -725,7 +574,7 @@ func TestSendOptionsAreBunsParse(t *testing.T) {
 	dir := t.TempDir()
 	fail := host.NewRunContext(nil, "", nil).Fail
 	parse := func(set map[string]any, stdin any) (*sendOptions, error) {
-		in := input(t, "send", nil, set)
+		in := product.Input(t, "send", nil, set)
 		in.Stdin = stdin
 		return parseSendOptions(in, fail)
 	}
@@ -766,27 +615,27 @@ func TestSendOptionsAreBunsParse(t *testing.T) {
 }
 
 // gmailFake answers profile, thread and send/draft calls for the MIME tests.
-func gmailFake(t *testing.T, thread map[string]any) *fakeGoogle {
-	return newFake(t, func(w http.ResponseWriter, h hit) {
+func gmailFake(t *testing.T, thread map[string]any) *googletest.Fake {
+	return googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Path == "/gmail/v1/users/me/profile":
-			writeJSON(w, 200, map[string]any{"emailAddress": "me@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"emailAddress": "me@example.com"})
 		case strings.HasPrefix(h.Path, "/gmail/v1/users/me/threads/"):
 			if thread == nil {
-				apiErr(w, 404, "Requested entity was not found.")
+				googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 				return
 			}
-			writeJSON(w, 200, thread)
+			googletest.WriteJSON(w, 200, thread)
 		case h.Path == "/gmail/v1/users/me/messages/send":
-			writeJSON(w, 200, map[string]any{"id": "m-sent", "threadId": "t-sent"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "m-sent", "threadId": "t-sent"})
 		case h.Path == "/gmail/v1/users/me/drafts":
-			writeJSON(w, 200, map[string]any{"id": "r-new", "message": map[string]any{"id": "m-draft"}})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "r-new", "message": map[string]any{"id": "m-draft"}})
 		case strings.HasPrefix(h.Path, "/gmail/v1/users/me/drafts/"):
 			if h.Path == "/gmail/v1/users/me/drafts/r-missing" {
-				apiErr(w, 404, "Requested entity was not found.")
+				googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 				return
 			}
-			writeJSON(w, 200, map[string]any{"id": "r-1"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "r-1"})
 		default:
 			t.Errorf("unexpected %s %s", h.Method, h.Path)
 			w.WriteHeader(500)
@@ -797,14 +646,14 @@ func gmailFake(t *testing.T, thread map[string]any) *fakeGoogle {
 func TestSendBuildsBunsMessage(t *testing.T) {
 	pinBoundaries(t)
 	fake := gmailFake(t, nil)
-	v, err, _ := runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{
+	v, err, _ := runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{
 		"to": []string{"a@example.com", "b@example.com"}, "cc": []string{"c@example.com"}, "bcc": []string{"d@example.com"},
 		"subject": "Héllo ✓", "body": "Line 1\nLine 2",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits := fake.recorded()
+	hits := fake.Recorded()
 	send := hits[len(hits)-1]
 	want := "From: me@example.com\r\nTo: a@example.com, b@example.com\r\nCc: c@example.com\r\nBcc: d@example.com\r\n" +
 		"Subject: =?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte("Héllo ✓")) + "?=\r\n" +
@@ -816,8 +665,8 @@ func TestSendBuildsBunsMessage(t *testing.T) {
 		t.Fatalf("send %#v", send.JSON)
 	}
 	// labelIds default to ["SENT"] when the API omits them.
-	if render(v) != "Message sent\nID: m-sent\nThread: t-sent" || jsonText(v) != `{"id":"m-sent","threadId":"t-sent","labelIds":["SENT"]}` {
-		t.Fatalf("%q %s", render(v), jsonText(v))
+	if render(v) != "Message sent\nID: m-sent\nThread: t-sent" || googletest.JSONText(v) != `{"id":"m-sent","threadId":"t-sent","labelIds":["SENT"]}` {
+		t.Fatalf("%q %s", render(v), googletest.JSONText(v))
 	}
 }
 
@@ -832,11 +681,11 @@ func TestReplyDerivesRecipientSubjectAndThreadingHeaders(t *testing.T) {
 		}}},
 	}}
 	fake := gmailFake(t, thread)
-	v, err, _ := runDirect(t, fake.ctx(), "draft", input(t, "draft", nil, map[string]any{"reply-to": "t1", "body": "Thanks", "html": true}))
+	v, err, _ := runDirect(t, fake.Ctx(), "draft", product.Input(t, "draft", nil, map[string]any{"reply-to": "t1", "body": "Thanks", "html": true}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits := fake.recorded()
+	hits := fake.Recorded()
 	if hits[0].Path != "/gmail/v1/users/me/profile" || hits[1].Path != "/gmail/v1/users/me/threads/t1" || hits[1].Query.Has("format") {
 		t.Fatalf("calls %v", hits)
 	}
@@ -853,38 +702,38 @@ func TestReplyDerivesRecipientSubjectAndThreadingHeaders(t *testing.T) {
 	// A "Re:" subject is kept, an absent one reads (no subject), and explicit
 	// flags win over the thread.
 	thread["messages"] = []any{map[string]any{"payload": map[string]any{"headers": []any{map[string]any{"name": "From", "value": "b@example.com"}}}}}
-	if _, err, _ = runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x"})); err != nil {
+	if _, err, _ = runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x"})); err != nil {
 		t.Fatal(err)
 	}
-	hits = fake.recorded()
+	hits = fake.Recorded()
 	if got := rawMessage(t, hits[len(hits)-1].JSON["raw"]); !strings.Contains(got, "To: b@example.com\r\nSubject: Re: (no subject)\r\nContent-Type") {
 		t.Fatalf("%q", got)
 	}
-	if _, err, _ = runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x", "to": []string{"z@example.com"}, "subject": "Re: kept"})); err != nil {
+	if _, err, _ = runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x", "to": []string{"z@example.com"}, "subject": "Re: kept"})); err != nil {
 		t.Fatal(err)
 	}
-	hits = fake.recorded()
+	hits = fake.Recorded()
 	if got := rawMessage(t, hits[len(hits)-1].JSON["raw"]); !strings.Contains(got, "To: z@example.com\r\nSubject: Re: kept\r\n") {
 		t.Fatalf("%q", got)
 	}
 	// An empty thread is NOT_FOUND.
 	thread["messages"] = []any{}
-	_, err, _ = runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x"}))
+	_, err, _ = runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{"reply-to": "t1", "body": "x"}))
 	wantErr(t, err, clierr.NotFound, "Thread not found: t1", "")
 }
 
 func TestDraftUpdateAndMissingThreadAndDraft(t *testing.T) {
 	fake := gmailFake(t, nil)
 	compose := map[string]any{"to": []string{"a@example.com"}, "subject": "S", "body": "B"}
-	v, err, _ := runDirect(t, fake.ctx(), "draft", input(t, "draft", map[string]any{"draft-id": "r-1"}, compose))
-	hits := fake.recorded()
+	v, err, _ := runDirect(t, fake.Ctx(), "draft", product.Input(t, "draft", map[string]any{"draft-id": "r-1"}, compose))
+	hits := fake.Recorded()
 	if err != nil || hits[len(hits)-1].Method != "PUT" || hits[len(hits)-1].Path != "/gmail/v1/users/me/drafts/r-1" || render(v) != "Draft updated\nDraft ID: r-1\nMessage ID: " {
 		t.Fatalf("%q %v", render(v), err)
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "draft", input(t, "draft", map[string]any{"draft-id": "r-missing"}, compose))
+	_, err, _ = runDirect(t, fake.Ctx(), "draft", product.Input(t, "draft", map[string]any{"draft-id": "r-missing"}, compose))
 	wantErr(t, err, clierr.NotFound, "Draft not found: r-missing", "Check the draft ID (use the ID returned when the draft was created).")
 	// Bun does not catch the thread lookup: its own message, no code.
-	v, err, _ = runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{"reply-to": "t-gone", "body": "x"}))
+	v, err, _ = runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{"reply-to": "t-gone", "body": "x"}))
 	if v != nil || err == nil || err.Error() != "Requested entity was not found." {
 		t.Fatalf("%#v %v", v, err)
 	}
@@ -909,10 +758,10 @@ func TestMultipartMessagesMatchBun(t *testing.T) {
 		for k, v := range set {
 			base[k] = v
 		}
-		if _, err, _ := runDirect(t, fake.ctx(), "send", input(t, "send", nil, base)); err != nil {
+		if _, err, _ := runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, base)); err != nil {
 			t.Fatal(err)
 		}
-		hits := fake.recorded()
+		hits := fake.Recorded()
 		return rawMessage(t, hits[len(hits)-1].JSON["raw"])
 	}
 	head := "From: me@example.com\r\nTo: a@example.com\r\nSubject: S\r\nMIME-Version: 1.0\r\n"
@@ -941,12 +790,12 @@ func TestMultipartMessagesMatchBun(t *testing.T) {
 		t.Fatalf("both\n%q\nwant\n%q", got, want)
 	}
 	// A missing file or a directory is NOT_FOUND before anything is sent.
-	n := len(fake.recorded())
+	n := len(fake.Recorded())
 	for _, path := range []string{filepath.Join(dir, "nope.pdf"), dir} {
-		_, err, _ := runDirect(t, fake.ctx(), "send", input(t, "send", nil, map[string]any{"to": []string{"a@example.com"}, "subject": "S", "body": "B", "attachment": []string{path}}))
+		_, err, _ := runDirect(t, fake.Ctx(), "send", product.Input(t, "send", nil, map[string]any{"to": []string{"a@example.com"}, "subject": "S", "body": "B", "attachment": []string{path}}))
 		wantErr(t, err, clierr.NotFound, "Attachment not found: "+path, "")
 	}
-	for _, h := range fake.recorded()[n:] {
+	for _, h := range fake.Recorded()[n:] {
 		if h.Path == "/gmail/v1/users/me/messages/send" {
 			t.Fatal("a message with a missing attachment was sent")
 		}
@@ -955,22 +804,22 @@ func TestMultipartMessagesMatchBun(t *testing.T) {
 
 func TestListAndSearchSendBunsQueries(t *testing.T) {
 	var pages int
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Path == "/gmail/v1/users/me/messages":
 			pages++
 			if h.Query.Get("pageToken") == "" {
-				writeJSON(w, 200, map[string]any{"resultSizeEstimate": 0, "nextPageToken": "p2", "messages": []any{
+				googletest.WriteJSON(w, 200, map[string]any{"resultSizeEstimate": 0, "nextPageToken": "p2", "messages": []any{
 					map[string]any{"id": "m1", "threadId": "t1"}, map[string]any{"id": "nothread"},
 				}})
 				return
 			}
-			writeJSON(w, 200, map[string]any{"resultSizeEstimate": 42, "messages": []any{
+			googletest.WriteJSON(w, 200, map[string]any{"resultSizeEstimate": 42, "messages": []any{
 				map[string]any{"id": "m2", "threadId": "t2"}, map[string]any{"id": "m3", "threadId": "t3"},
 			}})
 		case strings.HasPrefix(h.Path, "/gmail/v1/users/me/messages/"):
 			id := strings.TrimPrefix(h.Path, "/gmail/v1/users/me/messages/")
-			writeJSON(w, 200, map[string]any{"id": id, "threadId": "t-" + id, "snippet": "snip " + id, "labelIds": []any{"INBOX", "UNREAD"},
+			googletest.WriteJSON(w, 200, map[string]any{"id": id, "threadId": "t-" + id, "snippet": "snip " + id, "labelIds": []any{"INBOX", "UNREAD"},
 				"payload": map[string]any{"headers": []any{
 					map[string]any{"name": "From", "value": "Alice <a@example.com>"},
 					map[string]any{"name": "To", "value": "b@example.com,  c@example.com "},
@@ -981,11 +830,11 @@ func TestListAndSearchSendBunsQueries(t *testing.T) {
 			t.Errorf("unexpected %s", h.Path)
 		}
 	})
-	v, err, _ := runDirect(t, fake.ctx(), "list", input(t, "list", nil, map[string]any{"limit": "2", "query": " is:unread ", "label": []string{"INBOX", "Work"}}))
+	v, err, _ := runDirect(t, fake.Ctx(), "list", product.Input(t, "list", nil, map[string]any{"limit": "2", "query": " is:unread ", "label": []string{"INBOX", "Work"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits := fake.recorded()
+	hits := fake.Recorded()
 	if q := hits[0].Query; q.Get("q") != "is:unread  label:INBOX label:Work" || q.Get("maxResults") != "2" {
 		t.Fatalf("first page %v", q)
 	}
@@ -1002,27 +851,27 @@ func TestListAndSearchSendBunsQueries(t *testing.T) {
 		t.Fatalf("list\n%q\nwant\n%q", render(v), want)
 	}
 	// Above 100 only ids, no metadata calls; the ids print one per line.
-	n := len(fake.recorded())
-	v, err, _ = runDirect(t, fake.ctx(), "search", input(t, "search", nil, map[string]any{"query": "from:x", "limit": "101", "ids-only": true}))
-	if err != nil || render(v) != "m1\nm2\nm3" || len(fake.recorded()) != n+2 {
-		t.Fatalf("%q %v %d", render(v), err, len(fake.recorded())-n)
+	n := len(fake.Recorded())
+	v, err, _ = runDirect(t, fake.Ctx(), "search", product.Input(t, "search", nil, map[string]any{"query": "from:x", "limit": "101", "ids-only": true}))
+	if err != nil || render(v) != "m1\nm2\nm3" || len(fake.Recorded()) != n+2 {
+		t.Fatalf("%q %v %d", render(v), err, len(fake.Recorded())-n)
 	}
-	v, _, _ = runDirect(t, fake.ctx(), "search", input(t, "search", nil, map[string]any{"query": "from:x", "limit": "101"}))
+	v, _, _ = runDirect(t, fake.Ctx(), "search", product.Input(t, "search", nil, map[string]any{"query": "from:x", "limit": "101"}))
 	if !strings.HasPrefix(render(v), "Messages (3 of ~42)\n\n[1] m1 | thread:t1\n\n[2] m2") {
 		t.Fatalf("%q", render(v))
 	}
 	// A NaN or negative limit calls nothing and totals zero.
-	n = len(fake.recorded())
+	n = len(fake.Recorded())
 	for _, limit := range []string{"abc", "-5"} {
-		v, err, _ = runDirect(t, fake.ctx(), "list", input(t, "list", nil, map[string]any{"limit": limit}))
+		v, err, _ = runDirect(t, fake.Ctx(), "list", product.Input(t, "list", nil, map[string]any{"limit": limit}))
 		if err != nil || render(v) != "Messages (0 of ~0)\n" {
 			t.Fatalf("%s: %q %v", limit, render(v), err)
 		}
 	}
-	if len(fake.recorded()) != n {
+	if len(fake.Recorded()) != n {
 		t.Fatal("a NaN limit called the API")
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "search", input(t, "search", nil, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "search", product.Input(t, "search", nil, nil))
 	wantErr(t, err, clierr.InvalidParams, "required option '--query <query>' not specified", "")
 }
 
@@ -1051,22 +900,22 @@ func TestGetReadsTheBodyAndAttachmentsLikeBun(t *testing.T) {
 			},
 		},
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/gmail/v1/users/me/messages/gone" {
-			apiErr(w, 404, "Requested entity was not found.")
+			googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 			return
 		}
 		if h.Path == "/gmail/v1/users/me/messages/boom" {
-			apiErr(w, 400, "Invalid id value")
+			googletest.WriteAPIError(w, 400, "Invalid id value")
 			return
 		}
-		writeJSON(w, 200, msg)
+		googletest.WriteJSON(w, 200, msg)
 	})
-	v, err, _ := runDirect(t, fake.ctx(), "get", input(t, "get", map[string]any{"message-id": "m1"}, nil))
+	v, err, _ := runDirect(t, fake.Ctx(), "get", product.Input(t, "get", map[string]any{"message-id": "m1"}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q := fake.recorded()[0].Query; q.Get("format") != "full" {
+	if q := fake.Recorded()[0].Query; q.Get("format") != "full" {
 		t.Fatalf("%v", q)
 	}
 	want := "ID: m1\nThread: t1\nFrom: a@example.com\nCC: c@example.com, d@example.com\nDate: today\nSubject: Hello\nLabels: INBOX\n" +
@@ -1075,20 +924,20 @@ func TestGetReadsTheBodyAndAttachmentsLikeBun(t *testing.T) {
 		t.Fatalf("get\n%q\nwant\n%q", render(v), want)
 	}
 	// Bun's { ...message, body } key order.
-	if jsonText(v) != `{"id":"m1","threadId":"t1","subject":"Hello","from":"a@example.com","to":[],"cc":["c@example.com","d@example.com"],"date":"today","snippet":"","labels":["INBOX"],"attachments":[{"id":"att-1","filename":"a.pdf","mimeType":"application/pdf","size":2048},{"id":"att-2","filename":"b.bin","mimeType":"application/octet-stream","size":0}],"body":"plain ✓"}` {
-		t.Fatalf("%s", jsonText(v))
+	if googletest.JSONText(v) != `{"id":"m1","threadId":"t1","subject":"Hello","from":"a@example.com","to":[],"cc":["c@example.com","d@example.com"],"date":"today","snippet":"","labels":["INBOX"],"attachments":[{"id":"att-1","filename":"a.pdf","mimeType":"application/pdf","size":2048},{"id":"att-2","filename":"b.bin","mimeType":"application/octet-stream","size":0}],"body":"plain ✓"}` {
+		t.Fatalf("%s", googletest.JSONText(v))
 	}
-	v, _, _ = runDirect(t, fake.ctx(), "get", input(t, "get", map[string]any{"message-id": "m1"}, map[string]any{"format": "html", "body-only": true}))
+	v, _, _ = runDirect(t, fake.Ctx(), "get", product.Input(t, "get", map[string]any{"message-id": "m1"}, map[string]any{"format": "html", "body-only": true}))
 	if v != "<b>hi</b>" {
 		t.Fatalf("%#v", v)
 	}
-	v, _, _ = runDirect(t, fake.ctx(), "get", input(t, "get", map[string]any{"message-id": "m1"}, map[string]any{"format": "raw", "body-only": true}))
-	if v != "From: x\r\n\r\nraw ✓" || fake.recorded()[2].Query.Get("format") != "raw" {
+	v, _, _ = runDirect(t, fake.Ctx(), "get", product.Input(t, "get", map[string]any{"message-id": "m1"}, map[string]any{"format": "raw", "body-only": true}))
+	if v != "From: x\r\n\r\nraw ✓" || fake.Recorded()[2].Query.Get("format") != "raw" {
 		t.Fatalf("%#v", v)
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "get", input(t, "get", map[string]any{"message-id": "gone"}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "get", product.Input(t, "get", map[string]any{"message-id": "gone"}, nil))
 	wantErr(t, err, clierr.NotFound, "Message not found: gone", "")
-	v, err, _ = runDirect(t, fake.ctx(), "get", input(t, "get", map[string]any{"message-id": "boom"}, nil))
+	v, err, _ = runDirect(t, fake.Ctx(), "get", product.Input(t, "get", map[string]any{"message-id": "boom"}, nil))
 	wantErr(t, err, clierr.APIError, "Gmail API error: Invalid id value", "")
 	if v != nil {
 		t.Fatal("a failed get returned a value")
@@ -1101,24 +950,24 @@ func TestAttachmentDownloadsLikeBun(t *testing.T) {
 		map[string]any{"filename": "b.txt", "mimeType": "text/plain", "body": map[string]any{"attachmentId": "B"}},
 		map[string]any{"filename": "empty.txt", "body": map[string]any{"attachmentId": "E"}},
 	}}}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/gmail/v1/users/me/messages/m1":
-			writeJSON(w, 200, msg)
+			googletest.WriteJSON(w, 200, msg)
 		case "/gmail/v1/users/me/messages/plain":
-			writeJSON(w, 200, map[string]any{"id": "plain", "payload": map[string]any{"mimeType": "text/plain"}})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "plain", "payload": map[string]any{"mimeType": "text/plain"}})
 		case "/gmail/v1/users/me/messages/m1/attachments/A":
-			writeJSON(w, 200, map[string]any{"data": b64url("alpha")})
+			googletest.WriteJSON(w, 200, map[string]any{"data": b64url("alpha")})
 		case "/gmail/v1/users/me/messages/m1/attachments/B":
-			writeJSON(w, 200, map[string]any{"data": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xfb}, 1500))})
+			googletest.WriteJSON(w, 200, map[string]any{"data": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xfb}, 1500))})
 		case "/gmail/v1/users/me/messages/m1/attachments/E":
-			writeJSON(w, 200, map[string]any{})
+			googletest.WriteJSON(w, 200, map[string]any{})
 		default:
-			apiErr(w, 404, "Requested entity was not found.")
+			googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 		}
 	})
 	dir := filepath.Join(t.TempDir(), "new", "out")
-	v, err, _ := runDirect(t, fake.ctx(), "attachment", input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir}))
+	v, err, _ := runDirect(t, fake.Ctx(), "attachment", product.Input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1135,27 +984,27 @@ func TestAttachmentDownloadsLikeBun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "empty.txt")); err == nil {
 		t.Fatal("an attachment without data was written")
 	}
-	v, _, _ = runDirect(t, fake.ctx(), "attachment", input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir, "name": "b.txt"}))
+	v, _, _ = runDirect(t, fake.Ctx(), "attachment", product.Input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir, "name": "b.txt"}))
 	if render(v) != "Downloaded: b.txt\n  Path: "+filepath.Join(dir, "b.txt")+"\n  Size: 1.5 KB" {
 		t.Fatalf("%q", render(v))
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "attachment", input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir, "name": "zzz"}))
+	_, err, _ = runDirect(t, fake.Ctx(), "attachment", product.Input(t, "attachment", map[string]any{"message-id": "m1"}, map[string]any{"output": dir, "name": "zzz"}))
 	wantErr(t, err, clierr.NotFound, "Attachment not found: zzz", "")
-	v, _, _ = runDirect(t, fake.ctx(), "attachment", input(t, "attachment", map[string]any{"message-id": "plain"}, map[string]any{"output": dir}))
+	v, _, _ = runDirect(t, fake.Ctx(), "attachment", product.Input(t, "attachment", map[string]any{"message-id": "plain"}, map[string]any{"output": dir}))
 	if render(v) != "No attachments found" {
 		t.Fatalf("%q", render(v))
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "attachment", input(t, "attachment", map[string]any{"message-id": "gone"}, map[string]any{"output": dir}))
+	_, err, _ = runDirect(t, fake.Ctx(), "attachment", product.Input(t, "attachment", map[string]any{"message-id": "gone"}, map[string]any{"output": dir}))
 	wantErr(t, err, clierr.NotFound, "Message not found: gone", "")
 }
 
-func labelsFake(t *testing.T, extra func(w http.ResponseWriter, h hit) bool) *fakeGoogle {
-	return newFake(t, func(w http.ResponseWriter, h hit) {
+func labelsFake(t *testing.T, extra func(w http.ResponseWriter, h googletest.Hit) bool) *googletest.Fake {
+	return googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if extra != nil && extra(w, h) {
 			return
 		}
 		if h.Path == "/gmail/v1/users/me/labels" && h.Method == "GET" {
-			writeJSON(w, 200, map[string]any{"labels": []any{
+			googletest.WriteJSON(w, 200, map[string]any{"labels": []any{
 				map[string]any{"id": "Label_2", "name": "zeta", "type": "user"},
 				map[string]any{"id": "INBOX", "name": "INBOX", "type": "system", "messageListVisibility": "hide"},
 				map[string]any{"id": "Label_1", "name": "Auto/Receipts", "type": "user", "labelListVisibility": "labelShow"},
@@ -1170,47 +1019,47 @@ func labelsFake(t *testing.T, extra func(w http.ResponseWriter, h hit) bool) *fa
 }
 
 func TestLabelsCommands(t *testing.T) {
-	fake := labelsFake(t, func(w http.ResponseWriter, h hit) bool {
+	fake := labelsFake(t, func(w http.ResponseWriter, h googletest.Hit) bool {
 		switch {
 		case h.Method == "POST" && h.Path == "/gmail/v1/users/me/labels":
-			writeJSON(w, 200, map[string]any{"id": "Label_9", "name": h.JSON["name"], "type": "user"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "Label_9", "name": h.JSON["name"], "type": "user"})
 		case h.Method == "DELETE" && h.Path == "/gmail/v1/users/me/labels/Label_1":
 			w.WriteHeader(204)
 		case h.Method == "PATCH" && h.Path == "/gmail/v1/users/me/labels/Label_3":
-			writeJSON(w, 200, map[string]any{"id": "Label_3", "name": h.JSON["name"], "type": "user"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "Label_3", "name": h.JSON["name"], "type": "user"})
 		default:
 			return false
 		}
 		return true
 	})
-	v, err, _ := runDirect(t, fake.ctx(), "labels list", input(t, "labels list", nil, nil))
+	v, err, _ := runDirect(t, fake.Ctx(), "labels list", product.Input(t, "labels list", nil, nil))
 	want := "NAME           TYPE    ID\nINBOX          system  INBOX\nUNREAD         system  UNREAD\nauto           user    Label_3\nAuto/Receipts  user    Label_1\nzeta           user    Label_2\n\n5 label(s)"
 	if err != nil || render(v) != want {
 		t.Fatalf("%q\nwant %q", render(v), want)
 	}
-	if !strings.HasPrefix(jsonText(v), `[{"id":"INBOX","name":"INBOX","type":"system","messageListVisibility":"hide"},`) {
-		t.Fatalf("%s", jsonText(v))
+	if !strings.HasPrefix(googletest.JSONText(v), `[{"id":"INBOX","name":"INBOX","type":"system","messageListVisibility":"hide"},`) {
+		t.Fatalf("%s", googletest.JSONText(v))
 	}
 	if render(labelList{}) != "No labels found" {
 		t.Fatal("empty list")
 	}
-	v, err, _ = runDirect(t, fake.ctx(), "labels create", input(t, "labels create", map[string]any{"name": "work/acme"}, nil))
-	create := fake.recorded()[1]
-	if err != nil || jsonText(create.JSON) != `{"labelListVisibility":"labelShow","messageListVisibility":"show","name":"work/acme"}` || render(v) != "Created label: work/acme\nID: Label_9" {
-		t.Fatalf("%s %q %v", jsonText(create.JSON), render(v), err)
+	v, err, _ = runDirect(t, fake.Ctx(), "labels create", product.Input(t, "labels create", map[string]any{"name": "work/acme"}, nil))
+	create := fake.Recorded()[1]
+	if err != nil || googletest.JSONText(create.JSON) != `{"labelListVisibility":"labelShow","messageListVisibility":"show","name":"work/acme"}` || render(v) != "Created label: work/acme\nID: Label_9" {
+		t.Fatalf("%s %q %v", googletest.JSONText(create.JSON), render(v), err)
 	}
 	// By name without regard to case; system labels refused.
-	v, err, _ = runDirect(t, fake.ctx(), "labels delete", input(t, "labels delete", map[string]any{"name-or-id": "auto/receipts"}, nil))
+	v, err, _ = runDirect(t, fake.Ctx(), "labels delete", product.Input(t, "labels delete", map[string]any{"name-or-id": "auto/receipts"}, nil))
 	if err != nil || render(v) != "Deleted label: Auto/Receipts (Label_1)" {
 		t.Fatalf("%q %v", render(v), err)
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "labels delete", input(t, "labels delete", map[string]any{"name-or-id": "inbox"}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "labels delete", product.Input(t, "labels delete", map[string]any{"name-or-id": "inbox"}, nil))
 	wantErr(t, err, clierr.InvalidParams, "Cannot delete system label: INBOX", "")
-	_, err, _ = runDirect(t, fake.ctx(), "labels rename", input(t, "labels rename", map[string]any{"old": "UNREAD", "new": "x"}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "labels rename", product.Input(t, "labels rename", map[string]any{"old": "UNREAD", "new": "x"}, nil))
 	wantErr(t, err, clierr.InvalidParams, "Cannot rename system label: UNREAD", "")
-	_, err, _ = runDirect(t, fake.ctx(), "labels delete", input(t, "labels delete", map[string]any{"name-or-id": "nope"}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "labels delete", product.Input(t, "labels delete", map[string]any{"name-or-id": "nope"}, nil))
 	wantErr(t, err, clierr.NotFound, "Label not found: nope", "")
-	v, err, _ = runDirect(t, fake.ctx(), "labels rename", input(t, "labels rename", map[string]any{"old": "Label_3", "new": "auto/new"}, nil))
+	v, err, _ = runDirect(t, fake.Ctx(), "labels rename", product.Input(t, "labels rename", map[string]any{"old": "Label_3", "new": "auto/new"}, nil))
 	if err != nil || render(v) != "Renamed label: Label_3 -> auto/new\nID: Label_3" {
 		t.Fatalf("%q %v", render(v), err)
 	}
@@ -1221,21 +1070,21 @@ func TestMarkArchiveAndLabelModify(t *testing.T) {
 	retrySleep = func(time.Duration) {}
 	t.Cleanup(func() { retrySleep = prevSleep })
 	var batchCalls int
-	fake := labelsFake(t, func(w http.ResponseWriter, h hit) bool {
+	fake := labelsFake(t, func(w http.ResponseWriter, h googletest.Hit) bool {
 		switch {
 		case strings.HasSuffix(h.Path, "/gone/modify"):
-			apiErr(w, 404, "Requested entity was not found.")
+			googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 		case strings.HasSuffix(h.Path, "/modify"):
-			writeJSON(w, 200, map[string]any{"id": "x"})
+			googletest.WriteJSON(w, 200, map[string]any{"id": "x"})
 		case h.Path == "/gmail/v1/users/me/messages/batchModify":
 			batchCalls++
 			ids, _ := h.JSON["ids"].([]any)
 			if ids[0] == "bad1" {
-				apiErr(w, 400, "Invalid ids")
+				googletest.WriteAPIError(w, 400, "Invalid ids")
 				return true
 			}
 			if ids[0] == "flaky" && batchCalls == 1 {
-				apiErr(w, 503, "Backend Error")
+				googletest.WriteAPIError(w, 503, "Backend Error")
 				return true
 			}
 			w.WriteHeader(204)
@@ -1243,49 +1092,49 @@ func TestMarkArchiveAndLabelModify(t *testing.T) {
 			id := strings.TrimPrefix(h.Path, "/gmail/v1/users/me/threads/")
 			switch id {
 			case "tgone":
-				apiErr(w, 404, "Requested entity was not found.")
+				googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 			case "t1":
-				writeJSON(w, 200, map[string]any{"messages": []any{map[string]any{"id": "m1"}, map[string]any{"id": "m2"}}})
+				googletest.WriteJSON(w, 200, map[string]any{"messages": []any{map[string]any{"id": "m1"}, map[string]any{"id": "m2"}}})
 			default:
-				writeJSON(w, 200, map[string]any{"messages": []any{map[string]any{"id": "m-" + id}}})
+				googletest.WriteJSON(w, 200, map[string]any{"messages": []any{map[string]any{"id": "m-" + id}}})
 			}
 		default:
 			return false
 		}
 		return true
 	})
-	v, err, _ := runDirect(t, fake.ctx(), "mark", input(t, "mark", map[string]any{"message-id": []string{"a", "b"}}, map[string]any{"unread": true}))
-	hits := fake.recorded()
-	if err != nil || render(v) != "Marked a as unread\nMarked b as unread" || jsonText(hits[0].JSON) != `{"addLabelIds":["UNREAD"]}` || hits[0].Path != "/gmail/v1/users/me/messages/a/modify" {
-		t.Fatalf("%q %v %s", render(v), err, jsonText(hits[0].JSON))
+	v, err, _ := runDirect(t, fake.Ctx(), "mark", product.Input(t, "mark", map[string]any{"message-id": []string{"a", "b"}}, map[string]any{"unread": true}))
+	hits := fake.Recorded()
+	if err != nil || render(v) != "Marked a as unread\nMarked b as unread" || googletest.JSONText(hits[0].JSON) != `{"addLabelIds":["UNREAD"]}` || hits[0].Path != "/gmail/v1/users/me/messages/a/modify" {
+		t.Fatalf("%q %v %s", render(v), err, googletest.JSONText(hits[0].JSON))
 	}
 	// The marks before a failure are printed, then the error.
-	v, err, _ = runDirect(t, fake.ctx(), "mark", input(t, "mark", map[string]any{"message-id": []string{"a", "gone", "c"}}, map[string]any{"read": true}))
+	v, err, _ = runDirect(t, fake.Ctx(), "mark", product.Input(t, "mark", map[string]any{"message-id": []string{"a", "gone", "c"}}, map[string]any{"read": true}))
 	wantErr(t, err, clierr.NotFound, "Message not found: gone", "")
 	if render(v) != "Marked a as read" {
 		t.Fatalf("%q", render(v))
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "mark", input(t, "mark", map[string]any{"message-id": []string{"a"}}, map[string]any{"read": true, "unread": true}))
+	_, err, _ = runDirect(t, fake.Ctx(), "mark", product.Input(t, "mark", map[string]any{"message-id": []string{"a"}}, map[string]any{"read": true, "unread": true}))
 	wantErr(t, err, clierr.InvalidParams, "Cannot specify both --read and --unread", "")
 
 	// archive: one id is a modify; ids from stdin batch in chunks.
-	v, err, _ = runDirect(t, fake.ctx(), "archive", input(t, "archive", map[string]any{"message-id": []string{"one"}}, nil))
+	v, err, _ = runDirect(t, fake.Ctx(), "archive", product.Input(t, "archive", map[string]any{"message-id": []string{"one"}}, nil))
 	if err != nil || render(v) != "Archived: one" {
 		t.Fatalf("%q %v", render(v), err)
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "archive", input(t, "archive", map[string]any{"message-id": []string{"gone"}}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "archive", product.Input(t, "archive", map[string]any{"message-id": []string{"gone"}}, nil))
 	wantErr(t, err, clierr.NotFound, "Message not found: gone", "")
-	in := input(t, "archive", nil, map[string]any{"chunk-size": "2", "max-retries": "1"})
+	in := product.Input(t, "archive", nil, map[string]any{"chunk-size": "2", "max-retries": "1"})
 	in.Stdin = "flaky x\n  y\u00a0z\tw\n"
 	batchCalls = 0
-	n := len(fake.recorded())
-	v, err, logs := runDirect(t, fake.ctx(), "archive", in)
-	calls := fake.recorded()[n:]
+	n := len(fake.Recorded())
+	v, err, logs := runDirect(t, fake.Ctx(), "archive", in)
+	calls := fake.Recorded()[n:]
 	if err != nil || render(v) != "archive: 5/5 succeeded across 3 chunk(s)" || len(calls) != 4 {
 		t.Fatalf("%q %v %d", render(v), err, len(calls))
 	}
-	if jsonText(calls[0].JSON) != `{"ids":["flaky","x"],"removeLabelIds":["INBOX"]}` || jsonText(calls[3].JSON) != `{"ids":["w"],"removeLabelIds":["INBOX"]}` {
-		t.Fatalf("%s / %s", jsonText(calls[0].JSON), jsonText(calls[3].JSON))
+	if googletest.JSONText(calls[0].JSON) != `{"ids":["flaky","x"],"removeLabelIds":["INBOX"]}` || googletest.JSONText(calls[3].JSON) != `{"ids":["w"],"removeLabelIds":["INBOX"]}` {
+		t.Fatalf("%s / %s", googletest.JSONText(calls[0].JSON), googletest.JSONText(calls[3].JSON))
 	}
 	if len(logs) != 3 || !strings.HasPrefix(logs[0], "[archive] chunk 1/3 (2 ids) ok in ") || !strings.HasSuffix(logs[0], "ms") {
 		t.Fatalf("%q", logs)
@@ -1295,34 +1144,34 @@ func TestMarkArchiveAndLabelModify(t *testing.T) {
 	in.Options["max-retries"] = "abc"
 	in.Stdin = "bad1 bad2 ok1 ok2 ok3 ok4 ok5 ok6 ok7"
 	in.Options["chunk-size"] = "0"
-	v, err, logs = runDirect(t, fake.ctx(), "archive", in)
+	v, err, logs = runDirect(t, fake.Ctx(), "archive", in)
 	if exit, ok := err.(*plugins.ExitStatus); !ok || exit.Code != 5 {
 		t.Fatalf("%#v", err)
 	}
 	if render(v) != "archive: 0/9 succeeded across 1 chunk(s)\nFailed chunks: 1\n  - bad1..ok7 (9 ids): Invalid ids" || !strings.Contains(logs[0], "FAILED in ") || !strings.HasSuffix(logs[0], ": Invalid ids") {
 		t.Fatalf("%q %q", render(v), logs)
 	}
-	if jsonText(v) != `{"totalIds":9,"ok":0,"failed":[{"ids":["bad1","bad2","ok1","ok2","ok3","ok4","ok5","ok6","ok7"],"reason":"Invalid ids"}],"chunks":1}` {
-		t.Fatalf("%s", jsonText(v))
+	if googletest.JSONText(v) != `{"totalIds":9,"ok":0,"failed":[{"ids":["bad1","bad2","ok1","ok2","ok3","ok4","ok5","ok6","ok7"],"reason":"Invalid ids"}],"chunks":1}` {
+		t.Fatalf("%s", googletest.JSONText(v))
 	}
 
 	// label: names resolve to ids; one id is a modify printed with the names.
-	n = len(fake.recorded())
-	v, err, _ = runDirect(t, fake.ctx(), "label", input(t, "label", map[string]any{"id": []string{"m9"}}, map[string]any{"apply": []string{"AUTO/receipts", "Label_2"}, "remove": []string{"inbox"}}))
-	calls = fake.recorded()[n:]
+	n = len(fake.Recorded())
+	v, err, _ = runDirect(t, fake.Ctx(), "label", product.Input(t, "label", map[string]any{"id": []string{"m9"}}, map[string]any{"apply": []string{"AUTO/receipts", "Label_2"}, "remove": []string{"inbox"}}))
+	calls = fake.Recorded()[n:]
 	if err != nil || render(v) != "message m9: applied [AUTO/receipts, Label_2]; removed [inbox]" || len(calls) != 3 ||
-		jsonText(calls[2].JSON) != `{"addLabelIds":["Label_1","Label_2"],"removeLabelIds":["INBOX"]}` {
+		googletest.JSONText(calls[2].JSON) != `{"addLabelIds":["Label_1","Label_2"],"removeLabelIds":["INBOX"]}` {
 		t.Fatalf("%q %v %d", render(v), err, len(calls))
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "label", input(t, "label", map[string]any{"id": []string{"m9"}}, map[string]any{"apply": []string{"missing"}}))
+	_, err, _ = runDirect(t, fake.Ctx(), "label", product.Input(t, "label", map[string]any{"id": []string{"m9"}}, map[string]any{"apply": []string{"missing"}}))
 	wantErr(t, err, clierr.NotFound, "Label not found: missing", "")
 	// --thread expands (a missing thread skipped) in thread order.
-	n = len(fake.recorded())
-	v, err, logs = runDirect(t, fake.ctx(), "label", input(t, "label", map[string]any{"id": []string{"t1", "tgone", "t3"}}, map[string]any{"remove": []string{"UNREAD"}, "thread": true}))
-	calls = fake.recorded()[n:]
+	n = len(fake.Recorded())
+	v, err, logs = runDirect(t, fake.Ctx(), "label", product.Input(t, "label", map[string]any{"id": []string{"t1", "tgone", "t3"}}, map[string]any{"remove": []string{"UNREAD"}, "thread": true}))
+	calls = fake.Recorded()[n:]
 	last := calls[len(calls)-1]
-	if err != nil || render(v) != "label: 3/3 succeeded across 1 chunk(s)" || jsonText(last.JSON) != `{"ids":["m1","m2","m-t3"],"removeLabelIds":["UNREAD"]}` {
-		t.Fatalf("%q %v %s", render(v), err, jsonText(last.JSON))
+	if err != nil || render(v) != "label: 3/3 succeeded across 1 chunk(s)" || googletest.JSONText(last.JSON) != `{"ids":["m1","m2","m-t3"],"removeLabelIds":["UNREAD"]}` {
+		t.Fatalf("%q %v %s", render(v), err, googletest.JSONText(last.JSON))
 	}
 	if logs[0] != "expanded 3 thread(s) to 3 message(s)" {
 		t.Fatalf("%q", logs)
@@ -1332,13 +1181,13 @@ func TestMarkArchiveAndLabelModify(t *testing.T) {
 			t.Fatalf("thread format %v", c.Query)
 		}
 	}
-	v, _, logs = runDirect(t, fake.ctx(), "label", input(t, "label", map[string]any{"id": []string{"tgone"}}, map[string]any{"apply": []string{"zeta"}, "thread": true}))
+	v, _, logs = runDirect(t, fake.Ctx(), "label", product.Input(t, "label", map[string]any{"id": []string{"tgone"}}, map[string]any{"apply": []string{"zeta"}, "thread": true}))
 	if render(v) != "label: 0 message(s) to modify" || logs[0] != "expanded 1 thread(s) to 0 message(s)" {
 		t.Fatalf("%q %q", render(v), logs)
 	}
-	in = input(t, "label", nil, map[string]any{"apply": []string{"a", "b"}, "remove": []string{"c"}, "thread": true, "dry-run": true, "chunk-size": "2"})
+	in = product.Input(t, "label", nil, map[string]any{"apply": []string{"a", "b"}, "remove": []string{"c"}, "thread": true, "dry-run": true, "chunk-size": "2"})
 	in.Stdin = "x y z"
-	v, _, logs = runDirect(t, fake.ctx(), "label", in)
+	v, _, logs = runDirect(t, fake.Ctx(), "label", in)
 	if render(v) != "[dry-run] label\n  ids: 3\n  chunk size: 2\n  chunks: 2\n  add labels: a, b\n  remove labels: c\n  no API calls made" ||
 		logs[0] != "would expand 3 thread(s) to messages; chunk count below assumes 1 message/thread" {
 		t.Fatalf("%q %q", render(v), logs)
@@ -1346,17 +1195,17 @@ func TestMarkArchiveAndLabelModify(t *testing.T) {
 }
 
 func TestDeleteLoopsLogFailuresAndExitFive(t *testing.T) {
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case strings.HasSuffix(h.Path, "/gone"):
-			apiErr(w, 404, "Requested entity was not found.")
+			googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 		case strings.HasSuffix(h.Path, "/bad"):
-			apiErr(w, 400, "Invalid draft")
+			googletest.WriteAPIError(w, 400, "Invalid draft")
 		default:
 			w.WriteHeader(204)
 		}
 	})
-	v, err, logs := runDirect(t, fake.ctx(), "draft delete", input(t, "draft delete", map[string]any{"draft-id": []string{"r1", "gone", "bad", "r2"}}, nil))
+	v, err, logs := runDirect(t, fake.Ctx(), "draft delete", product.Input(t, "draft delete", map[string]any{"draft-id": []string{"r1", "gone", "bad", "r2"}}, nil))
 	if exit, ok := err.(*plugins.ExitStatus); !ok || exit.Code != 5 {
 		t.Fatalf("%#v", err)
 	}
@@ -1364,55 +1213,55 @@ func TestDeleteLoopsLogFailuresAndExitFive(t *testing.T) {
 		strings.Join(logs, "|") != "Failed to delete draft gone: Draft not found: gone|Failed to delete draft bad: Failed to delete draft: Invalid draft" {
 		t.Fatalf("%q %q", render(v), logs)
 	}
-	v, err, logs = runDirect(t, fake.ctx(), "filters delete", input(t, "filters delete", map[string]any{"id": []string{"gone"}}, nil))
+	v, err, logs = runDirect(t, fake.Ctx(), "filters delete", product.Input(t, "filters delete", map[string]any{"id": []string{"gone"}}, nil))
 	if exit, ok := err.(*plugins.ExitStatus); !ok || exit.Code != 5 || v != nil || strings.Join(logs, "|") != "Failed to delete filter gone: Filter not found: gone" {
 		t.Fatalf("%#v %#v %q", v, err, logs)
 	}
-	v, err, _ = runDirect(t, fake.ctx(), "filters delete", input(t, "filters delete", map[string]any{"id": []string{"f1", "f2"}}, nil))
-	if err != nil || render(v) != "Deleted filter: f1\nDeleted filter: f2" || fake.recorded()[len(fake.recorded())-1].Path != "/gmail/v1/users/me/settings/filters/f2" {
+	v, err, _ = runDirect(t, fake.Ctx(), "filters delete", product.Input(t, "filters delete", map[string]any{"id": []string{"f1", "f2"}}, nil))
+	if err != nil || render(v) != "Deleted filter: f1\nDeleted filter: f2" || fake.Recorded()[len(fake.Recorded())-1].Path != "/gmail/v1/users/me/settings/filters/f2" {
 		t.Fatalf("%q %v", render(v), err)
 	}
 }
 
 func TestFiltersCommands(t *testing.T) {
-	fake := labelsFake(t, func(w http.ResponseWriter, h hit) bool {
+	fake := labelsFake(t, func(w http.ResponseWriter, h googletest.Hit) bool {
 		switch {
 		case h.Method == "GET" && h.Path == "/gmail/v1/users/me/settings/filters":
-			writeJSON(w, 200, map[string]any{"filter": []any{
+			googletest.WriteJSON(w, 200, map[string]any{"filter": []any{
 				map[string]any{"id": "f1", "criteria": map[string]any{"from": "a@example.com", "hasAttachment": true, "size": 5000, "sizeComparison": "larger"},
 					"action": map[string]any{"addLabelIds": []any{"Label_1", "Label_x"}, "removeLabelIds": []any{"INBOX"}}},
 				map[string]any{"id": "filter-long", "criteria": map[string]any{"sizeComparison": "unknown"}, "action": map[string]any{"forward": "f@example.com", "addLabelIds": []any{}}},
 			}})
 		case h.Method == "GET" && h.Path == "/gmail/v1/users/me/settings/filters/f1":
-			writeJSON(w, 200, map[string]any{"id": "f1", "criteria": map[string]any{"to": "t@example.com", "subject": "S", "query": "q", "negatedQuery": "nq", "excludeChats": true},
+			googletest.WriteJSON(w, 200, map[string]any{"id": "f1", "criteria": map[string]any{"to": "t@example.com", "subject": "S", "query": "q", "negatedQuery": "nq", "excludeChats": true},
 				"action": map[string]any{"addLabelIds": []any{"Label_1"}, "forward": "f@example.com"}})
 		case h.Method == "GET" && h.Path == "/gmail/v1/users/me/settings/filters/gone":
-			apiErr(w, 404, "Filter not found")
+			googletest.WriteAPIError(w, 404, "Filter not found")
 		case h.Method == "POST" && h.Path == "/gmail/v1/users/me/settings/filters":
 			body := map[string]any{"id": "new1"}
 			for k, v := range h.JSON {
 				body[k] = v
 			}
-			writeJSON(w, 200, body)
+			googletest.WriteJSON(w, 200, body)
 		default:
 			return false
 		}
 		return true
 	})
-	v, err, _ := runDirect(t, fake.ctx(), "filters list", input(t, "filters list", nil, nil))
+	v, err, _ := runDirect(t, fake.Ctx(), "filters list", product.Input(t, "filters list", nil, nil))
 	want := "f1           from:a@example.com has:attachment size:larger:5000  ->  +Auto/Receipts +Label_x -INBOX\nfilter-long  (no criteria)  ->  forward:f@example.com\n\n2 filter(s)"
 	if err != nil || render(v) != want {
 		t.Fatalf("%q\nwant %q", render(v), want)
 	}
-	if jsonText(v) != `[{"id":"f1","criteria":{"from":"a@example.com","hasAttachment":true,"size":5000,"sizeComparison":"larger"},"action":{"addLabelIds":["Label_1","Label_x"],"removeLabelIds":["INBOX"]}},{"id":"filter-long","criteria":{},"action":{"forward":"f@example.com"}}]` {
-		t.Fatalf("%s", jsonText(v))
+	if googletest.JSONText(v) != `[{"id":"f1","criteria":{"from":"a@example.com","hasAttachment":true,"size":5000,"sizeComparison":"larger"},"action":{"addLabelIds":["Label_1","Label_x"],"removeLabelIds":["INBOX"]}},{"id":"filter-long","criteria":{},"action":{"forward":"f@example.com"}}]` {
+		t.Fatalf("%s", googletest.JSONText(v))
 	}
-	v, err, _ = runDirect(t, fake.ctx(), "filters get", input(t, "filters get", map[string]any{"id": "f1"}, nil))
+	v, err, _ = runDirect(t, fake.Ctx(), "filters get", product.Input(t, "filters get", map[string]any{"id": "f1"}, nil))
 	want = "ID:       f1\nCriteria:\n  To:             t@example.com\n  Subject:        S\n  Query:          q\n  Negated query:  nq\n  Exclude chats:  yes\nAction:\n  Apply labels:   Auto/Receipts\n  Forward:        f@example.com"
 	if err != nil || render(v) != want {
 		t.Fatalf("%q\nwant %q", render(v), want)
 	}
-	_, err, _ = runDirect(t, fake.ctx(), "filters get", input(t, "filters get", map[string]any{"id": "gone"}, nil))
+	_, err, _ = runDirect(t, fake.Ctx(), "filters get", product.Input(t, "filters get", map[string]any{"id": "gone"}, nil))
 	wantErr(t, err, clierr.NotFound, "Filter not found: gone", "")
 
 	for set, message := range map[*map[string]any]string{
@@ -1423,25 +1272,25 @@ func TestFiltersCommands(t *testing.T) {
 		{"size": "-1", "size-comparison": "smaller"}:  "--size must be a non-negative integer (bytes)",
 		{"from": "a@example.com"}:                     "At least one action is required",
 	} {
-		_, err, _ := runDirect(t, fake.ctx(), "filters create", input(t, "filters create", nil, *set))
-		if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != message {
+		_, err, _ := runDirect(t, fake.Ctx(), "filters create", product.Input(t, "filters create", nil, *set))
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != message {
 			t.Errorf("%v: %q", *set, ce.Message)
 		}
 	}
 	// A zero size is still sent, as Bun's { size: 0 } is.
-	n := len(fake.recorded())
-	v, err, _ = runDirect(t, fake.ctx(), "filters create", input(t, "filters create", nil, map[string]any{
+	n := len(fake.Recorded())
+	v, err, _ = runDirect(t, fake.Ctx(), "filters create", product.Input(t, "filters create", nil, map[string]any{
 		"size": "0", "size-comparison": "smaller", "has-attachment": true, "apply": []string{"zeta"}, "remove": []string{"INBOX"}, "forward": "f@example.com",
 	}))
-	calls := fake.recorded()[n:]
-	var create hit
+	calls := fake.Recorded()[n:]
+	var create googletest.Hit
 	for _, c := range calls {
 		if c.Method == "POST" {
 			create = c
 		}
 	}
-	if err != nil || jsonText(create.JSON) != `{"action":{"addLabelIds":["Label_2"],"forward":"f@example.com","removeLabelIds":["INBOX"]},"criteria":{"hasAttachment":true,"size":0,"sizeComparison":"smaller"}}` {
-		t.Fatalf("%s %v", jsonText(create.JSON), err)
+	if err != nil || googletest.JSONText(create.JSON) != `{"action":{"addLabelIds":["Label_2"],"forward":"f@example.com","removeLabelIds":["INBOX"]},"criteria":{"hasAttachment":true,"size":0,"sizeComparison":"smaller"}}` {
+		t.Fatalf("%s %v", googletest.JSONText(create.JSON), err)
 	}
 	// Bun keeps any numeric size from the API, 0 included.
 	if render(v) != "Created filter: new1\n  has:attachment size:smaller:0  ->  +zeta -INBOX forward:f@example.com" {
@@ -1472,11 +1321,11 @@ func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
 
 	prevFind, prevRun := findChrome, runChrome
 	t.Cleanup(func() { findChrome, runChrome = prevFind, prevRun })
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, 200, map[string]any{"id": "m1", "payload": map[string]any{"mimeType": "text/html", "body": map[string]any{"data": b64url("<i>x</i>")}}})
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"id": "m1", "payload": map[string]any{"mimeType": "text/html", "body": map[string]any{"data": b64url("<i>x</i>")}}})
 	})
 	findChrome = func() string { return "" }
-	_, err, _ := runDirect(t, fake.ctx(), "export", input(t, "export", map[string]any{"message-id": "m1"}, nil))
+	_, err, _ := runDirect(t, fake.Ctx(), "export", product.Input(t, "export", map[string]any{"message-id": "m1"}, nil))
 	wantErr(t, err, clierr.NotFound, "Chrome/Chromium not found", "Install Google Chrome, Chromium, or Microsoft Edge")
 	var argv []string
 	var html string
@@ -1487,7 +1336,7 @@ func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
 		html = string(b)
 		return 0, "", nil
 	}
-	v, err, logs := runDirect(t, fake.ctx(), "export", input(t, "export", map[string]any{"message-id": "m1"}, map[string]any{"output": "out/x.pdf"}))
+	v, err, logs := runDirect(t, fake.Ctx(), "export", product.Input(t, "export", map[string]any{"message-id": "m1"}, map[string]any{"output": "out/x.pdf"}))
 	cwd, _ := os.Getwd()
 	if err != nil || render(v) != "Exported to out/x.pdf" || strings.Join(logs, "|") != "Generating PDF..." {
 		t.Fatalf("%q %v %q", render(v), err, logs)
@@ -1500,6 +1349,6 @@ func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
 		t.Fatal("the temporary HTML was left behind")
 	}
 	runChrome = func(string, []string) (int, string, error) { return 1, "boom\n", nil }
-	_, err, _ = runDirect(t, fake.ctx(), "export", input(t, "export", map[string]any{"message-id": "m1"}, map[string]any{"output": "/abs/x.pdf"}))
+	_, err, _ = runDirect(t, fake.Ctx(), "export", product.Input(t, "export", map[string]any{"message-id": "m1"}, map[string]any{"output": "/abs/x.pdf"}))
 	wantErr(t, err, clierr.APIError, "Chrome failed: boom\n", "")
 }

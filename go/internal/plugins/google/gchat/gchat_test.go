@@ -24,96 +24,12 @@ import (
 	"github.com/plosson/agentio/go/internal/plugincache"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
-	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-// hit is one request that reached the fake Google.
-type hit struct {
-	Method string
-	Path   string
-	Query  url.Values
-	Auth   string
-	Type   string
-	JSON   map[string]any
-	Form   url.Values
-	Raw    string
-}
-
-type fakeGoogle struct {
-	mu     sync.Mutex
-	hits   []hit
-	handle func(w http.ResponseWriter, h hit)
-	srv    *httptest.Server
-}
-
-func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeGoogle {
-	t.Helper()
-	f := &fakeGoogle{handle: handle}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		h := hit{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Auth: r.Header.Get("Authorization"), Type: r.Header.Get("Content-Type"), Raw: string(raw)}
-		if strings.HasPrefix(h.Type, "application/json") {
-			if err := json.Unmarshal(raw, &h.JSON); err != nil {
-				t.Errorf("non-JSON body %q", raw)
-			}
-		} else if strings.HasPrefix(h.Type, "application/x-www-form-urlencoded") {
-			h.Form, _ = url.ParseQuery(string(raw))
-		}
-		f.mu.Lock()
-		f.hits = append(f.hits, h)
-		f.mu.Unlock()
-		f.handle(w, h)
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-// ctx sends the Chat and People clients (both rooted at "/") to the fake.
-func (f *fakeGoogle) ctx() context.Context {
-	return google.WithEndpoints(context.Background(), google.Endpoints{
-		API: f.srv.URL + "/", Token: f.srv.URL + "/token", UserInfo: f.srv.URL + "/userinfo",
-	})
-}
-
-func (f *fakeGoogle) recorded() []hit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]hit(nil), f.hits...)
-}
-
-func (f *fakeGoogle) paths() []string {
-	var out []string
-	for _, h := range f.recorded() {
-		out = append(out, h.Method+" "+h.Path)
-	}
-	return out
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func apiErr(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": message}})
-}
-
-func setupVault(t *testing.T) *plugins.Registry {
-	t.Helper()
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := plugins.NewRegistry(New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
+// product drives New() through the shared Google test harness.
+var product = googletest.For(New)
 
 func oauthCreds(expiry int64) map[string]any {
 	return map[string]any{
@@ -133,90 +49,6 @@ func webhookCreds(target string) map[string]any {
 
 func freshOAuth() map[string]any {
 	return oauthCreds(time.Now().Add(time.Hour).UnixMilli())
-}
-
-func saveProfile(t *testing.T, name string, creds map[string]any, readOnly bool) {
-	t.Helper()
-	opts := profile.SaveOptions{}
-	if readOnly {
-		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
-	}
-	if err := profile.Save("gchat", name, creds, opts); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func loadCreds(t *testing.T, name string) map[string]any {
-	t.Helper()
-	c, err := vault.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.Credentials["gchat"][name]
-}
-
-func spec(t *testing.T, path string) *plugins.CommandSpec {
-	t.Helper()
-	p := New()
-	for i := range p.Commands {
-		if p.Commands[i].Path == path {
-			return &p.Commands[i]
-		}
-	}
-	t.Fatalf("no command %q", path)
-	return nil
-}
-
-// input fills the options the way the host does ([] for a repeatable flag,
-// nil for an absent [value] flag, the defaults otherwise), then applies set.
-func input(t *testing.T, path string, args map[string]any, set map[string]any) plugins.CommandInput {
-	t.Helper()
-	in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
-	for _, o := range spec(t, path).Options {
-		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
-		switch {
-		case o.Repeatable:
-			in.Options[name] = []string{}
-		case strings.Contains(o.Flags, "["):
-			in.Options[name] = nil
-		case !strings.Contains(o.Flags, "<"):
-			in.Options[name] = false
-		default:
-			d, _ := o.DefaultValue.(string)
-			in.Options[name] = d
-		}
-	}
-	for k, v := range args {
-		in.Args[k] = v
-	}
-	for k, v := range set {
-		in.Options[k] = v
-	}
-	return in
-}
-
-func exec(ctx context.Context, t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
-	t.Helper()
-	return host.Execute(ctx, reg, reg.Find("gchat"), spec(t, path), in)
-}
-
-func render(t *testing.T, path string, v any) string {
-	t.Helper()
-	return spec(t, path).Format(v)
-}
-
-func cliErr(t *testing.T, err error) *clierr.Error {
-	t.Helper()
-	ce, ok := err.(*clierr.Error)
-	if !ok {
-		t.Fatalf("not a CLI error: %#v", err)
-	}
-	return ce
-}
-
-func jsonText(v any) string {
-	raw, _ := json.Marshal(v)
-	return string(raw)
 }
 
 // captureStderr returns what fn wrote to os.Stderr (RunContext.Log).
@@ -343,18 +175,18 @@ func setupContext(logs *[]string) *plugins.SetupContext {
 }
 
 func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/token":
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "chat"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "chat"})
 		case "/userinfo":
-			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"email": "user@example.com"})
 		case "/v1/spaces":
 			if h.Auth != "Bearer at-1" || h.Query.Get("pageSize") != "1" {
 				t.Errorf("chat check %q %v", h.Auth, h.Query)
 			}
-			writeJSON(w, 200, map[string]any{"spaces": []any{}})
+			googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{}})
 		default:
 			w.WriteHeader(404)
 		}
@@ -368,7 +200,7 @@ func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	}
 	asked := scripted(sc, "2")
 	var out bytes.Buffer
-	if err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
+	if err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(*asked) != 1 || !strings.HasPrefix((*asked)[0], "Choose profile type:\n  1) Webhook") {
@@ -378,7 +210,7 @@ func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	if got := authURL.Query().Get("scope"); got != strings.Join(google.Scopes["gchat"], " ") || opts.ServiceName != "Google" {
 		t.Fatalf("scope %q", got)
 	}
-	stored := loadCreds(t, "user@example.com")
+	stored := product.LoadCreds(t, "user@example.com")
 	var keys []string
 	for k := range stored {
 		keys = append(keys, k)
@@ -402,17 +234,17 @@ func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 }
 
 func TestSetupOAuthFailuresSaveNothing(t *testing.T) {
-	setupVault(t)
+	product.SetupVault(t)
 	var emailBody any
 	var chatStatus int
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/token":
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
 		case "/userinfo":
-			writeJSON(w, 200, emailBody)
+			googletest.WriteJSON(w, 200, emailBody)
 		default:
-			apiErr(w, chatStatus, "Google Chat app not found.")
+			googletest.WriteAPIError(w, chatStatus, "Google Chat app not found.")
 		}
 	})
 	cases := []struct {
@@ -430,7 +262,7 @@ func TestSetupOAuthFailuresSaveNothing(t *testing.T) {
 		var logs []string
 		sc := setupContext(&logs)
 		scripted(sc, "oauth")
-		ce := cliErr(t, host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, io.Discard))
+		ce := googletest.CliErr(t, host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, io.Discard))
 		if ce.Code != clierr.AuthFailed || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%#v", ce)
 		}
@@ -441,12 +273,12 @@ func TestSetupOAuthFailuresSaveNothing(t *testing.T) {
 }
 
 func TestSetupWebhookPostsATestMessage(t *testing.T) {
-	setupVault(t)
+	product.SetupVault(t)
 	var status int
-	var got []hit
+	var got []googletest.Hit
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		got = append(got, hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
+		got = append(got, googletest.Hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
 		w.WriteHeader(status)
 	}))
 	defer srv.Close()
@@ -476,8 +308,8 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 	if len(got) != 1 || got[0].Method != "POST" || got[0].Type != "application/json" || got[0].Raw != `{"text":"Test message from agentio"}` {
 		t.Fatalf("%#v", got)
 	}
-	if stored := loadCreds(t, "webhook"); jsonText(stored) != `{"type":"webhook","webhookUrl":"`+hook+`"}` {
-		t.Fatalf("%s", jsonText(stored))
+	if stored := product.LoadCreds(t, "webhook"); googletest.JSONText(stored) != `{"type":"webhook","webhookUrl":"`+hook+`"}` {
+		t.Fatalf("%s", googletest.JSONText(stored))
 	}
 	// --profile names a webhook profile.
 	if out, _, err := run(plugins.SetupOptions{Profile: "team"}, "webhook", hook); err != nil || !strings.HasPrefix(out, "Profile \"team\" configured!") {
@@ -497,7 +329,7 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 	}
 	for _, c := range cases {
 		_, _, err := run(plugins.SetupOptions{Profile: "bad"}, c.answers...)
-		ce := cliErr(t, err)
+		ce := googletest.CliErr(t, err)
 		if (c.message != "" && ce.Message != c.message) || ce.Suggestion != c.suggest {
 			t.Errorf("%v: %#v", c.answers, ce)
 		}
@@ -510,20 +342,20 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 // Bun never rotates a Google refresh token, and the rest of the map
 // (type, email) survives the refresh.
 func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", oauthCreds(1), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", oauthCreds(1), false)
 	var mu sync.Mutex
 	refreshes := 0
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
 			mu.Lock()
 			refreshes++
 			mu.Unlock()
 			time.Sleep(50 * time.Millisecond)
-			writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"spaces": []any{}})
+		googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{}})
 	})
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -531,7 +363,7 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = auth.GetFresh(fake.ctx(), reg, "gchat", "acme", auth.RefreshOptions{})
+			_, errs[i] = auth.GetFresh(fake.Ctx(), reg, "gchat", "acme", auth.RefreshOptions{})
 		}(i)
 	}
 	wg.Wait()
@@ -543,10 +375,10 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if refreshes != 1 {
 		t.Fatalf("%d refreshes, want 1", refreshes)
 	}
-	if form := fake.recorded()[0].Form; form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt-old" {
+	if form := fake.Recorded()[0].Form; form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt-old" {
 		t.Fatalf("refresh request %v", form)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["accessToken"] != "at-new" || stored["refreshToken"] != "rt-old" || stored["type"] != "oauth" ||
 		stored["email"] != "me@example.com" || stored["scope"] != "https://www.googleapis.com/auth/chat.messages.create" {
 		t.Fatalf("%#v", stored)
@@ -554,10 +386,10 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if _, ok := stored["expiryDate"].(json.Number); !ok {
 		t.Fatalf("expiryDate %T", stored["expiryDate"])
 	}
-	if _, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil)); err != nil {
+	if _, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	all := fake.recorded()
+	all := fake.Recorded()
 	if last := all[len(all)-1]; last.Auth != "Bearer at-new" || refreshes != 1 {
 		t.Fatalf("auth %q refreshes %d", last.Auth, refreshes)
 	}
@@ -566,8 +398,8 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 // tests/auth/refresh.test.ts: a webhook profile has nothing to refresh, even
 // when forced.
 func TestWebhookProfileIsNeverRefreshed(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "hook", webhookCreds("https://chat.example.com/hook"), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "hook", webhookCreds("https://chat.example.com/hook"), false)
 	fresh, err := auth.GetFresh(context.Background(), reg, "gchat", "hook", auth.RefreshOptions{Force: true})
 	if err != nil || fresh.Refreshed || fresh.Credentials["type"] != "webhook" {
 		t.Fatalf("%#v %v", fresh, err)
@@ -575,45 +407,45 @@ func TestWebhookProfileIsNeverRefreshed(t *testing.T) {
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", oauthCreds(1), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", oauthCreds(1), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			googletest.WriteJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
 			return
 		}
 		t.Errorf("API called after a failed refresh: %s", h.Path)
 	})
-	got, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil))
-	ce := cliErr(t, err)
+	got, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, nil))
+	ce := googletest.CliErr(t, err)
 	if got != nil || ce.Code != clierr.TokenExpired || ce.Message != `Token refresh failed for gchat profile "acme": invalid_grant` ||
 		ce.Suggestion != "Re-authenticate with: agentio gchat profile add --profile acme" {
 		t.Fatalf("%#v %#v", got, ce)
 	}
-	if stored := loadCreds(t, "acme"); stored["accessToken"] != "at-old" || stored["refreshToken"] != "rt-old" {
+	if stored := product.LoadCreds(t, "acme"); stored["accessToken"] != "at-old" || stored["refreshToken"] != "rt-old" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
 }
 
 func TestReadOnlyProfileRefusesSendButRunsReads(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "ro", freshOAuth(), true)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, 200, map[string]any{"name": "spaces/S"})
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", freshOAuth(), true)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/S"})
 	})
-	_, err := exec(fake.ctx(), t, reg, "send", input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "S"}))
-	ce := cliErr(t, err)
+	_, err := product.Exec(fake.Ctx(), t, reg, "send", product.Input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "S"}))
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.PermissionDenied || ce.Message != `Cannot send message: profile "ro" is read-only` ||
 		ce.Suggestion != "To modify this profile's access: agentio gchat profile update --profile ro --no-read-only" {
 		t.Fatalf("%#v", ce)
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
-	if _, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil)); err != nil {
+	if _, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(fake.recorded()); n != 1 {
+	if n := len(fake.Recorded()); n != 1 {
 		t.Fatalf("the read did not run: %d", n)
 	}
 }
@@ -621,32 +453,32 @@ func TestReadOnlyProfileRefusesSendButRunsReads(t *testing.T) {
 func TestValidate(t *testing.T) {
 	var status int
 	var body any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path != "/v1/spaces" || h.Query.Get("pageSize") != "1" || h.Auth != "Bearer at-old" {
 			t.Errorf("validate called %s %v with %q", h.Path, h.Query, h.Auth)
 		}
-		writeJSON(w, status, body)
+		googletest.WriteJSON(w, status, body)
 	})
-	v, err := New().Profile.Validate(fake.ctx(), host.NewRunContext(webhookCreds("https://x.example.com"), "hook", fake.ctx()))
-	if err != nil || !v.Valid || v.Info != "webhook" || len(fake.recorded()) != 0 {
+	v, err := New().Profile.Validate(fake.Ctx(), host.NewRunContext(webhookCreds("https://x.example.com"), "hook", fake.Ctx()))
+	if err != nil || !v.Valid || v.Info != "webhook" || len(fake.Recorded()) != 0 {
 		t.Fatalf("webhook %#v %v", v, err)
 	}
-	run := host.NewRunContext(oauthCreds(1), "acme", fake.ctx())
+	run := host.NewRunContext(oauthCreds(1), "acme", fake.Ctx())
 	status, body = 200, map[string]any{}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); !v.Valid || v.Info != "me@example.com" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v", v)
 	}
 	noEmail := oauthCreds(1)
 	delete(noEmail, "email")
-	if v, _ := New().Profile.Validate(fake.ctx(), host.NewRunContext(noEmail, "acme", fake.ctx())); !v.Valid || v.Info != "oauth" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), host.NewRunContext(noEmail, "acme", fake.Ctx())); !v.Valid || v.Info != "oauth" {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
 		t.Fatalf("%#v", v)
 	}
 }
@@ -674,18 +506,18 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	if listInfo(webhookCreds("u")) != " - webhook" || listInfo(oauthCreds(1)) != " - oauth" || listInfo(map[string]any{}) != " - oauth" {
 		t.Fatal("list info")
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"email": "me@example.com"})
+		googletest.WriteJSON(w, 200, map[string]any{"email": "me@example.com"})
 	})
 	var logs []string
 	sc := setupContext(&logs)
 	hook := webhookCreds("https://x.example.com")
-	got, err := New().Profile.Reauthenticate(fake.ctx(), hook, "hook", sc)
-	if err != nil || jsonText(got) != jsonText(hook) || len(fake.recorded()) != 0 {
+	got, err := New().Profile.Reauthenticate(fake.Ctx(), hook, "hook", sc)
+	if err != nil || googletest.JSONText(got) != googletest.JSONText(hook) || len(fake.Recorded()) != 0 {
 		t.Fatalf("%#v %v", got, err)
 	}
 	if strings.Join(logs, "|") != "\nSkipping gchat / hook: webhook profiles don't expire. Run 'agentio gchat profile add' to update." {
@@ -694,7 +526,7 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	logs = nil
 	legacy := oauthCreds(1)
 	delete(legacy, "type")
-	got, err = New().Profile.Reauthenticate(fake.ctx(), legacy, "work", sc)
+	got, err = New().Profile.Reauthenticate(fake.Ctx(), legacy, "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,51 +542,51 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 }
 
 func TestSendViaWebhook(t *testing.T) {
-	reg := setupVault(t)
+	reg := product.SetupVault(t)
 	var status int
 	var reply string
-	var got []hit
+	var got []googletest.Hit
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		got = append(got, hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
+		got = append(got, googletest.Hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, reply)
 	}))
 	defer srv.Close()
 	useTLS(t, srv)
-	saveProfile(t, "hook", webhookCreds(srv.URL+"/v1/spaces/W/messages?key=k"), false)
+	product.SaveProfile(t, "hook", webhookCreds(srv.URL+"/v1/spaces/W/messages?key=k"), false)
 	ctx := context.Background()
 	status, reply = 200, `{"name":"spaces/W/messages/M1"}`
-	res, err := exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": `Done\! <ok> & more`}, map[string]any{"thread": "ignored"}))
+	res, err := product.Exec(ctx, t, reg, "send", product.Input(t, "send", map[string]any{"message": `Done\! <ok> & more`}, map[string]any{"thread": "ignored"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].Method != "POST" || got[0].Type != "application/json" || got[0].Raw != `{"text":"Done! <ok> & more"}` {
 		t.Fatalf("%#v", got)
 	}
-	if render(t, "send", res) != "Message sent\nID: M1" || jsonText(res) != `{"messageId":"M1","text":"Done! \u003cok\u003e \u0026 more","isJsonPayload":false}` {
-		t.Fatalf("%q %s", render(t, "send", res), jsonText(res))
+	if product.Spec(t, "send").Format(res) != "Message sent\nID: M1" || googletest.JSONText(res) != `{"messageId":"M1","text":"Done! \u003cok\u003e \u0026 more","isJsonPayload":false}` {
+		t.Fatalf("%q %s", product.Spec(t, "send").Format(res), googletest.JSONText(res))
 	}
 	// Stdin text, trimmed; a body that is not JSON keeps the id "unknown".
 	reply = "ok"
-	in := input(t, "send", nil, nil)
+	in := product.Input(t, "send", nil, nil)
 	in.Stdin = "  from stdin\n"
-	if res, err = exec(ctx, t, reg, "send", in); err != nil || got[1].Raw != `{"text":"from stdin"}` || render(t, "send", res) != "Message sent\nID: unknown" {
+	if res, err = product.Exec(ctx, t, reg, "send", in); err != nil || got[1].Raw != `{"text":"from stdin"}` || product.Spec(t, "send").Format(res) != "Message sent\nID: unknown" {
 		t.Fatalf("%q %v", got[1].Raw, err)
 	}
 	// A JSON file is posted as is.
 	card := filepath.Join(t.TempDir(), "card.json")
 	_ = os.WriteFile(card, []byte(`{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}`), 0o600)
 	reply = `{"name":"spaces/W/messages/M2"}`
-	if res, err = exec(ctx, t, reg, "send", input(t, "send", nil, map[string]any{"json": card})); err != nil {
+	if res, err = product.Exec(ctx, t, reg, "send", product.Input(t, "send", nil, map[string]any{"json": card})); err != nil {
 		t.Fatal(err)
 	}
-	if got[2].Raw != `{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}` || render(t, "send", res) != "Message sent\nID: M2\nType: JSON payload" {
-		t.Fatalf("%q %q", got[2].Raw, render(t, "send", res))
+	if got[2].Raw != `{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}` || product.Spec(t, "send").Format(res) != "Message sent\nID: M2\nType: JSON payload" {
+		t.Fatalf("%q %q", got[2].Raw, product.Spec(t, "send").Format(res))
 	}
 	status, reply = 403, "no bots"
-	res, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "x"}, nil))
-	if ce := cliErr(t, err); res != nil || ce.Code != clierr.APIError || ce.Message != "Failed to send message via webhook: 403 no bots" ||
+	res, err = product.Exec(ctx, t, reg, "send", product.Input(t, "send", map[string]any{"message": "x"}, nil))
+	if ce := googletest.CliErr(t, err); res != nil || ce.Code != clierr.APIError || ce.Message != "Failed to send message via webhook: 403 no bots" ||
 		ce.Suggestion != "Check that the webhook URL is valid and the bot has permission to post" {
 		t.Fatalf("%#v %#v", res, ce)
 	}
@@ -765,17 +597,17 @@ func TestSendViaWebhook(t *testing.T) {
 		code    clierr.Code
 		message string
 	}{
-		{"send", input(t, "send", map[string]any{"message": "x"}, map[string]any{"attachment": []string{card}}), clierr.PermissionDenied, "File attachments are not supported for webhook profiles"},
-		{"list", input(t, "list", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing messages is not supported for webhook profiles"},
-		{"get", input(t, "get", map[string]any{"message-id": "M"}, map[string]any{"space": "S"}), clierr.PermissionDenied, "Getting messages is not supported for webhook profiles"},
-		{"spaces", input(t, "spaces", nil, nil), clierr.PermissionDenied, "Listing spaces is not supported for webhook profiles"},
-		{"spaces", input(t, "spaces", nil, map[string]any{"with": "a@example.com"}), clierr.PermissionDenied, "Finding direct message is not supported for webhook profiles"},
-		{"members", input(t, "members", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing members is not supported for webhook profiles"},
-		{"user", input(t, "user", map[string]any{"user-id": "1"}, nil), clierr.PermissionDenied, "Getting user info is not supported for webhook profiles"},
-		{"directory refresh", input(t, "directory refresh", nil, nil), clierr.PermissionDenied, "Refreshing directory is not supported for webhook profiles"},
+		{"send", product.Input(t, "send", map[string]any{"message": "x"}, map[string]any{"attachment": []string{card}}), clierr.PermissionDenied, "File attachments are not supported for webhook profiles"},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing messages is not supported for webhook profiles"},
+		{"get", product.Input(t, "get", map[string]any{"message-id": "M"}, map[string]any{"space": "S"}), clierr.PermissionDenied, "Getting messages is not supported for webhook profiles"},
+		{"spaces", product.Input(t, "spaces", nil, nil), clierr.PermissionDenied, "Listing spaces is not supported for webhook profiles"},
+		{"spaces", product.Input(t, "spaces", nil, map[string]any{"with": "a@example.com"}), clierr.PermissionDenied, "Finding direct message is not supported for webhook profiles"},
+		{"members", product.Input(t, "members", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing members is not supported for webhook profiles"},
+		{"user", product.Input(t, "user", map[string]any{"user-id": "1"}, nil), clierr.PermissionDenied, "Getting user info is not supported for webhook profiles"},
+		{"directory refresh", product.Input(t, "directory refresh", nil, nil), clierr.PermissionDenied, "Refreshing directory is not supported for webhook profiles"},
 	} {
-		res, err := exec(ctx, t, reg, c.path, c.in)
-		ce := cliErr(t, err)
+		res, err := product.Exec(ctx, t, reg, c.path, c.in)
+		ce := googletest.CliErr(t, err)
 		if res != nil || ce.Code != c.code || ce.Message != c.message {
 			t.Errorf("%s: %#v", c.path, ce)
 		}
@@ -783,66 +615,64 @@ func TestSendViaWebhook(t *testing.T) {
 	if len(got) != n {
 		t.Fatal("a refused webhook command made a request")
 	}
-	saveProfile(t, "plain", webhookCreds("http://chat.example.com/hook"), false)
-	_, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "x"}, map[string]any{"profile": "plain"}))
-	if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "Invalid webhook URL - must be HTTPS" || ce.Suggestion != "Check the webhook URL configuration" {
+	product.SaveProfile(t, "plain", webhookCreds("http://chat.example.com/hook"), false)
+	_, err = product.Exec(ctx, t, reg, "send", product.Input(t, "send", map[string]any{"message": "x"}, map[string]any{"profile": "plain"}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "Invalid webhook URL - must be HTTPS" || ce.Suggestion != "Check the webhook URL configuration" {
 		t.Fatalf("%#v", ce)
 	}
 }
 
 func TestSendViaOAuth(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Method == "GET" && h.Path == "/v1/spaces/AAAA":
-			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
 		case h.Method == "GET" && strings.HasPrefix(h.Path, "/v1/spaces/"):
-			apiErr(w, 404, "not found")
+			googletest.WriteAPIError(w, 404, "not found")
 		case h.Method == "GET" && h.Path == "/v1/spaces":
-			writeJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/ENG1", "displayName": "Engineering"}}})
+			googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/ENG1", "displayName": "Engineering"}}})
 		case h.Method == "POST":
-			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M9"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M9"})
 		}
 	})
-	ctx := fake.ctx()
-	res, err := exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "Status update"}, map[string]any{"space": "AAAA"}))
+	ctx := fake.Ctx()
+	res, err := product.Exec(ctx, t, reg, "send", product.Input(t, "send", map[string]any{"message": "Status update"}, map[string]any{"space": "AAAA"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := fake.recorded()
-	if strings.Join(fake.paths(), ",") != "GET /v1/spaces/AAAA,POST /v1/spaces/AAAA/messages" || jsonText(all[1].JSON) != `{"text":"Status update"}` || all[1].Auth != "Bearer at-old" {
-		t.Fatalf("%v %s", fake.paths(), jsonText(all[1].JSON))
+	all := fake.Recorded()
+	if strings.Join(fake.Paths(), ",") != "GET /v1/spaces/AAAA,POST /v1/spaces/AAAA/messages" || googletest.JSONText(all[1].JSON) != `{"text":"Status update"}` || all[1].Auth != "Bearer at-old" {
+		t.Fatalf("%v %s", fake.Paths(), googletest.JSONText(all[1].JSON))
 	}
-	if render(t, "send", res) != "Message sent\nID: M9\nSpace: AAAA" || jsonText(res) != `{"messageId":"M9","spaceId":"AAAA","text":"Status update","isJsonPayload":false}` {
-		t.Fatalf("%q %s", render(t, "send", res), jsonText(res))
+	if product.Spec(t, "send").Format(res) != "Message sent\nID: M9\nSpace: AAAA" || googletest.JSONText(res) != `{"messageId":"M9","spaceId":"AAAA","text":"Status update","isJsonPayload":false}` {
+		t.Fatalf("%q %s", product.Spec(t, "send").Format(res), googletest.JSONText(res))
 	}
 	// A display name resolves through the space list, case-insensitively.
-	fake.mu.Lock()
-	fake.hits = nil
-	fake.mu.Unlock()
-	if res, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "engineering"})); err != nil {
+	fake.Reset()
+	if res, err = product.Exec(ctx, t, reg, "send", product.Input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "engineering"})); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(fake.paths(), ","); got != "GET /v1/spaces/engineering,GET /v1/spaces,POST /v1/spaces/ENG1/messages" {
+	if got := strings.Join(fake.Paths(), ","); got != "GET /v1/spaces/engineering,GET /v1/spaces,POST /v1/spaces/ENG1/messages" {
 		t.Fatalf("%s", got)
 	}
-	if render(t, "send", res) != "Message sent\nID: M9\nSpace: ENG1" {
-		t.Fatalf("%q", render(t, "send", res))
+	if product.Spec(t, "send").Format(res) != "Message sent\nID: M9\nSpace: ENG1" {
+		t.Fatalf("%q", product.Spec(t, "send").Format(res))
 	}
 }
 
 func TestSendUploadsAttachmentsBeforeTheMessage(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Method == "GET":
-			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
 		case strings.HasPrefix(h.Path, "/upload/"):
-			writeJSON(w, 200, map[string]any{"attachmentDataRef": map[string]any{"resourceName": "ref-" + h.Query.Get("uploadType")}})
+			googletest.WriteJSON(w, 200, map[string]any{"attachmentDataRef": map[string]any{"resourceName": "ref-" + h.Query.Get("uploadType")}})
 		default:
-			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M1"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M1"})
 		}
 	})
 	dir := t.TempDir()
@@ -850,15 +680,15 @@ func TestSendUploadsAttachmentsBeforeTheMessage(t *testing.T) {
 	notes := filepath.Join(dir, ".notes")
 	_ = os.WriteFile(png, []byte("png-bytes"), 0o600)
 	_ = os.WriteFile(notes, []byte("n"), 0o600)
-	in := input(t, "send", nil, map[string]any{"space": "AAAA", "json": true, "attachment": []string{png, notes}})
+	in := product.Input(t, "send", nil, map[string]any{"space": "AAAA", "json": true, "attachment": []string{png, notes}})
 	in.Stdin = ` {"text":"card","attachment":[{"contentName":"old"}]} `
-	res, err := exec(fake.ctx(), t, reg, "send", in)
+	res, err := product.Exec(fake.Ctx(), t, reg, "send", in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := fake.recorded()
-	if strings.Join(fake.paths(), ",") != "GET /v1/spaces/AAAA,POST /upload/v1/spaces/AAAA/attachments:upload,POST /upload/v1/spaces/AAAA/attachments:upload,POST /v1/spaces/AAAA/messages" {
-		t.Fatalf("%v", fake.paths())
+	all := fake.Recorded()
+	if strings.Join(fake.Paths(), ",") != "GET /v1/spaces/AAAA,POST /upload/v1/spaces/AAAA/attachments:upload,POST /upload/v1/spaces/AAAA/attachments:upload,POST /v1/spaces/AAAA/messages" {
+		t.Fatalf("%v", fake.Paths())
 	}
 	for i, want := range []string{"Content-Type: image/png", "Content-Type: application/octet-stream"} {
 		up := all[1+i]
@@ -866,30 +696,30 @@ func TestSendUploadsAttachmentsBeforeTheMessage(t *testing.T) {
 			t.Fatalf("upload %d %v %q", i, up.Query, up.Raw)
 		}
 	}
-	if got := jsonText(all[3].JSON); got != `{"attachment":[{"contentName":"old"},{"attachmentDataRef":{"resourceName":"ref-multipart"}},{"attachmentDataRef":{"resourceName":"ref-multipart"}}],"text":"card"}` {
+	if got := googletest.JSONText(all[3].JSON); got != `{"attachment":[{"contentName":"old"},{"attachmentDataRef":{"resourceName":"ref-multipart"}},{"attachmentDataRef":{"resourceName":"ref-multipart"}}],"text":"card"}` {
 		t.Fatalf("%s", got)
 	}
-	if render(t, "send", res) != "Message sent\nID: M1\nSpace: AAAA\nType: JSON payload" {
-		t.Fatalf("%q", render(t, "send", res))
+	if product.Spec(t, "send").Format(res) != "Message sent\nID: M1\nSpace: AAAA\nType: JSON payload" {
+		t.Fatalf("%q", product.Spec(t, "send").Format(res))
 	}
 }
 
 func TestSendInputAndAPIErrorsMatchBun(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	var status int
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch {
 		case h.Method == "GET":
-			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
 		case strings.HasPrefix(h.Path, "/upload/"):
 			if status == 200 {
-				writeJSON(w, 200, map[string]any{})
+				googletest.WriteJSON(w, 200, map[string]any{})
 				return
 			}
-			apiErr(w, status, "upload refused")
+			googletest.WriteAPIError(w, status, "upload refused")
 		default:
-			apiErr(w, status, "Invalid argument")
+			googletest.WriteAPIError(w, status, "Invalid argument")
 		}
 	})
 	dir := t.TempDir()
@@ -905,23 +735,23 @@ func TestSendInputAndAPIErrorsMatchBun(t *testing.T) {
 		message string
 		suggest string
 	}{
-		{input(t, "send", map[string]any{"message": "hi"}, map[string]any{"json": true}), clierr.InvalidParams, "Cannot use both text message and --json option",
+		{product.Input(t, "send", map[string]any{"message": "hi"}, map[string]any{"json": true}), clierr.InvalidParams, "Cannot use both text message and --json option",
 			`Use either: agentio gchat send "text" OR agentio gchat send --json file.json`},
-		{input(t, "send", nil, map[string]any{"json": missing}), clierr.InvalidParams, "Failed to read JSON file: " + missing, "Check that the file exists and is readable"},
-		{withStdin(input(t, "send", nil, map[string]any{"json": true}), " \n"), clierr.InvalidParams, "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json"},
-		{input(t, "send", nil, map[string]any{"json": bad}), clierr.InvalidParams, "Invalid JSON: unexpected EOF", "Check that the JSON is valid"},
-		{withStdin(input(t, "send", nil, nil), "  "), clierr.InvalidParams, "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", ""},
-		{input(t, "send", map[string]any{"message": "hi"}, nil), clierr.InvalidParams, "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile"},
-		{input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{missing}}), clierr.InvalidParams, "Failed to read attachment: " + missing, "Check that the file exists and is readable"},
+		{product.Input(t, "send", nil, map[string]any{"json": missing}), clierr.InvalidParams, "Failed to read JSON file: " + missing, "Check that the file exists and is readable"},
+		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), " \n"), clierr.InvalidParams, "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json"},
+		{product.Input(t, "send", nil, map[string]any{"json": bad}), clierr.InvalidParams, "Invalid JSON: unexpected EOF", "Check that the JSON is valid"},
+		{withStdin(product.Input(t, "send", nil, nil), "  "), clierr.InvalidParams, "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", ""},
+		{product.Input(t, "send", map[string]any{"message": "hi"}, nil), clierr.InvalidParams, "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile"},
+		{product.Input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{missing}}), clierr.InvalidParams, "Failed to read attachment: " + missing, "Check that the file exists and is readable"},
 	}
 	for _, c := range cases {
-		res, err := exec(fake.ctx(), t, reg, "send", c.in)
-		ce := cliErr(t, err)
+		res, err := product.Exec(fake.Ctx(), t, reg, "send", c.in)
+		ce := googletest.CliErr(t, err)
 		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%#v", ce)
 		}
 	}
-	for _, h := range fake.recorded() {
+	for _, h := range fake.Recorded() {
 		if h.Method != "GET" {
 			t.Fatalf("an invalid send posted %s", h.Path)
 		}
@@ -933,19 +763,19 @@ func TestSendInputAndAPIErrorsMatchBun(t *testing.T) {
 		message string
 		suggest string
 	}{
-		{403, input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.PermissionDenied,
+		{403, product.Input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.PermissionDenied,
 			"Failed to send message: Bot lacks permission for this operation", "Check that the space ID is valid and OAuth token is not expired"},
-		{400, input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.APIError,
+		{400, product.Input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.APIError,
 			"Failed to send message: Invalid argument", "Check that the space ID is valid and OAuth token is not expired"},
-		{400, input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
+		{400, product.Input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
 			`Failed to upload attachment "a.txt": upload refused`, "Check that the space ID is valid, OAuth scope includes chat.messages.create, and the file is under 200MB"},
-		{200, input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
+		{200, product.Input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
 			`Upload of "a.txt" returned no attachmentDataRef`, "Retry, or check that the file size is under the Chat API limit (200MB)"},
 	}
 	for _, c := range api {
 		status = c.status
-		res, err := exec(fake.ctx(), t, reg, "send", c.in)
-		ce := cliErr(t, err)
+		res, err := product.Exec(fake.Ctx(), t, reg, "send", c.in)
+		ce := googletest.CliErr(t, err)
 		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%d: %#v", c.status, ce)
 		}
@@ -961,22 +791,22 @@ type chatFake struct {
 	listStatus int
 }
 
-func (c *chatFake) handle(w http.ResponseWriter, h hit) {
+func (c *chatFake) handle(w http.ResponseWriter, h googletest.Hit) {
 	switch {
 	case h.Path == "/v1/spaces/S" || h.Path == "/v1/spaces/ENG1":
-		writeJSON(w, 200, map[string]any{"name": strings.TrimPrefix(h.Path, "/v1/")})
+		googletest.WriteJSON(w, 200, map[string]any{"name": strings.TrimPrefix(h.Path, "/v1/")})
 	case h.Path == "/v1/spaces":
 		if h.Query.Get("pageToken") == "" {
-			writeJSON(w, 200, map[string]any{"spaces": []any{
+			googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{
 				map[string]any{"name": "spaces/ENG1", "displayName": "Engineering", "type": "ROOM", "spaceDetails": map[string]any{"description": "Eng team"}},
 				map[string]any{"name": "spaces/DM1", "type": "ROOM", "spaceType": "DIRECT_MESSAGE"},
 			}, "nextPageToken": "p2"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/G1", "displayName": "Group", "spaceType": "GROUP_CHAT"}}})
+		googletest.WriteJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/G1", "displayName": "Group", "spaceType": "GROUP_CHAT"}}})
 	case strings.HasPrefix(h.Path, "/v1/spaces/") && strings.HasSuffix(h.Path, "/messages"):
 		if c.listStatus != 0 {
-			apiErr(w, c.listStatus, "denied")
+			googletest.WriteAPIError(w, c.listStatus, "denied")
 			return
 		}
 		start := 0
@@ -994,17 +824,17 @@ func (c *chatFake) handle(w http.ResponseWriter, h hit) {
 		if end < len(c.messages) {
 			reply["nextPageToken"] = string(rune('0' + end))
 		}
-		writeJSON(w, 200, reply)
+		googletest.WriteJSON(w, 200, reply)
 	case strings.HasPrefix(h.Path, "/v1/spaces/") && strings.Contains(h.Path, "/messages/"):
 		for _, m := range c.messages {
 			if "/v1/"+m["name"].(string) == h.Path {
-				writeJSON(w, 200, m)
+				googletest.WriteJSON(w, 200, m)
 				return
 			}
 		}
-		apiErr(w, 404, "Message not found")
+		googletest.WriteAPIError(w, 404, "Message not found")
 	case strings.HasSuffix(h.Path, "/members"):
-		writeJSON(w, 200, map[string]any{"memberships": []any{
+		googletest.WriteJSON(w, 200, map[string]any{"memberships": []any{
 			map[string]any{"name": "spaces/S/members/1", "role": "ROLE_MANAGER", "state": "JOINED", "member": map[string]any{"name": "users/1", "type": "HUMAN"}},
 			map[string]any{"name": "spaces/S/members/2", "state": "INVITED", "member": map[string]any{"name": "users/2", "displayName": "Chat Two"}},
 			map[string]any{"name": "spaces/S/members/3", "member": map[string]any{"name": "users/3", "type": "BOT", "displayName": "Bot"}},
@@ -1012,27 +842,27 @@ func (c *chatFake) handle(w http.ResponseWriter, h hit) {
 		}})
 	case h.Path == "/v1/people:listDirectoryPeople":
 		if c.dirStatus != 0 {
-			apiErr(w, c.dirStatus, "directory off")
+			googletest.WriteAPIError(w, c.dirStatus, "directory off")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"people": c.directory, "nextSyncToken": "sync-1"})
+		googletest.WriteJSON(w, 200, map[string]any{"people": c.directory, "nextSyncToken": "sync-1"})
 	case strings.HasPrefix(h.Path, "/v1/people/"):
 		if p, ok := c.people[strings.TrimPrefix(h.Path, "/v1/people/")]; ok {
-			writeJSON(w, 200, p)
+			googletest.WriteJSON(w, 200, p)
 			return
 		}
-		apiErr(w, 404, "Requested entity was not found.")
+		googletest.WriteAPIError(w, 404, "Requested entity was not found.")
 	case h.Path == "/v1/spaces:findDirectMessage":
 		switch h.Query.Get("name") {
 		case "users/7":
-			writeJSON(w, 200, map[string]any{"name": "spaces/DM7"})
+			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/DM7"})
 		case "users/8":
-			apiErr(w, 403, "scope")
+			googletest.WriteAPIError(w, 403, "scope")
 		default:
-			apiErr(w, 404, "none")
+			googletest.WriteAPIError(w, 404, "none")
 		}
 	default:
-		apiErr(w, 404, "unexpected "+h.Path)
+		googletest.WriteAPIError(w, 404, "unexpected "+h.Path)
 	}
 }
 
@@ -1048,8 +878,8 @@ func person(id, name, email string) map[string]any {
 }
 
 func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	msg := func(n, sender string) map[string]any {
 		return map[string]any{"name": "spaces/S/messages/" + n, "text": "text " + n, "createTime": "2026-04-0" + n + "T10:00:00Z",
 			"lastUpdateTime": "2026-04-0" + n + "T11:00:00Z", "sender": map[string]any{"name": sender, "displayName": "Chat " + sender}, "thread": map[string]any{"name": "spaces/S/threads/t"}}
@@ -1059,19 +889,19 @@ func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
 		directory: []any{person("1", "Alice", "alice@example.com")},
 		people:    map[string]map[string]any{"2": person("2", "Bob", "")},
 	}
-	fake := newFake(t, cf.handle)
+	fake := googletest.NewFake(t, cf.handle)
 	var res any
 	var err error
 	stderr := captureStderr(t, func() {
-		res, err = exec(fake.ctx(), t, reg, "list", input(t, "list", nil, map[string]any{
+		res, err = product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, map[string]any{
 			"space": "S", "limit": "3", "thread": "t", "since": "2026-04-01", "until": "2026-05-01T10:00:00+02:00",
 		}))
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var lists []hit
-	for _, h := range fake.recorded() {
+	var lists []googletest.Hit
+	for _, h := range fake.Recorded() {
 		if h.Path == "/v1/spaces/S/messages" {
 			lists = append(lists, h)
 		}
@@ -1087,10 +917,10 @@ func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
 	want := "Messages (3)\n\n[1] spaces/S/messages/5\n    From: Alice <alice@example.com>\n    > text 5\n    Date: 2026-04-05T10:00:00Z\n\n" +
 		"[2] spaces/S/messages/4\n    From: Bob\n    > text 4\n    Date: 2026-04-04T10:00:00Z\n\n" +
 		"[3] spaces/S/messages/3\n    From: Chat users/3\n    > text 3\n    Date: 2026-04-03T10:00:00Z\n"
-	if got := render(t, "list", res); got != want {
+	if got := product.Spec(t, "list").Format(res); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := jsonText(res); !strings.HasPrefix(got, `[{"name":"spaces/S/messages/5","createTime":"2026-04-05T10:00:00Z","updateTime":"2026-04-05T11:00:00Z","text":"text 5","sender":{"name":"users/1","displayName":"Alice","email":"alice@example.com"},"thread":{"name":"spaces/S/threads/t"}}`) {
+	if got := googletest.JSONText(res); !strings.HasPrefix(got, `[{"name":"spaces/S/messages/5","createTime":"2026-04-05T10:00:00Z","updateTime":"2026-04-05T11:00:00Z","text":"text 5","sender":{"name":"users/1","displayName":"Alice","email":"alice@example.com"},"thread":{"name":"spaces/S/threads/t"}}`) {
 		t.Fatalf("%s", got)
 	}
 	// The directory was cached where Bun keeps it.
@@ -1100,12 +930,12 @@ func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
 	}
 	// --format json prints the array; no warning when the range is complete.
 	stderr = captureStderr(t, func() {
-		res, err = exec(fake.ctx(), t, reg, "list", input(t, "list", nil, map[string]any{"space": "S", "limit": "abc", "format": "json"}))
+		res, err = product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", nil, map[string]any{"space": "S", "limit": "abc", "format": "json"}))
 	})
 	if err != nil || stderr != "" {
 		t.Fatalf("%v %q", err, stderr)
 	}
-	if got := render(t, "list", res); !strings.HasPrefix(got, "[\n  {\n    \"name\": \"spaces/S/messages/5\",\n    \"createTime\"") || !strings.HasSuffix(got, "  }\n]") {
+	if got := product.Spec(t, "list").Format(res); !strings.HasPrefix(got, "[\n  {\n    \"name\": \"spaces/S/messages/5\",\n    \"createTime\"") || !strings.HasSuffix(got, "  }\n]") {
 		t.Fatalf("%q", got)
 	}
 	if n := len(res.(shown[[]message]).Value); n != 4 {
@@ -1114,10 +944,10 @@ func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
 }
 
 func TestListAndGetErrorsMatchBun(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	cf := &chatFake{messages: []map[string]any{{"name": "spaces/S/messages/1"}, {"name": "spaces/S/messages/2"}}}
-	fake := newFake(t, cf.handle)
+	fake := googletest.NewFake(t, cf.handle)
 	const listHint = "Check that the space ID is valid and OAuth token is not expired"
 	cases := []struct {
 		path    string
@@ -1127,22 +957,22 @@ func TestListAndGetErrorsMatchBun(t *testing.T) {
 		message string
 		suggest string
 	}{
-		{"list", input(t, "list", nil, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
-		{"list", input(t, "list", nil, map[string]any{"space": "S", "format": "xml"}), 0, clierr.InvalidParams, "Unknown format: xml", "Use --format text or --format json"},
-		{"list", input(t, "list", nil, map[string]any{"space": "  "}), 0, clierr.InvalidParams, "spaceId is required for listing messages", "Specify with --space or configure default in profile"},
-		{"list", input(t, "list", nil, map[string]any{"space": "S", "since": "last week"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
-		{"list", input(t, "list", nil, map[string]any{"space": "S", "until": "2026-02-32"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
-		{"list", input(t, "list", nil, map[string]any{"space": "S", "limit": "-1"}), 0, clierr.APIError, "Failed to list messages: Invalid array length", listHint},
-		{"list", input(t, "list", nil, map[string]any{"space": "S"}), 403, clierr.PermissionDenied, "Failed to list messages: Bot lacks permission for this operation", listHint},
-		{"list", input(t, "list", nil, map[string]any{"space": "Nowhere"}), 0, clierr.NotFound, `Space not found: "Nowhere"`, `Use "agentio gchat spaces" to list available spaces`},
-		{"get", input(t, "get", map[string]any{"message-id": "9"}, map[string]any{"space": "S"}), 0, clierr.NotFound, "Failed to get message: Space or message not found", "Check that the space ID and message ID are valid"},
-		{"get", input(t, "get", map[string]any{"message-id": " "}, map[string]any{"space": "S"}), 0, clierr.InvalidParams, "Both spaceId and messageId are required", "Specify with --space and message ID"},
-		{"get", input(t, "get", map[string]any{"message-id": "1"}, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
+		{"list", product.Input(t, "list", nil, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S", "format": "xml"}), 0, clierr.InvalidParams, "Unknown format: xml", "Use --format text or --format json"},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "  "}), 0, clierr.InvalidParams, "spaceId is required for listing messages", "Specify with --space or configure default in profile"},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S", "since": "last week"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S", "until": "2026-02-32"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S", "limit": "-1"}), 0, clierr.APIError, "Failed to list messages: Invalid array length", listHint},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "S"}), 403, clierr.PermissionDenied, "Failed to list messages: Bot lacks permission for this operation", listHint},
+		{"list", product.Input(t, "list", nil, map[string]any{"space": "Nowhere"}), 0, clierr.NotFound, `Space not found: "Nowhere"`, `Use "agentio gchat spaces" to list available spaces`},
+		{"get", product.Input(t, "get", map[string]any{"message-id": "9"}, map[string]any{"space": "S"}), 0, clierr.NotFound, "Failed to get message: Space or message not found", "Check that the space ID and message ID are valid"},
+		{"get", product.Input(t, "get", map[string]any{"message-id": " "}, map[string]any{"space": "S"}), 0, clierr.InvalidParams, "Both spaceId and messageId are required", "Specify with --space and message ID"},
+		{"get", product.Input(t, "get", map[string]any{"message-id": "1"}, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
 	}
 	for _, c := range cases {
 		cf.listStatus = c.status
-		res, err := exec(fake.ctx(), t, reg, c.path, c.in)
-		ce := cliErr(t, err)
+		res, err := product.Exec(fake.Ctx(), t, reg, c.path, c.in)
+		ce := googletest.CliErr(t, err)
 		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%s %v: %#v", c.path, c.in.Options, ce)
 		}
@@ -1150,59 +980,59 @@ func TestListAndGetErrorsMatchBun(t *testing.T) {
 }
 
 func TestGetResolvesTheSpaceByNameAndPrintsTheMessage(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	cf := &chatFake{
 		messages:  []map[string]any{{"name": "spaces/ENG1/messages/7", "text": "line1\nline2", "createTime": "2026-04-01T00:00:00Z", "sender": map[string]any{"name": "users/1"}, "thread": map[string]any{"name": "spaces/ENG1/threads/t"}}},
 		dirStatus: 403,
 		people:    map[string]map[string]any{"1": person("1", "Alice", "alice@example.com")},
 	}
-	fake := newFake(t, cf.handle)
-	res, err := exec(fake.ctx(), t, reg, "get", input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "engineering"}))
+	fake := googletest.NewFake(t, cf.handle)
+	res, err := product.Exec(fake.Ctx(), t, reg, "get", product.Input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "engineering"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := render(t, "get", res); got != "ID: spaces/ENG1/messages/7\nFrom: Alice <alice@example.com>\nDate: 2026-04-01T00:00:00Z\nThread: spaces/ENG1/threads/t\n---\nline1\nline2" {
+	if got := product.Spec(t, "get").Format(res); got != "ID: spaces/ENG1/messages/7\nFrom: Alice <alice@example.com>\nDate: 2026-04-01T00:00:00Z\nThread: spaces/ENG1/threads/t\n---\nline1\nline2" {
 		t.Fatalf("%q", got)
 	}
 	// People fields asked for a sender are names and emails only.
-	for _, h := range fake.recorded() {
+	for _, h := range fake.Recorded() {
 		if h.Path == "/v1/people/1" && h.Query.Get("personFields") != "names,emailAddresses" {
 			t.Fatalf("%v", h.Query)
 		}
 	}
-	res, _ = exec(fake.ctx(), t, reg, "get", input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "ENG1", "format": "json"}))
-	if got := render(t, "get", res); !strings.HasPrefix(got, "{\n  \"name\": \"spaces/ENG1/messages/7\",\n  \"createTime\": \"2026-04-01T00:00:00Z\",\n  \"updateTime\": \"") {
+	res, _ = product.Exec(fake.Ctx(), t, reg, "get", product.Input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "ENG1", "format": "json"}))
+	if got := product.Spec(t, "get").Format(res); !strings.HasPrefix(got, "{\n  \"name\": \"spaces/ENG1/messages/7\",\n  \"createTime\": \"2026-04-01T00:00:00Z\",\n  \"updateTime\": \"") {
 		t.Fatalf("%q", got)
 	}
 }
 
 func TestSpacesAndDirectMessages(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	cf := &chatFake{directory: []any{person("7", "Grace", "Grace@Example.com"), person("8", "", "h@example.com")}}
-	fake := newFake(t, cf.handle)
-	res, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil))
+	fake := googletest.NewFake(t, cf.handle)
+	res, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := render(t, "spaces", res); got != "Spaces (3)\n\n[ROOM] ENG1  Engineering  - Eng team\n[DM] DM1  Unnamed\n[DM] G1  Group" {
+	if got := product.Spec(t, "spaces").Format(res); got != "Spaces (3)\n\n[ROOM] ENG1  Engineering  - Eng team\n[DM] DM1  Unnamed\n[DM] G1  Group" {
 		t.Fatalf("%q", got)
 	}
-	res, _ = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"filter": "ENG"}))
-	if got := render(t, "spaces", res); got != "Spaces (1)\n\n[ROOM] ENG1  Engineering  - Eng team" {
+	res, _ = product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"filter": "ENG"}))
+	if got := product.Spec(t, "spaces").Format(res); got != "Spaces (1)\n\n[ROOM] ENG1  Engineering  - Eng team" {
 		t.Fatalf("%q", got)
 	}
-	res, _ = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"filter": "zzz"}))
-	if got := render(t, "spaces", res); got != "No spaces found" || jsonText(res) != "[]" {
-		t.Fatalf("%q %s", got, jsonText(res))
+	res, _ = product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"filter": "zzz"}))
+	if got := product.Spec(t, "spaces").Format(res); got != "No spaces found" || googletest.JSONText(res) != "[]" {
+		t.Fatalf("%q %s", got, googletest.JSONText(res))
 	}
 	// An email resolves through the directory; the DM name comes from it too.
-	res, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.COM"}))
+	res, err = product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": "grace@example.COM"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := render(t, "spaces", res); got != "Spaces (1)\n\n[DM] DM7  Grace" {
+	if got := product.Spec(t, "spaces").Format(res); got != "Spaces (1)\n\n[DM] DM7  Grace" {
 		t.Fatalf("%q", got)
 	}
 	cases := []struct {
@@ -1217,8 +1047,8 @@ func TestSpacesAndDirectMessages(t *testing.T) {
 		{"nobody@example.com", clierr.NotFound, "Email not found in workspace directory: nobody@example.com", `Run "agentio gchat directory refresh" if the user was added recently`},
 	}
 	for _, c := range cases {
-		res, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": c.with}))
-		ce := cliErr(t, err)
+		res, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": c.with}))
+		ce := googletest.CliErr(t, err)
 		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%s: %#v", c.with, ce)
 		}
@@ -1228,23 +1058,23 @@ func TestSpacesAndDirectMessages(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(vault.ConfigDir(), "cache")); err != nil {
 		t.Fatal(err)
 	}
-	_, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.com"}))
-	if ce := cliErr(t, err); ce.Code != clierr.APIError || !strings.HasPrefix(ce.Message, "Failed to refresh workspace directory: listDirectoryPeople failed: 403 {") ||
+	_, err = product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": "grace@example.com"}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.APIError || !strings.HasPrefix(ce.Message, "Failed to refresh workspace directory: listDirectoryPeople failed: 403 {") ||
 		ce.Suggestion != "Check OAuth scope and network connectivity" {
 		t.Fatalf("%#v", ce)
 	}
 	noEmail := freshOAuth()
 	delete(noEmail, "email")
-	saveProfile(t, "anon", noEmail, false)
-	_, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.com", "profile": "anon"}))
-	if ce := cliErr(t, err); ce.Code != clierr.ConfigError || ce.Message != "Directory cache requires an OAuth profile with an email" {
+	product.SaveProfile(t, "anon", noEmail, false)
+	_, err = product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": "grace@example.com", "profile": "anon"}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.ConfigError || ce.Message != "Directory cache requires an OAuth profile with an email" {
 		t.Fatalf("%#v", ce)
 	}
 }
 
 func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
 	full := person("1", "Alice", "alice@example.com")
 	full["phoneNumbers"] = []any{map[string]any{"value": "+1 555"}, map[string]any{}}
 	full["organizations"] = []any{map[string]any{"title": "CTO", "name": "Acme"}, map[string]any{}}
@@ -1254,8 +1084,8 @@ func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
 		people:    map[string]map[string]any{"1": full, "2": {"resourceName": "people/2"}},
 		directory: []any{person("2", "Bob Dir", "bob@example.com")},
 	}
-	fake := newFake(t, cf.handle)
-	res, err := exec(fake.ctx(), t, reg, "members", input(t, "members", nil, map[string]any{"space": "S"}))
+	fake := googletest.NewFake(t, cf.handle)
+	res, err := product.Exec(fake.Ctx(), t, reg, "members", product.Input(t, "members", nil, map[string]any{"space": "S"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1263,77 +1093,77 @@ func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
 		"[2] Bob Dir <bob@example.com> [INVITED]\n    User ID: users/2\n" +
 		"[3] Bot [BOT] [MEMBERSHIP_STATE_UNSPECIFIED]\n    User ID: users/3\n" +
 		"[4] (unknown)"
-	if got := render(t, "members", res); got != want {
+	if got := product.Spec(t, "members").Format(res); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := jsonText(res.([]member)[3]); got != `{"name":"spaces/S/members/4","role":"ROLE_MEMBER","state":"JOINED","memberType":"HUMAN"}` {
+	if got := googletest.JSONText(res.([]member)[3]); got != `{"name":"spaces/S/members/4","role":"ROLE_MEMBER","state":"JOINED","memberType":"HUMAN"}` {
 		t.Fatalf("%s", got)
 	}
-	for _, h := range fake.recorded() {
+	for _, h := range fake.Recorded() {
 		if h.Path == "/v1/people/1" && h.Query.Get("personFields") != "names,emailAddresses,phoneNumbers,organizations,photos,locations" {
 			t.Fatalf("%v", h.Query)
 		}
 	}
-	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "1"}, nil))
+	res, err = product.Exec(fake.Ctx(), t, reg, "user", product.Input(t, "user", map[string]any{"user-id": "1"}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := render(t, "user", res); got != "ID: users/1\nName: Alice\nEmail: alice@example.com\nPhone: +1 555\nOrganizations:\n  - CTO · Acme\nLocation: Paris\nPhoto: https://photo.example.com/a" {
+	if got := product.Spec(t, "user").Format(res); got != "ID: users/1\nName: Alice\nEmail: alice@example.com\nPhone: +1 555\nOrganizations:\n  - CTO · Acme\nLocation: Paris\nPhoto: https://photo.example.com/a" {
 		t.Fatalf("%q", got)
 	}
-	if got := jsonText(res); got != `{"name":"users/1","displayName":"Alice","email":"alice@example.com","phoneNumbers":["+1 555"],"organizations":[{"name":"Acme","title":"CTO"},{}],"photoUrl":"https://photo.example.com/a","locations":["Paris"]}` {
+	if got := googletest.JSONText(res); got != `{"name":"users/1","displayName":"Alice","email":"alice@example.com","phoneNumbers":["+1 555"],"organizations":[{"name":"Acme","title":"CTO"},{}],"photoUrl":"https://photo.example.com/a","locations":["Paris"]}` {
 		t.Fatalf("%s", got)
 	}
-	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "users/2"}, nil))
-	if err != nil || render(t, "user", res) != "ID: users/2\nName: Bob Dir\nEmail: bob@example.com" {
-		t.Fatalf("%v %q", err, render(t, "user", res))
+	res, err = product.Exec(fake.Ctx(), t, reg, "user", product.Input(t, "user", map[string]any{"user-id": "users/2"}, nil))
+	if err != nil || product.Spec(t, "user").Format(res) != "ID: users/2\nName: Bob Dir\nEmail: bob@example.com" {
+		t.Fatalf("%v %q", err, product.Spec(t, "user").Format(res))
 	}
-	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "404"}, nil))
-	if ce := cliErr(t, err); res != nil || ce.Code != clierr.NotFound || ce.Message != `User not found: "404"` || ce.Suggestion != "Check the user ID is valid" {
+	res, err = product.Exec(fake.Ctx(), t, reg, "user", product.Input(t, "user", map[string]any{"user-id": "404"}, nil))
+	if ce := googletest.CliErr(t, err); res != nil || ce.Code != clierr.NotFound || ce.Message != `User not found: "404"` || ce.Suggestion != "Check the user ID is valid" {
 		t.Fatalf("%#v", ce)
 	}
-	_, err = exec(fake.ctx(), t, reg, "members", input(t, "members", nil, nil))
-	if ce := cliErr(t, err); ce.Message != "required option '--space <id-or-name>' not specified" {
+	_, err = product.Exec(fake.Ctx(), t, reg, "members", product.Input(t, "members", nil, nil))
+	if ce := googletest.CliErr(t, err); ce.Message != "required option '--space <id-or-name>' not specified" {
 		t.Fatalf("%#v", ce)
 	}
 }
 
 func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", freshOAuth(), false)
-	var dirHits []hit
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	var dirHits []googletest.Hit
 	var incremental []any
 	incrementalStatus := 200
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path != "/v1/people:listDirectoryPeople" {
-			apiErr(w, 404, "none")
+			googletest.WriteAPIError(w, 404, "none")
 			return
 		}
 		dirHits = append(dirHits, h)
 		if h.Query.Get("syncToken") != "" {
 			if incrementalStatus != 200 {
-				apiErr(w, incrementalStatus, "expired")
+				googletest.WriteAPIError(w, incrementalStatus, "expired")
 				return
 			}
-			writeJSON(w, 200, map[string]any{"people": incremental})
+			googletest.WriteJSON(w, 200, map[string]any{"people": incremental})
 			return
 		}
 		if h.Query.Get("pageToken") == "" {
-			writeJSON(w, 200, map[string]any{"people": []any{person("1", "Alice", "a@example.com"), person("", "Nobody", "")}, "nextPageToken": "p2"})
+			googletest.WriteJSON(w, 200, map[string]any{"people": []any{person("1", "Alice", "a@example.com"), person("", "Nobody", "")}, "nextPageToken": "p2"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"people": []any{person("2", "", "b@example.com"), person("3", "", "")}, "nextSyncToken": "sync-1"})
+		googletest.WriteJSON(w, 200, map[string]any{"people": []any{person("2", "", "b@example.com"), person("3", "", "")}, "nextSyncToken": "sync-1"})
 	})
 	clock := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
 	prev := now
 	now = func() time.Time { return clock }
 	t.Cleanup(func() { now = prev })
-	res, err := exec(fake.ctx(), t, reg, "directory refresh", input(t, "directory refresh", nil, nil))
+	res, err := product.Exec(fake.Ctx(), t, reg, "directory refresh", product.Input(t, "directory refresh", nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	path, _ := plugincache.Path("gchat", "me@example.com", "directory")
-	if got := render(t, "directory refresh", res); got != "Refreshed: 2 users\nPath: "+path+"\nFetched at: 2026-04-01T10:00:00.000Z" {
+	if got := product.Spec(t, "directory refresh").Format(res); got != "Refreshed: 2 users\nPath: "+path+"\nFetched at: 2026-04-01T10:00:00.000Z" {
 		t.Fatalf("%q", got)
 	}
 	q := dirHits[0].Query
@@ -1349,7 +1179,7 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 		t.Fatalf("mode %v", info.Mode())
 	}
 	// Inside the TTL, resolving an email reads the cache only.
-	a, err := apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1192,7 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 	deleted := person("1", "", "")
 	deleted["metadata"] = map[string]any{"deleted": true}
 	incremental = []any{deleted, person("4", "Dan", "d@example.com")}
-	a, _ = apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
 	if id, err := a.resolveUserResourceName("d@example.com"); err != nil || id != "users/4" {
 		t.Fatalf("%q %v", id, err)
 	}
@@ -1375,13 +1205,13 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 	// A rejected sync token falls back to a full fetch.
 	clock = clock.Add(25 * time.Hour)
 	incrementalStatus = 410
-	a, _ = apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
 	if id, err := a.resolveUserResourceName("a@example.com"); err != nil || id != "users/1" || len(dirHits) != 6 {
 		t.Fatalf("%q %v %d", id, err, len(dirHits))
 	}
 	// A forced refresh surfaces the directory error as Bun's plain Error.
-	fake.handle = func(w http.ResponseWriter, h hit) { apiErr(w, 403, "no") }
-	res, err = exec(fake.ctx(), t, reg, "directory refresh", input(t, "directory refresh", nil, nil))
+	fake.SetHandle(func(w http.ResponseWriter, h googletest.Hit) { googletest.WriteAPIError(w, 403, "no") })
+	res, err = product.Exec(fake.Ctx(), t, reg, "directory refresh", product.Input(t, "directory refresh", nil, nil))
 	var ce *clierr.Error
 	if res != nil || err == nil || errors.As(err, &ce) || err.Error() != "listDirectoryPeople failed: 403 {\"error\":{\"code\":403,\"message\":\"no\"}}\n" {
 		t.Fatalf("%#v %v", res, err)

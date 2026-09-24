@@ -76,10 +76,9 @@ func toPushed(scriptID string, files []file) *pushed {
 // api is GScriptClient: projects through script/v1, listing and deletion
 // through drive/v3.
 type api struct {
-	ctx    context.Context
+	google.API
 	script *script.Service
 	drive  *drive.Service
-	fail   func(code plugins.ErrorCode, message, suggestion string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
@@ -91,28 +90,25 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, script: scriptSvc, drive: driveSvc, fail: run.Fail}, nil
+	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, script: scriptSvc, drive: driveSvc}, nil
 }
 
-// apiError is GScriptClient.throwApiError.
-func (a *api) apiError(operation string, err error) error {
-	message := google.StatusMessage(err, "Insufficient permissions for this script project", "Script project not found")
-	return a.fail(google.ErrorCode(err), "Failed to "+operation+": "+message, "")
-}
+// errorMessage is GScriptClient.getErrorMessage.
+var errorMessage = google.StatusText("Insufficient permissions for this script project", "Script project not found")
 
 func (a *api) create(title, parentID string) (*project, error) {
 	req := &script.CreateProjectRequest{Title: title, ParentId: parentID, ForceSendFields: []string{"Title"}}
-	resp, err := a.script.Projects.Create(req).Context(a.ctx).Do()
+	resp, err := a.script.Projects.Create(req).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("create script project", err)
+		return nil, a.Failed("create script project", err)
 	}
 	return toProject(resp), nil
 }
 
 func (a *api) metadata(scriptID string) (*project, error) {
-	resp, err := a.script.Projects.Get(scriptID).Context(a.ctx).Do()
+	resp, err := a.script.Projects.Get(scriptID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get script project metadata", err)
+		return nil, a.Failed("get script project metadata", err)
 	}
 	return toProject(resp), nil
 }
@@ -125,9 +121,9 @@ func (a *api) list(parentID string, limit float64) ([]listItem, error) {
 		q += " and '" + parentID + "' in parents"
 	}
 	resp, err := a.drive.Files.List().Q(q).Fields("files(id,name,parents,modifiedTime)").
-		OrderBy("modifiedTime desc").Context(a.ctx).Do(google.PageSize(limit))
+		OrderBy("modifiedTime desc").Context(a.Ctx).Do(google.PageSize(limit))
 	if err != nil {
-		return nil, a.apiError("list script projects", err)
+		return nil, a.Failed("list script projects", err)
 	}
 	out := []listItem{}
 	for _, f := range resp.Files {
@@ -144,16 +140,16 @@ func (a *api) list(parentID string, limit float64) ([]listItem, error) {
 }
 
 func (a *api) delete(scriptID string) error {
-	if err := a.drive.Files.Delete(scriptID).Context(a.ctx).Do(); err != nil {
-		return a.apiError("delete script project", err)
+	if err := a.drive.Files.Delete(scriptID).Context(a.Ctx).Do(); err != nil {
+		return a.Failed("delete script project", err)
 	}
 	return nil
 }
 
 func (a *api) getContent(scriptID string) ([]file, error) {
-	resp, err := a.script.Projects.GetContent(scriptID).Context(a.ctx).Do()
+	resp, err := a.script.Projects.GetContent(scriptID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get script content", err)
+		return nil, a.Failed("get script content", err)
 	}
 	return toFiles(resp.Files), nil
 }
@@ -165,9 +161,9 @@ func (a *api) updateContent(scriptID string, files []file) ([]file, error) {
 	for _, f := range files {
 		body.Files = append(body.Files, &script.File{Name: f.Name, Type: f.Type, Source: f.Source, ForceSendFields: []string{"Name", "Type", "Source"}})
 	}
-	resp, err := a.script.Projects.UpdateContent(scriptID, body).Context(a.ctx).Do()
+	resp, err := a.script.Projects.UpdateContent(scriptID, body).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("update script content", err)
+		return nil, a.Failed("update script content", err)
 	}
 	return toFiles(resp.Files), nil
 }

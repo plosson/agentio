@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
@@ -18,90 +17,12 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/google"
-	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-// hit is one request that reached the fake Google.
-type hit struct {
-	Method string
-	Path   string
-	Query  url.Values
-	Auth   string
-	Body   string
-	Form   url.Values
-}
-
-type fakeGoogle struct {
-	mu     sync.Mutex
-	hits   []hit
-	handle func(w http.ResponseWriter, h hit)
-	srv    *httptest.Server
-}
-
-func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeGoogle {
-	t.Helper()
-	f := &fakeGoogle{handle: handle}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		h := hit{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Auth: r.Header.Get("Authorization")}
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-			// Compacted, keys sorted: the body as the API reads it.
-			var v any
-			if err := json.Unmarshal(raw, &v); err != nil {
-				t.Errorf("non-JSON body %q", raw)
-			}
-			h.Body = jsonText(v)
-		} else if len(raw) > 0 {
-			h.Form, _ = url.ParseQuery(string(raw))
-		}
-		f.mu.Lock()
-		f.hits = append(f.hits, h)
-		f.mu.Unlock()
-		f.handle(w, h)
-	}))
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-func (f *fakeGoogle) ctx() context.Context {
-	return google.WithEndpoints(context.Background(), google.Endpoints{
-		API: f.srv.URL + "/", Token: f.srv.URL + "/token", UserInfo: f.srv.URL + "/userinfo",
-	})
-}
-
-func (f *fakeGoogle) recorded() []hit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]hit(nil), f.hits...)
-}
-
-func (f *fakeGoogle) last() hit {
-	all := f.recorded()
-	return all[len(all)-1]
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func setupVault(t *testing.T) *plugins.Registry {
-	t.Helper()
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := plugins.NewRegistry(New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
+// product drives New() through the shared Google test harness.
+var product = googletest.For(New)
 
 func storedCreds(expiry int64) map[string]any {
 	return map[string]any{
@@ -112,79 +33,6 @@ func storedCreds(expiry int64) map[string]any {
 		"scope":         "https://www.googleapis.com/auth/tasks",
 		"email":         "me@example.com",
 	}
-}
-
-func saveProfile(t *testing.T, name string, creds map[string]any, readOnly bool) {
-	t.Helper()
-	opts := profile.SaveOptions{}
-	if readOnly {
-		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
-	}
-	if err := profile.Save("gtasks", name, creds, opts); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func loadCreds(t *testing.T, name string) map[string]any {
-	t.Helper()
-	c, err := vault.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.Credentials["gtasks"][name]
-}
-
-func spec(t *testing.T, path string) *plugins.CommandSpec {
-	t.Helper()
-	p := New()
-	for i := range p.Commands {
-		if p.Commands[i].Path == path {
-			return &p.Commands[i]
-		}
-	}
-	t.Fatalf("no command %q", path)
-	return nil
-}
-
-// input fills the switches and the defaults the way the host does (an absent
-// <value> option without a default stays absent), then applies set.
-func input(t *testing.T, path string, args map[string]any, set map[string]any) plugins.CommandInput {
-	t.Helper()
-	in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
-	for _, o := range spec(t, path).Options {
-		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
-		switch d := o.DefaultValue.(type) {
-		case bool:
-			in.Options[name] = d
-		case string:
-			in.Options[name] = d
-		default:
-			if !strings.Contains(o.Flags, "<") {
-				in.Options[name] = false
-			}
-		}
-	}
-	for k, v := range args {
-		in.Args[k] = v
-	}
-	for k, v := range set {
-		in.Options[k] = v
-	}
-	return in
-}
-
-func exec(ctx context.Context, t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
-	t.Helper()
-	return host.Execute(ctx, reg, reg.Find("gtasks"), spec(t, path), in)
-}
-
-func cliErr(t *testing.T, err error) *clierr.Error {
-	t.Helper()
-	ce, ok := err.(*clierr.Error)
-	if !ok {
-		t.Fatalf("not a CLI error: %#v", err)
-	}
-	return ce
 }
 
 // The command table is the Bun surface: `bun run src/index.ts gtasks --help`
@@ -266,17 +114,17 @@ func TestCommandTableMatchesBun(t *testing.T) {
 }
 
 func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		switch h.Path {
 		case "/token":
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/userinfo.email"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/userinfo.email"})
 		case "/userinfo":
 			if h.Auth != "Bearer at-1" {
 				w.WriteHeader(401)
 				return
 			}
-			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+			googletest.WriteJSON(w, 200, map[string]any{"email": "user@example.com"})
 		default:
 			w.WriteHeader(404)
 		}
@@ -295,7 +143,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	}
 	var out bytes.Buffer
 	before := time.Now().UnixMilli()
-	if err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
+	if err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(logs, "|") != "Starting OAuth flow for Google Tasks...\n" {
@@ -311,12 +159,12 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		q.Get("redirect_uri") != "http://localhost:3001/callback" || q.Get("response_type") != "code" || !strings.HasSuffix(q.Get("client_id"), ".apps.googleusercontent.com") {
 		t.Fatalf("authorize url %s", authURL)
 	}
-	token := fake.recorded()[0].Form
+	token := fake.Recorded()[0].Form
 	if token.Get("grant_type") != "authorization_code" || token.Get("code") != "code-1" || token.Get("redirect_uri") != "http://localhost:3001/callback" || token.Get("client_secret") == "" {
 		t.Fatalf("token request %v", token)
 	}
 	// The suggested name is the email, and the host saved it under Bun's keys.
-	stored := loadCreds(t, "user@example.com")
+	stored := product.LoadCreds(t, "user@example.com")
 	var keys []string
 	for k := range stored {
 		keys = append(keys, k)
@@ -341,20 +189,20 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 }
 
 func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
-	setupVault(t)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": "123"})
+		googletest.WriteJSON(w, 200, map[string]any{"id": "123"})
 	})
 	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, io.Discard)
-	ce := cliErr(t, err)
+	err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, io.Discard)
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.AuthFailed || ce.Message != "Could not fetch email" || ce.Suggestion != "Try again or specify --profile manually" {
 		t.Fatalf("%#v", ce)
 	}
@@ -366,22 +214,22 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 // Bun never rotates a Google refresh token: google-auth-library puts the
 // stored one back on the result, so a rotated token in the response is dropped.
 func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
-	reg := setupVault(t)
+	reg := product.SetupVault(t)
 	creds := storedCreds(1)
 	creds["legacy"] = "kept"
-	saveProfile(t, "acme", creds, false)
+	product.SaveProfile(t, "acme", creds, false)
 	var mu sync.Mutex
 	refreshes := 0
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
 			mu.Lock()
 			refreshes++
 			mu.Unlock()
 			time.Sleep(50 * time.Millisecond)
-			writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"items": []any{}})
+		googletest.WriteJSON(w, 200, map[string]any{"items": []any{}})
 	})
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -389,7 +237,7 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = auth.GetFresh(fake.ctx(), reg, "gtasks", "acme", auth.RefreshOptions{})
+			_, errs[i] = auth.GetFresh(fake.Ctx(), reg, "gtasks", "acme", auth.RefreshOptions{})
 		}(i)
 	}
 	wg.Wait()
@@ -401,11 +249,11 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if refreshes != 1 {
 		t.Fatalf("%d refreshes, want 1", refreshes)
 	}
-	form := fake.recorded()[0].Form
+	form := fake.Recorded()[0].Form
 	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt-old" || form.Get("client_secret") == "" {
 		t.Fatalf("refresh request %v", form)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["access_token"] != "at-new" || stored["refresh_token"] != "rt-old" || stored["email"] != "me@example.com" ||
 		stored["legacy"] != "kept" || stored["scope"] != "https://www.googleapis.com/auth/tasks" {
 		t.Fatalf("%#v", stored)
@@ -414,44 +262,44 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		t.Fatalf("expiry_date %T", stored["expiry_date"])
 	}
 	// The command then calls the API with the refreshed token.
-	if _, err := exec(fake.ctx(), t, reg, "lists list", input(t, "lists list", nil, nil)); err != nil {
+	if _, err := product.Exec(fake.Ctx(), t, reg, "lists list", product.Input(t, "lists list", nil, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if last := fake.last(); last.Auth != "Bearer at-new" || refreshes != 1 {
+	if last := fake.Last(); last.Auth != "Bearer at-new" || refreshes != 1 {
 		t.Fatalf("auth %q refreshes %d", last.Auth, refreshes)
 	}
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(1), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(1), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			googletest.WriteJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
 			return
 		}
 		t.Errorf("API called after a failed refresh: %s", h.Path)
 	})
-	_, err := exec(fake.ctx(), t, reg, "list", input(t, "list", map[string]any{"tasklist-id": "L1"}, nil))
-	ce := cliErr(t, err)
+	_, err := product.Exec(fake.Ctx(), t, reg, "list", product.Input(t, "list", map[string]any{"tasklist-id": "L1"}, nil))
+	ce := googletest.CliErr(t, err)
 	if ce.Code != clierr.TokenExpired || ce.Message != `Token refresh failed for gtasks profile "acme": invalid_grant` ||
 		ce.Suggestion != "Re-authenticate with: agentio gtasks profile add --profile acme" {
 		t.Fatalf("%#v", ce)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["access_token"] != "at-old" || stored["refresh_token"] != "rt-old" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
-	if n := len(fake.recorded()); n != 1 {
+	if n := len(fake.Recorded()); n != 1 {
 		t.Fatalf("%d requests", n)
 	}
 }
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "ro", storedCreds(time.Now().Add(24*time.Hour).UnixMilli()), true)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, 200, map[string]any{"id": "T1", "items": []any{}})
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", storedCreds(time.Now().Add(24*time.Hour).UnixMilli()), true)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"id": "T1", "items": []any{}})
 	})
 	args := map[string]any{"tasklist-id": "L1", "task-id": "T1", "title": "Groceries"}
 	writes := map[string]string{
@@ -459,8 +307,8 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 		"done": "complete task", "undo": "uncomplete task", "delete": "delete task", "clear": "clear tasks", "move": "move task",
 	}
 	for path, op := range writes {
-		_, err := exec(fake.ctx(), t, reg, path, input(t, path, args, map[string]any{"title": "T", "parent": "P1"}))
-		ce := cliErr(t, err)
+		_, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, args, map[string]any{"title": "T", "parent": "P1"}))
+		ce := googletest.CliErr(t, err)
 		if ce.Code != clierr.PermissionDenied || ce.Message != `Cannot `+op+`: profile "ro" is read-only` ||
 			ce.Suggestion != "To modify this profile's access: agentio gtasks profile update --profile ro --no-read-only" {
 			t.Fatalf("%s: %#v", path, ce)
@@ -472,20 +320,20 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 		"update": {"status": "done"},
 		"move":   nil,
 	} {
-		_, err := exec(fake.ctx(), t, reg, path, input(t, path, args, set))
-		if ce := cliErr(t, err); ce.Code != clierr.InvalidParams {
+		_, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, args, set))
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams {
 			t.Fatalf("%s: %#v", path, ce)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
 	for _, path := range []string{"lists list", "list", "get"} {
-		if _, err := exec(fake.ctx(), t, reg, path, input(t, path, args, nil)); err != nil {
+		if _, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, args, nil)); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
 	}
-	if n := len(fake.recorded()); n != 3 {
+	if n := len(fake.Recorded()); n != 3 {
 		t.Fatalf("reads did not run: %d", n)
 	}
 }
@@ -493,24 +341,24 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 func TestValidate(t *testing.T) {
 	var status int
 	var body any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path != "/tasks/v1/users/@me/lists" || h.Query.Get("maxResults") != "1" || h.Auth != "Bearer at-old" {
 			t.Errorf("validate called %s %v with %q", h.Path, h.Query, h.Auth)
 		}
-		writeJSON(w, status, body)
+		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.ctx())
+	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"items": []any{}}
-	v, err := New().Profile.Validate(fake.ctx(), run)
+	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "tasks access ok" {
 		t.Fatalf("%#v %v", v, err)
 	}
 	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}
-	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
 		t.Fatalf("%#v", v)
 	}
 }
@@ -535,12 +383,12 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	if p.Profile.ListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || p.Profile.ListInfo(map[string]any{}) != "" {
 		t.Fatal("list info")
 	}
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Path == "/token" {
-			writeJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
+			googletest.WriteJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"email": "me@example.com"})
+		googletest.WriteJSON(w, 200, map[string]any{"email": "me@example.com"})
 	})
 	var logs []string
 	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
@@ -552,7 +400,7 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := p.Profile.Reauthenticate(fake.ctx(), storedCreds(1), "work", sc)
+	got, err := p.Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,21 +413,21 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 }
 
 func TestListingCommandsSendTheBunQueries(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, 200, map[string]any{"items": []any{}})
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, 200, map[string]any{"items": []any{}})
 	})
-	run := func(path string, args, set map[string]any) hit {
+	run := func(path string, args, set map[string]any) googletest.Hit {
 		t.Helper()
-		before := len(fake.recorded())
-		if _, err := exec(fake.ctx(), t, reg, path, input(t, path, args, set)); err != nil {
+		before := len(fake.Recorded())
+		if _, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, args, set)); err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		if n := len(fake.recorded()) - before; n != 1 {
+		if n := len(fake.Recorded()) - before; n != 1 {
 			t.Fatalf("%s: %d requests", path, n)
 		}
-		return fake.last()
+		return fake.Last()
 	}
 	h := run("lists list", nil, nil)
 	if h.Method != "GET" || h.Path != "/tasks/v1/users/@me/lists" || h.Query.Get("maxResults") != "100" || h.Query.Has("pageToken") {
@@ -610,14 +458,14 @@ func TestListingCommandsSendTheBunQueries(t *testing.T) {
 }
 
 func TestWriteCommandsSendTheBunBodies(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		if h.Method == "DELETE" || strings.HasSuffix(h.Path, "/clear") {
 			w.WriteHeader(204)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": "T1", "title": "Buy milk", "status": "completed", "parent": "P1"})
+		googletest.WriteJSON(w, 200, map[string]any{"id": "T1", "title": "Buy milk", "status": "completed", "parent": "P1"})
 	})
 	ids := map[string]any{"tasklist-id": "L1", "task-id": "T1", "title": "Q4 Roadmap"}
 	cases := []struct {
@@ -655,16 +503,16 @@ func TestWriteCommandsSendTheBunBodies(t *testing.T) {
 		{"clear", "clear", nil, nil, "POST", "/tasks/v1/lists/L1/clear", "", ""},
 	}
 	for _, c := range cases {
-		in := input(t, c.path, ids, c.set)
+		in := product.Input(t, c.path, ids, c.set)
 		in.Stdin = c.stdin
-		before := len(fake.recorded())
-		if _, err := exec(fake.ctx(), t, reg, c.path, in); err != nil {
+		before := len(fake.Recorded())
+		if _, err := product.Exec(fake.Ctx(), t, reg, c.path, in); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		if n := len(fake.recorded()) - before; n != 1 {
+		if n := len(fake.Recorded()) - before; n != 1 {
 			t.Fatalf("%s: %d requests", c.name, n)
 		}
-		h := fake.last()
+		h := fake.Last()
 		q := url.Values{}
 		for k, v := range h.Query {
 			if k != "alt" && k != "prettyPrint" {
@@ -678,12 +526,12 @@ func TestWriteCommandsSendTheBunBodies(t *testing.T) {
 }
 
 func TestInputAndAPIErrorsMatchBun(t *testing.T) {
-	reg := setupVault(t)
-	saveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
 	var status int
 	var body any
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
-		writeJSON(w, status, body)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteJSON(w, status, body)
 	})
 	ids := map[string]any{"tasklist-id": "L9", "task-id": "T9", "title": "X"}
 	inputs := []struct {
@@ -695,12 +543,12 @@ func TestInputAndAPIErrorsMatchBun(t *testing.T) {
 		{"move", "At least one of --parent or --previous is required", "", map[string]any{"parent": "", "previous": ""}},
 	}
 	for _, c := range inputs {
-		_, err := exec(fake.ctx(), t, reg, c.path, input(t, c.path, ids, c.set))
-		if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != c.message || ce.Suggestion != c.suggest {
+		_, err := product.Exec(fake.Ctx(), t, reg, c.path, product.Input(t, c.path, ids, c.set))
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%s: %#v", c.path, ce)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("an invalid input reached the API %d times", n)
 	}
 	// 404 is NOT_FOUND where Bun checks it; everything else is API_ERROR with the Bun prefix.
@@ -723,8 +571,8 @@ func TestInputAndAPIErrorsMatchBun(t *testing.T) {
 		"clear":        {clierr.NotFound, "Task list not found: L9"},
 		"move":         {clierr.NotFound, "Task not found: T9"},
 	} {
-		got, err := exec(fake.ctx(), t, reg, path, input(t, path, ids, set))
-		ce := cliErr(t, err)
+		got, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, ids, set))
+		ce := googletest.CliErr(t, err)
 		if ce.Code != want.code || ce.Message != want.message || ce.Suggestion != "" {
 			t.Errorf("%s: %#v", path, ce)
 		}
@@ -742,8 +590,8 @@ func TestInputAndAPIErrorsMatchBun(t *testing.T) {
 		"undo": "Failed to update task: Forbidden", "delete": "Failed to delete task: Forbidden",
 		"clear": "Failed to clear completed tasks: Forbidden", "move": "Failed to move task: Forbidden",
 	} {
-		_, err := exec(fake.ctx(), t, reg, path, input(t, path, ids, set))
-		if ce := cliErr(t, err); ce.Code != clierr.APIError || ce.Message != message {
+		_, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, ids, set))
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.APIError || ce.Message != message {
 			t.Errorf("%s: %#v", path, ce)
 		}
 	}
@@ -810,7 +658,7 @@ func TestFormatMatchesBun(t *testing.T) {
 // parseTask keeps Bun's shape in --json: falsy optional fields are dropped,
 // an absent title is "" and an absent status is needsAction.
 func TestTaskJSONKeepsBunsShape(t *testing.T) {
-	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(h.Path, "/tasks") {
 			_, _ = io.WriteString(w, `{"items":[{"id":"T1"},{"id":"T2","title":"t","status":"completed","completed":"2024-04-19T00:00:00.000Z","hidden":true,"deleted":false,"notes":"","links":[],"etag":"e","kind":"tasks#task"}],"nextPageToken":"n"}`)
@@ -818,7 +666,7 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"items":[{"id":"L1","title":"A","kind":"tasks#taskList","etag":"e"},{}]}`)
 	})
-	a, err := apiFrom(fake.ctx(), host.NewRunContext(storedCreds(1), "acme", fake.ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(1), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,9 +685,4 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 	if raw, _ := json.Marshal(lists); string(raw) != `{"taskLists":[{"id":"L1","title":"A"},{"title":""}]}` {
 		t.Fatalf("%s", raw)
 	}
-}
-
-func jsonText(v any) string {
-	raw, _ := json.Marshal(v)
-	return string(raw)
 }

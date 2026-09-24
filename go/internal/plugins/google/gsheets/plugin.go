@@ -45,7 +45,7 @@ func intOption(in plugins.CommandInput, name string) *float64 {
 
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
-func parseValues(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) ([]any, error) {
+func parseValues(in plugins.CommandInput, fail google.FailFunc) ([]any, error) {
 	if raw := in.Option("values-json"); raw != "" {
 		parsed, err := jsvalue.Parse([]byte(raw))
 		if err != nil {
@@ -73,14 +73,14 @@ func parseValues(in plugins.CommandInput, fail func(plugins.ErrorCode, string, s
 }
 
 // valuesInputError is the parseValues check Bun makes before it resolves the profile.
-func valuesInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func valuesInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	_, err := parseValues(in, fail)
 	return err
 }
 
 // choice is Bun parseAlign / parseValign / parseWrap / parseBorder: an empty
 // value is absent, anything else must be one of the lowercased keys.
-func choice(value, name string, choices map[string]string, suggestion string, fail func(plugins.ErrorCode, string, string) error) (string, error) {
+func choice(value, name string, choices map[string]string, suggestion string, fail google.FailFunc) (string, error) {
 	if value == "" {
 		return "", nil
 	}
@@ -91,7 +91,7 @@ func choice(value, name string, choices map[string]string, suggestion string, fa
 }
 
 // parseRawFormat is Bun parseRawFormat: a JSON object, nil when absent.
-func parseRawFormat(raw string, fail func(plugins.ErrorCode, string, string) error) (*jsvalue.Object, error) {
+func parseRawFormat(raw string, fail google.FailFunc) (*jsvalue.Object, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -500,7 +500,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.copy(in.Arg("spreadsheet-id-or-url"), in.Arg("title"), in.Option("parent")))
+			return google.Result(a.CopyDriveFile(a.drive, extractSpreadsheetID(in.Arg("spreadsheet-id-or-url")), in.Arg("title"), in.Option("parent"), "copy spreadsheet", spreadsheetURL))
 		},
 		Format: formatCreated,
 	}
@@ -529,7 +529,7 @@ func exportCmd() plugins.CommandSpec {
 			"Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--output <path>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -541,7 +541,7 @@ func exportCmd() plugins.CommandSpec {
 			if !ok {
 				return nil, run.Fail("INVALID_PARAMS", "Unknown format: "+format, "Use xlsx, pdf, csv, ods, or tsv")
 			}
-			data, err := a.export(in.Arg("spreadsheet-id-or-url"), mimeType)
+			data, err := a.ExportDriveFile(a.drive, extractSpreadsheetID(in.Arg("spreadsheet-id-or-url")), mimeType, "export spreadsheet")
 			if err != nil {
 				return nil, err
 			}

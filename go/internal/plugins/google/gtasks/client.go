@@ -54,9 +54,8 @@ type taskRef struct {
 }
 
 type api struct {
-	ctx  context.Context
-	svc  *tasks.Service
-	fail func(code plugins.ErrorCode, message, suggestion string) error
+	google.API
+	svc *tasks.Service
 }
 
 func service(ctx context.Context, run *plugins.RunContext) (*tasks.Service, error) {
@@ -68,26 +67,13 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, svc: svc, fail: run.Fail}, nil
-}
-
-// apiError is Bun `throw new CliError('API_ERROR', `${prefix}: ${message}`)`.
-func (a *api) apiError(prefix string, err error) error {
-	return a.fail("API_ERROR", prefix+": "+google.Message(err), "")
-}
-
-// notFoundOr is the Bun isNotFoundError branch before the generic API error.
-func (a *api) notFoundOr(what, id, prefix string, err error) error {
-	if google.IsNotFound(err) {
-		return a.fail("NOT_FOUND", what+" not found: "+id, "")
-	}
-	return a.apiError(prefix, err)
+	return &api{API: google.API{Ctx: ctx, RunContext: run}, svc: svc}, nil
 }
 
 func (a *api) listTaskLists(limit float64) (*taskListPage, error) {
-	resp, err := a.svc.Tasklists.List().Context(a.ctx).Do(google.MaxResults(limit, 100))
+	resp, err := a.svc.Tasklists.List().Context(a.Ctx).Do(google.MaxResults(limit, 100))
 	if err != nil {
-		return nil, a.apiError("Tasks API error", err)
+		return nil, a.APIError("Tasks API error", err)
 	}
 	out := &taskListPage{TaskLists: []taskList{}, NextPageToken: resp.NextPageToken}
 	for _, tl := range resp.Items {
@@ -98,17 +84,17 @@ func (a *api) listTaskLists(limit float64) (*taskListPage, error) {
 
 func (a *api) createTaskList(title string) (*taskList, error) {
 	body := &tasks.TaskList{Title: title, ForceSendFields: []string{"Title"}}
-	tl, err := a.svc.Tasklists.Insert(body).Context(a.ctx).Do()
+	tl, err := a.svc.Tasklists.Insert(body).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Failed to create task list", err)
+		return nil, a.APIError("Failed to create task list", err)
 	}
 	parsed := parseTaskList(tl)
 	return &parsed, nil
 }
 
 func (a *api) deleteTaskList(id string) error {
-	if err := a.svc.Tasklists.Delete(id).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Task list", id, "Failed to delete task list", err)
+	if err := a.svc.Tasklists.Delete(id).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Task list", id, "Failed to delete task list", err)
 	}
 	return nil
 }
@@ -122,7 +108,7 @@ type listOptions struct {
 
 func (a *api) listTasks(o listOptions) (*taskPage, error) {
 	call := a.svc.Tasks.List(o.tasklistID).
-		ShowCompleted(o.showCompleted).ShowDeleted(false).ShowHidden(o.showHidden).Context(a.ctx)
+		ShowCompleted(o.showCompleted).ShowDeleted(false).ShowHidden(o.showHidden).Context(a.Ctx)
 	if o.dueMin != "" {
 		call.DueMin(o.dueMin)
 	}
@@ -131,7 +117,7 @@ func (a *api) listTasks(o listOptions) (*taskPage, error) {
 	}
 	resp, err := call.Do(google.MaxResults(o.limit, 100))
 	if err != nil {
-		return nil, a.notFoundOr("Task list", o.tasklistID, "Tasks API error", err)
+		return nil, a.NotFoundOr("Task list", o.tasklistID, "Tasks API error", err)
 	}
 	out := &taskPage{Tasks: []task{}, NextPageToken: resp.NextPageToken}
 	for _, t := range resp.Items {
@@ -141,9 +127,9 @@ func (a *api) listTasks(o listOptions) (*taskPage, error) {
 }
 
 func (a *api) getTask(tasklistID, taskID string) (*task, error) {
-	t, err := a.svc.Tasks.Get(tasklistID, taskID).Context(a.ctx).Do()
+	t, err := a.svc.Tasks.Get(tasklistID, taskID).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Task", taskID, "Tasks API error", err)
+		return nil, a.NotFoundOr("Task", taskID, "Tasks API error", err)
 	}
 	parsed := parseTask(t)
 	return &parsed, nil
@@ -164,7 +150,7 @@ func (a *api) createTask(o createOptions) (*task, error) {
 	if o.due != "" {
 		body.Due = normalizeDue(o.due)
 	}
-	call := a.svc.Tasks.Insert(o.tasklistID, body).Context(a.ctx)
+	call := a.svc.Tasks.Insert(o.tasklistID, body).Context(a.Ctx)
 	if o.parent != "" {
 		call.Parent(o.parent)
 	}
@@ -173,7 +159,7 @@ func (a *api) createTask(o createOptions) (*task, error) {
 	}
 	t, err := call.Do()
 	if err != nil {
-		return nil, a.notFoundOr("Task list", o.tasklistID, "Failed to create task", err)
+		return nil, a.NotFoundOr("Task list", o.tasklistID, "Failed to create task", err)
 	}
 	parsed := parseTask(t)
 	return &parsed, nil
@@ -214,30 +200,30 @@ func (a *api) updateTask(o updateOptions) (*task, error) {
 		patch.Status = o.status
 		patch.ForceSendFields = append(patch.ForceSendFields, "Status")
 	}
-	t, err := a.svc.Tasks.Patch(o.tasklistID, o.taskID, patch).Context(a.ctx).Do()
+	t, err := a.svc.Tasks.Patch(o.tasklistID, o.taskID, patch).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Task", o.taskID, "Failed to update task", err)
+		return nil, a.NotFoundOr("Task", o.taskID, "Failed to update task", err)
 	}
 	parsed := parseTask(t)
 	return &parsed, nil
 }
 
 func (a *api) deleteTask(tasklistID, taskID string) error {
-	if err := a.svc.Tasks.Delete(tasklistID, taskID).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Task", taskID, "Failed to delete task", err)
+	if err := a.svc.Tasks.Delete(tasklistID, taskID).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Task", taskID, "Failed to delete task", err)
 	}
 	return nil
 }
 
 func (a *api) clearCompleted(tasklistID string) error {
-	if err := a.svc.Tasks.Clear(tasklistID).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Task list", tasklistID, "Failed to clear completed tasks", err)
+	if err := a.svc.Tasks.Clear(tasklistID).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Task list", tasklistID, "Failed to clear completed tasks", err)
 	}
 	return nil
 }
 
 func (a *api) moveTask(tasklistID, taskID, parent, previous string) (*task, error) {
-	call := a.svc.Tasks.Move(tasklistID, taskID).Context(a.ctx)
+	call := a.svc.Tasks.Move(tasklistID, taskID).Context(a.Ctx)
 	if parent != "" {
 		call.Parent(parent)
 	}
@@ -246,7 +232,7 @@ func (a *api) moveTask(tasklistID, taskID, parent, previous string) (*task, erro
 	}
 	t, err := call.Do()
 	if err != nil {
-		return nil, a.notFoundOr("Task", taskID, "Failed to move task", err)
+		return nil, a.NotFoundOr("Task", taskID, "Failed to move task", err)
 	}
 	parsed := parseTask(t)
 	return &parsed, nil

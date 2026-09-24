@@ -2,7 +2,6 @@ package gslides
 
 import (
 	"context"
-	"io"
 	"net/url"
 	"regexp"
 	"strings"
@@ -59,13 +58,6 @@ type slideContent struct {
 	Notes    string    `json:"notes"`
 }
 
-// created is GSlidesCreateResult (create and copy).
-type created struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
-
 // batched is GSlidesBatchResult.
 type batched struct {
 	Replies        int    `json:"replies"`
@@ -76,11 +68,9 @@ type batched struct {
 // slides/v1 and drive/v3 clients. batchUpdate carries the caller's JSON, so it
 // is sent as ordered JSON at the slides client's BasePath.
 type api struct {
-	ctx    context.Context
-	run    *plugins.RunContext
+	google.API
 	slides *slides.Service
 	drive  *drive.Service
-	fail   func(code plugins.ErrorCode, message, suggestion string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
@@ -92,14 +82,11 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, run: run, slides: slidesSvc, drive: driveSvc, fail: run.Fail}, nil
+	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, slides: slidesSvc, drive: driveSvc}, nil
 }
 
-// apiError is GSlidesClient.throwApiError.
-func (a *api) apiError(operation string, err error) error {
-	message := google.StatusMessage(err, "Insufficient permissions to access this presentation", "Presentation not found")
-	return a.fail(google.ErrorCode(err), "Failed to "+operation+": "+message, "")
-}
+// errorMessage is GSlidesClient.getErrorMessage.
+var errorMessage = google.StatusText("Insufficient permissions to access this presentation", "Presentation not found")
 
 var (
 	presentationURLPattern = regexp.MustCompile(`/presentation/d/([a-zA-Z0-9_-]+)`)
@@ -118,9 +105,9 @@ func extractPresentationID(idOrURL string) string {
 }
 
 func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
-	files, err := google.ListDriveFiles(a.ctx, a.drive, presentationMimeType, query, limit, presentationURL)
+	files, err := google.ListDriveFiles(a.Ctx, a.drive, presentationMimeType, query, limit, presentationURL)
 	if err != nil {
-		return nil, a.apiError("list presentations", err)
+		return nil, a.Failed("list presentations", err)
 	}
 	return files, nil
 }
@@ -135,9 +122,9 @@ func magnitude(d *slides.Dimension) *float64 {
 }
 
 func (a *api) metadata(idOrURL string) (*presentation, error) {
-	resp, err := a.slides.Presentations.Get(extractPresentationID(idOrURL)).Context(a.ctx).Do()
+	resp, err := a.slides.Presentations.Get(extractPresentationID(idOrURL)).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get presentation metadata", err)
+		return nil, a.Failed("get presentation metadata", err)
 	}
 	out := &presentation{ID: resp.PresentationId, Title: resp.Title, URL: presentationURL + resp.PresentationId, Slides: []slideInfo{}}
 	if out.Title == "" {
@@ -156,9 +143,9 @@ func (a *api) metadata(idOrURL string) (*presentation, error) {
 // get is the text of every slide, or of the one at slide (a parseInt result:
 // NaN reads past the list, as Bun's allSlides[NaN] does).
 func (a *api) get(idOrURL string, slide *float64) ([]slideContent, error) {
-	resp, err := a.slides.Presentations.Get(extractPresentationID(idOrURL)).Context(a.ctx).Do()
+	resp, err := a.slides.Presentations.Get(extractPresentationID(idOrURL)).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("get slide content", err)
+		return nil, a.Failed("get slide content", err)
 	}
 	all := resp.Slides
 	if slide == nil {
@@ -171,71 +158,38 @@ func (a *api) get(idOrURL string, slide *float64) ([]slideContent, error) {
 	n := *slide
 	last := jsvalue.NumberString(float64(len(all) - 1))
 	if n < 0 || n >= float64(len(all)) {
-		return nil, a.fail("INVALID_PARAMS", "Slide index "+jsvalue.NumberString(n)+" out of range (0–"+last+")", "Use --slide 0 to "+last)
+		return nil, a.Fail("INVALID_PARAMS", "Slide index "+jsvalue.NumberString(n)+" out of range (0–"+last+")", "Use --slide 0 to "+last)
 	}
 	if n != n {
 		// parseSlide(undefined) throws a TypeError, reported as an API failure.
-		return nil, a.fail("API_ERROR", "Failed to get slide content: undefined is not an object (evaluating 'slide.pageElements')", "")
+		return nil, a.Fail("API_ERROR", "Failed to get slide content: undefined is not an object (evaluating 'slide.pageElements')", "")
 	}
 	return []slideContent{parseSlide(all[int(n)], int(n))}, nil
 }
 
-func (a *api) create(title string) (*created, error) {
+func (a *api) create(title string) (*google.CreatedFile, error) {
 	body := &slides.Presentation{Title: title, ForceSendFields: []string{"Title"}}
-	resp, err := a.slides.Presentations.Create(body).Context(a.ctx).Do()
+	resp, err := a.slides.Presentations.Create(body).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("create presentation", err)
+		return nil, a.Failed("create presentation", err)
 	}
-	out := &created{ID: resp.PresentationId, Title: resp.Title, URL: presentationURL + resp.PresentationId}
+	out := &google.CreatedFile{ID: resp.PresentationId, Title: resp.Title, URL: presentationURL + resp.PresentationId}
 	if out.Title == "" {
 		out.Title = title
 	}
 	return out, nil
-}
-
-func (a *api) copy(idOrURL, title, parentFolderID string) (*created, error) {
-	file := &drive.File{Name: title}
-	if parentFolderID != "" {
-		file.Parents = []string{parentFolderID}
-	}
-	f, err := a.drive.Files.Copy(extractPresentationID(idOrURL), file).Fields("id,name,webViewLink").Context(a.ctx).Do()
-	if err != nil {
-		return nil, a.apiError("copy presentation", err)
-	}
-	out := &created{ID: f.Id, Title: f.Name, URL: f.WebViewLink}
-	if out.Title == "" {
-		out.Title = title
-	}
-	if out.URL == "" {
-		out.URL = presentationURL + f.Id
-	}
-	return out, nil
-}
-
-// export is the Drive export bytes of the presentation as mimeType.
-func (a *api) export(idOrURL, mimeType string) ([]byte, error) {
-	resp, err := a.drive.Files.Export(extractPresentationID(idOrURL), mimeType).Context(a.ctx).Download()
-	if err != nil {
-		return nil, a.apiError("export presentation", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, a.apiError("export presentation", err)
-	}
-	return body, nil
 }
 
 func (a *api) batch(idOrURL string, requests []any) (*batched, error) {
 	id := extractPresentationID(idOrURL)
 	if len(requests) == 0 {
-		return nil, a.fail("INVALID_PARAMS", "requests must be a non-empty array", "")
+		return nil, a.Fail("INVALID_PARAMS", "requests must be a non-empty array", "")
 	}
 	body := jsvalue.NewObject()
 	body.Set("requests", requests)
-	v, err := google.CallJSON(a.ctx, a.run, google.Camel, "POST", a.slides.BasePath, "v1/presentations/"+url.PathEscape(id)+":batchUpdate", jsvalue.Stringify(body))
+	v, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, "POST", a.slides.BasePath, "v1/presentations/"+url.PathEscape(id)+":batchUpdate", jsvalue.Stringify(body))
 	if err != nil {
-		return nil, a.apiError("execute batch update", err)
+		return nil, a.Failed("execute batch update", err)
 	}
 	out := &batched{PresentationID: id}
 	if resp, ok := v.(*jsvalue.Object); ok {

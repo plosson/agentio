@@ -3,6 +3,7 @@ package gmail
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,7 +27,7 @@ func New() *plugins.Plugin {
 		DisplayName: "Gmail",
 		Description: "Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
+			Setup:          google.SnakeSetup("gmail", "Gmail", "Could not fetch email from Gmail"),
 			Validate:       validate,
 			Reauthenticate: google.Reauthenticate("gmail", google.Snake),
 			Refresh:        google.Snake.RefreshSpec(),
@@ -40,21 +41,6 @@ func New() *plugins.Plugin {
 			labelCmd(), attachmentCmd(), exportCmd(),
 		},
 	}
-}
-
-func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
-	setup.Log("Starting OAuth flow for Gmail...\n")
-	tokens, err := google.PerformOAuth(ctx, setup, "gmail")
-	if err != nil {
-		return nil, err
-	}
-	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
-	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Could not fetch email from Gmail", "Try again or specify --profile manually")
-	}
-	creds := google.Snake.Merge(nil, tokens)
-	creds["email"] = email
-	return &plugins.SetupResult{Credentials: creds, SuggestedProfileName: email, Info: "Email: " + email}, nil
 }
 
 // validate is GmailClient.validate: the profile's address is the account.
@@ -77,21 +63,20 @@ func args(in plugins.CommandInput, name string) []string {
 
 // collectIDs is Bun collectIds: the arguments, else whitespace-separated ids
 // on stdin.
-func collectIDs(positional []string, stdin any) []string {
+func collectIDs(positional []string, in plugins.CommandInput) []string {
 	if len(positional) > 0 {
 		return positional
 	}
-	text, _ := stdin.(string)
-	return strings.FieldsFunc(text, jsvalue.IsSpace)
+	return strings.FieldsFunc(google.Stdin(in), jsvalue.IsSpace)
 }
 
 // chunkOptions is Bun parseChunkOpts.
 func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
-	size := jsvalue.ParseInt(orDefault(in.Option("chunk-size"), "1000"))
+	size := jsvalue.ParseInt(cmp.Or(in.Option("chunk-size"), "1000"))
 	if math.IsNaN(size) || size == 0 {
 		size = 1000
 	}
-	retries := jsvalue.ParseInt(orDefault(in.Option("max-retries"), "5"))
+	retries := jsvalue.ParseInt(cmp.Or(in.Option("max-retries"), "5"))
 	if math.IsNaN(retries) {
 		retries = 0
 	}
@@ -100,7 +85,7 @@ func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
 
 // writeUnless is an AccessFor: read for a dry run or for input Bun rejects
 // before its write check, else write.
-func writeUnless(check func(plugins.CommandInput, failFunc) error) func(plugins.CommandInput) string {
+func writeUnless(check func(plugins.CommandInput, google.FailFunc) error) func(plugins.CommandInput) string {
 	access := google.WriteUnlessInvalid(check)
 	return func(in plugins.CommandInput) string {
 		if in.Flag("dry-run") {
@@ -125,7 +110,7 @@ var composeOptions = []plugins.OptionSpec{
 	{Flags: "--inline <cid:path>", Description: "Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)", Repeatable: true},
 }
 
-func checkCompose(in plugins.CommandInput, fail failFunc) error {
+func checkCompose(in plugins.CommandInput, fail google.FailFunc) error {
 	_, err := parseSendOptions(in, fail)
 	return err
 }
@@ -225,7 +210,7 @@ func searchCmd() plugins.CommandSpec {
 			"Combine with spaces (AND), OR, or - to negate.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run, "--query <query>"); err != nil {
+			if err := google.RequireOptions(in, run.Fail, "--query <query>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -386,9 +371,9 @@ func eachID(ids []string, do func(string) error, logFailure func(string, error),
 }
 
 // checkIDs is Bun's "No ... IDs provided" check on the arguments or stdin.
-func checkIDs(argName, message string) func(plugins.CommandInput, failFunc) error {
-	return func(in plugins.CommandInput, fail failFunc) error {
-		if len(collectIDs(args(in, argName), in.Stdin)) == 0 {
+func checkIDs(argName, message string) func(plugins.CommandInput, google.FailFunc) error {
+	return func(in plugins.CommandInput, fail google.FailFunc) error {
+		if len(collectIDs(args(in, argName), in)) == 0 {
 			return fail("INVALID_PARAMS", message, "Pass IDs as args or pipe via stdin")
 		}
 		return nil
@@ -427,7 +412,7 @@ func archiveCmd() plugins.CommandSpec {
 			if err := check(in, run.Fail); err != nil {
 				return nil, err
 			}
-			ids := collectIDs(args(in, "message-id"), in.Stdin)
+			ids := collectIDs(args(in, "message-id"), in)
 			chunkSize, maxRetries := chunkOptions(in)
 			if in.Flag("dry-run") {
 				return &dryRunPlan{Action: "archive", TotalIDs: len(ids), ChunkSize: chunkSize,
@@ -457,7 +442,7 @@ func batchOutcome(result *batchResult) (any, error) {
 	return result, nil
 }
 
-func checkMark(in plugins.CommandInput, fail failFunc) error {
+func checkMark(in plugins.CommandInput, fail google.FailFunc) error {
 	read, unread := in.Flag("read"), in.Flag("unread")
 	if !read && !unread {
 		return fail("INVALID_PARAMS", "Specify --read or --unread", "")
@@ -685,7 +670,7 @@ func filtersGetCmd() plugins.CommandSpec {
 }
 
 // filterCriteriaFrom is Bun parseFilterCriteriaFromOptions.
-func filterCriteriaFrom(in plugins.CommandInput, fail failFunc) (filterCriteria, error) {
+func filterCriteriaFrom(in plugins.CommandInput, fail google.FailFunc) (filterCriteria, error) {
 	c := filterCriteria{
 		From: in.Option("from"), To: in.Option("to"), Subject: in.Option("subject"), Query: in.Option("query"),
 		NegatedQuery: in.Option("negated-query"), HasAttachment: in.Flag("has-attachment"), ExcludeChats: in.Flag("exclude-chats"),
@@ -713,7 +698,7 @@ func (c filterCriteria) empty() bool {
 }
 
 // checkFilterCreate is the Bun filters create input checks, before its write check.
-func checkFilterCreate(in plugins.CommandInput, fail failFunc) error {
+func checkFilterCreate(in plugins.CommandInput, fail google.FailFunc) error {
 	c, err := filterCriteriaFrom(in, fail)
 	if err != nil {
 		return err
@@ -827,7 +812,7 @@ func filtersDeleteCmd() plugins.CommandSpec {
 	}
 }
 
-func checkLabel(in plugins.CommandInput, fail failFunc) error {
+func checkLabel(in plugins.CommandInput, fail google.FailFunc) error {
 	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 {
 		return fail("INVALID_PARAMS", "Specify at least one --apply or --remove", "")
 	}
@@ -868,7 +853,7 @@ func labelCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			apply, remove := in.List("apply"), in.List("remove")
-			ids := collectIDs(args(in, "id"), in.Stdin)
+			ids := collectIDs(args(in, "id"), in)
 			isThread := in.Flag("thread")
 			chunkSize, maxRetries := chunkOptions(in)
 			if in.Flag("dry-run") {
@@ -1039,8 +1024,8 @@ func chromeCandidates() []string {
 			"/usr/bin/brave-browser",
 		}
 	case "windows":
-		programFiles := orDefault(os.Getenv("PROGRAMFILES"), `C:\Program Files`)
-		programFilesX86 := orDefault(os.Getenv("PROGRAMFILES(X86)"), `C:\Program Files (x86)`)
+		programFiles := cmp.Or(os.Getenv("PROGRAMFILES"), `C:\Program Files`)
+		programFilesX86 := cmp.Or(os.Getenv("PROGRAMFILES(X86)"), `C:\Program Files (x86)`)
 		localAppData := os.Getenv("LOCALAPPDATA")
 		return []string{
 			programFiles + `\Google\Chrome\Application\chrome.exe`,

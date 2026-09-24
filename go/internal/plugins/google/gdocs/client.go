@@ -2,7 +2,6 @@ package gdocs
 
 import (
 	"context"
-	"io"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -46,11 +45,9 @@ type batchResult struct {
 // responses are printed or forwarded as the API sent them (structure, batch),
 // so Docs calls send and read ordered JSON at the docs/v1 client's BasePath.
 type api struct {
-	ctx      context.Context
-	run      *plugins.RunContext
+	google.API
 	drive    *drive.Service
 	docsBase string
-	fail     func(code plugins.ErrorCode, message, suggestion string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
@@ -62,14 +59,11 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, run: run, drive: driveSvc, docsBase: docsSvc.BasePath, fail: run.Fail}, nil
+	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, drive: driveSvc, docsBase: docsSvc.BasePath}, nil
 }
 
-// apiError is GDocsClient.throwApiError.
-func (a *api) apiError(operation string, err error) error {
-	message := google.StatusMessage(err, "Insufficient permissions to access this document", "Document not found")
-	return a.fail(google.ErrorCode(err), "Failed to "+operation+": "+message, "")
-}
+// errorMessage is GDocsClient.getErrorMessage.
+var errorMessage = google.StatusText("Insufficient permissions to access this document", "Document not found")
 
 var docIDPattern = regexp.MustCompile(`/document/d/([a-zA-Z0-9_-]+)`)
 
@@ -81,20 +75,6 @@ func extractDocID(docIDOrURL string) string {
 	return docIDOrURL
 }
 
-// export is getAsMarkdown / getAsDocx: the Drive export bytes.
-func (a *api) export(docIDOrURL, mimeType, operation string) ([]byte, error) {
-	resp, err := a.drive.Files.Export(extractDocID(docIDOrURL), mimeType).Context(a.ctx).Download()
-	if err != nil {
-		return nil, a.apiError(operation, err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, a.apiError(operation, err)
-	}
-	return body, nil
-}
-
 func (a *api) create(title, markdown, folderID string) (*created, error) {
 	file := &drive.File{Name: title, MimeType: docMimeType}
 	if folderID != "" {
@@ -102,9 +82,9 @@ func (a *api) create(title, markdown, folderID string) (*created, error) {
 	}
 	f, err := a.drive.Files.Create(file).
 		Media(strings.NewReader(markdown), googleapi.ContentType("text/markdown")).
-		Fields("id,name,webViewLink").Context(a.ctx).Do()
+		Fields("id,name,webViewLink").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("create document", err)
+		return nil, a.Failed("create document", err)
 	}
 	out := &created{ID: f.Id, Title: f.Name, WebViewLink: f.WebViewLink}
 	if out.Title == "" {
@@ -117,9 +97,9 @@ func (a *api) create(title, markdown, folderID string) (*created, error) {
 }
 
 func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
-	files, err := google.ListDriveFiles(a.ctx, a.drive, docMimeType, query, limit, "https://docs.google.com/document/d/")
+	files, err := google.ListDriveFiles(a.Ctx, a.drive, docMimeType, query, limit, "https://docs.google.com/document/d/")
 	if err != nil {
-		return nil, a.apiError("list documents", err)
+		return nil, a.Failed("list documents", err)
 	}
 	return files, nil
 }
@@ -127,9 +107,9 @@ func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
 // getDocument is docs.documents.get as the API sent it.
 func (a *api) getDocument(documentID string, includeTabsContent bool, operation string) (*jsvalue.Object, error) {
 	path := "v1/documents/" + url.PathEscape(documentID) + "?includeTabsContent=" + strconv.FormatBool(includeTabsContent)
-	v, err := google.CallJSON(a.ctx, a.run, google.Camel, "GET", a.docsBase, path, nil)
+	v, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, "GET", a.docsBase, path, nil)
 	if err != nil {
-		return nil, a.apiError(operation, err)
+		return nil, a.Failed(operation, err)
 	}
 	doc, _ := v.(*jsvalue.Object)
 	return doc, nil
@@ -154,7 +134,7 @@ func (a *api) structure(docIDOrURL, tabID string, allTabs bool) (any, error) {
 		if len(available) > 0 {
 			suggestion = "Available tabs: " + strings.Join(available, ", ")
 		}
-		return nil, a.fail("NOT_FOUND", "Tab not found: "+tabID, suggestion)
+		return nil, a.Fail("NOT_FOUND", "Tab not found: "+tabID, suggestion)
 	}
 	documentTab, ok := found.Get("documentTab")
 	if !ok {
@@ -176,12 +156,12 @@ func (a *api) listTabs(docIDOrURL string) ([]tab, error) {
 func (a *api) batch(docIDOrURL string, requests []any) (*batchResult, error) {
 	documentID := extractDocID(docIDOrURL)
 	if len(requests) == 0 {
-		return nil, a.fail("INVALID_PARAMS", "requests must be a non-empty array", "")
+		return nil, a.Fail("INVALID_PARAMS", "requests must be a non-empty array", "")
 	}
 	body := append(append([]byte(`{"requests":`), jsvalue.Stringify(requests)...), '}')
-	v, err := google.CallJSON(a.ctx, a.run, google.Camel, "POST", a.docsBase, "v1/documents/"+url.PathEscape(documentID)+":batchUpdate", body)
+	v, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, "POST", a.docsBase, "v1/documents/"+url.PathEscape(documentID)+":batchUpdate", body)
 	if err != nil {
-		return nil, a.apiError("execute batch update", err)
+		return nil, a.Failed("execute batch update", err)
 	}
 	var replies any = []any{}
 	if resp, ok := v.(*jsvalue.Object); ok {

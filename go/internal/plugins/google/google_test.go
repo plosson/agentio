@@ -476,13 +476,13 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 		return errors.New(message)
 	}}
 	in := plugins.CommandInput{Options: map[string]any{"space": "", "limit": true, "query": "q"}}
-	if err := RequireOptions(in, run, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
+	if err := RequireOptions(in, run.Fail, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
 		t.Fatal("a bool where a string is required passed")
 	}
-	if err := RequireOptions(in, run, "--space <id>"); err == nil {
+	if err := RequireOptions(in, run.Fail, "--space <id>"); err == nil {
 		t.Fatal("an empty string passed")
 	}
-	if err := RequireOptions(in, run, "--missing <x>"); err == nil {
+	if err := RequireOptions(in, run.Fail, "--missing <x>"); err == nil {
 		t.Fatal("an absent option passed")
 	}
 	want := []string{
@@ -493,7 +493,7 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("%q", got)
 	}
-	if err := RequireOptions(in, run, "--query <q>"); err != nil {
+	if err := RequireOptions(in, run.Fail, "--query <q>"); err != nil {
 		t.Fatal(err)
 	}
 }

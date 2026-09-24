@@ -21,8 +21,6 @@ var (
 	typeToExt = map[string]string{"SERVER_JS": ".gs", "HTML": ".html", "JSON": ".json"}
 )
 
-type failFunc = func(code plugins.ErrorCode, message, suggestion string) error
-
 // localFilename is localFilenameForApiFile: an unknown type appends
 // "undefined", as the Bun template does.
 func localFilename(f file) string {
@@ -87,7 +85,7 @@ func claspJSON(scriptID string) []byte {
 // preparePull is what Bun pull does before it resolves the profile: create
 // the directory and refuse one whose .clasp.json names another script unless
 // force is set. It returns the directory and its .clasp.json path.
-func preparePull(dir, scriptID string, force bool, fail failFunc) (string, string, error) {
+func preparePull(dir, scriptID string, force bool, fail google.FailFunc) (string, string, error) {
 	root, err := targetDir(dir)
 	if err != nil {
 		return "", "", err
@@ -128,7 +126,7 @@ func writePull(root, claspPath, scriptID string, files []file) (*pulled, error) 
 // localProject is what Bun push reads before it resolves the profile: the
 // script id (--id, else .clasp.json) and every .gs, .html and .json file of
 // the directory, in directory order, hidden files skipped.
-func localProject(in plugins.CommandInput, fail failFunc) (string, []file, error) {
+func localProject(in plugins.CommandInput, fail google.FailFunc) (string, []file, error) {
 	root, err := targetDir(in.Arg("dir"))
 	if err != nil {
 		return "", nil, err
@@ -204,7 +202,7 @@ func readdirNames(dir string) ([]string, error) {
 
 // putSource is the content Bun put reads before it resolves the profile:
 // --source, else the --from file, else stdin trimmed.
-func putSource(in plugins.CommandInput, fail failFunc) (string, error) {
+func putSource(in plugins.CommandInput, fail google.FailFunc) (string, error) {
 	source, from := in.Option("source"), in.Option("from")
 	if source != "" && from != "" {
 		return "", fail("INVALID_PARAMS", "--source and --from are mutually exclusive", "")
@@ -219,21 +217,20 @@ func putSource(in plugins.CommandInput, fail failFunc) (string, error) {
 		}
 		return jsvalue.BufferString(raw), nil
 	}
-	stdin, ok := in.Stdin.(string)
-	if !ok {
+	if _, ok := in.Stdin.(string); !ok {
 		return "", fail("INVALID_PARAMS", "No content provided", "Pass --source <text>, --from <path>, or pipe content via stdin")
 	}
-	return jsvalue.Trim(jsvalue.BufferString([]byte(stdin))), nil
+	return google.Stdin(in), nil
 }
 
 // pushInputError and putInputError are the input rejections Bun reports
 // before enforceWriteAccess (google.WriteUnlessInvalid).
-func pushInputError(in plugins.CommandInput, fail failFunc) error {
+func pushInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	_, _, err := localProject(in, fail)
 	return err
 }
 
-func putInputError(in plugins.CommandInput, fail failFunc) error {
+func putInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	_, err := putSource(in, fail)
 	return err
 }

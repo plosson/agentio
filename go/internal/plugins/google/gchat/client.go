@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -133,12 +132,9 @@ type resolvedUser struct {
 }
 
 type api struct {
-	ctx       context.Context
-	creds     map[string]any
+	google.API
 	chat      *chat.Service
 	people    *people.Service
-	fail      func(code plugins.ErrorCode, message, suggestion string) error
-	fetch     func(context.Context, *http.Request) (*http.Response, error)
 	users     map[string]resolvedUser
 	fullUsers map[string]*user
 	dir       *directory
@@ -158,28 +154,20 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 		return nil, err
 	}
 	return &api{
-		ctx: ctx, creds: run.Credentials, chat: chatSvc, people: peopleSvc, fail: run.Fail, fetch: run.Fetch,
-		users: map[string]resolvedUser{}, fullUsers: map[string]*user{},
+		API:  google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage},
+		chat: chatSvc, people: peopleSvc, users: map[string]resolvedUser{}, fullUsers: map[string]*user{},
 	}, nil
 }
 
 func (a *api) ensureOAuth(operation string) error {
-	if isWebhook(a.creds) {
-		return a.fail("PERMISSION_DENIED", operation+" is not supported for webhook profiles", "Use an OAuth profile")
+	if isWebhook(a.Credentials) {
+		return a.Fail("PERMISSION_DENIED", operation+" is not supported for webhook profiles", "Use an OAuth profile")
 	}
 	return nil
 }
 
-// apiError is the Bun client's `new CliError(getErrorCode(err), prefix +
-// getErrorMessage(err), suggestion)`.
-func (a *api) apiError(err error, prefix, suggestion string) error {
-	return a.fail(google.ErrorCode(err), prefix+errorMessage(err), suggestion)
-}
-
 // errorMessage is GChatClient.getErrorMessage.
-func errorMessage(err error) string {
-	return google.StatusMessage(err, "Bot lacks permission for this operation", "Space or message not found")
-}
+var errorMessage = google.StatusText("Bot lacks permission for this operation", "Space or message not found")
 
 type sendOptions struct {
 	spaceID, text string
@@ -188,9 +176,9 @@ type sendOptions struct {
 }
 
 func (a *api) send(o sendOptions) (*sendResult, error) {
-	if isWebhook(a.creds) {
+	if isWebhook(a.Credentials) {
 		if len(o.attachments) > 0 {
-			return nil, a.fail("PERMISSION_DENIED", "File attachments are not supported for webhook profiles", "Use an OAuth profile to send attachments")
+			return nil, a.Fail("PERMISSION_DENIED", "File attachments are not supported for webhook profiles", "Use an OAuth profile to send attachments")
 		}
 		return a.sendViaWebhook(o)
 	}
@@ -216,21 +204,21 @@ func (o sendOptions) body() any {
 }
 
 func (a *api) sendViaWebhook(o sendOptions) (*sendResult, error) {
-	webhookURL, _ := a.creds["webhookUrl"].(string)
+	webhookURL, _ := a.Credentials["webhookUrl"].(string)
 	if strings.TrimSpace(webhookURL) == "" || !strings.HasPrefix(webhookURL, "https://") {
-		return nil, a.fail("INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration")
+		return nil, a.Fail("INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration")
 	}
-	resp, err := postJSON(a.ctx, a.fetch, webhookURL, o.body())
+	resp, err := postJSON(a.Ctx, a.Fetch, webhookURL, o.body())
 	if err != nil {
-		return nil, a.fail("NETWORK_ERROR", "Webhook request failed: "+err.Error(), "Verify the webhook URL is correct and accessible")
+		return nil, a.Fail("NETWORK_ERROR", "Webhook request failed: "+err.Error(), "Verify the webhook URL is correct and accessible")
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, a.fail("NETWORK_ERROR", "Webhook request failed: "+err.Error(), "Verify the webhook URL is correct and accessible")
+		return nil, a.Fail("NETWORK_ERROR", "Webhook request failed: "+err.Error(), "Verify the webhook URL is correct and accessible")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, a.fail("API_ERROR", fmt.Sprintf("Failed to send message via webhook: %d %s", resp.StatusCode, raw),
+		return nil, a.Fail("API_ERROR", fmt.Sprintf("Failed to send message via webhook: %d %s", resp.StatusCode, raw),
 			"Check that the webhook URL is valid and the bot has permission to post")
 	}
 	// The message was sent; an unreadable body only loses the id.
@@ -243,7 +231,7 @@ func (a *api) sendViaWebhook(o sendOptions) (*sendResult, error) {
 
 func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
 	if o.spaceID == "" {
-		return nil, a.fail("INVALID_PARAMS", "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile")
+		return nil, a.Fail("INVALID_PARAMS", "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile")
 	}
 	var refs []*chat.AttachmentDataRef
 	for _, path := range o.attachments {
@@ -256,14 +244,14 @@ func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
 	const suggestion = "Check that the space ID is valid and OAuth token is not expired"
 	msg, err := requestMessage(o.body())
 	if err != nil {
-		return nil, a.fail("API_ERROR", "Failed to send message: "+err.Error(), suggestion)
+		return nil, a.Fail("API_ERROR", "Failed to send message: "+err.Error(), suggestion)
 	}
 	for _, ref := range refs {
 		msg.Attachment = append(msg.Attachment, &chat.Attachment{AttachmentDataRef: ref})
 	}
-	created, err := a.chat.Spaces.Messages.Create("spaces/"+o.spaceID, msg).Context(a.ctx).Do()
+	created, err := a.chat.Spaces.Messages.Create("spaces/"+o.spaceID, msg).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError(err, "Failed to send message: ", suggestion)
+		return nil, a.StatusError("Failed to send message: ", err, suggestion)
 	}
 	return &sendResult{MessageID: lastSegment(created.Name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: o.payload != nil}, nil
 }
@@ -287,7 +275,7 @@ func requestMessage(body any) (*chat.Message, error) {
 
 func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, error) {
 	if _, err := os.Stat(path); err != nil {
-		return nil, a.fail("INVALID_PARAMS", "Failed to read attachment: "+path, "Check that the file exists and is readable")
+		return nil, a.Fail("INVALID_PARAMS", "Failed to read attachment: "+path, "Check that the file exists and is readable")
 	}
 	filename := filepath.Base(path)
 	mime, ok := attachmentMIME[strings.ToLower(google.Extname(filename))]
@@ -298,16 +286,16 @@ func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, e
 	prefix := fmt.Sprintf("Failed to upload attachment \"%s\": ", filename)
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, a.fail("API_ERROR", prefix+err.Error(), suggestion)
+		return nil, a.Fail("API_ERROR", prefix+err.Error(), suggestion)
 	}
 	defer f.Close()
 	resp, err := a.chat.Media.Upload("spaces/"+spaceID, &chat.UploadAttachmentRequest{Filename: filename}).
-		Media(f, googleapi.ContentType(mime)).Context(a.ctx).Do()
+		Media(f, googleapi.ContentType(mime)).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError(err, prefix, suggestion)
+		return nil, a.StatusError(prefix, err, suggestion)
 	}
 	if resp.AttachmentDataRef == nil {
-		return nil, a.fail("API_ERROR", fmt.Sprintf("Upload of \"%s\" returned no attachmentDataRef", filename),
+		return nil, a.Fail("API_ERROR", fmt.Sprintf("Upload of \"%s\" returned no attachmentDataRef", filename),
 			"Retry, or check that the file size is under the Chat API limit (200MB)")
 	}
 	return resp.AttachmentDataRef, nil
@@ -322,7 +310,7 @@ type listOptions struct {
 // list returns the newest messages first and whether --limit cut the range.
 func (a *api) list(o listOptions) ([]message, bool, error) {
 	if strings.TrimSpace(o.spaceID) == "" {
-		return nil, false, a.fail("INVALID_PARAMS", "spaceId is required for listing messages", "Specify with --space or configure default in profile")
+		return nil, false, a.Fail("INVALID_PARAMS", "spaceId is required for listing messages", "Specify with --space or configure default in profile")
 	}
 	if err := a.ensureOAuth("Listing messages"); err != nil {
 		return nil, false, err
@@ -343,7 +331,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 		t, ok := parseDate(bound.value)
 		if !ok {
 			// JavaScriptCore: new Date(...).toISOString() throws RangeError "Invalid Date".
-			return nil, false, a.fail("API_ERROR", prefix+"Invalid Date", suggestion)
+			return nil, false, a.Fail("API_ERROR", prefix+"Invalid Date", suggestion)
 		}
 		filters = append(filters, fmt.Sprintf(`createTime %s "%s"`, bound.op, google.ISOString(t)))
 	}
@@ -356,7 +344,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 	pageToken := ""
 	for {
 		call := a.chat.Spaces.Messages.List("spaces/" + spaceID).
-			PageSize(int64(min(limit-float64(len(raw)), 1000))).OrderBy("createTime desc").Context(a.ctx)
+			PageSize(int64(min(limit-float64(len(raw)), 1000))).OrderBy("createTime desc").Context(a.Ctx)
 		if len(filters) > 0 {
 			call.Filter(strings.Join(filters, " AND "))
 		}
@@ -365,7 +353,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 		}
 		resp, err := call.Do()
 		if err != nil {
-			return nil, false, a.apiError(err, prefix, suggestion)
+			return nil, false, a.StatusError(prefix, err, suggestion)
 		}
 		raw = append(raw, resp.Messages...)
 		pageToken = resp.NextPageToken
@@ -377,7 +365,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 	if float64(len(raw)) > limit {
 		if limit < 0 {
 			// `messages.length = limit` throws on a negative length.
-			return nil, false, a.fail("API_ERROR", prefix+"Invalid array length", suggestion)
+			return nil, false, a.Fail("API_ERROR", prefix+"Invalid array length", suggestion)
 		}
 		raw = raw[:int(limit)]
 	}
@@ -399,7 +387,7 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 
 func (a *api) get(spaceID, messageID string) (*message, error) {
 	if strings.TrimSpace(spaceID) == "" || strings.TrimSpace(messageID) == "" {
-		return nil, a.fail("INVALID_PARAMS", "Both spaceId and messageId are required", "Specify with --space and message ID")
+		return nil, a.Fail("INVALID_PARAMS", "Both spaceId and messageId are required", "Specify with --space and message ID")
 	}
 	if err := a.ensureOAuth("Getting messages"); err != nil {
 		return nil, err
@@ -408,9 +396,9 @@ func (a *api) get(spaceID, messageID string) (*message, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := a.chat.Spaces.Messages.Get(fmt.Sprintf("spaces/%s/messages/%s", spaceID, messageID)).Context(a.ctx).Do()
+	m, err := a.chat.Spaces.Messages.Get(fmt.Sprintf("spaces/%s/messages/%s", spaceID, messageID)).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError(err, "Failed to get message: ", "Check that the space ID and message ID are valid")
+		return nil, a.StatusError("Failed to get message: ", err, "Check that the space ID and message ID are valid")
 	}
 	if m.Sender != nil && m.Sender.Name != "" {
 		a.resolveUsers([]string{m.Sender.Name})
@@ -459,13 +447,13 @@ func (a *api) listSpacesViaOAuth() ([]space, error) {
 	out := []space{}
 	pageToken := ""
 	for {
-		call := a.chat.Spaces.List().PageSize(100).Context(a.ctx)
+		call := a.chat.Spaces.List().PageSize(100).Context(a.Ctx)
 		if pageToken != "" {
 			call.PageToken(pageToken)
 		}
 		resp, err := call.Do()
 		if err != nil {
-			return nil, a.apiError(err, "Failed to list spaces: ", "Check that OAuth token is valid and has Chat scope")
+			return nil, a.StatusError("Failed to list spaces: ", err, "Check that OAuth token is valid and has Chat scope")
 		}
 		for _, s := range resp.Spaces {
 			// Prefer spaceType (current API) over type (legacy): some DMs come
@@ -492,7 +480,7 @@ func (a *api) listSpacesViaOAuth() ([]space, error) {
 
 // resolveSpaceID takes an id, or a display name looked up in the space list.
 func (a *api) resolveSpaceID(idOrName string) (string, error) {
-	if s, err := a.chat.Spaces.Get("spaces/" + idOrName).Context(a.ctx).Do(); err == nil && s.Name != "" {
+	if s, err := a.chat.Spaces.Get("spaces/" + idOrName).Context(a.Ctx).Do(); err == nil && s.Name != "" {
 		return idOrName, nil
 	}
 	spaces, err := a.listSpacesViaOAuth()
@@ -504,7 +492,7 @@ func (a *api) resolveSpaceID(idOrName string) (string, error) {
 			return strings.Replace(s.Name, "spaces/", "", 1), nil
 		}
 	}
-	return "", a.fail("NOT_FOUND", fmt.Sprintf("Space not found: \"%s\"", idOrName), `Use "agentio gchat spaces" to list available spaces`)
+	return "", a.Fail("NOT_FOUND", fmt.Sprintf("Space not found: \"%s\"", idOrName), `Use "agentio gchat spaces" to list available spaces`)
 }
 
 func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
@@ -519,16 +507,16 @@ func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
 	if err != nil {
 		return nil, err
 	}
-	dm, err := a.chat.Spaces.FindDirectMessage().Name(resource).Context(a.ctx).Do()
+	dm, err := a.chat.Spaces.FindDirectMessage().Name(resource).Context(a.Ctx).Do()
 	if err != nil {
 		var ge *googleapi.Error
 		if !errors.As(err, &ge) {
 			return nil, err
 		}
 		if ge.Code == 404 {
-			return nil, a.fail("NOT_FOUND", "No direct message space exists with "+emailOrUserID, "Open the chat once in Google Chat to create the DM space")
+			return nil, a.Fail("NOT_FOUND", "No direct message space exists with "+emailOrUserID, "Open the chat once in Google Chat to create the DM space")
 		}
-		return nil, a.fail(google.StatusToErrorCode(ge.Code), fmt.Sprintf("findDirectMessage failed: %d %s", ge.Code, ge.Body),
+		return nil, a.Fail(google.StatusToErrorCode(ge.Code), fmt.Sprintf("findDirectMessage failed: %d %s", ge.Code, ge.Body),
 			"Check that the OAuth scope includes chat.spaces.readonly")
 	}
 	name := dm.DisplayName
@@ -555,19 +543,19 @@ func (a *api) resolveUserResourceName(input string) (string, error) {
 		return "users/" + input, nil
 	}
 	if !strings.Contains(input, "@") {
-		return "", a.fail("INVALID_PARAMS", fmt.Sprintf("Cannot resolve \"%s\" to a user", input),
+		return "", a.Fail("INVALID_PARAMS", fmt.Sprintf("Cannot resolve \"%s\" to a user", input),
 			"Provide an email address, numeric user ID, or users/<id> resource name")
 	}
 	d := a.directory()
 	if d == nil {
-		return "", a.fail("CONFIG_ERROR", "Directory cache requires an OAuth profile with an email", "")
+		return "", a.Fail("CONFIG_ERROR", "Directory cache requires an OAuth profile with an email", "")
 	}
 	if err := d.ensureFresh(false); err != nil {
-		return "", a.fail("API_ERROR", "Failed to refresh workspace directory: "+err.Error(), "Check OAuth scope and network connectivity")
+		return "", a.Fail("API_ERROR", "Failed to refresh workspace directory: "+err.Error(), "Check OAuth scope and network connectivity")
 	}
 	userID, _ := d.lookupByEmail(input)
 	if userID == "" {
-		return "", a.fail("NOT_FOUND", "Email not found in workspace directory: "+input,
+		return "", a.Fail("NOT_FOUND", "Email not found in workspace directory: "+input,
 			`Run "agentio gchat directory refresh" if the user was added recently`)
 	}
 	return userID, nil
@@ -584,13 +572,13 @@ func (a *api) listMembers(spaceIDOrName string) ([]member, error) {
 	var all []*chat.Membership
 	pageToken := ""
 	for {
-		call := a.chat.Spaces.Members.List("spaces/" + spaceID).PageSize(100).Context(a.ctx)
+		call := a.chat.Spaces.Members.List("spaces/" + spaceID).PageSize(100).Context(a.Ctx)
 		if pageToken != "" {
 			call.PageToken(pageToken)
 		}
 		resp, err := call.Do()
 		if err != nil {
-			return nil, a.apiError(err, "Failed to list members: ", "Check that the space ID is valid and OAuth token is not expired")
+			return nil, a.StatusError("Failed to list members: ", err, "Check that the space ID is valid and OAuth token is not expired")
 		}
 		all = append(all, resp.Memberships...)
 		if pageToken = resp.NextPageToken; pageToken == "" {
@@ -643,7 +631,7 @@ func (a *api) getUser(userID string) (*user, error) {
 	}
 	u := a.fetchPersons([]string{resource})[0]
 	if u == nil {
-		return nil, a.fail("NOT_FOUND", fmt.Sprintf("User not found: \"%s\"", userID), "Check the user ID is valid")
+		return nil, a.Fail("NOT_FOUND", fmt.Sprintf("User not found: \"%s\"", userID), "Check the user ID is valid")
 	}
 	return u, nil
 }
@@ -677,7 +665,7 @@ func (a *api) getPeople(names []string, fields string) map[string]personReply {
 		go func(name string) {
 			defer func() { <-slots; wg.Done() }()
 			id := strings.Replace(name, "users/", "", 1)
-			p, err := a.people.People.Get("people/" + id).PersonFields(fields).Context(a.ctx).Do()
+			p, err := a.people.People.Get("people/" + id).PersonFields(fields).Context(a.Ctx).Do()
 			mu.Lock()
 			out[name] = personReply{person: p, err: err}
 			mu.Unlock()
@@ -817,15 +805,15 @@ func (a *api) resolveUsers(ids []string) {
 
 // directory is the workspace directory of an OAuth profile with an email.
 func (a *api) directory() *directory {
-	if a.creds["type"] != "oauth" {
+	if a.Credentials["type"] != "oauth" {
 		return nil
 	}
 	if a.dir == nil {
-		email, _ := a.creds["email"].(string)
+		email, _ := a.Credentials["email"].(string)
 		if email == "" {
 			return nil
 		}
-		a.dir = newDirectory(a.ctx, a.people, email)
+		a.dir = newDirectory(a.Ctx, a.people, email)
 	}
 	return a.dir
 }
@@ -836,7 +824,7 @@ func (a *api) refreshDirectory() (*directoryRefresh, error) {
 	}
 	d := a.directory()
 	if d == nil {
-		return nil, a.fail("CONFIG_ERROR", "Directory cache requires an OAuth profile with an email", "")
+		return nil, a.Fail("CONFIG_ERROR", "Directory cache requires an OAuth profile with an email", "")
 	}
 	if err := d.ensureFresh(true); err != nil {
 		return nil, err

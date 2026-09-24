@@ -1,6 +1,7 @@
 package gmail
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -119,11 +120,8 @@ type batchResult struct {
 
 // api is GmailClient.
 type api struct {
-	ctx       context.Context
+	google.API
 	svc       *gmail.Service
-	run       *plugins.RunContext
-	fail      failFunc
-	log       func(parts ...any)
 	userEmail string
 }
 
@@ -136,20 +134,7 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api{ctx: ctx, svc: svc, run: run, fail: run.Fail, log: run.Log}, nil
-}
-
-// apiError is Bun `throw new CliError('API_ERROR', `${prefix}: ${message}`)`.
-func (a *api) apiError(prefix string, err error) error {
-	return a.fail("API_ERROR", prefix+": "+google.Message(err), "")
-}
-
-// notFoundOr is the Bun isNotFoundError branch before the generic API error.
-func (a *api) notFoundOr(what, id, prefix string, err error) error {
-	if google.IsNotFound(err) {
-		return a.fail("NOT_FOUND", what+" not found: "+id, "")
-	}
-	return a.apiError(prefix, err)
+	return &api{API: google.API{Ctx: ctx, RunContext: run}, svc: svc}, nil
 }
 
 // thrown is a googleapis error Bun does not catch: handleError prints its
@@ -163,7 +148,7 @@ func (a *api) getUserEmail() (string, error) {
 	if a.userEmail != "" {
 		return a.userEmail, nil
 	}
-	p, err := a.svc.Users.GetProfile("me").Context(a.ctx).Do()
+	p, err := a.svc.Users.GetProfile("me").Context(a.Ctx).Do()
 	if err != nil {
 		return "", err
 	}
@@ -219,13 +204,6 @@ func addresses(value string) []string {
 	return parts
 }
 
-func orDefault(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
-}
-
 func parseMessage(m *gmail.Message, withAttachments bool) message {
 	var headers map[string]string
 	if m.Payload != nil {
@@ -238,7 +216,7 @@ func parseMessage(m *gmail.Message, withAttachments bool) message {
 	out := message{
 		ID:       m.Id,
 		ThreadID: m.ThreadId,
-		Subject:  orDefault(headers["subject"], "(no subject)"),
+		Subject:  cmp.Or(headers["subject"], "(no subject)"),
 		From:     headers["from"],
 		To:       addresses(headers["to"]),
 		Cc:       addresses(headers["cc"]),
@@ -311,7 +289,7 @@ func (a *api) list(limit float64, query string, labels []string) (*messageList, 
 	pageToken := ""
 	for float64(len(ids)) < capped {
 		remaining := capped - float64(len(ids))
-		call := a.svc.Users.Messages.List("me").MaxResults(int64(math.Min(remaining, 500))).Context(a.ctx)
+		call := a.svc.Users.Messages.List("me").MaxResults(int64(math.Min(remaining, 500))).Context(a.Ctx)
 		if q != "" {
 			call.Q(q)
 		}
@@ -320,7 +298,7 @@ func (a *api) list(limit float64, query string, labels []string) (*messageList, 
 		}
 		resp, err := call.Do()
 		if err != nil {
-			return nil, a.apiError("Gmail API error", err)
+			return nil, a.APIError("Gmail API error", err)
 		}
 		if total == 0 {
 			total = resp.ResultSizeEstimate
@@ -346,9 +324,9 @@ func (a *api) list(limit float64, query string, labels []string) (*messageList, 
 			continue
 		}
 		m, err := a.svc.Users.Messages.Get("me", r.id).Format("metadata").
-			MetadataHeaders("From", "To", "Cc", "Subject", "Date").Context(a.ctx).Do()
+			MetadataHeaders("From", "To", "Cc", "Subject", "Date").Context(a.Ctx).Do()
 		if err != nil {
-			return nil, a.apiError("Gmail API error", err)
+			return nil, a.APIError("Gmail API error", err)
 		}
 		out.Messages = append(out.Messages, parseMessage(m, false))
 	}
@@ -366,9 +344,9 @@ func (a *api) get(id, format string) (*message, error) {
 	if format == "raw" {
 		apiFormat = "raw"
 	}
-	m, err := a.svc.Users.Messages.Get("me", id).Format(apiFormat).Context(a.ctx).Do()
+	m, err := a.svc.Users.Messages.Get("me", id).Format(apiFormat).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Message", id, "Gmail API error", err)
+		return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
 	}
 	out := parseMessage(m, true)
 	var body string
@@ -390,15 +368,15 @@ type downloaded struct {
 
 // allAttachments is GmailClient.getAllAttachments.
 func (a *api) allAttachments(id string) ([]downloaded, error) {
-	m, err := a.svc.Users.Messages.Get("me", id).Format("full").Context(a.ctx).Do()
+	m, err := a.svc.Users.Messages.Get("me", id).Format("full").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.notFoundOr("Message", id, "Gmail API error", err)
+		return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
 	}
 	out := []downloaded{}
 	for _, att := range extractAttachments(m.Payload) {
-		body, err := a.svc.Users.Messages.Attachments.Get("me", id, att.ID).Context(a.ctx).Do()
+		body, err := a.svc.Users.Messages.Attachments.Get("me", id, att.ID).Context(a.Ctx).Do()
 		if err != nil {
-			return nil, a.notFoundOr("Message", id, "Gmail API error", err)
+			return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
 		}
 		if body.Data != "" {
 			out = append(out, downloaded{data: jsvalue.DecodeBase64(body.Data), attachment: att})
@@ -410,22 +388,22 @@ func (a *api) allAttachments(id string) ([]downloaded, error) {
 // replyContext is GmailClient.resolveReplyContext: the last message of the
 // thread gives the recipient, the subject and the threading headers.
 func (a *api) replyContext(threadID string) (to []string, subject string, extra []string, err error) {
-	thread, err := a.svc.Users.Threads.Get("me", threadID).Context(a.ctx).Do()
+	thread, err := a.svc.Users.Threads.Get("me", threadID).Context(a.Ctx).Do()
 	if err != nil {
 		return nil, "", nil, thrown(err)
 	}
 	if len(thread.Messages) == 0 {
-		return nil, "", nil, a.fail("NOT_FOUND", "Thread not found: "+threadID, "")
+		return nil, "", nil, a.Fail("NOT_FOUND", "Thread not found: "+threadID, "")
 	}
 	last := thread.Messages[len(thread.Messages)-1]
 	var headers map[string]string
 	if last.Payload != nil {
 		headers = parseHeaders(last.Payload.Headers)
 	}
-	to = []string{orDefault(headers["reply-to"], headers["from"])}
+	to = []string{cmp.Or(headers["reply-to"], headers["from"])}
 	subject = headers["subject"]
 	if !strings.HasPrefix(subject, "Re:") {
-		subject = "Re: " + orDefault(subject, "(no subject)")
+		subject = "Re: " + cmp.Or(subject, "(no subject)")
 	}
 	if id := headers["message-id"]; id != "" {
 		extra = []string{"In-Reply-To: " + id, "References: " + id}
@@ -477,13 +455,13 @@ type encodedAttachment struct {
 func (a *api) encodeAttachment(att attachmentFile) (encodedAttachment, error) {
 	info, err := os.Stat(att.path)
 	if err != nil || info.IsDir() {
-		return encodedAttachment{}, a.fail("NOT_FOUND", "Attachment not found: "+att.path, "")
+		return encodedAttachment{}, a.Fail("NOT_FOUND", "Attachment not found: "+att.path, "")
 	}
 	content, err := os.ReadFile(att.path)
 	if err != nil {
-		return encodedAttachment{}, a.fail("API_ERROR", fmt.Sprintf("Failed to read attachment %s: %s", att.path, err.Error()), "")
+		return encodedAttachment{}, a.Fail("API_ERROR", fmt.Sprintf("Failed to read attachment %s: %s", att.path, err.Error()), "")
 	}
-	filename := orDefault(att.filename, basename(att.path))
+	filename := cmp.Or(att.filename, basename(att.path))
 	return encodedAttachment{filename: filename, mimeType: mimeTypeOf(filename), base64: base64.StdEncoding.EncodeToString(content)}, nil
 }
 
@@ -622,9 +600,9 @@ func (a *api) send(o *sendOptions) (*sendResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := a.svc.Users.Messages.Send("me", &gmail.Message{Raw: raw, ThreadId: o.replyTo}).Context(a.ctx).Do()
+	m, err := a.svc.Users.Messages.Send("me", &gmail.Message{Raw: raw, ThreadId: o.replyTo}).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Failed to send email", err)
+		return nil, a.APIError("Failed to send email", err)
 	}
 	labels := m.LabelIds
 	if labels == nil {
@@ -646,7 +624,7 @@ func draftMissing(err error) bool {
 }
 
 func (a *api) draftNotFound(id string) error {
-	return a.fail("NOT_FOUND", "Draft not found: "+id, "Check the draft ID (use the ID returned when the draft was created).")
+	return a.Fail("NOT_FOUND", "Draft not found: "+id, "Check the draft ID (use the ID returned when the draft was created).")
 }
 
 // saveDraft is GmailClient.draft, or GmailClient.updateDraft with an id.
@@ -658,17 +636,17 @@ func (a *api) saveDraft(id string, o *sendOptions) (*draftResult, error) {
 	draft := &gmail.Draft{Message: &gmail.Message{Raw: raw, ThreadId: o.replyTo}}
 	var d *gmail.Draft
 	if id == "" {
-		d, err = a.svc.Users.Drafts.Create("me", draft).Context(a.ctx).Do()
+		d, err = a.svc.Users.Drafts.Create("me", draft).Context(a.Ctx).Do()
 		if err != nil {
-			return nil, a.apiError("Failed to create draft", err)
+			return nil, a.APIError("Failed to create draft", err)
 		}
 	} else {
-		d, err = a.svc.Users.Drafts.Update("me", id, draft).Context(a.ctx).Do()
+		d, err = a.svc.Users.Drafts.Update("me", id, draft).Context(a.Ctx).Do()
 		if err != nil {
 			if draftMissing(err) {
 				return nil, a.draftNotFound(id)
 			}
-			return nil, a.apiError("Failed to update draft", err)
+			return nil, a.APIError("Failed to update draft", err)
 		}
 	}
 	out := &draftResult{ID: d.Id, updated: id != ""}
@@ -679,19 +657,19 @@ func (a *api) saveDraft(id string, o *sendOptions) (*draftResult, error) {
 }
 
 func (a *api) deleteDraft(id string) error {
-	if err := a.svc.Users.Drafts.Delete("me", id).Context(a.ctx).Do(); err != nil {
+	if err := a.svc.Users.Drafts.Delete("me", id).Context(a.Ctx).Do(); err != nil {
 		if draftMissing(err) {
 			return a.draftNotFound(id)
 		}
-		return a.apiError("Failed to delete draft", err)
+		return a.APIError("Failed to delete draft", err)
 	}
 	return nil
 }
 
 func (a *api) archive(id string) error {
-	_, err := a.svc.Users.Messages.Modify("me", id, &gmail.ModifyMessageRequest{RemoveLabelIds: []string{"INBOX"}}).Context(a.ctx).Do()
+	_, err := a.svc.Users.Messages.Modify("me", id, &gmail.ModifyMessageRequest{RemoveLabelIds: []string{"INBOX"}}).Context(a.Ctx).Do()
 	if err != nil {
-		return a.notFoundOr("Message", id, "Failed to archive", err)
+		return a.NotFoundOr("Message", id, "Failed to archive", err)
 	}
 	return nil
 }
@@ -701,8 +679,8 @@ func (a *api) mark(id string, read bool) error {
 	if read {
 		req = &gmail.ModifyMessageRequest{RemoveLabelIds: []string{"UNREAD"}}
 	}
-	if _, err := a.svc.Users.Messages.Modify("me", id, req).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Message", id, "Failed to update message", err)
+	if _, err := a.svc.Users.Messages.Modify("me", id, req).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Message", id, "Failed to update message", err)
 	}
 	return nil
 }
@@ -718,9 +696,9 @@ func mapLabel(l *gmail.Label) label {
 // listLabels is GmailClient.listLabels: system labels first, then by
 // localeCompare on the name.
 func (a *api) listLabels() ([]label, error) {
-	resp, err := a.svc.Users.Labels.List("me").Context(a.ctx).Do()
+	resp, err := a.svc.Users.Labels.List("me").Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Gmail API error", err)
+		return nil, a.APIError("Gmail API error", err)
 	}
 	out := []label{}
 	for _, l := range resp.Labels {
@@ -738,9 +716,9 @@ func (a *api) listLabels() ([]label, error) {
 }
 
 func (a *api) createLabel(name string) (*label, error) {
-	l, err := a.svc.Users.Labels.Create("me", &gmail.Label{Name: name, MessageListVisibility: "show", LabelListVisibility: "labelShow"}).Context(a.ctx).Do()
+	l, err := a.svc.Users.Labels.Create("me", &gmail.Label{Name: name, MessageListVisibility: "show", LabelListVisibility: "labelShow"}).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Failed to create label", err)
+		return nil, a.APIError("Failed to create label", err)
 	}
 	out := mapLabel(l)
 	return &out, nil
@@ -762,7 +740,7 @@ func (a *api) resolveLabel(nameOrID string) (*label, error) {
 			return &labels[i], nil
 		}
 	}
-	return nil, a.fail("NOT_FOUND", "Label not found: "+nameOrID, "")
+	return nil, a.Fail("NOT_FOUND", "Label not found: "+nameOrID, "")
 }
 
 type labelDeleted struct {
@@ -776,10 +754,10 @@ func (a *api) deleteLabel(nameOrID string) (*labelDeleted, error) {
 		return nil, err
 	}
 	if l.Type == "system" {
-		return nil, a.fail("INVALID_PARAMS", "Cannot delete system label: "+l.Name, "")
+		return nil, a.Fail("INVALID_PARAMS", "Cannot delete system label: "+l.Name, "")
 	}
-	if err := a.svc.Users.Labels.Delete("me", l.ID).Context(a.ctx).Do(); err != nil {
-		return nil, a.apiError("Failed to delete label", err)
+	if err := a.svc.Users.Labels.Delete("me", l.ID).Context(a.Ctx).Do(); err != nil {
+		return nil, a.APIError("Failed to delete label", err)
 	}
 	return &labelDeleted{ID: l.ID, Name: l.Name}, nil
 }
@@ -790,11 +768,11 @@ func (a *api) renameLabel(oldNameOrID, newName string) (*label, error) {
 		return nil, err
 	}
 	if l.Type == "system" {
-		return nil, a.fail("INVALID_PARAMS", "Cannot rename system label: "+l.Name, "")
+		return nil, a.Fail("INVALID_PARAMS", "Cannot rename system label: "+l.Name, "")
 	}
-	patched, err := a.svc.Users.Labels.Patch("me", l.ID, &gmail.Label{Name: newName}).Context(a.ctx).Do()
+	patched, err := a.svc.Users.Labels.Patch("me", l.ID, &gmail.Label{Name: newName}).Context(a.Ctx).Do()
 	if err != nil {
-		return nil, a.apiError("Failed to rename label", err)
+		return nil, a.APIError("Failed to rename label", err)
 	}
 	out := mapLabel(patched)
 	return &out, nil
@@ -823,7 +801,7 @@ func (a *api) resolveLabelIDs(namesOrIDs []string) ([]string, error) {
 		} else if id, ok := byName[strings.ToLower(input)]; ok {
 			out[i] = id
 		} else {
-			return nil, a.fail("NOT_FOUND", "Label not found: "+input, "")
+			return nil, a.Fail("NOT_FOUND", "Label not found: "+input, "")
 		}
 	}
 	return out, nil
@@ -832,8 +810,8 @@ func (a *api) resolveLabelIDs(namesOrIDs []string) ([]string, error) {
 // modifyLabels is GmailClient.modifyLabels on one message.
 func (a *api) modifyLabels(id string, add, remove []string) error {
 	req := &gmail.ModifyMessageRequest{AddLabelIds: add, RemoveLabelIds: remove}
-	if _, err := a.svc.Users.Messages.Modify("me", id, req).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Message", id, "Failed to modify labels", err)
+	if _, err := a.svc.Users.Messages.Modify("me", id, req).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Message", id, "Failed to modify labels", err)
 	}
 	return nil
 }
@@ -880,7 +858,7 @@ func (a *api) expandThreads(threadIDs []string, maxRetries int) ([]string, error
 			var thread *gmail.Thread
 			err := withRetry(maxRetries, func() error {
 				var err error
-				thread, err = a.svc.Users.Threads.Get("me", id).Format("minimal").Context(a.ctx).Do()
+				thread, err = a.svc.Users.Threads.Get("me", id).Format("minimal").Context(a.Ctx).Do()
 				return err
 			})
 			if err != nil {
@@ -889,7 +867,7 @@ func (a *api) expandThreads(threadIDs []string, maxRetries int) ([]string, error
 				}
 				mu.Lock()
 				if firstErr == nil {
-					firstErr = a.apiError("Failed to expand thread "+id, err)
+					firstErr = a.APIError("Failed to expand thread "+id, err)
 				}
 				mu.Unlock()
 				return
@@ -933,18 +911,18 @@ func (a *api) batchModify(action string, ids, add, remove []string, chunkSize, m
 	for i, batch := range chunks {
 		started := now()
 		err := withRetry(maxRetries, func() error {
-			return a.svc.Users.Messages.BatchModify("me", &gmail.BatchModifyMessagesRequest{Ids: batch, AddLabelIds: add, RemoveLabelIds: remove}).Context(a.ctx).Do()
+			return a.svc.Users.Messages.BatchModify("me", &gmail.BatchModifyMessagesRequest{Ids: batch, AddLabelIds: add, RemoveLabelIds: remove}).Context(a.Ctx).Do()
 		})
 		tag := fmt.Sprintf("[%s] chunk %d/%d (%d ids)", action, i+1, len(chunks), len(batch))
 		elapsed := now().Sub(started).Milliseconds()
 		if err == nil {
 			out.OK += len(batch)
-			a.log(fmt.Sprintf("%s ok in %dms", tag, elapsed))
+			a.Log(fmt.Sprintf("%s ok in %dms", tag, elapsed))
 			continue
 		}
 		reason := google.Message(err)
 		out.Failed = append(out.Failed, failedChunk{IDs: batch, Reason: reason})
-		a.log(fmt.Sprintf("%s FAILED in %dms: %s", tag, elapsed, reason))
+		a.Log(fmt.Sprintf("%s FAILED in %dms: %s", tag, elapsed, reason))
 	}
 	return out
 }
@@ -997,13 +975,13 @@ func labelIDs(v any) []string {
 // filtersCall is users.settings.filters under the client's base path, so
 // test endpoints apply.
 func (a *api) filtersCall(method, suffix string, body []byte) (any, error) {
-	return google.CallJSON(a.ctx, a.run, google.Snake, method, a.svc.BasePath, "gmail/v1/users/me/settings/filters"+suffix, body)
+	return google.CallJSON(a.Ctx, a.RunContext, google.Snake, method, a.svc.BasePath, "gmail/v1/users/me/settings/filters"+suffix, body)
 }
 
 func (a *api) listFilters() ([]filter, error) {
 	resp, err := a.filtersCall("GET", "", nil)
 	if err != nil {
-		return nil, a.apiError("Gmail API error", err)
+		return nil, a.APIError("Gmail API error", err)
 	}
 	o, _ := resp.(*jsvalue.Object)
 	out := []filter{}
@@ -1017,7 +995,7 @@ func (a *api) listFilters() ([]filter, error) {
 func (a *api) getFilter(id string) (*filter, error) {
 	resp, err := a.filtersCall("GET", "/"+url.PathEscape(id), nil)
 	if err != nil {
-		return nil, a.notFoundOr("Filter", id, "Gmail API error", err)
+		return nil, a.NotFoundOr("Filter", id, "Gmail API error", err)
 	}
 	out := mapFilter(resp)
 	return &out, nil
@@ -1033,15 +1011,15 @@ func (a *api) createFilter(c filterCriteria, act filterAction) (*filter, error) 
 	}
 	resp, err := a.filtersCall("POST", "", body)
 	if err != nil {
-		return nil, a.apiError("Failed to create filter", err)
+		return nil, a.APIError("Failed to create filter", err)
 	}
 	out := mapFilter(resp)
 	return &out, nil
 }
 
 func (a *api) deleteFilter(id string) error {
-	if err := a.svc.Users.Settings.Filters.Delete("me", id).Context(a.ctx).Do(); err != nil {
-		return a.notFoundOr("Filter", id, "Failed to delete filter", err)
+	if err := a.svc.Users.Settings.Filters.Delete("me", id).Context(a.Ctx).Do(); err != nil {
+		return a.NotFoundOr("Filter", id, "Failed to delete filter", err)
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ func New() *plugins.Plugin {
 		DisplayName: "Google Tasks",
 		Description: "Use when interacting with Google Tasks via the agentio CLI.",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
+			Setup:          google.SnakeSetup("gtasks", "Google Tasks", "Could not fetch email"),
 			Validate:       validate,
 			Reauthenticate: google.Reauthenticate("gtasks", google.Snake),
 			Refresh:        google.Snake.RefreshSpec(),
@@ -28,21 +28,6 @@ func New() *plugins.Plugin {
 			deleteCmd(), clearCmd(), moveCmd(),
 		},
 	}
-}
-
-func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
-	setup.Log("Starting OAuth flow for Google Tasks...\n")
-	tokens, err := google.PerformOAuth(ctx, setup, "gtasks")
-	if err != nil {
-		return nil, err
-	}
-	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
-	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Could not fetch email", "Try again or specify --profile manually")
-	}
-	creds := google.Snake.Merge(nil, tokens)
-	creds["email"] = email
-	return &plugins.SetupResult{Credentials: creds, SuggestedProfileName: email, Info: "Email: " + email}, nil
 }
 
 // validate is GTasksClient.validate: listing one task list proves access.
@@ -64,15 +49,14 @@ func notes(in plugins.CommandInput, emptyReadsStdin bool) (string, bool) {
 	if given && (value != "" || !emptyReadsStdin) {
 		return value, true
 	}
-	text, _ := in.Stdin.(string)
-	if piped := jsvalue.Trim(text); piped != "" {
+	if piped := google.Stdin(in); piped != "" {
 		return piped, true
 	}
 	return value, given
 }
 
 // addInputError is Commander's requiredOption check on --title.
-func addInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func addInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	if in.Option("title") == "" {
 		return fail("INVALID_PARAMS", "required option '--title <title>' not specified", "")
 	}
@@ -80,7 +64,7 @@ func addInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string,
 }
 
 // updateInputError is Bun's --status check, made before enforceWriteAccess.
-func updateInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func updateInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	if status := in.Option("status"); status != "" && status != "needsAction" && status != "completed" {
 		return fail("INVALID_PARAMS", "Invalid status: "+status, "Use: needsAction or completed")
 	}
@@ -88,7 +72,7 @@ func updateInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, stri
 }
 
 // moveInputError is Bun's --parent/--previous check, made before enforceWriteAccess.
-func moveInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+func moveInputError(in plugins.CommandInput, fail google.FailFunc) error {
 	if in.Option("parent") == "" && in.Option("previous") == "" {
 		return fail("INVALID_PARAMS", "At least one of --parent or --previous is required", "")
 	}
