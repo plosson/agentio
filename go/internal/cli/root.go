@@ -24,6 +24,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
 	"github.com/plosson/agentio/go/internal/plugins/dropbox"
 	"github.com/plosson/agentio/go/internal/plugins/falco"
+	"github.com/plosson/agentio/go/internal/plugins/github"
 	"github.com/plosson/agentio/go/internal/plugins/google/gcal"
 	"github.com/plosson/agentio/go/internal/plugins/google/gchat"
 	"github.com/plosson/agentio/go/internal/plugins/google/gdocs"
@@ -49,6 +50,7 @@ func init() {
 	plugins.Default.MustRegister(gchat.New())
 	plugins.Default.MustRegister(gdocs.New())
 	plugins.Default.MustRegister(gdrive.New())
+	plugins.Default.MustRegister(github.New())
 }
 
 func Main(args []string) int {
@@ -101,6 +103,7 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 	for _, p := range reg.Plugins() {
 		root.AddCommand(serviceCmd(reg, p))
 	}
+	addGitHubVaultSecretCommands(root, reg)
 	return root
 }
 
