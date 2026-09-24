@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
@@ -20,207 +19,42 @@ import (
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/obscure"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/plugins/atlassian"
+	"github.com/plosson/agentio/go/internal/plugins/atlassian/atlassiantest"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-// hit is one request that reached the fake Atlassian.
-type hit struct {
-	Host   string
-	Method string
-	Path   string
-	Query  url.Values
-	Auth   string
-	Body   map[string]any
-}
+var product = atlassiantest.For(New)
 
-// fakeAtlassian stands in for auth.atlassian.com and api.atlassian.com. The
-// default transport is rewritten so production URLs land here.
-type fakeAtlassian struct {
-	mu     sync.Mutex
-	hits   []hit
-	handle func(w http.ResponseWriter, h hit)
-}
+type hit = atlassiantest.Hit
 
-func (f *fakeAtlassian) recorded() []hit {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]hit(nil), f.hits...)
-}
-
-type rewrite struct {
-	target *url.URL
-	base   http.RoundTripper
-}
-
-func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host == "api.atlassian.com" || req.URL.Host == "auth.atlassian.com" {
-		out := req.Clone(req.Context())
-		out.URL.Scheme = r.target.Scheme
-		out.URL.Host = r.target.Host
-		out.Host = r.target.Host
-		out.Header.Set("X-Orig-Host", req.URL.Host)
-		return r.base.RoundTrip(out)
-	}
-	return nil, io.ErrUnexpectedEOF // nothing else may leave the test
-}
-
-func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeAtlassian {
-	t.Helper()
-	f := &fakeAtlassian{handle: handle}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		h := hit{
-			Host: r.Header.Get("X-Orig-Host"), Method: r.Method, Path: r.URL.Path,
-			Query: r.URL.Query(), Auth: r.Header.Get("Authorization"),
-		}
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &h.Body); err != nil {
-				t.Errorf("non-JSON body %q", raw)
-			}
-		}
-		f.mu.Lock()
-		f.hits = append(f.hits, h)
-		f.mu.Unlock()
-		f.handle(w, h)
-	}))
-	t.Cleanup(srv.Close)
-	target, _ := url.Parse(srv.URL)
-	prev := http.DefaultTransport
-	http.DefaultTransport = rewrite{target: target, base: srv.Client().Transport}
-	t.Cleanup(func() { http.DefaultTransport = prev })
-	return f
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func setupVault(t *testing.T) *plugins.Registry {
-	t.Helper()
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := plugins.NewRegistry(New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reg
-}
-
-func storedCreds(expiry int64) map[string]any {
-	return map[string]any{
-		"accessToken":  "at-old",
-		"refreshToken": "rt-old",
-		"expiryDate":   expiry,
-		"cloudId":      "cloud-1",
-		"siteUrl":      "https://acme.atlassian.net",
-		"legacyField":  "kept",
-	}
-}
-
-func loadCreds(t *testing.T, name string) map[string]any {
-	t.Helper()
-	c, err := vault.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c.Credentials["confluence"][name]
-}
-
-func spec(t *testing.T, path string) *plugins.CommandSpec {
-	t.Helper()
-	p := New()
-	for i := range p.Commands {
-		if p.Commands[i].Path == path {
-			return &p.Commands[i]
-		}
-	}
-	t.Fatalf("no command %q", path)
-	return nil
-}
-
-func exec(t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
-	t.Helper()
-	if in.Options == nil {
-		in.Options = map[string]any{}
-	}
-	if in.Args == nil {
-		in.Args = map[string]any{}
-	}
-	return host.Execute(context.Background(), reg, reg.Find("confluence"), spec(t, path), in)
-}
-
-func codeOf(err error) string {
-	if ce, ok := err.(*clierr.Error); ok {
-		return string(ce.Code)
-	}
-	return ""
-}
+var (
+	writeJSON   = atlassiantest.WriteJSON
+	storedCreds = atlassiantest.StoredCreds
+	newFake     = atlassiantest.NewFake
+)
 
 // The command table is the Bun surface. A renamed flag, a lost default, or a
 // write that turned into a read fails here.
 func TestCommandTableMatchesBun(t *testing.T) {
-	type row struct {
-		args, flags, access, op, input string
-	}
-	want := map[string]row{
-		"spaces":   {"", "--limit <number>=50 --type <type>", "read", "", ""},
-		"pages":    {"", "--space <key> --space-id <id> --parent <id> --limit <number>=25", "read", "", ""},
-		"get":      {"<page-id>", "--format <format>=storage", "read", "", ""},
-		"search":   {"", "--cql <query> --space <key> --type <type> --text <text> --limit <number>=25", "read", "", ""},
-		"create":   {"", "--title <title> --space <key> --space-id <id> --parent <id> --content <text>", "write", "create page", "text"},
-		"update":   {"<page-id>", "--title <title> --content <text>", "write", "update page", "text"},
-		"comments": {"<page-id>", "", "read", "", ""},
-		"comment":  {"<page-id> [body]", "", "write", "add comment", "text"},
-	}
 	p := New()
 	if p.ID != "confluence" || p.DisplayName != "Confluence" || p.Description != "Use when interacting with Confluence via the agentio CLI." {
 		t.Fatalf("identity %q %q %q", p.ID, p.DisplayName, p.Description)
 	}
-	if _, err := plugins.NewRegistry(p); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.Commands) != len(want) {
-		t.Fatalf("%d commands, want %d", len(p.Commands), len(want))
-	}
-	for _, c := range p.Commands {
-		w, ok := want[c.Path]
-		if !ok {
-			t.Fatalf("unexpected command %q", c.Path)
-		}
-		var args, flags []string
-		for _, a := range c.Arguments {
-			if a.Required {
-				args = append(args, "<"+a.Name+">")
-			} else {
-				args = append(args, "["+a.Name+"]")
-			}
-		}
-		for _, o := range c.Options {
-			f := o.Flags
-			if d, ok := o.DefaultValue.(string); ok {
-				f += "=" + d
-			}
-			flags = append(flags, f)
-		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input}
-		if got != w {
-			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
-		}
-		if len(c.Examples) == 0 || c.Format == nil {
-			t.Errorf("%s: missing examples or format", c.Path)
-		}
-	}
+	product.CheckCommands(t, map[string]atlassiantest.Row{
+		"spaces":   {Flags: "--limit <number>=50 --type <type>", Access: "read"},
+		"pages":    {Flags: "--space <key> --space-id <id> --parent <id> --limit <number>=25", Access: "read"},
+		"get":      {Args: "<page-id>", Flags: "--format <format>=storage", Access: "read"},
+		"search":   {Flags: "--cql <query> --space <key> --type <type> --text <text> --limit <number>=25", Access: "read"},
+		"create":   {Flags: "--title <title> --space <key> --space-id <id> --parent <id> --content <text>", Access: "write", Operation: "create page", Input: "text"},
+		"update":   {Args: "<page-id>", Flags: "--title <title> --content <text>", Access: "write", Operation: "update page", Input: "text"},
+		"comments": {Args: "<page-id>", Access: "read"},
+		"comment":  {Args: "<page-id> [body]", Access: "write", Operation: "add comment", Input: "text"},
+	})
 }
 
 func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
-	setupVault(t)
+	product.SetupVault(t)
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
 		switch {
 		case h.Host == "auth.atlassian.com" && h.Path == "/oauth/token":
@@ -236,7 +70,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	})
 	var opts plugins.OAuthSetupOptions
 	var prompts []string
-	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
+	sc := atlassiantest.SetupContext()
 	sc.OAuth = func(_ context.Context, o plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		opts = o
 		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:9999/callback"}, nil
@@ -256,15 +90,15 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	authURL, _ := url.Parse(opts.AuthorizationURL("http://localhost:9999/callback"))
 	q := authURL.Query()
 	if authURL.Host != "auth.atlassian.com" || authURL.Path != "/authorize" ||
-		q.Get("audience") != "api.atlassian.com" || q.Get("client_id") != atlassianClientID ||
+		q.Get("audience") != "api.atlassian.com" || q.Get("client_id") != atlassian.ClientID ||
 		q.Get("scope") != "read:page:confluence write:page:confluence read:space:confluence read:comment:confluence write:comment:confluence search:confluence read:me offline_access" ||
 		q.Get("redirect_uri") != "http://localhost:9999/callback" || q.Get("state") != opts.ExpectedState ||
 		q.Get("response_type") != "code" || q.Get("prompt") != "consent" {
 		t.Fatalf("authorize url %s", authURL)
 	}
-	secret, _ := obscure.Reveal(atlassianSecretEnc)
-	token := fake.recorded()[0]
-	if token.Body["grant_type"] != "authorization_code" || token.Body["client_id"] != atlassianClientID ||
+	secret, _ := obscure.Reveal(atlassian.SecretEnc)
+	token := fake.Recorded()[0]
+	if token.Body["grant_type"] != "authorization_code" || token.Body["client_id"] != atlassian.ClientID ||
 		token.Body["client_secret"] != secret || secret == "" || token.Body["code"] != "code-1" ||
 		token.Body["redirect_uri"] != "http://localhost:9999/callback" {
 		t.Fatalf("token request %#v", token.Body)
@@ -273,7 +107,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		t.Fatalf("prompts %v", prompts)
 	}
 	// The suggested name is the site hostname, and the host saved it.
-	stored := loadCreds(t, "beta.atlassian.net")
+	stored := product.LoadCreds(t, "beta.atlassian.net")
 	var keys []string
 	for k := range stored {
 		keys = append(keys, k)
@@ -298,7 +132,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 }
 
 func TestSetupRefusesWhenNoSiteOrNoTerminal(t *testing.T) {
-	setupVault(t)
+	product.SetupVault(t)
 	sites := []map[string]any{}
 	newFake(t, func(w http.ResponseWriter, h hit) {
 		if h.Path == "/oauth/token" {
@@ -307,17 +141,17 @@ func TestSetupRefusesWhenNoSiteOrNoTerminal(t *testing.T) {
 		}
 		writeJSON(w, 200, sites)
 	})
-	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
+	sc := atlassiantest.SetupContext()
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
-	_, err := setup(context.Background(), plugins.SetupOptions{}, sc)
+	_, err := New().Profile.Setup(context.Background(), plugins.SetupOptions{}, sc)
 	if err == nil || err.Error() != "No accessible Confluence sites found. Make sure your app has the correct permissions." {
 		t.Fatalf("no sites: %v", err)
 	}
 	// Two sites and stdin at EOF is Bun's non-TTY interactiveSelect refusal.
 	sites = []map[string]any{{"id": "1", "url": "https://a.atlassian.net", "name": "a"}, {"id": "2", "url": "https://b.atlassian.net", "name": "b"}}
-	_, err = setup(context.Background(), plugins.SetupOptions{}, sc)
+	_, err = New().Profile.Setup(context.Background(), plugins.SetupOptions{}, sc)
 	ce, ok := err.(*clierr.Error)
 	if !ok || ce.Code != clierr.InvalidParams || ce.Message != "Interactive input required but not running in terminal" {
 		t.Fatalf("non-tty: %#v", err)
@@ -336,15 +170,11 @@ func TestReauthenticateKeepsUnknownFields(t *testing.T) {
 		}
 		writeJSON(w, 200, []map[string]any{{"id": "c-9", "url": "https://z.atlassian.net", "name": "z"}})
 	})
-	sc := &plugins.SetupContext{
-		Log: func(...any) {}, Fetch: func(ctx context.Context, r *http.Request) (*http.Response, error) {
-			return http.DefaultClient.Do(r.WithContext(ctx))
-		},
-		OAuth: func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
-			return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
-		},
+	sc := atlassiantest.SetupContext()
+	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
-	got, err := reauth(context.Background(), storedCreds(1), "p", sc)
+	got, err := New().Profile.Reauthenticate(context.Background(), storedCreds(1), "p", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,10 +184,8 @@ func TestReauthenticateKeepsUnknownFields(t *testing.T) {
 }
 
 func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
-	reg := setupVault(t)
-	if err := profile.Save("confluence", "acme", storedCreds(1), profile.SaveOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(1), false)
 	var mu sync.Mutex
 	refreshes := 0
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -389,12 +217,12 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 	if refreshes != 1 {
 		t.Fatalf("%d refreshes, want 1", refreshes)
 	}
-	secret, _ := obscure.Reveal(atlassianSecretEnc)
-	body := fake.recorded()[0].Body
-	if body["grant_type"] != "refresh_token" || body["refresh_token"] != "rt-old" || body["client_id"] != atlassianClientID || body["client_secret"] != secret {
+	secret, _ := obscure.Reveal(atlassian.SecretEnc)
+	body := fake.Recorded()[0].Body
+	if body["grant_type"] != "refresh_token" || body["refresh_token"] != "rt-old" || body["client_id"] != atlassian.ClientID || body["client_secret"] != secret {
 		t.Fatalf("refresh request %#v", body)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["accessToken"] != "at-new" || stored["refreshToken"] != "rt-rotated" || stored["cloudId"] != "cloud-1" ||
 		stored["siteUrl"] != "https://acme.atlassian.net" || stored["legacyField"] != "kept" {
 		t.Fatalf("%#v", stored)
@@ -403,10 +231,10 @@ func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
 		t.Fatalf("expiryDate %T", stored["expiryDate"])
 	}
 	// The command then calls the API with the refreshed token.
-	if _, err := exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"limit": "50"}}); err != nil {
+	if _, err := product.Exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"limit": "50"}}); err != nil {
 		t.Fatal(err)
 	}
-	last := fake.recorded()[len(fake.recorded())-1]
+	last := fake.Recorded()[len(fake.Recorded())-1]
 	if last.Auth != "Bearer at-new" || refreshes != 1 {
 		t.Fatalf("auth %q refreshes %d", last.Auth, refreshes)
 	}
@@ -416,7 +244,7 @@ func TestRefreshKeepsTheOldRefreshTokenWhenNoneIsReturned(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) {
 		writeJSON(w, 200, map[string]any{"access_token": "at-new", "expires_in": 10})
 	})
-	got, err := refresh(context.Background(), storedCreds(1))
+	got, err := New().Profile.Refresh.Run(context.Background(), storedCreds(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,10 +254,8 @@ func TestRefreshKeepsTheOldRefreshTokenWhenNoneIsReturned(t *testing.T) {
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
-	reg := setupVault(t)
-	if err := profile.Save("confluence", "acme", storedCreds(1), profile.SaveOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(1), false)
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
 		if h.Path == "/oauth/token" {
 			w.WriteHeader(403)
@@ -438,33 +264,30 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 		}
 		t.Errorf("API called after a failed refresh: %s", h.Path)
 	})
-	_, err := exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"limit": "50"}})
+	_, err := product.Exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"limit": "50"}})
 	ce, ok := err.(*clierr.Error)
 	if !ok || ce.Code != clierr.TokenExpired ||
 		ce.Message != `Token refresh failed for confluence profile "acme": Failed to refresh token: {"error":"invalid_grant"}` ||
 		ce.Suggestion != "Re-authenticate with: agentio confluence profile add --profile acme" {
 		t.Fatalf("%#v", err)
 	}
-	stored := loadCreds(t, "acme")
+	stored := product.LoadCreds(t, "acme")
 	if stored["accessToken"] != "at-old" || stored["refreshToken"] != "rt-old" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
-	if len(fake.recorded()) != 1 {
-		t.Fatalf("%d requests", len(fake.recorded()))
+	if len(fake.Recorded()) != 1 {
+		t.Fatalf("%d requests", len(fake.Recorded()))
 	}
 }
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
-	reg := setupVault(t)
-	far := time.Now().Add(24 * time.Hour).UnixMilli()
-	if err := profile.Save("confluence", "ro", storedCreds(far), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
-		t.Fatal(err)
-	}
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", storedCreds(atlassiantest.Far()), true)
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
 		writeJSON(w, 200, map[string]any{"results": []any{}})
 	})
 	for path, op := range map[string]string{"create": "create page", "update": "update page", "comment": "add comment"} {
-		_, err := exec(t, reg, path, plugins.CommandInput{
+		_, err := product.Exec(t, reg, path, plugins.CommandInput{
 			Args:    map[string]any{"page-id": "1", "body": "hi"},
 			Options: map[string]any{"title": "T", "space-id": "9", "content": "x"},
 		})
@@ -474,13 +297,13 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 			t.Fatalf("%s: %#v", path, err)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
-	if _, err := exec(t, reg, "comments", plugins.CommandInput{Args: map[string]any{"page-id": "1"}}); err != nil {
+	if _, err := product.Exec(t, reg, "comments", plugins.CommandInput{Args: map[string]any{"page-id": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(fake.recorded()); n != 1 {
+	if n := len(fake.Recorded()); n != 1 {
 		t.Fatalf("read did not run: %d", n)
 	}
 }
@@ -496,7 +319,7 @@ func TestValidate(t *testing.T) {
 	if err != nil || !res.Valid || res.Info != "https://acme.atlassian.net" {
 		t.Fatalf("%#v %v", res, err)
 	}
-	h := fake.recorded()[0]
+	h := fake.Recorded()[0]
 	if h.Path != "/ex/confluence/cloud-1/wiki/api/v2/spaces" || h.Query.Get("limit") != "1" || h.Auth != "Bearer at-old" {
 		t.Fatalf("%#v", h)
 	}
@@ -535,21 +358,18 @@ func TestStaleFollowsTheBunComparison(t *testing.T) {
 		{"beyond the buffer", map[string]any{"expiryDate": json.Number("1501")}, false},
 	}
 	for _, c := range cases {
-		if got := stale(c.creds, 1000, 500); got != c.want {
+		if got := New().Profile.Refresh.IsStale(c.creds, 1000, 500); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	if applies(map[string]any{"refreshToken": ""}) || applies(map[string]any{"refreshToken": 5}) || !applies(map[string]any{"refreshToken": "r"}) {
+	if New().Profile.Refresh.Applies(map[string]any{"refreshToken": ""}) || New().Profile.Refresh.Applies(map[string]any{"refreshToken": 5}) || !New().Profile.Refresh.Applies(map[string]any{"refreshToken": "r"}) {
 		t.Fatal("applies")
 	}
 }
 
 func TestCommandsSendTheBunRequests(t *testing.T) {
-	reg := setupVault(t)
-	far := time.Now().Add(24 * time.Hour).UnixMilli()
-	if err := profile.Save("confluence", "acme", storedCreds(far), profile.SaveOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(atlassiantest.Far()), false)
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
 		switch {
 		case h.Path == "/ex/confluence/cloud-1/wiki/api/v2/spaces" && h.Query.Get("keys") == "NOPE":
@@ -569,7 +389,7 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 			writeJSON(w, 200, map[string]any{"results": []any{}})
 		}
 	})
-	last := func() hit { r := fake.recorded(); return r[len(r)-1] }
+	last := func() hit { r := fake.Recorded(); return r[len(r)-1] }
 	opts := func(kv ...string) map[string]any {
 		m := map[string]any{"profile": "acme"}
 		for i := 0; i+1 < len(kv); i += 2 {
@@ -579,13 +399,13 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// spaces: limit is parseInt'ed; NaN is sent as Bun sends it.
-	if _, err := exec(t, reg, "spaces", plugins.CommandInput{Options: opts("limit", "10abc", "type", "global")}); err != nil {
+	if _, err := product.Exec(t, reg, "spaces", plugins.CommandInput{Options: opts("limit", "10abc", "type", "global")}); err != nil {
 		t.Fatal(err)
 	}
 	if h := last(); h.Query.Get("limit") != "10" || h.Query.Get("type") != "global" {
 		t.Fatalf("spaces %v", h.Query)
 	}
-	if _, err := exec(t, reg, "spaces", plugins.CommandInput{Options: opts("limit", "x")}); err != nil {
+	if _, err := product.Exec(t, reg, "spaces", plugins.CommandInput{Options: opts("limit", "x")}); err != nil {
 		t.Fatal(err)
 	}
 	if h := last(); h.Query.Get("limit") != "NaN" || h.Query.Has("type") {
@@ -593,26 +413,26 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// pages: a space key is resolved to its id first.
-	if _, err := exec(t, reg, "pages", plugins.CommandInput{Options: opts("space", "ENG", "parent", "3", "limit", "25")}); err != nil {
+	if _, err := product.Exec(t, reg, "pages", plugins.CommandInput{Options: opts("space", "ENG", "parent", "3", "limit", "25")}); err != nil {
 		t.Fatal(err)
 	}
 	if h := last(); h.Path != "/ex/confluence/cloud-1/wiki/api/v2/spaces/77/pages" || h.Query.Get("parent-id") != "3" || h.Query.Get("limit") != "25" {
 		t.Fatalf("pages %#v", h)
 	}
-	_, err := exec(t, reg, "pages", plugins.CommandInput{Options: opts("space", "NOPE", "limit", "25")})
+	_, err := product.Exec(t, reg, "pages", plugins.CommandInput{Options: opts("space", "NOPE", "limit", "25")})
 	if ce, ok := err.(*clierr.Error); !ok || ce.Code != "NOT_FOUND" || ce.Message != `Space "NOPE" not found` {
 		t.Fatalf("missing space %#v", err)
 	}
 
 	// search: CQL is joined the Bun way and quotes in --text are escaped.
-	if _, err := exec(t, reg, "search", plugins.CommandInput{Options: opts("cql", "title ~ 'API'", "space", "ENG", "type", "page", "text", `say "hi"`, "limit", "5")}); err != nil {
+	if _, err := product.Exec(t, reg, "search", plugins.CommandInput{Options: opts("cql", "title ~ 'API'", "space", "ENG", "type", "page", "text", `say "hi"`, "limit", "5")}); err != nil {
 		t.Fatal(err)
 	}
 	if h := last(); h.Path != "/ex/confluence/cloud-1/wiki/rest/api/search" ||
 		h.Query.Get("cql") != `title ~ 'API' AND space.key = "ENG" AND type = "page" AND text ~ "say \"hi\""` || h.Query.Get("limit") != "5" {
 		t.Fatalf("search %#v", h)
 	}
-	if _, err := exec(t, reg, "search", plugins.CommandInput{Options: opts("limit", "25")}); err != nil {
+	if _, err := product.Exec(t, reg, "search", plugins.CommandInput{Options: opts("limit", "25")}); err != nil {
 		t.Fatal(err)
 	}
 	if h := last(); h.Query.Get("cql") != `type = "page" ORDER BY lastmodified DESC` {
@@ -620,7 +440,7 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// create: body from stdin is trimmed, escaped, and wrapped as storage.
-	res, err := exec(t, reg, "create", plugins.CommandInput{Options: opts("title", "T", "space", "ENG"), Stdin: "a & <b>\nline\n\nnext\n"})
+	res, err := product.Exec(t, reg, "create", plugins.CommandInput{Options: opts("title", "T", "space", "ENG"), Stdin: "a & <b>\nline\n\nnext\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +458,7 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// update: keeps the current title, bumps the version.
-	if _, err := exec(t, reg, "update", plugins.CommandInput{Args: map[string]any{"page-id": "5"}, Options: opts("content", "new")}); err != nil {
+	if _, err := product.Exec(t, reg, "update", plugins.CommandInput{Args: map[string]any{"page-id": "5"}, Options: opts("content", "new")}); err != nil {
 		t.Fatal(err)
 	}
 	h = last()
@@ -648,7 +468,7 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// comment: the argument wins over stdin.
-	if _, err := exec(t, reg, "comment", plugins.CommandInput{Args: map[string]any{"page-id": "5", "body": "arg"}, Options: opts(), Stdin: "stdin"}); err != nil {
+	if _, err := product.Exec(t, reg, "comment", plugins.CommandInput{Args: map[string]any{"page-id": "5", "body": "arg"}, Options: opts(), Stdin: "stdin"}); err != nil {
 		t.Fatal(err)
 	}
 	h = last()
@@ -658,18 +478,15 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 
 	// An API failure maps the status and keeps Atlassian's body.
-	_, err = exec(t, reg, "get", plugins.CommandInput{Args: map[string]any{"page-id": "404"}, Options: opts("format", "storage")})
+	_, err = product.Exec(t, reg, "get", plugins.CommandInput{Args: map[string]any{"page-id": "404"}, Options: opts("format", "storage")})
 	if ce, ok := err.(*clierr.Error); !ok || ce.Code != "NOT_FOUND" || ce.Message != `Confluence API error: {"message":"gone"}` || ce.Suggestion != "" {
 		t.Fatalf("404 %#v", err)
 	}
 }
 
 func TestInputErrorsMatchBun(t *testing.T) {
-	reg := setupVault(t)
-	far := time.Now().Add(24 * time.Hour).UnixMilli()
-	if err := profile.Save("confluence", "acme", storedCreds(far), profile.SaveOptions{}); err != nil {
-		t.Fatal(err)
-	}
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(atlassiantest.Far()), false)
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { writeJSON(w, 200, map[string]any{}) })
 	cases := []struct {
 		path string
@@ -687,23 +504,19 @@ func TestInputErrorsMatchBun(t *testing.T) {
 			"Comment body is required. Provide as argument or pipe via stdin."},
 	}
 	for _, c := range cases {
-		_, err := exec(t, reg, c.path, c.in)
+		_, err := product.Exec(t, reg, c.path, c.in)
 		ce, ok := err.(*clierr.Error)
 		if !ok || ce.Code != clierr.InvalidParams || ce.Message != c.msg {
 			t.Errorf("%s: %#v", c.path, err)
 		}
 	}
-	if n := len(fake.recorded()); n != 0 {
+	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("invalid input reached the API %d times", n)
 	}
 	// No profile at all is the host's error, not a crash in the client.
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	_, err := exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"profile": "ghost"}})
-	if codeOf(err) != string(clierr.ProfileNotFound) {
+	product.SetupVault(t)
+	_, err := product.Exec(t, reg, "spaces", plugins.CommandInput{Options: map[string]any{"profile": "ghost"}})
+	if atlassiantest.CliErr(t, err).Code != clierr.ProfileNotFound {
 		t.Fatalf("%#v", err)
 	}
 }
@@ -746,8 +559,8 @@ func TestResponseMappingAndFormat(t *testing.T) {
 		map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "a"}, map[string]any{"type": "hardBreak"}, map[string]any{"type": "text", "text": "b"}}},
 		map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "c"}}},
 	}}
-	if extractTextFromAdf(adf) != "a\nb\n\nc" {
-		t.Fatalf("%q", extractTextFromAdf(adf))
+	if atlassian.ExtractTextFromADF(adf) != "a\nb\n\nc" {
+		t.Fatalf("%q", atlassian.ExtractTextFromADF(adf))
 	}
 	if stripHTML("<p>one</p>  <p class='x'>two<br/>three</p>\n\n\n\n&quot;q&quot;&#39;&nbsp;") != "one\n\ntwo\nthree\n\n\"q\"'" {
 		t.Fatalf("%q", stripHTML("<p>one</p>  <p class='x'>two<br/>three</p>\n\n\n\n&quot;q&quot;&#39;&nbsp;"))

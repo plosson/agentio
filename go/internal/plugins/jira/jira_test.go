@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -29,72 +28,27 @@ type hit = atlassiantest.Hit
 
 var writeJSON = atlassiantest.WriteJSON
 
-func storedCreds(expiry int64) map[string]any {
-	return map[string]any{
-		"accessToken":  "at-old",
-		"refreshToken": "rt-old",
-		"expiryDate":   expiry,
-		"cloudId":      "cloud-1",
-		"siteUrl":      "https://acme.atlassian.net",
-		"legacyField":  "kept",
-	}
-}
-
-func far() int64 { return time.Now().Add(24 * time.Hour).UnixMilli() }
+var (
+	storedCreds = atlassiantest.StoredCreds
+	far         = atlassiantest.Far
+)
 
 // The command table is the Bun surface. A renamed flag, a lost default, or a
 // write that turned into a read fails here.
 func TestCommandTableMatchesBun(t *testing.T) {
-	type row struct {
-		args, flags, access, op, input string
-	}
-	want := map[string]row{
-		"projects":    {"", "--limit <number>=50", "read", "", ""},
-		"search":      {"", "--jql <query> --project <key> --status <status> --assignee <name> --limit <number>=50", "read", "", ""},
-		"get":         {"<issue-key>", "", "read", "", ""},
-		"comment":     {"<issue-key> [body]", "", "", "add comment", "text"},
-		"transitions": {"<issue-key>", "", "read", "", ""},
-		"transition":  {"<issue-key> <transition-id>", "", "write", "transition issue", ""},
-	}
 	p := New()
 	if p.ID != "jira" || p.DisplayName != "JIRA" ||
 		p.Description != "Use when interacting with JIRA via the agentio CLI - search issues, comment, transition." {
 		t.Fatalf("identity %q %q %q", p.ID, p.DisplayName, p.Description)
 	}
-	if _, err := plugins.NewRegistry(p); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.Commands) != len(want) {
-		t.Fatalf("%d commands, want %d", len(p.Commands), len(want))
-	}
-	for _, c := range p.Commands {
-		w, ok := want[c.Path]
-		if !ok {
-			t.Fatalf("unexpected command %q", c.Path)
-		}
-		var args, flags []string
-		for _, a := range c.Arguments {
-			if a.Required {
-				args = append(args, "<"+a.Name+">")
-			} else {
-				args = append(args, "["+a.Name+"]")
-			}
-		}
-		for _, o := range c.Options {
-			f := o.Flags
-			if d, ok := o.DefaultValue.(string); ok {
-				f += "=" + d
-			}
-			flags = append(flags, f)
-		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input}
-		if got != w {
-			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
-		}
-		if len(c.Examples) == 0 || c.Format == nil {
-			t.Errorf("%s: missing examples or format", c.Path)
-		}
-	}
+	product.CheckCommands(t, map[string]atlassiantest.Row{
+		"projects":    {Flags: "--limit <number>=50", Access: "read"},
+		"search":      {Flags: "--jql <query> --project <key> --status <status> --assignee <name> --limit <number>=50", Access: "read"},
+		"get":         {Args: "<issue-key>", Access: "read"},
+		"comment":     {Args: "<issue-key> [body]", Operation: "add comment", Input: "text"},
+		"transitions": {Args: "<issue-key>", Access: "read"},
+		"transition":  {Args: "<issue-key> <transition-id>", Access: "write", Operation: "transition issue"},
+	})
 	// comment decides its access from the input: a body makes it a write.
 	comment := product.Spec(t, "comment")
 	if comment.AccessFor(plugins.CommandInput{Args: map[string]any{"body": "x"}}) != "write" ||
@@ -102,10 +56,6 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		comment.AccessFor(plugins.CommandInput{Stdin: " \n"}) != "read" {
 		t.Fatal("comment access")
 	}
-}
-
-func setupContext() *plugins.SetupContext {
-	return host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
 }
 
 func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
@@ -125,7 +75,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	})
 	var opts plugins.OAuthSetupOptions
 	var prompts []string
-	sc := setupContext()
+	sc := atlassiantest.SetupContext()
 	sc.OAuth = func(_ context.Context, o plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		opts = o
 		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:9999/callback"}, nil
@@ -201,7 +151,7 @@ func TestSetupFailuresWriteNothing(t *testing.T) {
 		}
 		writeJSON(w, 200, sites)
 	})
-	sc := setupContext()
+	sc := atlassiantest.SetupContext()
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
@@ -238,14 +188,10 @@ func TestReauthenticateReturnsTheReplacement(t *testing.T) {
 		writeJSON(w, 200, []map[string]any{{"id": "cloud-new", "url": "https://new.atlassian.net", "name": "new"}})
 	})
 	var logs []string
-	sc := &plugins.SetupContext{
-		Log: func(a ...any) { logs = append(logs, a[0].(string)) },
-		Fetch: func(ctx context.Context, r *http.Request) (*http.Response, error) {
-			return http.DefaultClient.Do(r.WithContext(ctx))
-		},
-		OAuth: func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
-			return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
-		},
+	sc := atlassiantest.SetupContext()
+	sc.Log = func(a ...any) { logs = append(logs, a[0].(string)) }
+	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
 	creds := storedCreds(10_000)
 	got, err := New().Profile.Reauthenticate(context.Background(), creds, "work", sc)

@@ -14,8 +14,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
@@ -219,4 +221,74 @@ func (p Product) Exec(t *testing.T, reg *plugins.Registry, path string, in plugi
 		in.Args = map[string]any{}
 	}
 	return host.Execute(context.Background(), reg, reg.Find(p.id()), p.Spec(t, path), in)
+}
+
+// StoredCreds is a saved Atlassian profile expiring at expiry (ms), with a
+// field no product owns so tests can see it is kept.
+func StoredCreds(expiry int64) map[string]any {
+	return map[string]any{
+		"accessToken":  "at-old",
+		"refreshToken": "rt-old",
+		"expiryDate":   expiry,
+		"cloudId":      "cloud-1",
+		"siteUrl":      "https://acme.atlassian.net",
+		"legacyField":  "kept",
+	}
+}
+
+// Far is an expiry a day away: no refresh is due.
+func Far() int64 { return time.Now().Add(24 * time.Hour).UnixMilli() }
+
+// SetupContext is the host's setup context with stdin at EOF (no terminal)
+// and output discarded. Tests set OAuth and Prompt as they need.
+func SetupContext() *plugins.SetupContext {
+	return host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
+}
+
+// Row is one command as the Bun command table describes it: arguments
+// ("<a> [b]"), flags with their defaults ("--limit <number>=50"), access,
+// read-only refusal label and stdin input.
+type Row struct {
+	Args, Flags, Access, Operation, Input string
+}
+
+// CheckCommands fails t unless the product's commands are exactly want, each
+// with examples and a Format.
+func (p Product) CheckCommands(t *testing.T, want map[string]Row) {
+	t.Helper()
+	plugin := p.New()
+	if _, err := plugins.NewRegistry(plugin); err != nil {
+		t.Fatal(err)
+	}
+	if len(plugin.Commands) != len(want) {
+		t.Fatalf("%d commands, want %d", len(plugin.Commands), len(want))
+	}
+	for _, c := range plugin.Commands {
+		w, ok := want[c.Path]
+		if !ok {
+			t.Fatalf("unexpected command %q", c.Path)
+		}
+		var args, flags []string
+		for _, a := range c.Arguments {
+			if a.Required {
+				args = append(args, "<"+a.Name+">")
+			} else {
+				args = append(args, "["+a.Name+"]")
+			}
+		}
+		for _, o := range c.Options {
+			f := o.Flags
+			if d, ok := o.DefaultValue.(string); ok {
+				f += "=" + d
+			}
+			flags = append(flags, f)
+		}
+		got := Row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input}
+		if got != w {
+			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
+		}
+		if len(c.Examples) == 0 || c.Format == nil {
+			t.Errorf("%s: missing examples or format", c.Path)
+		}
+	}
 }
