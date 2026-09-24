@@ -266,3 +266,53 @@ func TestResultReturnedWithAnErrorIsPrintedFirst(t *testing.T) {
 		t.Fatalf("code %d\n%q", code, out.String())
 	}
 }
+
+// Bun gcal: `events` answers to `list`, and `--attendee` collects every
+// occurrence into an array that is empty when the flag is absent.
+func TestAliasRunsTheCommandAndRepeatableOptionsCollect(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	var got []plugins.CommandInput
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Commands: []plugins.CommandSpec{{
+			Path: "events", Description: "events", Aliases: []string{"list"}, Examples: []string{"agentio desk events"},
+			Options: []plugins.OptionSpec{
+				{Flags: "--attendee <email>", Description: "Attendee (repeatable)", Repeatable: true},
+				{Flags: "--limit <n>", Description: "Max", DefaultValue: "10"},
+			},
+			Run: func(_ context.Context, in plugins.CommandInput, _ *plugins.RunContext) (any, error) {
+				got = append(got, in)
+				return "ok", nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Execute(reg, []string{"desk", "list", "--attendee", "a@example.com", "--attendee", "b@example.com,c@example.com", "--limit", "5", "--limit", "7"}, &out, &errOut, strings.NewReader("")); code != 0 {
+		t.Fatalf("alias code %d %s", code, errOut.String())
+	}
+	if code := Execute(reg, []string{"desk", "events"}, &out, &errOut, strings.NewReader("")); code != 0 {
+		t.Fatalf("code %d %s", code, errOut.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("%d runs", len(got))
+	}
+	// A comma stays inside one value: pflag's StringSlice would split it.
+	first, ok := got[0].Options["attendee"].([]string)
+	if !ok || len(first) != 2 || first[0] != "a@example.com" || first[1] != "b@example.com,c@example.com" || got[0].Options["limit"] != "7" {
+		t.Fatalf("%#v", got[0].Options)
+	}
+	empty, ok := got[1].Options["attendee"].([]string)
+	if !ok || empty == nil || len(empty) != 0 {
+		t.Fatalf("absent repeatable flag: %#v", got[1].Options["attendee"])
+	}
+	Execute(reg, []string{"desk", "ls"}, &out, &errOut, strings.NewReader(""))
+	if len(got) != 2 {
+		t.Fatal("an undeclared alias ran the command")
+	}
+}

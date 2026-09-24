@@ -87,6 +87,9 @@ type OptionSpec struct {
 	Flags        string
 	Description  string
 	DefaultValue any // string or bool; nil when unset
+	// Repeatable collects every occurrence of a <value> flag into a []string,
+	// empty when the flag is absent (Bun: a collector option with default []).
+	Repeatable bool
 }
 
 type CommandInput struct {
@@ -100,6 +103,8 @@ type CommandSpec struct {
 	Description string
 	Arguments   []ArgumentSpec
 	Options     []OptionSpec
+	// Aliases are other names for the last Path segment (Bun `.alias('list')`).
+	Aliases []string
 	// Input is "", "none", "text", or "json".
 	Input string
 	// Access is "", "read", or "write". Omitted access is treated as read.

@@ -78,6 +78,12 @@ func (r *Registry) add(p *Plugin) error {
 		}
 	}
 	paths := map[string]bool{}
+	// names holds every invocable path, aliases included, so an alias cannot
+	// shadow a sibling command.
+	names := map[string]bool{}
+	for i := range p.Commands {
+		names[p.Commands[i].Path] = true
+	}
 	for i := range p.Commands {
 		cmd := &p.Commands[i]
 		if strings.TrimSpace(cmd.Path) == "" {
@@ -111,11 +117,22 @@ func (r *Registry) add(p *Plugin) error {
 			if hostFlag.MatchString(opt.Flags) {
 				return fmt.Errorf("plugin %s command %s redeclares host option: %s", p.ID, cmd.Path, opt.Flags)
 			}
+			if opt.Repeatable && !strings.Contains(opt.Flags, "<") {
+				return fmt.Errorf("plugin %s command %s has a repeatable option without a value: %s", p.ID, cmd.Path, opt.Flags)
+			}
 		}
-		names := map[string]bool{}
+		parent := strings.Join(segments[:len(segments)-1], " ")
+		for _, alias := range cmd.Aliases {
+			full := strings.TrimSpace(parent + " " + alias)
+			if !pluginID.MatchString(alias) || alias == "profile" || names[full] {
+				return fmt.Errorf("plugin %s command %s has an invalid or duplicate alias: %s", p.ID, cmd.Path, alias)
+			}
+			names[full] = true
+		}
+		argNames := map[string]bool{}
 		optionalSeen := false
 		for _, arg := range cmd.Arguments {
-			if !pluginID.MatchString(arg.Name) || names[arg.Name] {
+			if !pluginID.MatchString(arg.Name) || argNames[arg.Name] {
 				return fmt.Errorf("plugin %s command %s has an invalid or duplicate argument: %s", p.ID, cmd.Path, arg.Name)
 			}
 			if !arg.Required {
@@ -124,7 +141,7 @@ func (r *Registry) add(p *Plugin) error {
 			if arg.Required && optionalSeen {
 				return fmt.Errorf("plugin %s command %s has a required argument after an optional argument", p.ID, cmd.Path)
 			}
-			names[arg.Name] = true
+			argNames[arg.Name] = true
 		}
 		paths[cmd.Path] = true
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
 	"github.com/plosson/agentio/go/internal/plugins/dropbox"
 	"github.com/plosson/agentio/go/internal/plugins/falco"
+	"github.com/plosson/agentio/go/internal/plugins/google/gcal"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -41,6 +42,7 @@ func init() {
 	plugins.Default.MustRegister(discourse.New())
 	plugins.Default.MustRegister(dropbox.New())
 	plugins.Default.MustRegister(falco.New())
+	plugins.Default.MustRegister(gcal.New())
 }
 
 func Main(args []string) int {
@@ -175,6 +177,7 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 			}
 		}
 		leaf.Use = use
+		leaf.Aliases = spec.Aliases
 		if len(spec.Examples) > 0 {
 			leaf.Example = strings.Join(spec.Examples, "\n")
 		}
@@ -220,12 +223,7 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				if f.Name == "json" {
 					return
 				}
-				if f.Value.Type() == "bool" {
-					b, _ := c.Flags().GetBool(f.Name)
-					in.Options[f.Name] = b
-					return
-				}
-				in.Options[f.Name] = f.Value.String()
+				in.Options[f.Name] = flagValue(c.Flags(), f)
 			})
 			if specCopy.Input == "text" || specCopy.Input == "json" {
 				raw, present, err := host.ReadStdin(c.InOrStdin())
@@ -258,12 +256,14 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	return cmd
 }
 
-// declareOptions adds plugin OptionSpecs as flags: a <value> flag is a string,
-// anything else (or a bool default) is a switch.
+// declareOptions adds plugin OptionSpecs as flags: a <value> flag is a string
+// (a []string when repeatable), anything else (or a bool default) is a switch.
 func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 	for _, opt := range opts {
 		fname := longName(opt.Flags)
-		if _, isBool := opt.DefaultValue.(bool); isBool || !strings.Contains(opt.Flags, "<") {
+		if opt.Repeatable {
+			flags.StringArray(fname, []string{}, opt.Description)
+		} else if _, isBool := opt.DefaultValue.(bool); isBool || !strings.Contains(opt.Flags, "<") {
 			def, _ := opt.DefaultValue.(bool)
 			flags.Bool(fname, def, opt.Description)
 		} else {
@@ -282,14 +282,23 @@ func optionValues(flags *pflag.FlagSet, opts []plugins.OptionSpec) map[string]an
 		if f == nil {
 			continue
 		}
-		if f.Value.Type() == "bool" {
-			b, _ := flags.GetBool(name)
-			out[name] = b
-			continue
-		}
-		out[name] = f.Value.String()
+		out[name] = flagValue(flags, f)
 	}
 	return out
+}
+
+// flagValue is a switch as bool, a repeatable flag as []string, anything else as string.
+func flagValue(flags *pflag.FlagSet, f *pflag.Flag) any {
+	switch f.Value.Type() {
+	case "bool":
+		b, _ := flags.GetBool(f.Name)
+		return b
+	case "stringArray":
+		values, _ := flags.GetStringArray(f.Name)
+		return values
+	default:
+		return f.Value.String()
+	}
 }
 
 func nested(root *cobra.Command, path string) *cobra.Command {
