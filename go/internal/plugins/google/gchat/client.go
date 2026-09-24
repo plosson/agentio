@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -330,12 +329,12 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 		if bound.value == "" {
 			continue
 		}
-		t, ok := parseDate(bound.value)
+		t, ok := jsvalue.ParseDate(bound.value)
 		if !ok {
 			// JavaScriptCore: new Date(...).toISOString() throws RangeError "Invalid Date".
 			return nil, false, a.Fail("API_ERROR", prefix+"Invalid Date", suggestion)
 		}
-		filters = append(filters, fmt.Sprintf(`createTime %s "%s"`, bound.op, google.ISOString(t)))
+		filters = append(filters, fmt.Sprintf(`createTime %s "%s"`, bound.op, jsvalue.ISOString(t)))
 	}
 	limit := o.limit
 	if math.IsNaN(limit) || limit == 0 { // options.limit || 10
@@ -412,10 +411,10 @@ func (a *api) get(spaceID, messageID string) (*message, error) {
 func (a *api) toMessage(m *chat.Message) message {
 	out := message{Name: m.Name, CreateTime: m.CreateTime, UpdateTime: m.LastUpdateTime, Text: m.Text, Sender: a.enrichSender(m)}
 	if out.CreateTime == "" {
-		out.CreateTime = google.ISOString(now())
+		out.CreateTime = jsvalue.ISOString(now())
 	}
 	if out.UpdateTime == "" {
-		out.UpdateTime = google.ISOString(now())
+		out.UpdateTime = jsvalue.ISOString(now())
 	}
 	if m.Thread != nil && m.Thread.Name != "" {
 		out.Thread = &thread{Name: m.Thread.Name}
@@ -837,7 +836,7 @@ func (a *api) refreshDirectory() (*directoryRefresh, error) {
 	}
 	fetchedAt := d.fetchedAt()
 	if fetchedAt == "" {
-		fetchedAt = google.ISOString(now())
+		fetchedAt = jsvalue.ISOString(now())
 	}
 	return &directoryRefresh{Size: d.size(), Path: path, FetchedAt: fetchedAt}, nil
 }
@@ -848,77 +847,4 @@ func lastSegment(name string) string {
 		return s
 	}
 	return "unknown"
-}
-
-var (
-	isoDate = regexp.MustCompile(`^([+-]\d{6}|\d{4})(?:-(\d{2})(?:-(\d{2}))?)?(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?(Z|[+-]\d{2}:?\d{2})?$`)
-	ymdDate = regexp.MustCompile(`^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?: +(\d{1,2}):(\d{2})(?::(\d{2}))?)?$`)
-	mdyDate = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})(?: +(\d{1,2}):(\d{2})(?::(\d{2}))?)?$`)
-)
-
-func atoiOrZero(v string) int {
-	n, _ := strconv.Atoi(v)
-	return n
-}
-
-// parseDate is JavaScriptCore's new Date(s) for the forms a --since or
-// --until takes: the ISO forms (a date alone is UTC, a time without a zone is
-// local), then the numeric legacy forms Y/M/D, Y-M-D and M/D/Y in local time.
-// A day past the month's end rolls over (Feb 30 is Mar 2), as in Bun. Any
-// other text is an Invalid Date.
-func parseDate(s string) (time.Time, bool) {
-	if m := isoDate.FindStringSubmatch(s); m != nil {
-		return isoTime(m)
-	}
-	trimmed := strings.TrimSpace(s)
-	if m := ymdDate.FindStringSubmatch(trimmed); m != nil {
-		return legacyTime(m[1], m[2], m[3], m[4], m[5], m[6])
-	}
-	if m := mdyDate.FindStringSubmatch(trimmed); m != nil {
-		return legacyTime(m[3], m[1], m[2], m[4], m[5], m[6])
-	}
-	return time.Time{}, false
-}
-
-func isoTime(m []string) (time.Time, bool) {
-	num := func(v string, def int) int {
-		if v == "" {
-			return def
-		}
-		return atoiOrZero(v)
-	}
-	year, month, day := num(m[1], 0), num(m[2], 1), num(m[3], 1)
-	hour, minute, second := num(m[4], 0), num(m[5], 0), num(m[6], 0)
-	ms := 0
-	if frac := m[7]; frac != "" {
-		ms = num((frac + "00")[:3], 0)
-	}
-	// Hour 24 is only midnight at the end of the day.
-	if month < 1 || month > 12 || day < 1 || day > 31 || minute > 59 || second > 59 ||
-		hour > 24 || (hour == 24 && (minute != 0 || second != 0 || ms != 0)) {
-		return time.Time{}, false
-	}
-	loc := time.UTC
-	switch zone := m[8]; {
-	case zone == "Z":
-	case zone != "":
-		z := strings.ReplaceAll(zone[1:], ":", "")
-		offset := num(z[:2], 0)*3600 + num(z[2:], 0)*60
-		if zone[0] == '-' {
-			offset = -offset
-		}
-		loc = time.FixedZone("", offset)
-	case m[4] != "":
-		loc = time.Local
-	}
-	return time.Date(year, time.Month(month), day, hour, minute, second, ms*int(time.Millisecond), loc), true
-}
-
-func legacyTime(y, mo, d, h, mi, sec string) (time.Time, bool) {
-	year, month, day := atoiOrZero(y), atoiOrZero(mo), atoiOrZero(d)
-	hour, minute, second := atoiOrZero(h), atoiOrZero(mi), atoiOrZero(sec)
-	if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59 {
-		return time.Time{}, false
-	}
-	return time.Date(year, time.Month(month), day, hour, minute, second, 0, time.Local), true
 }

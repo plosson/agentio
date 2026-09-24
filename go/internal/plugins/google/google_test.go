@@ -450,16 +450,6 @@ func TestFormatBytesMatchesBun(t *testing.T) {
 	}
 }
 
-func TestISOStringIsUTCWithTruncatedMilliseconds(t *testing.T) {
-	at := time.Date(2026, 1, 2, 3, 4, 5, 999_999_999, time.FixedZone("", -5*3600))
-	if got := ISOString(at); got != "2026-01-02T08:04:05.999Z" {
-		t.Fatal(got)
-	}
-	if got := ISOString(time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)); got != "1999-12-31T23:59:59.000Z" {
-		t.Fatal(got)
-	}
-}
-
 func TestStatusMessageUsesTheProductTextFor403And404(t *testing.T) {
 	apiErr := func(status int) error {
 		return &googleapi.Error{Code: status, Body: fmt.Sprintf(`{"error":{"code":%d,"message":"server says"}}`, status)}

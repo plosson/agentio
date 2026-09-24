@@ -3,7 +3,6 @@ package google
 import (
 	"math"
 	"strconv"
-	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 )
@@ -24,9 +23,4 @@ func FormatBytes(bytes int64) string {
 	// parseFloat(value.toFixed(1)) + " " + unit
 	fixed, _ := strconv.ParseFloat(jsvalue.ToFixed(value, 1), 64)
 	return jsvalue.NumberString(fixed) + " " + unit
-}
-
-// ISOString is Date.toISOString: UTC, milliseconds, truncated.
-func ISOString(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }

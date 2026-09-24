@@ -1,7 +1,8 @@
 // Package jsvalue reproduces what the Bun CLI gets from JavaScript itself:
 // JSON.parse and JSON.stringify with key order kept, String(n), Number(s),
-// parseInt, toFixed, and UTF-16 string slicing. A ported service uses it so
-// its output matches Bun byte for byte without a private copy of these rules.
+// parseInt, toFixed, new Date(s), and UTF-16 string slicing. A ported service
+// uses it so its output matches Bun byte for byte without a private copy of
+// these rules.
 package jsvalue
 
 import (

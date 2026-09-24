@@ -37,6 +37,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/jira"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/plugins/revolut"
+	"github.com/plosson/agentio/go/internal/plugins/rss"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
@@ -65,6 +66,7 @@ func init() {
 	plugins.Default.MustRegister(gtasks.New())
 	plugins.Default.MustRegister(jira.New())
 	plugins.Default.MustRegister(revolut.New())
+	plugins.Default.MustRegister(rss.New())
 }
 
 func Main(args []string) int {

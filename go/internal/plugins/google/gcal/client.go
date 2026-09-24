@@ -510,13 +510,13 @@ func timeRange(in plugins.CommandInput) (string, string) {
 			offset = 1
 		}
 		start := time.Date(t.Year(), t.Month(), t.Day()+offset, 0, 0, 0, 0, time.Local)
-		return google.ISOString(start), google.ISOString(addDays(start, 1))
+		return jsvalue.ISOString(start), jsvalue.ISOString(addDays(start, 1))
 	case in.Option("days") != "":
 		days := jsvalue.ParseInt(in.Option("days"))
 		if math.IsNaN(days) || days <= 0 {
 			return "", ""
 		}
-		return google.ISOString(t), google.ISOString(addDays(t, int(days)))
+		return jsvalue.ISOString(t), jsvalue.ISOString(addDays(t, int(days)))
 	default:
 		return in.Option("from"), in.Option("to")
 	}

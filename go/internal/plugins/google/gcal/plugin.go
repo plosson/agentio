@@ -410,10 +410,10 @@ func searchCmd() plugins.CommandSpec {
 			t := now()
 			timeMin, timeMax := in.Option("from"), in.Option("to")
 			if timeMin == "" {
-				timeMin = google.ISOString(addDays(t, -30))
+				timeMin = jsvalue.ISOString(addDays(t, -30))
 			}
 			if timeMax == "" {
-				timeMax = google.ISOString(addDays(t, 90))
+				timeMax = jsvalue.ISOString(addDays(t, 90))
 			}
 			return plugins.Result(a.listEvents(in.Option("calendar"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Arg("query")))
 		},

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugincache"
-	"github.com/plosson/agentio/go/internal/plugins/google"
 	"google.golang.org/api/googleapi"
 	people "google.golang.org/api/people/v1"
 )
@@ -169,7 +169,7 @@ func (d *directory) fetchFull() error {
 			break
 		}
 	}
-	d.data = &directoryFile{FetchedAt: google.ISOString(now()), SyncToken: syncToken, Users: users}
+	d.data = &directoryFile{FetchedAt: jsvalue.ISOString(now()), SyncToken: syncToken, Users: users}
 	return d.save()
 }
 
@@ -209,7 +209,7 @@ func (d *directory) fetchIncremental(syncToken string) error {
 	if next == "" {
 		next = syncToken
 	}
-	d.data = &directoryFile{FetchedAt: google.ISOString(now()), SyncToken: next, Users: users}
+	d.data = &directoryFile{FetchedAt: jsvalue.ISOString(now()), SyncToken: next, Users: users}
 	return d.save()
 }
 
