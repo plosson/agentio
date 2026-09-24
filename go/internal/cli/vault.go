@@ -26,7 +26,7 @@ func vaultCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Vault created at %s\n", s.Path())
-			fmt.Println("\nNext: agentio profile add gmail")
+			fmt.Println("\nNext: agentio profile add <service>")
 			return nil
 		},
 	}
@@ -58,7 +58,7 @@ func vaultCmd() *cobra.Command {
 					return nil
 				}
 				fmt.Println("Unlock: ok")
-				for _, ref := range profile.ListAll(s, "") {
+				for _, ref := range profile.ListProfileRefs(s, "") {
 					ro := ""
 					if ref.ReadOnly {
 						ro = " [read-only]"

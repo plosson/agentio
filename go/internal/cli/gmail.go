@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// gmailCmd is service-facing: OAuth-backed API ops. Profile CRUD lives under
-// `agentio profile …` (shared). Per-service `gmail profile add|list` remain as
-// Bun-compatible shims that call the shared profile layer.
+// gmailCmd registers Gmail API commands only. Profile CRUD is under
+// `agentio profile …`. Per-service `gmail profile add|list` remain as
+// Bun-compatible shims that call the same AddProfileFromPlugin host path.
 func gmailCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "gmail", Short: "Gmail operations (Go skeleton)"}
 	var profileFlag string
@@ -20,20 +20,32 @@ func gmailCmd() *cobra.Command {
 	pCmd.PersistentFlags().StringVar(&profileFlag, "profile", "", "Profile name (defaults to Google email)")
 	pCmd.AddCommand(&cobra.Command{
 		Use:   "add",
-		Short: "Add a Gmail profile via OAuth",
+		Short: "Add a Gmail profile via OAuth (shim → agentio profile add gmail)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return addProfileForService(cmd.Context(), gmailsvc.ServiceKey, profileFlag, false)
+			return addProfileForService(cmd.Context(), gmailsvc.ServiceID, profileFlag, false)
 		},
 	})
 	pCmd.AddCommand(&cobra.Command{
 		Use:   "list",
-		Short: "List Gmail profiles",
+		Short: "List Gmail profiles (shim → profile.ListProfiles)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			entries := profile.List(s, gmailsvc.ServiceKey)
+			groups := profile.ListProfiles(s, gmailsvc.ServiceID)
+			var entries []struct {
+				Name     string
+				ReadOnly bool
+			}
+			if len(groups) > 0 {
+				for _, p := range groups[0].Profiles {
+					entries = append(entries, struct {
+						Name     string
+						ReadOnly bool
+					}{p.Name, p.ReadOnly})
+				}
+			}
 			if len(entries) == 0 {
 				fmt.Println("No Gmail profiles configured.")
 				fmt.Println("Run: agentio profile add gmail")
@@ -96,11 +108,11 @@ func gmailAPIClient(ctx context.Context, profileFlag string) (*gmailsvc.Client, 
 	if err != nil {
 		return nil, "", err
 	}
-	name, err := profile.Resolve(s, gmailsvc.ServiceKey, profileFlag)
+	name, err := profile.RequireProfile(s, gmailsvc.ServiceID, profileFlag)
 	if err != nil {
 		return nil, "", err
 	}
-	creds, err := profile.Credentials(s, gmailsvc.ServiceKey, name)
+	creds, err := profile.GetCredentials(s, gmailsvc.ServiceID, name)
 	if err != nil {
 		return nil, "", err
 	}

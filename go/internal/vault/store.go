@@ -11,6 +11,9 @@ import (
 
 const CurrentVersion = 1
 
+// CURRENT_VAULT_VERSION mirrors Bun CURRENT_VAULT_VERSION.
+const CURRENT_VAULT_VERSION = CurrentVersion
+
 type ProfileEntry struct {
 	Name     string `json:"name"`
 	ReadOnly bool   `json:"readOnly,omitempty"`
@@ -19,6 +22,10 @@ type ProfileEntry struct {
 type Config struct {
 	Profiles map[string][]ProfileEntry `json:"profiles"`
 }
+
+// VaultContents is the Bun VaultContents shape stored inside vault.enc.
+// Alias kept so call sites can use either name.
+type VaultContents = Contents
 
 type Contents struct {
 	Version     int                                  `json:"version"`
@@ -263,6 +270,65 @@ func (s *Store) RemoveProfile(service, name string) (bool, error) {
 		return nil
 	})
 	return removed, err
+}
+
+
+// ListServices returns service keys that have at least one profile entry
+// (Bun configuredServiceIds / keys of config.profiles).
+func (s *Store) ListServices() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache == nil {
+		return nil
+	}
+	out := make([]string, 0, len(s.cache.Config.Profiles))
+	for svc, entries := range s.cache.Config.Profiles {
+		if len(entries) > 0 {
+			out = append(out, svc)
+		}
+	}
+	return out
+}
+
+// RenameProfile moves a profile entry and its credentials (Bun renameProfile / moveProfile).
+// Returns "ok", "absent", or "taken".
+func (s *Store) RenameProfile(service, from, to string) (string, error) {
+	var outcome string
+	err := s.Update(func(c *Contents) error {
+		profiles := c.Config.Profiles[service]
+		idx := -1
+		for i, p := range profiles {
+			if p.Name == from {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			outcome = "absent"
+			return nil
+		}
+		if from != to {
+			for _, p := range profiles {
+				if p.Name == to {
+					outcome = "taken"
+					return nil
+				}
+			}
+		}
+		entry := profiles[idx]
+		entry.Name = to
+		profiles[idx] = entry
+		c.Config.Profiles[service] = profiles
+		if c.Credentials[service] != nil {
+			if stored, ok := c.Credentials[service][from]; ok && from != to {
+				c.Credentials[service][to] = stored
+				delete(c.Credentials[service], from)
+			}
+		}
+		outcome = "ok"
+		return nil
+	})
+	return outcome, err
 }
 
 func ResolvePassphrase() (string, error) {

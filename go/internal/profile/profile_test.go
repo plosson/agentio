@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/plosson/agentio/go/internal/service"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -17,58 +18,63 @@ func initTestVault(t *testing.T) *vault.Store {
 	return s
 }
 
-func TestChooseNameAndCRUD(t *testing.T) {
+func TestChooseProfileNameAndCRUD(t *testing.T) {
 	s := initTestVault(t)
 
-	name := ChooseName(s, "gmail", "", "alice@example.com", false)
+	name := ChooseProfileName(s, "gmail", ProfileNameChoice{Derived: "alice@example.com"})
 	if name != "alice@example.com" {
 		t.Fatalf("got %q", name)
 	}
-	if err := Save(s, "gmail", name, map[string]any{"access_token": "a"}, false); err != nil {
+	if err := SaveProfile(s, "gmail", name, map[string]any{"access_token": "a"}, SetProfileOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
-	n2 := ChooseName(s, "gmail", "", "alice@example.com", false)
+	n2 := ChooseProfileName(s, "gmail", ProfileNameChoice{Derived: "alice@example.com"})
 	if n2 != "alice@example.com-2" {
 		t.Fatalf("collision got %q", n2)
 	}
-	if err := Save(s, "gmail", n2, map[string]any{"access_token": "b"}, false); err != nil {
+	if err := SaveProfile(s, "gmail", n2, map[string]any{"access_token": "b"}, SetProfileOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
-	refs := ListAll(s, "gmail")
+	refs := ListProfileRefs(s, "gmail")
 	if len(refs) != 2 {
 		t.Fatalf("want 2 refs, got %d", len(refs))
 	}
 
-	if _, err := Resolve(s, "gmail", ""); err == nil {
-		t.Fatal("expected multiple-profile error")
+	if r := ResolveProfile(s, "gmail", ""); r.Error != "multiple" {
+		t.Fatalf("expected multiple, got %#v", r)
 	}
-	resolved, err := Resolve(s, "gmail", "alice@example.com")
+	resolved, err := RequireProfile(s, "gmail", "alice@example.com")
 	if err != nil || resolved != "alice@example.com" {
 		t.Fatalf("resolve: %q %v", resolved, err)
 	}
 
-	ok, err := Remove(s, "gmail", "alice@example.com")
+	ok, err := DeleteProfile(s, "gmail", "alice@example.com")
 	if err != nil || !ok {
-		t.Fatalf("remove: %v %v", ok, err)
+		t.Fatalf("delete: %v %v", ok, err)
 	}
-	if len(List(s, "gmail")) != 1 {
-		t.Fatalf("after remove want 1")
+	if len(ListProfiles(s, "gmail")[0].Profiles) != 1 {
+		t.Fatalf("after delete want 1")
 	}
 
-	saved, err := PersistSetup(s, "gmail", SetupResult{
+	outcome, err := RenameProfile(s, "gmail", n2, "renamed")
+	if err != nil || outcome != WriteOK {
+		t.Fatalf("rename: %v %v", outcome, err)
+	}
+
+	saved, err := PersistSetupResult(s, "gmail", &service.SetupResult{
 		Credentials:          map[string]any{"access_token": "c"},
 		SuggestedProfileName: "bob@example.com",
-	}, "")
+	}, service.SetupOptions{})
 	if err != nil || saved != "bob@example.com" {
 		t.Fatalf("persist: %q %v", saved, err)
 	}
 }
 
-func TestValidateUnknownService(t *testing.T) {
+func TestSaveProfileRejectsBadName(t *testing.T) {
 	s := initTestVault(t)
-	if err := Save(s, "nosuch", "x", map[string]any{}, false); err == nil {
-		t.Fatal("expected unknown service error")
+	if err := SaveProfile(s, "gmail", "bad/name", map[string]any{}, SetProfileOptions{}); err == nil {
+		t.Fatal("expected invalid name error")
 	}
 }

@@ -15,11 +15,11 @@ const Version = "0.0.0-go-skeleton"
 func NewRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "agentio",
-		Short:         "AgentIO Go port skeleton (vault + daemon + profile + gmail)",
+		Short:         "AgentIO Go port skeleton (vault + daemon + profile + gmail + jira)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(versionCmd(), vaultCmd(), daemonCmd(), profileCmd(), gmailCmd())
+	root.AddCommand(versionCmd(), vaultCmd(), daemonCmd(), profileCmd(), gmailCmd(), jiraCmd())
 	return root
 }
 

@@ -86,3 +86,9 @@ func Decrypt(encoded, passphrase string) (string, error) {
         }
         return string(plain), nil
 }
+
+// EncryptVault is the Bun encryptVault name for Encrypt.
+func EncryptVault(plaintext, passphrase string) (string, error) { return Encrypt(plaintext, passphrase) }
+
+// DecryptVault is the Bun decryptVault name for Decrypt.
+func DecryptVault(encoded, passphrase string) (string, error) { return Decrypt(encoded, passphrase) }

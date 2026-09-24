@@ -7,20 +7,20 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/profile"
-	gmailsvc "github.com/plosson/agentio/go/internal/services/gmail"
+	"github.com/plosson/agentio/go/internal/service"
 	"github.com/spf13/cobra"
 )
 
 func profileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
-		Short: "Manage profiles across services (shared registry)",
+		Short: "Manage profiles across services (shared registry — Bun profile commands)",
 	}
-	known := strings.Join(profile.KnownServices, ", ")
+	known := func() string { return strings.Join(service.Default.Names(), ", ") }
 
 	listCmd := &cobra.Command{
 		Use:   "list [service]",
-		Short: "List configured profiles",
+		Short: "List configured profiles (Bun profile list / listProfileRefs)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -30,17 +30,17 @@ func profileCmd() *cobra.Command {
 			filter := ""
 			if len(args) == 1 {
 				filter = args[0]
-				if !profile.IsKnown(filter) {
-					return fmt.Errorf("unknown service: %q (known: %s)", filter, known)
+				if !service.Default.Has(filter) {
+					return fmt.Errorf("unknown service: %q (known: %s)", filter, known())
 				}
 			}
-			refs := profile.ListAll(s, filter)
+			refs := profile.ListProfileRefs(s, filter)
 			if len(refs) == 0 {
 				fmt.Println("No profiles configured.")
 				fmt.Println("Add one with: agentio profile add <service>")
 				return nil
 			}
-			by := map[string][]profile.Ref{}
+			by := map[string][]profile.ProfileRef{}
 			order := []string{}
 			for _, r := range refs {
 				if _, ok := by[r.Service]; !ok {
@@ -66,14 +66,10 @@ func profileCmd() *cobra.Command {
 	var readOnly bool
 	addCmd := &cobra.Command{
 		Use:   "add <service>",
-		Short: "Add a profile for a service (service runs OAuth; profile layer stores)",
+		Short: "Add a profile (plugin Setup → host SaveProfile; Bun addProfileFromPlugin)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			service := args[0]
-			if !profile.IsKnown(service) {
-				return fmt.Errorf("unknown service: %q (known: %s)", service, known)
-			}
-			return addProfileForService(cmd.Context(), service, profileName, readOnly)
+			return addProfileForService(cmd.Context(), args[0], profileName, readOnly)
 		},
 	}
 	addCmd.Flags().StringVar(&profileName, "profile", "", "Profile name")
@@ -81,34 +77,70 @@ func profileCmd() *cobra.Command {
 
 	removeCmd := &cobra.Command{
 		Use:   "remove <service> <name>",
-		Short: "Remove a profile",
+		Short: "Remove a profile (Bun deleteProfile)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			service, name := args[0], args[1]
-			if !profile.IsKnown(service) {
-				return fmt.Errorf("unknown service: %q (known: %s)", service, known)
+			svc, name := args[0], args[1]
+			if !service.Default.Has(svc) {
+				return fmt.Errorf("unknown service: %q (known: %s)", svc, known())
 			}
 			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			ok, err := profile.Remove(s, service, name)
+			ok, err := profile.DeleteProfile(s, svc, name)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("profile %q not found for %s", name, service)
+				return fmt.Errorf("profile %q not found for %s", name, svc)
 			}
 			fmt.Printf("Removed profile %q\n", name)
 			return nil
 		},
 	}
 
-	cmd.AddCommand(listCmd, addCmd, removeCmd)
+	renameCmd := &cobra.Command{
+		Use:   "rename <service> <name> <new-name>",
+		Short: "Rename a profile (Bun renameProfile)",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc, from, to := args[0], args[1], args[2]
+			if !service.Default.Has(svc) {
+				return fmt.Errorf("unknown service: %q (known: %s)", svc, known())
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			outcome, err := profile.RenameProfile(s, svc, from, to)
+			if err != nil {
+				return err
+			}
+			switch outcome {
+			case profile.WriteOK:
+				fmt.Printf("Renamed profile %q to %q\n", from, to)
+				return nil
+			case profile.WriteAbsent:
+				return fmt.Errorf("profile %q not found for %s", from, svc)
+			case profile.WriteTaken:
+				return fmt.Errorf("profile %q already exists for %s", to, svc)
+			default:
+				return fmt.Errorf("rename failed: %s", outcome)
+			}
+		},
+	}
+
+	cmd.AddCommand(listCmd, addCmd, removeCmd, renameCmd)
 	return cmd
 }
 
-func addProfileForService(ctx context.Context, service, explicitName string, readOnly bool) error {
+// addProfileForService is the host path: registry Find → AddProfileFromPlugin.
+func addProfileForService(ctx context.Context, serviceID, explicitName string, readOnly bool) error {
+	plugin, ok := service.Default.Find(serviceID)
+	if !ok {
+		return fmt.Errorf("unknown service: %q (known: %s)", serviceID, strings.Join(service.Default.Names(), ", "))
+	}
 	s, err := openStore()
 	if err != nil {
 		return err
@@ -116,23 +148,15 @@ func addProfileForService(ctx context.Context, service, explicitName string, rea
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
 
-	var result profile.SetupResult
-	switch service {
-	case gmailsvc.ServiceKey:
-		result, err = gmailsvc.Setup(ctx)
-	default:
-		return fmt.Errorf("no profile setup for %s", service)
-	}
-	if err != nil {
-		return err
-	}
-	result.ReadOnly = readOnly
-	name, err := profile.PersistSetup(s, service, result, explicitName)
+	name, result, err := profile.AddProfileFromPlugin(ctx, s, plugin, service.SetupOptions{
+		Profile:  explicitName,
+		ReadOnly: readOnly,
+	})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Profile %q configured!\n", name)
-	if result.Info != "" {
+	if result != nil && result.Info != "" {
 		fmt.Println(result.Info)
 	}
 	if readOnly {
