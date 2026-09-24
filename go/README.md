@@ -3,6 +3,8 @@
 Branch work for [issue #85](https://github.com/plosson/agentio/issues/85) / [PR #86](https://github.com/plosson/agentio/pull/86).
 
 See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the Bun → Go boundary map.
+See **[MIGRATION.md](./MIGRATION.md)** for the agent-followable strangler playbook (phases, per-service checklist, DoD).
+See **[COVERAGE.md](./COVERAGE.md)** for the Gmail/Jira command parity matrix (update in the same PR as ports).
 
 **In scope for this skeleton**
 
@@ -35,6 +37,8 @@ go/
       jira/                # Jira Setup + API (implements ServicePlugin)
     cli/                   # cobra wiring (profile CRUD is shared)
   ARCHITECTURE.md
+  MIGRATION.md
+  COVERAGE.md
 ```
 
 ## Build

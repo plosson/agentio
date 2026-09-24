@@ -1,3 +1,5 @@
+> **Agents:** follow **[MIGRATION.md](./MIGRATION.md)** for phased port rules; track cmds in **[COVERAGE.md](./COVERAGE.md)**.
+
 # Go skeleton architecture — Bun domain model → Go
 
 This tree ports **boundaries and signatures**, not a thinner Go-only redesign.
