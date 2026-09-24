@@ -227,7 +227,7 @@ func (a *api) sendViaWebhook(o sendOptions) (*sendResult, error) {
 		Name string `json:"name"`
 	}
 	_ = json.Unmarshal(raw, &data)
-	return &sendResult{MessageID: lastSegment(data.Name), Text: o.text, IsJSONPayload: o.payload != nil}, nil
+	return &sendResult{MessageID: lastSegment(data.Name), Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
 }
 
 func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
@@ -254,21 +254,19 @@ func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
 	if err != nil {
 		return nil, a.StatusError("Failed to send message: ", err, suggestion)
 	}
-	return &sendResult{MessageID: lastSegment(created.Name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: o.payload != nil}, nil
+	return &sendResult{MessageID: lastSegment(created.Name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
 }
 
 // requestMessage is Bun `{ ...payload }` as a Chat message. Spreading a
 // non-object gives no message field.
 func requestMessage(body any) (*chat.Message, error) {
 	msg := &chat.Message{}
-	if _, ok := body.(map[string]any); !ok {
+	switch body.(type) {
+	case *jsvalue.Object, map[string]any:
+	default:
 		return msg, nil
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(raw, msg); err != nil {
+	if err := json.Unmarshal(jsvalue.Stringify(body), msg); err != nil {
 		return nil, err
 	}
 	return msg, nil
@@ -517,7 +515,7 @@ func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
 		if ge.Code == 404 {
 			return nil, a.Fail("NOT_FOUND", "No direct message space exists with "+emailOrUserID, "Open the chat once in Google Chat to create the DM space")
 		}
-		return nil, a.Fail(google.StatusToErrorCode(ge.Code), fmt.Sprintf("findDirectMessage failed: %d %s", ge.Code, ge.Body),
+		return nil, a.Fail(plugins.HTTPStatusToErrorCode(ge.Code), fmt.Sprintf("findDirectMessage failed: %d %s", ge.Code, ge.Body),
 			"Check that the OAuth scope includes chat.spaces.readonly")
 	}
 	name := dm.DisplayName

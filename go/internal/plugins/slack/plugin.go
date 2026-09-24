@@ -4,7 +4,6 @@ package slack
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -162,22 +161,9 @@ func readMessage(in plugins.CommandInput, fail plugins.FailFunc) (message, error
 		return message{}, fail("INVALID_PARAMS", "Cannot use both text message and --json option",
 			`Use either: agentio slack send "text" OR agentio slack send --json file.json`)
 	}
-	var content string
-	if file, isFile := source.(string); isFile {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			return message{}, fail("INVALID_PARAMS", "Failed to read JSON file: "+file, "Check that the file exists and is readable")
-		}
-		content = jsvalue.BufferString(raw)
-	} else {
-		content = plugins.Stdin(in)
-		if content == "" {
-			return message{}, fail("INVALID_PARAMS", "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio slack send --json")
-		}
-	}
-	payload, err := jsvalue.Parse([]byte(content))
+	payload, err := plugins.JSONPayload(in, source, fail, "Pipe JSON content: cat message.json | agentio slack send --json")
 	if err != nil {
-		return message{}, fail("INVALID_PARAMS", "Invalid JSON: "+jsvalue.ParseErrorMessage([]byte(content)), "Check that the JSON is valid")
+		return message{}, err
 	}
 	return message{payload: payload, isPayload: true}, nil
 }

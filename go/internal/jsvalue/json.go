@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -132,8 +133,15 @@ func readValue(dec *json.Decoder) (any, error) {
 	return nil, fmt.Errorf("unexpected %v", d)
 }
 
-// Stringify is JSON.stringify(v) for Parse values and plain Go values.
-// NaN, Infinity and out-of-range numbers are written as null.
+// Stringify is JSON.stringify(v) for Parse values and plain Go values:
+// strings are quoted as writeString does (no escaping of <, >, &, U+2028 or
+// U+2029), numbers use String(n) text, and NaN, Infinity and out-of-range
+// numbers are written as null.
+//
+// A Go map has no insertion order, so its keys are written sorted, as
+// encoding/json does; a value whose JavaScript key order matters must be an
+// *Object. A struct keeps its field order and its json tags. A nil map, nil
+// slice or nil pointer is null, as encoding/json writes it.
 func Stringify(v any) []byte {
 	var b bytes.Buffer
 	writeValue(&b, v)
@@ -168,9 +176,9 @@ func writeValue(b *bytes.Buffer, v any) {
 	case float64:
 		writeFloat(b, t)
 	case int:
-		b.WriteString(strconv.Itoa(t))
+		writeFloat(b, float64(t))
 	case int64:
-		b.WriteString(strconv.FormatInt(t, 10))
+		writeFloat(b, float64(t))
 	case *Object:
 		if t == nil {
 			b.WriteString("null")
@@ -204,9 +212,100 @@ func writeValue(b *bytes.Buffer, v any) {
 		}
 		b.Write(raw)
 	default:
-		raw, _ := json.Marshal(t)
-		b.Write(raw)
+		writeReflect(b, reflect.ValueOf(v))
 	}
+}
+
+// writeReflect writes the plain Go values writeValue has no case for.
+func writeReflect(b *bytes.Buffer, rv reflect.Value) {
+	switch rv.Kind() {
+	case reflect.Invalid:
+		b.WriteString("null")
+	case reflect.Pointer, reflect.Interface:
+		if rv.IsNil() {
+			b.WriteString("null")
+			return
+		}
+		writeValue(b, rv.Elem().Interface())
+	case reflect.Bool:
+		b.WriteString(strconv.FormatBool(rv.Bool()))
+	case reflect.String:
+		writeString(b, rv.String())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		// A JavaScript number: exact up to 2^53, rounded beyond, as String(n).
+		writeFloat(b, float64(rv.Int()))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		writeFloat(b, float64(rv.Uint()))
+	case reflect.Float32:
+		// The shortest float32 text, read as the JavaScript number it names.
+		f, _ := strconv.ParseFloat(strconv.FormatFloat(rv.Float(), 'g', -1, 32), 64)
+		writeFloat(b, f)
+	case reflect.Float64:
+		writeFloat(b, rv.Float())
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			writeViaJSON(b, rv.Interface())
+			return
+		}
+		if rv.IsNil() {
+			b.WriteString("null")
+			return
+		}
+		keys := make([]string, 0, rv.Len())
+		for _, k := range rv.MapKeys() {
+			keys = append(keys, k.String())
+		}
+		slices.Sort(keys)
+		b.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeString(b, k)
+			b.WriteByte(':')
+			writeValue(b, rv.MapIndex(reflect.ValueOf(k).Convert(rv.Type().Key())).Interface())
+		}
+		b.WriteByte('}')
+	case reflect.Slice, reflect.Array:
+		if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+			writeViaJSON(b, rv.Interface()) // []byte: base64, as encoding/json
+			return
+		}
+		if rv.Kind() == reflect.Slice && rv.IsNil() {
+			b.WriteString("null")
+			return
+		}
+		b.WriteByte('[')
+		for i := 0; i < rv.Len(); i++ {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeValue(b, rv.Index(i).Interface())
+		}
+		b.WriteByte(']')
+	default:
+		writeViaJSON(b, rv.Interface())
+	}
+}
+
+// writeViaJSON writes a struct (fields in declaration order, json tags
+// applied) or another type encoding/json knows, then re-writes the result
+// through Parse so strings and numbers follow JSON.stringify. A value
+// encoding/json cannot write (a NaN field, a channel) is null.
+func writeViaJSON(b *bytes.Buffer, v any) {
+	var raw bytes.Buffer
+	enc := json.NewEncoder(&raw)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		b.WriteString("null")
+		return
+	}
+	parsed, err := Parse(raw.Bytes())
+	if err != nil {
+		b.WriteString("null")
+		return
+	}
+	writeValue(b, parsed)
 }
 
 func writeFloat(b *bytes.Buffer, f float64) {

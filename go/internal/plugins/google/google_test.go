@@ -413,9 +413,20 @@ func TestGaxiosMessageAndCode(t *testing.T) {
 			t.Errorf("%s: got %q want %q", c.body, got, c.want)
 		}
 	}
-	for status, want := range map[int]plugins.ErrorCode{401: "AUTH_FAILED", 403: "PERMISSION_DENIED", 404: "NOT_FOUND", 429: "RATE_LIMITED", 500: "API_ERROR", 400: "API_ERROR"} {
-		if StatusToErrorCode(status) != want {
-			t.Errorf("%d", status)
+	// The body's error.code wins over the HTTP status, and both go through
+	// Bun's httpStatusToErrorCode.
+	for _, c := range []struct {
+		status int
+		body   string
+		want   plugins.ErrorCode
+	}{
+		{401, "", "AUTH_FAILED"}, {403, "", "PERMISSION_DENIED"}, {404, "", "NOT_FOUND"}, {429, "", "RATE_LIMITED"},
+		{500, "", "API_ERROR"}, {400, "", "API_ERROR"},
+		{500, `{"error":{"code":404,"message":"gone"}}`, "NOT_FOUND"},
+		{403, `{"error":{"code":"x","message":"odd"}}`, "API_ERROR"},
+	} {
+		if got := ErrorCode(&googleapi.Error{Code: c.status, Body: c.body}); got != c.want {
+			t.Errorf("%d %s: %q, want %q", c.status, c.body, got, c.want)
 		}
 	}
 	plain := errors.New("dial tcp: refused")

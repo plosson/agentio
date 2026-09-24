@@ -52,9 +52,7 @@ func (m message) body() any {
 	return jsvalue.NewObject()
 }
 
-// textBody is the object literal `{ text }`. It is a jsvalue.Object because
-// jsvalue.Stringify sends a Go map through encoding/json, which escapes <, >
-// and & where JSON.stringify does not.
+// textBody is the object literal `{ text }`.
 func textBody(text string) *jsvalue.Object {
 	o := jsvalue.NewObject()
 	o.Set("text", text)

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -197,6 +198,31 @@ func OptionOrStdin(in CommandInput, name string, emptyReadsStdin bool) (string, 
 		return piped, true
 	}
 	return value, given
+}
+
+// JSONPayload is Bun's `--json [file]` message payload (slack and gchat send):
+// source is the option's value, a file name to read or true (bare flag) for
+// stdin, and the text is JSON.parse'd with Bun's error wording. stdinHint is
+// the suggestion when nothing was piped.
+func JSONPayload(in CommandInput, source any, fail FailFunc, stdinHint string) (any, error) {
+	var content string
+	if file, isFile := source.(string); isFile {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fail("INVALID_PARAMS", "Failed to read JSON file: "+file, "Check that the file exists and is readable")
+		}
+		content = jsvalue.BufferString(raw) // readFile(file, 'utf-8')
+	} else {
+		content = Stdin(in)
+		if content == "" {
+			return nil, fail("INVALID_PARAMS", "No JSON provided via stdin", stdinHint)
+		}
+	}
+	payload, err := jsvalue.Parse([]byte(content))
+	if err != nil {
+		return nil, fail("INVALID_PARAMS", "Invalid JSON: "+jsvalue.ParseErrorMessage([]byte(content)), "Check that the JSON is valid")
+	}
+	return payload, nil
 }
 
 // RequireOptions is Commander's requiredOption check, in declaration order:

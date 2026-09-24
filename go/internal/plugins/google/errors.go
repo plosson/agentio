@@ -49,28 +49,10 @@ func IsNotFound(err error) bool {
 	return Code(err) == 404
 }
 
-// StatusToErrorCode is Bun httpStatusToErrorCode.
-func StatusToErrorCode(status int) plugins.ErrorCode {
-	switch status {
-	case 401:
-		return "AUTH_FAILED"
-	case 403:
-		return "PERMISSION_DENIED"
-	case 404:
-		return "NOT_FOUND"
-	case 429:
-		return "RATE_LIMITED"
-	default:
-		return "API_ERROR"
-	}
-}
-
-// ErrorCode is the Bun clients' getErrorCode: the mapped numeric code, else API_ERROR.
+// ErrorCode is the Bun clients' getErrorCode: the mapped numeric code, else
+// API_ERROR (no code is 0, which the mapping also answers with API_ERROR).
 func ErrorCode(err error) plugins.ErrorCode {
-	if c := Code(err); c != 0 {
-		return StatusToErrorCode(c)
-	}
-	return "API_ERROR"
+	return plugins.HTTPStatusToErrorCode(Code(err))
 }
 
 // StatusMessage is the Bun clients' getErrorMessage: fixed text for 401 and

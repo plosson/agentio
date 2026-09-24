@@ -514,3 +514,102 @@ func TestISOStringIsUTCWithTruncatedMilliseconds(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Plain Go maps, slices and structs are written as JSON.stringify writes the
+// same values: no escaping of <, > and &, U+2028 and U+2029 as is, and
+// String(n) number text. The want strings are JSON.stringify output from Bun
+// (map keys given in sorted order, since a Go map is written sorted).
+func TestStringifyPlainGoContainersMatchJSONStringify(t *testing.T) {
+	negZero := math.Copysign(0, -1)
+	cases := []struct {
+		name string
+		v    any
+		want string
+	}{
+		{"nested maps", map[string]any{
+			"a": "\u2028\u2029\u0007",
+			"b": map[string]any{"x": nil, "y": []any{1, map[string]string{"q": `<a href="x">&amp;</a>`}}},
+		}, "{\"a\":\"\u2028\u2029\\u0007\",\"b\":{\"x\":null,\"y\":[1,{\"q\":\"<a href=\\\"x\\\">&amp;</a>\"}]}}"},
+		{"floats", []float64{1e21, 1e-7, negZero, 0.1, 1.5, 123456789012345680000, 1e-6, -1e21, 5e-324, math.NaN(), math.Inf(1), math.Inf(-1)},
+			`[1e+21,1e-7,0,0.1,1.5,123456789012345680000,0.000001,-1e+21,5e-324,null,null,null]`},
+		{"floats in a map", map[string]float64{"a": 1e21, "b": 1e-7, "c": negZero, "d": math.NaN()}, `{"a":1e+21,"b":1e-7,"c":0,"d":null}`},
+		{"json.Number", []json.Number{"12345678901234567890", "1.50", "1E3", "-0.0"}, `[12345678901234567000,1.5,1000,0]`},
+		{"slice of maps", []map[string]any{{"a": 2, "z": "<&>"}, {}}, `[{"a":2,"z":"<&>"},{}]`},
+		{"slice of strings", []string{"<b>", "\u2029"}, "[\"<b>\",\"\u2029\"]"},
+		{"array", [2]any{nil, true}, `[null,true]`},
+		{"integers are JavaScript numbers", []any{int8(-8), uint16(7), int32(1 << 30), uint64(math.MaxUint64), int64(math.MaxInt64), int64(1 << 53), float32(0.1)},
+			`[-8,7,1073741824,18446744073709552000,9223372036854776000,9007199254740992,0.1]`},
+		{"nil", nil, `null`},
+		{"nil values inside", map[string]any{"m": map[string]any(nil), "p": (*int)(nil), "s": []string(nil), "i": nil}, `{"i":null,"m":null,"p":null,"s":null}`},
+		{"pointer and interface", []any{ptr(2.5), any(map[string]any{"k": ptr("<")})}, `[2.5,{"k":"<"}]`},
+		{"named string key", map[label]int{"b": 1, "a": 2}, `{"a":2,"b":1}`},
+		{"*Object inside a map keeps its order", map[string]any{"o": ordered("z", 1, "a", "<&>")}, `{"o":{"z":1,"a":"<&>"}}`},
+	}
+	for _, c := range cases {
+		if got := string(Stringify(c.v)); got != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
+		}
+	}
+}
+
+// A Go map has no insertion order: its keys are written sorted, whatever the
+// order the literal names them in.
+func TestStringifyWritesGoMapKeysSorted(t *testing.T) {
+	m := map[string]any{"zeta": 1, "alpha": 2, "Mid": 3, "beta": map[string]any{"y": 1, "x": 2}}
+	for i := 0; i < 20; i++ { // map iteration order is random: every run must agree
+		if got := string(Stringify(m)); got != `{"Mid":3,"alpha":2,"beta":{"x":2,"y":1},"zeta":1}` {
+			t.Fatalf("run %d: %s", i, got)
+		}
+	}
+}
+
+type label string
+
+type receipt struct {
+	Name    string         `json:"name"`
+	Size    float64        `json:"size"`
+	Skip    string         `json:"-"`
+	Note    string         `json:"note,omitempty"`
+	Extra   map[string]any `json:"extra"`
+	Nested  *receipt       `json:"nested,omitempty"`
+	private string
+}
+
+// A struct keeps its declaration order and json tags, with JSON.stringify's
+// strings and numbers; a struct encoding/json cannot write is null.
+func TestStringifyStructs(t *testing.T) {
+	r := receipt{
+		Name: "<a&b>\u2028", Size: 1e21, Skip: "no", Extra: map[string]any{"b": 1e-7, "a": -0.0},
+		Nested: &receipt{Name: "inner", Size: 1.50}, private: "x",
+	}
+	want := "{\"name\":\"<a&b>\u2028\",\"size\":1e+21,\"extra\":{\"a\":0,\"b\":1e-7},\"nested\":{\"name\":\"inner\",\"size\":1.5,\"extra\":null}}"
+	if got := string(Stringify(r)); got != want {
+		t.Errorf("value:\n got %s\nwant %s", got, want)
+	}
+	if got := string(Stringify(&r)); got != want {
+		t.Errorf("pointer:\n got %s\nwant %s", got, want)
+	}
+	if got := string(Stringify([]receipt{{Name: "&"}})); got != `[{"name":"&","size":0,"extra":null}]` {
+		t.Errorf("slice: %s", got)
+	}
+	if got := string(Stringify(receipt{Size: math.NaN()})); got != "null" {
+		t.Errorf("NaN field: %s", got)
+	}
+	if got := string(Stringify([]byte{1, 2})); got != `"AQI="` {
+		t.Errorf("[]byte: %s", got)
+	}
+	indented := string(StringifyIndent(map[string]any{"a": []any{"<\u2028>"}}))
+	if indented != "{\n  \"a\": [\n    \"<\u2028>\"\n  ]\n}" {
+		t.Errorf("indent: %q", indented)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func ordered(kv ...any) *Object {
+	o := NewObject()
+	for i := 0; i < len(kv); i += 2 {
+		o.Set(kv[i].(string), kv[i+1])
+	}
+	return o
+}

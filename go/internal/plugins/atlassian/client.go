@@ -34,22 +34,6 @@ func NewClient(ctx context.Context, run *plugins.RunContext, errorPrefix string)
 	}
 }
 
-// StatusToErrorCode is Bun httpStatusToErrorCode.
-func StatusToErrorCode(status int) plugins.ErrorCode {
-	switch status {
-	case http.StatusUnauthorized:
-		return "AUTH_FAILED"
-	case http.StatusForbidden:
-		return "PERMISSION_DENIED"
-	case http.StatusNotFound:
-		return "NOT_FOUND"
-	case http.StatusTooManyRequests:
-		return "RATE_LIMITED"
-	default:
-		return "API_ERROR"
-	}
-}
-
 // Request sends method to target with body as JSON (none when nil) and
 // decodes the answer into out. A 204 or an empty answer leaves out as is.
 func (c Client) Request(method, target string, body any, out any) error {
@@ -80,7 +64,7 @@ func (c Client) Request(method, target string, body any, out any) error {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.Fail(StatusToErrorCode(resp.StatusCode), c.ErrorPrefix+": "+string(raw), "")
+		return c.Fail(plugins.HTTPStatusToErrorCode(resp.StatusCode), c.ErrorPrefix+": "+string(raw), "")
 	}
 	if resp.StatusCode == http.StatusNoContent || out == nil {
 		return nil

@@ -190,21 +190,6 @@ func normalizePath(input string) string {
 	return withSlash
 }
 
-func statusCode(status int) plugins.ErrorCode {
-	switch status {
-	case http.StatusUnauthorized:
-		return "AUTH_FAILED"
-	case http.StatusForbidden:
-		return "PERMISSION_DENIED"
-	case http.StatusNotFound:
-		return "NOT_FOUND"
-	case http.StatusTooManyRequests:
-		return "RATE_LIMITED"
-	default:
-		return "API_ERROR"
-	}
-}
-
 // errorCodeFor reads the 409 error_summary, which says more than the status.
 func errorCodeFor(status int, summary string) plugins.ErrorCode {
 	if status == http.StatusConflict {
@@ -220,7 +205,7 @@ func errorCodeFor(status int, summary string) plugins.ErrorCode {
 		}
 		return "API_ERROR"
 	}
-	return statusCode(status)
+	return plugins.HTTPStatusToErrorCode(status)
 }
 
 func suggestionFor(status int, summary string) string {

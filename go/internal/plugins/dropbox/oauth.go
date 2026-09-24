@@ -101,7 +101,7 @@ func postTokenRequest(ctx context.Context, do fetchFunc, form string) (tokenResp
 			suggestion = "Authorisation codes are single-use and short-lived - request a fresh one"
 		}
 		return tokenResponse{}, &apiError{
-			code:       statusCode(resp.StatusCode),
+			code:       plugins.HTTPStatusToErrorCode(resp.StatusCode),
 			message:    fmt.Sprintf("Dropbox token request failed (%d): %s", resp.StatusCode, text),
 			suggestion: suggestion,
 		}

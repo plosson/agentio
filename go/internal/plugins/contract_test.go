@@ -2,8 +2,12 @@ package plugins
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // A wrong type or a missing key must read as the zero value, never panic.
@@ -139,5 +143,60 @@ func TestHTTPStatusToErrorCodeMatchesBun(t *testing.T) {
 		if got := HTTPStatusToErrorCode(status); got != want {
 			t.Errorf("%d: %q, want %q", status, got, want)
 		}
+	}
+}
+
+// Bun `--json [file]`: a file is read as readFile(file, 'utf-8') (a BOM is
+// kept, so JSON.parse rejects it), stdin is trimmed, key order is kept, and
+// every failure uses Bun's text (the parse wording was checked with bun -e).
+func TestJSONPayloadMatchesBun(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	var got []string
+	fail := func(code ErrorCode, m, s string) error {
+		got = append(got, code+"|"+m+"|"+s)
+		return errInvalid
+	}
+	ordered := write("ordered.json", "\n{\"z\":1,\"a\":[\"<&>\",1.50]}\n")
+	v, err := JSONPayload(CommandInput{}, ordered, fail, "hint")
+	if err != nil || string(jsvalue.Stringify(v)) != `{"z":1,"a":["<&>",1.5]}` {
+		t.Fatalf("file: %s %v", jsvalue.Stringify(v), err)
+	}
+	v, err = JSONPayload(CommandInput{Stdin: "  [null] \n"}, true, fail, "hint")
+	if err != nil || string(jsvalue.Stringify(v)) != `[null]` {
+		t.Fatalf("stdin: %s %v", jsvalue.Stringify(v), err)
+	}
+	missing := filepath.Join(dir, "missing.json")
+	for _, c := range []struct {
+		in     CommandInput
+		source any
+	}{
+		{CommandInput{}, missing},
+		{CommandInput{}, dir},
+		{CommandInput{Stdin: " \n"}, true},
+		{CommandInput{}, write("bom.json", "\uFEFF{}")},
+		{CommandInput{Stdin: `{"a":1,}`}, true},
+		{CommandInput{}, write("empty.json", "")},
+	} {
+		if v, err := JSONPayload(c.in, c.source, fail, "hint"); v != nil || err == nil {
+			t.Errorf("%v: accepted %v", c.source, v)
+		}
+	}
+	want := []string{
+		"INVALID_PARAMS|Failed to read JSON file: " + missing + "|Check that the file exists and is readable",
+		"INVALID_PARAMS|Failed to read JSON file: " + dir + "|Check that the file exists and is readable",
+		"INVALID_PARAMS|No JSON provided via stdin|hint",
+		"INVALID_PARAMS|Invalid JSON: JSON Parse error: Unrecognized token '\uFEFF'|Check that the JSON is valid",
+		"INVALID_PARAMS|Invalid JSON: JSON Parse error: Property name must be a string literal|Check that the JSON is valid",
+		"INVALID_PARAMS|Invalid JSON: JSON Parse error: Unexpected EOF|Check that the JSON is valid",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("\n got %q\nwant %q", got, want)
 	}
 }

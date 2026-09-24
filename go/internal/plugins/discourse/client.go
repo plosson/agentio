@@ -157,21 +157,6 @@ func str(m map[string]any, key string) string {
 	return s
 }
 
-func statusCode(status int) plugins.ErrorCode {
-	switch status {
-	case http.StatusUnauthorized:
-		return "AUTH_FAILED"
-	case http.StatusForbidden:
-		return "PERMISSION_DENIED"
-	case http.StatusNotFound:
-		return "NOT_FOUND"
-	case http.StatusTooManyRequests:
-		return "RATE_LIMITED"
-	default:
-		return "API_ERROR"
-	}
-}
-
 func networkError(err error) *apiError {
 	return &apiError{code: "NETWORK_ERROR", message: "Failed to connect to Discourse: " + err.Error()}
 }
@@ -194,7 +179,7 @@ func (a *api) get(path string, out any) error {
 		return networkError(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &apiError{code: statusCode(resp.StatusCode), message: errorMessage(resp.StatusCode, string(raw))}
+		return &apiError{code: plugins.HTTPStatusToErrorCode(resp.StatusCode), message: errorMessage(resp.StatusCode, string(raw))}
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return networkError(err)

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -171,11 +170,7 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 
 // postJSON is Bun `fetch(url, { method: 'POST', body: JSON.stringify(body) })`.
 func postJSON(ctx context.Context, fetch func(context.Context, *http.Request) (*http.Response, error), target string, body any) (*http.Response, error) {
-	raw, err := stringify(body, "")
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(jsvalue.Stringify(body)))
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +237,7 @@ func sendCmd() plugins.CommandSpec {
 					return nil, run.Fail("INVALID_PARAMS", "Cannot use both text message and --json option",
 						"Use either: agentio gchat send \"text\" OR agentio gchat send --json file.json")
 				}
-				payload, err := readPayload(source, in, run)
+				payload, err := plugins.JSONPayload(in, source, run.Fail, "Pipe JSON content: cat message.json | agentio gchat send --json")
 				if err != nil {
 					return nil, err
 				}
@@ -265,36 +260,6 @@ func sendCmd() plugins.CommandSpec {
 		},
 		Format: formatSendResult,
 	}
-}
-
-// readPayload is the --json branch: a file when --json has a value, stdin
-// otherwise, parsed as JSON.
-func readPayload(source any, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	var raw []byte
-	if file, ok := source.(string); ok {
-		content, err := os.ReadFile(file)
-		if err != nil {
-			return nil, run.Fail("INVALID_PARAMS", "Failed to read JSON file: "+file, "Check that the file exists and is readable")
-		}
-		raw = content
-	} else {
-		text := plugins.Stdin(in)
-		if text == "" {
-			return nil, run.Fail("INVALID_PARAMS", "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json")
-		}
-		raw = []byte(text)
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var payload any
-	err := dec.Decode(&payload)
-	if err == nil && dec.More() {
-		err = fmt.Errorf("invalid character after top-level value")
-	}
-	if err != nil {
-		return nil, run.Fail("INVALID_PARAMS", "Invalid JSON: "+err.Error(), "Check that the JSON is valid")
-	}
-	return payload, nil
 }
 
 func listCmd() plugins.CommandSpec {

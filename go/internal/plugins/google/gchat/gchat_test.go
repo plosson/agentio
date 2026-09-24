@@ -576,14 +576,15 @@ func TestSendViaWebhook(t *testing.T) {
 	if res, err = product.Exec(ctx, t, reg, "send", in); err != nil || got[1].Raw != `{"text":"from stdin"}` || product.Spec(t, "send").Format(res) != "Message sent\nID: unknown" {
 		t.Fatalf("%q %v", got[1].Raw, err)
 	}
-	// A JSON file is posted as is.
+	// A JSON file is posted as JSON.stringify(JSON.parse(file)) (checked with
+	// Bun): key order kept, <, > and & as is, numbers as JavaScript reads them.
 	card := filepath.Join(t.TempDir(), "card.json")
-	_ = os.WriteFile(card, []byte(`{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}`), 0o600)
+	_ = os.WriteFile(card, []byte(` {"cardsV2":[{"cardId":"c"}],"z":1,"a":"<&>","n":12345678901234567890} `), 0o600)
 	reply = `{"name":"spaces/W/messages/M2"}`
 	if res, err = product.Exec(ctx, t, reg, "send", product.Input(t, "send", nil, map[string]any{"json": card})); err != nil {
 		t.Fatal(err)
 	}
-	if got[2].Raw != `{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}` || product.Spec(t, "send").Format(res) != "Message sent\nID: M2\nType: JSON payload" {
+	if got[2].Raw != `{"cardsV2":[{"cardId":"c"}],"z":1,"a":"<&>","n":12345678901234567000}` || product.Spec(t, "send").Format(res) != "Message sent\nID: M2\nType: JSON payload" {
 		t.Fatalf("%q %q", got[2].Raw, product.Spec(t, "send").Format(res))
 	}
 	status, reply = 403, "no bots"
@@ -661,6 +662,27 @@ func TestSendViaOAuth(t *testing.T) {
 	}
 	if product.Spec(t, "send").Format(res) != "Message sent\nID: M9\nSpace: ENG1" {
 		t.Fatalf("%q", product.Spec(t, "send").Format(res))
+	}
+	// A --json object is spread into the message (Bun `{ ...payload }`); a
+	// payload that is not an object gives no message field. The Chat SDK
+	// writes the request, so the posted fields are compared, not the text.
+	for _, c := range []struct{ stdin, want, format string }{
+		{`{"text":"card <&>","cardsV2":[{"cardId":"c"}]}`, googletest.JSONText(map[string]any{"cardsV2": []any{map[string]any{"cardId": "c"}}, "text": "card <&>"}), "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		{`[1,2]`, `{}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		// Bun reports `!!payload`, so a falsy payload is not a JSON payload.
+		{`0`, `{}`, "Message sent\nID: M9\nSpace: AAAA"},
+		{`false`, `{}`, "Message sent\nID: M9\nSpace: AAAA"},
+	} {
+		fake.Reset()
+		in := product.Input(t, "send", nil, map[string]any{"space": "AAAA", "json": true})
+		in.Stdin = c.stdin
+		if res, err = product.Exec(ctx, t, reg, "send", in); err != nil {
+			t.Fatal(err)
+		}
+		posted := fake.Recorded()[1]
+		if googletest.JSONText(posted.JSON) != c.want || product.Spec(t, "send").Format(res) != c.format {
+			t.Fatalf("%s: posted %s, %q", c.stdin, googletest.JSONText(posted.JSON), product.Spec(t, "send").Format(res))
+		}
 	}
 }
 
@@ -741,7 +763,12 @@ func TestSendInputAndAPIErrorsMatchBun(t *testing.T) {
 			`Use either: agentio gchat send "text" OR agentio gchat send --json file.json`},
 		{product.Input(t, "send", nil, map[string]any{"json": missing}), clierr.InvalidParams, "Failed to read JSON file: " + missing, "Check that the file exists and is readable"},
 		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), " \n"), clierr.InvalidParams, "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json"},
-		{product.Input(t, "send", nil, map[string]any{"json": bad}), clierr.InvalidParams, "Invalid JSON: unexpected EOF", "Check that the JSON is valid"},
+		// JSON.parse's wording, checked with Bun.
+		{product.Input(t, "send", nil, map[string]any{"json": bad}), clierr.InvalidParams, "Invalid JSON: JSON Parse error: Unexpected EOF", "Check that the JSON is valid"},
+		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), `{"a":1,}`), clierr.InvalidParams, "Invalid JSON: JSON Parse error: Property name must be a string literal", "Check that the JSON is valid"},
+		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), `[1,2`), clierr.InvalidParams, "Invalid JSON: JSON Parse error: Expected ']'", "Check that the JSON is valid"},
+		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), `tru`), clierr.InvalidParams, `Invalid JSON: JSON Parse error: Unexpected identifier "tru"`, "Check that the JSON is valid"},
+		{withStdin(product.Input(t, "send", nil, map[string]any{"json": true}), `{"z":1}{`), clierr.InvalidParams, "Invalid JSON: JSON Parse error: Unable to parse JSON string", "Check that the JSON is valid"},
 		{withStdin(product.Input(t, "send", nil, nil), "  "), clierr.InvalidParams, "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", ""},
 		{product.Input(t, "send", map[string]any{"message": "hi"}, nil), clierr.InvalidParams, "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile"},
 		{product.Input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{missing}}), clierr.InvalidParams, "Failed to read attachment: " + missing, "Check that the file exists and is readable"},
