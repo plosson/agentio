@@ -1,7 +1,6 @@
 package confluence
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 )
 
 type space struct {
@@ -82,22 +82,16 @@ type commentCreated struct {
 }
 
 type api struct {
-	access  string
+	atlassian.Client
 	cloudID string
 	siteURL string
-	ctx     context.Context
-	fetch   fetchFunc
-	fail    func(plugins.ErrorCode, string, string) error
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) api {
 	return api{
-		access:  str(run.Credentials, "accessToken"),
-		cloudID: str(run.Credentials, "cloudId"),
-		siteURL: str(run.Credentials, "siteUrl"),
-		ctx:     ctx,
-		fetch:   run.Fetch,
-		fail:    run.Fail,
+		Client:  atlassian.NewClient(ctx, run, "Confluence API error"),
+		cloudID: atlassian.Str(run.Credentials, "cloudId"),
+		siteURL: atlassian.Str(run.Credentials, "siteUrl"),
 	}
 }
 
@@ -113,58 +107,8 @@ func (a api) webURL(path string) string {
 	return strings.TrimSuffix(a.siteURL, "/") + "/wiki" + path
 }
 
-func statusCode(status int) plugins.ErrorCode {
-	switch status {
-	case http.StatusUnauthorized:
-		return "AUTH_FAILED"
-	case http.StatusForbidden:
-		return "PERMISSION_DENIED"
-	case http.StatusNotFound:
-		return "NOT_FOUND"
-	case http.StatusTooManyRequests:
-		return "RATE_LIMITED"
-	default:
-		return "API_ERROR"
-	}
-}
-
 func (a api) request(method, base, path string, body any, out any) error {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(raw)
-	}
-	req, err := http.NewRequestWithContext(a.ctx, method, base+path, reader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+a.access)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := a.fetch(a.ctx, req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return a.fail(statusCode(resp.StatusCode), "Confluence API error: "+string(raw), "")
-	}
-	if resp.StatusCode == http.StatusNoContent || out == nil {
-		return nil
-	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil
-	}
-	return json.Unmarshal(raw, out)
+	return a.Request(method, base+path, body, out)
 }
 
 func query(path string, kv ...string) string {
@@ -245,7 +189,7 @@ func (a api) getSpace(idOrKey string) (space, error) {
 		return space{}, err
 	}
 	if len(payload.Results) == 0 {
-		return space{}, a.fail("NOT_FOUND", fmt.Sprintf("Space %q not found", idOrKey), "")
+		return space{}, a.Fail("NOT_FOUND", fmt.Sprintf("Space %q not found", idOrKey), "")
 	}
 	return payload.Results[0].model(), nil
 }
@@ -335,7 +279,7 @@ func pageBody(response apiPage, bodyFormat string) string {
 		if err := json.Unmarshal([]byte(response.Body.Atlas.Value), &adf); err != nil {
 			return response.Body.Atlas.Value
 		}
-		return extractTextFromAdf(adf)
+		return atlassian.ExtractTextFromADF(adf)
 	}
 	if bodyFormat == "view" && response.Body.View != nil && response.Body.View.Value != "" {
 		return stripHTML(response.Body.View.Value)
@@ -355,7 +299,7 @@ func (a api) createPage(spaceKey, spaceID, title, parentID, body string) (pageCr
 		spaceID = found.ID
 	}
 	if spaceID == "" {
-		return pageCreated{}, a.fail("INVALID_PARAMS", "spaceId or spaceKey is required to create a page", "")
+		return pageCreated{}, a.Fail("INVALID_PARAMS", "spaceId or spaceKey is required to create a page", "")
 	}
 	payload := map[string]any{
 		"spaceId": spaceID,
@@ -575,53 +519,13 @@ func stripHTML(html string) string {
 	return strings.TrimSpace(html)
 }
 
-func extractTextFromAdf(adf any) string {
-	doc, ok := adf.(map[string]any)
-	if !ok {
-		return ""
-	}
-	content, ok := doc["content"].([]any)
-	if !ok {
-		return ""
-	}
-	parts := make([]string, len(content))
-	for i, block := range content {
-		parts[i] = extractNode(block)
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func extractNode(node any) string {
-	n, ok := node.(map[string]any)
-	if !ok {
-		return ""
-	}
-	if n["type"] == "text" {
-		if text, _ := n["text"].(string); text != "" {
-			return text
-		}
-	}
-	if n["type"] == "hardBreak" {
-		return "\n"
-	}
-	content, ok := n["content"].([]any)
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	for _, child := range content {
-		b.WriteString(extractNode(child))
-	}
-	return b.String()
-}
-
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
 	a := apiFrom(ctx, run)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.v2()+"/spaces?limit=1", nil)
 	if err != nil {
 		return plugins.ValidationResult{Valid: false, Error: err.Error()}, nil
 	}
-	req.Header.Set("Authorization", "Bearer "+a.access)
+	req.Header.Set("Authorization", "Bearer "+a.Access)
 	req.Header.Set("Accept", "application/json")
 	resp, err := run.Fetch(ctx, req)
 	if err != nil {

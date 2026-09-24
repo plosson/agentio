@@ -1,4 +1,10 @@
-package confluence
+// Package atlassian is the layer the Atlassian product plugins (confluence,
+// jira) share: one OAuth app, the same authorize/token/site-selection flow,
+// the camelCase credential map and its refresh, and the REST error shape.
+// Each product keeps its own plugins.Plugin and id, and describes itself with
+// an App. Nothing here writes the vault; the host persists what these
+// functions return.
+package atlassian
 
 import (
 	"bytes"
@@ -19,24 +25,28 @@ import (
 )
 
 const (
-	atlassianAuthURL      = "https://auth.atlassian.com/authorize"
-	atlassianTokenURL     = "https://auth.atlassian.com/oauth/token"
-	atlassianResourcesURL = "https://api.atlassian.com/oauth/token/accessible-resources"
-	atlassianClientID     = "cVyhx1kQLRUef6gr50M9cTDke7ZPL4CN"
-	atlassianSecretEnc    = "cFN1vM5KVVVCIkv9YlE5O0rerKJUkr-CszeusEVxofAH7W0evcCidzAB_OdTygfAcq2LjbN1IXK7ZiBBl3XrBsIO7RfxSGcEfHWpSbbHWxnKPP6H2iOoQZbOfns"
+	authURL      = "https://auth.atlassian.com/authorize"
+	tokenURL     = "https://auth.atlassian.com/oauth/token"
+	resourcesURL = "https://api.atlassian.com/oauth/token/accessible-resources"
+	// ClientID and SecretEnc are Bun ATLASSIAN_OAUTH_CONFIG (= JIRA_OAUTH_CONFIG).
+	ClientID  = "cVyhx1kQLRUef6gr50M9cTDke7ZPL4CN"
+	SecretEnc = "cFN1vM5KVVVCIkv9YlE5O0rerKJUkr-CszeusEVxofAH7W0evcCidzAB_OdTygfAcq2LjbN1IXK7ZiBBl3XrBsIO7RfxSGcEfHWpSbbHWxnKPP6H2iOoQZbOfns"
 	// oauthPort is the callback port registered on the Atlassian app.
 	oauthPort = 9999
 )
 
-var confluenceScopes = []string{
-	"read:page:confluence",
-	"write:page:confluence",
-	"read:space:confluence",
-	"read:comment:confluence",
-	"write:comment:confluence",
-	"search:confluence",
-	"read:me",
-	"offline_access",
+// App is one Atlassian product's side of the shared flow.
+type App struct {
+	// ID is the CLI noun in the reauthentication log.
+	ID string
+	// DisplayName is the product name in the setup banner and site prompt.
+	DisplayName string
+	// SitesName is the product name in Bun's "No accessible … sites found".
+	SitesName string
+	// Scopes is the product's Bun *_SCOPES list.
+	Scopes []string
+	// SetupInfo is the Bun SetupResult info line.
+	SetupInfo string
 }
 
 type fetchFunc func(context.Context, *http.Request) (*http.Response, error)
@@ -47,7 +57,7 @@ type tokenResult struct {
 	expiresIn    int64
 }
 
-type atlassianSite struct {
+type site struct {
 	ID        string   `json:"id"`
 	URL       string   `json:"url"`
 	Name      string   `json:"name"`
@@ -63,8 +73,8 @@ type oauthResult struct {
 	siteURL      string
 }
 
-func atlassianSecret() (string, error) {
-	return obscure.Reveal(atlassianSecretEnc)
+func secret() (string, error) {
+	return obscure.Reveal(SecretEnc)
 }
 
 func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
@@ -79,16 +89,16 @@ func randomState() string {
 	return hex.EncodeToString(buf)
 }
 
-func authorizeURL(redirect, state string) string {
+func (a App) authorizeURL(redirect, state string) string {
 	q := url.Values{}
 	q.Set("audience", "api.atlassian.com")
-	q.Set("client_id", atlassianClientID)
-	q.Set("scope", strings.Join(confluenceScopes, " "))
+	q.Set("client_id", ClientID)
+	q.Set("scope", strings.Join(a.Scopes, " "))
 	q.Set("redirect_uri", redirect)
 	q.Set("state", state)
 	q.Set("response_type", "code")
 	q.Set("prompt", "consent")
-	return atlassianAuthURL + "?" + q.Encode()
+	return authURL + "?" + q.Encode()
 }
 
 func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, previousRefresh, failPrefix string) (tokenResult, error) {
@@ -96,7 +106,7 @@ func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, pre
 	if err != nil {
 		return tokenResult{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, atlassianTokenURL, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader(raw))
 	if err != nil {
 		return tokenResult{}, err
 	}
@@ -133,8 +143,8 @@ func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, pre
 	}, nil
 }
 
-func accessibleSites(ctx context.Context, do fetchFunc, access string) ([]atlassianSite, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, atlassianResourcesURL, nil)
+func accessibleSites(ctx context.Context, do fetchFunc, access string) ([]site, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resourcesURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -152,23 +162,23 @@ func accessibleSites(ctx context.Context, do fetchFunc, access string) ([]atlass
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("Failed to get accessible resources: %s", string(body))
 	}
-	var sites []atlassianSite
+	var sites []site
 	if err := json.Unmarshal(body, &sites); err != nil {
 		return nil, err
 	}
 	return sites, nil
 }
 
-func chooseSite(setup *plugins.SetupContext, sites []atlassianSite) (atlassianSite, error) {
+func (a App) chooseSite(setup *plugins.SetupContext, sites []site) (site, error) {
 	var b strings.Builder
-	b.WriteString("Select a Confluence site:")
-	for i, site := range sites {
-		fmt.Fprintf(&b, "\n  %d) %s — %s", i+1, site.Name, site.URL)
+	fmt.Fprintf(&b, "Select a %s site:", a.DisplayName)
+	for i, s := range sites {
+		fmt.Fprintf(&b, "\n  %d) %s — %s", i+1, s.Name, s.URL)
 	}
 	answer, err := setup.Prompt(b.String(), false)
 	answer = strings.TrimSpace(answer)
 	if err != nil || answer == "" {
-		return atlassianSite{}, setup.Fail(
+		return site{}, setup.Fail(
 			"INVALID_PARAMS",
 			"Interactive input required but not running in terminal",
 			"Run this command in an interactive terminal",
@@ -177,20 +187,21 @@ func chooseSite(setup *plugins.SetupContext, sites []atlassianSite) (atlassianSi
 	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(sites) {
 		return sites[n-1], nil
 	}
-	for _, site := range sites {
-		if answer == site.Name || answer == site.URL || answer == site.ID {
-			return site, nil
+	for _, s := range sites {
+		if answer == s.Name || answer == s.URL || answer == s.ID {
+			return s, nil
 		}
 	}
-	return atlassianSite{}, setup.Fail(
+	return site{}, setup.Fail(
 		"INVALID_PARAMS",
-		fmt.Sprintf("Unknown Confluence site %q", answer),
+		fmt.Sprintf("Unknown %s site %q", a.DisplayName, answer),
 		"Choose one of the listed sites",
 	)
 }
 
-func performOAuth(ctx context.Context, setup *plugins.SetupContext) (oauthResult, error) {
-	secret, err := atlassianSecret()
+// performOAuth is Bun perform<Product>OAuthFlow(select<Product>Site).
+func (a App) performOAuth(ctx context.Context, setup *plugins.SetupContext) (oauthResult, error) {
+	clientSecret, err := secret()
 	if err != nil {
 		return oauthResult{}, err
 	}
@@ -200,7 +211,7 @@ func performOAuth(ctx context.Context, setup *plugins.SetupContext) (oauthResult
 		ExpectedState: state,
 		Port:          oauthPort,
 		AuthorizationURL: func(redirect string) string {
-			return authorizeURL(redirect, state)
+			return a.authorizeURL(redirect, state)
 		},
 	})
 	if err != nil {
@@ -208,8 +219,8 @@ func performOAuth(ctx context.Context, setup *plugins.SetupContext) (oauthResult
 	}
 	tokens, err := requestToken(ctx, setup.Fetch, map[string]any{
 		"grant_type":    "authorization_code",
-		"client_id":     atlassianClientID,
-		"client_secret": secret,
+		"client_id":     ClientID,
+		"client_secret": clientSecret,
 		"code":          flow.Code,
 		"redirect_uri":  flow.RedirectURI,
 	}, "", "Failed to exchange code for tokens")
@@ -221,11 +232,11 @@ func performOAuth(ctx context.Context, setup *plugins.SetupContext) (oauthResult
 		return oauthResult{}, err
 	}
 	if len(sites) == 0 {
-		return oauthResult{}, fmt.Errorf("No accessible Confluence sites found. Make sure your app has the correct permissions.")
+		return oauthResult{}, fmt.Errorf("No accessible %s sites found. Make sure your app has the correct permissions.", a.SitesName)
 	}
 	selected := sites[0]
 	if len(sites) > 1 {
-		selected, err = chooseSite(setup, sites)
+		selected, err = a.chooseSite(setup, sites)
 		if err != nil {
 			return oauthResult{}, err
 		}
@@ -257,9 +268,11 @@ func credentialMap(prev map[string]any, result oauthResult) map[string]any {
 	return out
 }
 
-func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
-	setup.Log("\nConfluence OAuth Setup\n")
-	result, err := performOAuth(ctx, setup)
+// Setup is the product's Bun profile.setup: the OAuth flow, then the
+// credentials named after the site hostname.
+func (a App) Setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
+	setup.Log(fmt.Sprintf("\n%s OAuth Setup\n", a.DisplayName))
+	result, err := a.performOAuth(ctx, setup)
 	if err != nil {
 		return nil, err
 	}
@@ -271,60 +284,18 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 	return &plugins.SetupResult{
 		Credentials:          credentialMap(nil, result),
 		SuggestedProfileName: host,
-		Info:                 "Test with: agentio confluence spaces",
+		Info:                 a.SetupInfo,
 	}, nil
 }
 
-func reauth(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
-	setup.Log(fmt.Sprintf("\nRe-authenticating confluence / %s...", profileName))
-	result, err := performOAuth(ctx, setup)
+// Reauthenticate is the product's Bun profile.reauthenticate: a new OAuth
+// flow merged over the stored map, unknown fields kept.
+func (a App) Reauthenticate(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+	setup.Log(fmt.Sprintf("\nRe-authenticating %s / %s...", a.ID, profileName))
+	result, err := a.performOAuth(ctx, setup)
 	if err != nil {
 		return nil, err
 	}
 	setup.Log(fmt.Sprintf("  Done (%s)", result.siteURL))
 	return credentialMap(creds, result), nil
-}
-
-func applies(creds map[string]any) bool {
-	token, ok := creds["refreshToken"].(string)
-	return ok && token != ""
-}
-
-// stale is Bun's `expiryDate !== undefined && now + bufferMs >= expiryDate`.
-// A stored null coerces to 0 in JavaScript, so it counts as expired.
-func stale(creds map[string]any, nowMs, bufferMs int64) bool {
-	raw, present := creds["expiryDate"]
-	if !present {
-		return false
-	}
-	if raw == nil {
-		return true
-	}
-	expiry, ok := asInt64(raw)
-	if !ok {
-		return false
-	}
-	return nowMs+bufferMs >= expiry
-}
-
-func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
-	secret, err := atlassianSecret()
-	if err != nil {
-		return nil, err
-	}
-	old := str(creds, "refreshToken")
-	next, err := requestToken(ctx, defaultFetch, map[string]any{
-		"grant_type":    "refresh_token",
-		"client_id":     atlassianClientID,
-		"client_secret": secret,
-		"refresh_token": old,
-	}, old, "Failed to refresh token")
-	if err != nil {
-		return nil, err
-	}
-	out := copyMap(creds)
-	out["accessToken"] = next.accessToken
-	out["refreshToken"] = next.refreshToken
-	out["expiryDate"] = jsonNum(time.Now().UnixMilli() + next.expiresIn*1000)
-	return out, nil
 }

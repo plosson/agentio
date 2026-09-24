@@ -34,6 +34,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google/gsheets"
 	"github.com/plosson/agentio/go/internal/plugins/google/gslides"
 	"github.com/plosson/agentio/go/internal/plugins/google/gtasks"
+	"github.com/plosson/agentio/go/internal/plugins/jira"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -61,6 +62,7 @@ func init() {
 	plugins.Default.MustRegister(gslides.New())
 	plugins.Default.MustRegister(gscript.New())
 	plugins.Default.MustRegister(gtasks.New())
+	plugins.Default.MustRegister(jira.New())
 }
 
 func Main(args []string) int {

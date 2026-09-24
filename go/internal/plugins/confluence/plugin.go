@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 )
 
 func New() *plugins.Plugin {
@@ -16,16 +17,11 @@ func New() *plugins.Plugin {
 		DisplayName: "Confluence",
 		Description: "Use when interacting with Confluence via the agentio CLI.",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
+			Setup:          app.Setup,
 			Validate:       validate,
-			Reauthenticate: reauth,
-			ListInfo:       listInfo,
-			Refresh: &plugins.RefreshSpec{
-				SecretFields: []string{"refreshToken"},
-				Applies:      applies,
-				IsStale:      stale,
-				Run:          refresh,
-			},
+			Reauthenticate: app.Reauthenticate,
+			ListInfo:       atlassian.ListInfo,
+			Refresh:        atlassian.RefreshSpec(),
 		},
 		Commands: []plugins.CommandSpec{
 			spacesCmd(), pagesCmd(), getCmd(), searchCmd(),
@@ -34,11 +30,22 @@ func New() *plugins.Plugin {
 	}
 }
 
-func listInfo(creds map[string]any) string {
-	if site := str(creds, "siteUrl"); site != "" {
-		return " - " + site
-	}
-	return ""
+// app is Bun's Confluence OAuth flow on the shared Atlassian app.
+var app = atlassian.App{
+	ID:          "confluence",
+	DisplayName: "Confluence",
+	SitesName:   "Confluence",
+	Scopes: []string{
+		"read:page:confluence",
+		"write:page:confluence",
+		"read:space:confluence",
+		"read:comment:confluence",
+		"write:comment:confluence",
+		"search:confluence",
+		"read:me",
+		"offline_access",
+	},
+	SetupInfo: "Test with: agentio confluence spaces",
 }
 
 func piped(content string, stdin any) string {
