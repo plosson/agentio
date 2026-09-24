@@ -39,6 +39,9 @@ type OAuthSetupOptions struct {
 	ExpectedState string
 	// AuthorizationURL is called after the host has reserved a localhost callback.
 	AuthorizationURL func(redirectURI string) string
+	// Port pins the callback port when the provider only accepts one registered
+	// redirect URI (Atlassian: 9999). Zero picks a free port in 3000-3010.
+	Port int
 }
 
 type OAuthSetupResult struct {
@@ -95,10 +98,13 @@ type CommandSpec struct {
 	// Input is "", "none", "text", or "json".
 	Input string
 	// Access is "", "read", or "write". Omitted access is treated as read.
-	Access   string
-	Examples []string
-	Run      func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
-	Format   func(value any) string
+	Access string
+	// Operation names the action in the read-only refusal ("Cannot <operation>").
+	// Empty uses Path.
+	Operation string
+	Examples  []string
+	Run       func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
+	Format    func(value any) string
 }
 
 // RefreshSpec is profile.refresh. Run must not persist; the host does.
@@ -114,6 +120,8 @@ type ProfileSpec struct {
 	Validate       func(ctx context.Context, run *RunContext) (ValidationResult, error)
 	Reauthenticate func(ctx context.Context, credentials map[string]any, profileName string, setup *SetupContext) (map[string]any, error)
 	Refresh        *RefreshSpec
+	// ListInfo is appended to a profile's line in `profile list` (Bun getExtraInfo).
+	ListInfo func(credentials map[string]any) string
 }
 
 type Brand struct {

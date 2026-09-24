@@ -59,9 +59,13 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 		Log:     func(parts ...any) { fmt.Fprintln(s.err(), parts...) },
 		OpenURL: oauth.LaunchBrowser,
 		OAuth: func(ctx context.Context, opts plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
-			port, err := oauth.FindPort()
-			if err != nil {
-				return plugins.OAuthSetupResult{}, err
+			port := opts.Port
+			if port == 0 {
+				found, err := oauth.FindPort()
+				if err != nil {
+					return plugins.OAuthSetupResult{}, err
+				}
+				port = found
 			}
 			redirect := fmt.Sprintf("http://localhost:%d/callback", port)
 			authURL := ""

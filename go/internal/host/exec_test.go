@@ -3,8 +3,13 @@ package host
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/plugins"
@@ -165,5 +170,97 @@ func freshCreds(account string) map[string]any {
 	return map[string]any{
 		"account": account, "accessToken": "tok", "refreshToken": "rt",
 		"expiryDate": int64(9_000_000_000_000),
+	}
+}
+
+func TestReadOnlyRefusalNamesTheOperation(t *testing.T) {
+	testbox.Isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	cmd := func(path, operation string) plugins.CommandSpec {
+		return plugins.CommandSpec{
+			Path: path, Description: path, Access: "write", Operation: operation,
+			Examples: []string{"agentio desk " + path},
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) {
+				ran = true
+				return nil, nil
+			},
+		}
+	}
+	r, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+				return nil, nil
+			},
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
+			},
+		},
+		Commands: []plugins.CommandSpec{cmd("create", "create page"), cmd("delete", "")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	p := r.Find("desk")
+	for path, want := range map[string]string{
+		"create": `Cannot create page: profile "ro" is read-only`,
+		"delete": `Cannot delete: profile "ro" is read-only`,
+	} {
+		_, err := Execute(context.Background(), r, p, command(p, path), plugins.CommandInput{Options: map[string]any{}})
+		ce, ok := err.(*clierr.Error)
+		if !ok || ce.Code != clierr.PermissionDenied || ce.Message != want {
+			t.Fatalf("%s: %#v", path, err)
+		}
+	}
+	if ran {
+		t.Fatal("handler ran on a read-only profile")
+	}
+}
+
+func TestOAuthUsesAPinnedCallbackPort(t *testing.T) {
+	testbox.Isolate(t)
+	t.Setenv("PATH", t.TempDir()) // no browser opener
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	pr, pw := io.Pipe() // a paste that never arrives
+	defer pw.Close()
+	setup := NewSetupContext(Streams{In: pr, Out: io.Discard, Err: io.Discard})
+	var redirect string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		want := fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port)
+		for i := 0; i < 200; i++ {
+			resp, err := http.Get(want)
+			if err == nil {
+				resp.Body.Close()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	res, err := setup.OAuth(context.Background(), plugins.OAuthSetupOptions{
+		ServiceName: "Demo", ExpectedState: "s1", Port: port,
+		AuthorizationURL: func(r string) string { redirect = r; return "https://example.invalid/auth" },
+	})
+	<-done
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRedirect := fmt.Sprintf("http://localhost:%d/callback", port)
+	if res.Code != "abc" || res.RedirectURI != wantRedirect || redirect != wantRedirect {
+		t.Fatalf("res %#v redirect %q", res, redirect)
 	}
 }

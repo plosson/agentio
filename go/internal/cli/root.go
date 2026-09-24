@@ -20,6 +20,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
+	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -33,6 +34,7 @@ func init() {
 	plugins.Default.MustRegister(acme.New())
 	plugins.Default.MustRegister(board.New())
 	plugins.Default.MustRegister(ping.New())
+	plugins.Default.MustRegister(confluence.New())
 }
 
 func Main(args []string) int {
@@ -316,7 +318,15 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				if ref.ReadOnly {
 					suffix = " [read-only]"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s%s\n", ref.Name, suffix)
+				extra := ""
+				if p.Profile.ListInfo != nil {
+					creds, err := auth.GetCredentials(p.ID, ref.Name)
+					if err != nil {
+						return err
+					}
+					extra = p.Profile.ListInfo(creds)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s%s%s\n", ref.Name, suffix, extra)
 			}
 			return nil
 		},

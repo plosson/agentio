@@ -43,7 +43,11 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 		}
 		profileName = name
 		if spec.Access == "write" {
-			if err := EnforceWrite(p.ID, profileName, spec.Path); err != nil {
+			operation := spec.Operation
+			if operation == "" {
+				operation = spec.Path
+			}
+			if err := EnforceWrite(p.ID, profileName, operation); err != nil {
 				return nil, err
 			}
 		}

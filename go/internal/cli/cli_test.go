@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -127,5 +128,47 @@ func TestExportDropsReadOnlyAndImportDoesNotInventIt(t *testing.T) {
 	c, _ := vault.Load()
 	if c.Credentials["board"]["desk"]["token"] != "sek" {
 		t.Fatalf("%#v", c.Credentials)
+	}
+}
+
+func TestProfileListAppendsTheServiceListInfo(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+				return nil, nil
+			},
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
+			},
+			ListInfo: func(c map[string]any) string {
+				if site, _ := c["site"].(string); site != "" {
+					return " - " + site
+				}
+				return ""
+			},
+		},
+		Commands: []plugins.CommandSpec{{
+			Path: "ping", Description: "ping", Examples: []string{"agentio desk ping"},
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) { return "pong", nil },
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("desk", "a", map[string]any{"site": "https://a.example"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("desk", "b", map[string]any{}, profile.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := Execute(reg, []string{"desk", "profile", "list"}, &out, &errOut, strings.NewReader(""))
+	if code != 0 || out.String() != "a [read-only] - https://a.example\nb\n" {
+		t.Fatalf("code %d\n%q\n%s", code, out.String(), errOut.String())
 	}
 }
