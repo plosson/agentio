@@ -178,17 +178,7 @@ func (a *api) apiError(err error, prefix, suggestion string) error {
 
 // errorMessage is GChatClient.getErrorMessage.
 func errorMessage(err error) string {
-	switch google.Code(err) {
-	case 401:
-		return "OAuth token expired or invalid"
-	case 403:
-		return "Bot lacks permission for this operation"
-	case 404:
-		return "Space or message not found"
-	case 429:
-		return "Rate limit exceeded, please try again later"
-	}
-	return google.Message(err)
+	return google.StatusMessage(err, "Bot lacks permission for this operation", "Space or message not found")
 }
 
 type sendOptions struct {

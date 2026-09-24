@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +18,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/plugins"
 	calendar "google.golang.org/api/calendar/v3"
+	"google.golang.org/api/googleapi"
 )
 
 // fakeGoogle records every request and answers with handle.
@@ -522,5 +525,148 @@ func TestISOStringIsUTCWithTruncatedMilliseconds(t *testing.T) {
 	}
 	if got := ISOString(time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)); got != "1999-12-31T23:59:59.000Z" {
 		t.Fatal(got)
+	}
+}
+
+func TestStatusMessageUsesTheProductTextFor403And404(t *testing.T) {
+	apiErr := func(status int) error {
+		return &googleapi.Error{Code: status, Body: fmt.Sprintf(`{"error":{"code":%d,"message":"server says"}}`, status)}
+	}
+	cases := map[int]string{
+		401: "OAuth token expired or invalid",
+		403: "no access",
+		404: "gone",
+		429: "Rate limit exceeded, please try again later",
+		500: "server says",
+		400: "server says",
+	}
+	for status, want := range cases {
+		if got := StatusMessage(apiErr(status), "no access", "gone"); got != want {
+			t.Errorf("%d: %q", status, got)
+		}
+	}
+	// The body's error.code wins over the HTTP status, as error.code || error.status does.
+	mixed := &googleapi.Error{Code: 400, Body: `{"error":{"code":404,"message":"x"}}`}
+	if got := StatusMessage(mixed, "no access", "gone"); got != "gone" {
+		t.Fatalf("%q", got)
+	}
+	if got := StatusMessage(errors.New("socket hang up"), "a", "b"); got != "socket hang up" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestJSNumberIsJavaScriptsString(t *testing.T) {
+	tenth, fifth := 0.1, 0.2
+	cases := map[float64]string{
+		0: "0", math.Copysign(0, -1): "0", 12: "12", -3.5: "-3.5", tenth + fifth: "0.30000000000000004",
+		1e21: "1e+21", 1.5e22: "1.5e+22", 1e-7: "1e-7", -2.5e-8: "-2.5e-8", 0.000001: "0.000001",
+		123456789012345680000: "123456789012345680000", math.Inf(1): "Infinity", math.Inf(-1): "-Infinity", math.NaN(): "NaN",
+	}
+	for in, want := range cases {
+		if got := JSNumber(in); got != want {
+			t.Errorf("%v: got %q want %q", in, got, want)
+		}
+	}
+}
+
+// Google escapes <, >, =, & and ' in its JSON; JSON.parse then JSON.stringify
+// prints them as is, keeps key order and keeps false and zero values.
+func TestParseJSONRoundTripsLikeJSONStringify(t *testing.T) {
+	raw := `{"z":1,"a":{"bold":false,"n":0,"f":1.50,"e":1E2,"big":1e400},"s":"a<b=&' \"\\\b\f\n\r\t\u0001é","arr":[],"obj":{},"nul":null,"z":2}`
+	v, err := ParseJSON([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.(*Object).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"z":2,"a":{"bold":false,"n":0,"f":1.5,"e":100,"big":null},"s":"a<b=&'` + " " + `\"\\\b\f\n\r\t\u0001é","arr":[],"obj":{},"nul":null}`
+	if string(got) != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	// Indented by an encoder that does not escape HTML, as the host prints --json.
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(map[string]any{"v": v}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "\"s\": \"a<b=&' ") || !strings.Contains(b.String(), "\"arr\": [],") {
+		t.Fatalf("%s", b.String())
+	}
+	obj := v.(*Object)
+	if z, ok := obj.Get("z"); !ok || z != json.Number("2") {
+		t.Fatalf("%v", z)
+	}
+	if _, ok := obj.Get("missing"); ok {
+		t.Fatal("missing key present")
+	}
+	var nilObj *Object
+	if _, ok := nilObj.Get("x"); ok {
+		t.Fatal("nil object has keys")
+	}
+	for _, bad := range []string{`{"a":`, `{} {}`, `[1,]`, ``} {
+		if _, err := ParseJSON([]byte(bad)); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
+	waits := noSleep(t)
+	var bodies []string
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
+		if r.Header.Get("Authorization") != "Bearer at-stored" {
+			t.Errorf("auth %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/api/v1/docs/d1:batchUpdate":
+			if r.Header.Get("Content-Type") != "application/json" {
+				t.Errorf("content type %q", r.Header.Get("Content-Type"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"replies":[{}],"documentId":"d1"}`))
+		case "/api/v1/docs/busy":
+			writeJSON(w, 503, map[string]any{"error": map[string]any{"code": 503, "message": "busy"}})
+		default:
+			writeJSON(w, 404, map[string]any{"error": map[string]any{"code": 404, "message": "Requested entity was not found."}})
+		}
+	})
+	fake.srv.Config.Handler = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			bodies = append(bodies, string(raw))
+			r.Body = io.NopCloser(strings.NewReader(string(raw)))
+			next.ServeHTTP(w, r)
+		})
+	}(fake.srv.Config.Handler)
+	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at-stored"}, Fetch: hostFetch}
+	base := fake.srv.URL + "/api/"
+	body := `[{"updateTextStyle":{"textStyle":{"bold":false},"fields":"bold","unknownField":1}}]`
+	v, err := CallJSON(context.Background(), run, Camel, "POST", base, "v1/docs/d1:batchUpdate", []byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bodies[0] != body {
+		t.Fatalf("body rewritten: %s", bodies[0])
+	}
+	if out, _ := v.(*Object).MarshalJSON(); string(out) != `{"replies":[{}],"documentId":"d1"}` {
+		t.Fatalf("%s", out)
+	}
+	// A failed POST is not retried (gaxios leaves POST alone).
+	_, err = CallJSON(context.Background(), run, Camel, "POST", base, "v1/docs/busy", []byte(`[]`))
+	if err == nil || Code(err) != 503 || Message(err) != "busy" || len(*waits) != 0 {
+		t.Fatalf("%v %d waits", err, len(*waits))
+	}
+	// A GET is, and a 404 maps like any googleapis failure.
+	_, err = CallJSON(context.Background(), run, Camel, "GET", base, "v1/docs/busy", nil)
+	if err == nil || len(*waits) != 3 || bodies[len(bodies)-1] != "" {
+		t.Fatalf("%v %d waits", err, len(*waits))
+	}
+	_, err = CallJSON(context.Background(), run, Camel, "GET", base, "v1/docs/nope", nil)
+	if ErrorCode(err) != "NOT_FOUND" || StatusMessage(err, "f", "Document not found") != "Document not found" {
+		t.Fatalf("%v", err)
 	}
 }

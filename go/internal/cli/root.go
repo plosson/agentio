@@ -26,6 +26,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/falco"
 	"github.com/plosson/agentio/go/internal/plugins/google/gcal"
 	"github.com/plosson/agentio/go/internal/plugins/google/gchat"
+	"github.com/plosson/agentio/go/internal/plugins/google/gdocs"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -45,6 +46,7 @@ func init() {
 	plugins.Default.MustRegister(falco.New())
 	plugins.Default.MustRegister(gcal.New())
 	plugins.Default.MustRegister(gchat.New())
+	plugins.Default.MustRegister(gdocs.New())
 }
 
 func Main(args []string) int {

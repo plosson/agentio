@@ -73,6 +73,22 @@ func ErrorCode(err error) plugins.ErrorCode {
 	return "API_ERROR"
 }
 
+// StatusMessage is the Bun clients' getErrorMessage: fixed text for 401 and
+// 429, the product's own text for 403 and 404, else Message.
+func StatusMessage(err error, forbidden, notFound string) string {
+	switch Code(err) {
+	case 401:
+		return "OAuth token expired or invalid"
+	case 403:
+		return forbidden
+	case 404:
+		return notFound
+	case 429:
+		return "Rate limit exceeded, please try again later"
+	}
+	return Message(err)
+}
+
 // ValidationFailure is the catch branch every Bun Google client's validate
 // shares: an expired or revoked grant asks for re-authentication.
 func ValidationFailure(err error) plugins.ValidationResult {

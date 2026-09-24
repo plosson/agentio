@@ -75,13 +75,23 @@ func ParseInt(s string) float64 {
 	return n
 }
 
-// JSNumber is String(n) for the integers ParseInt returns, NaN included.
+// JSNumber is String(n): NaN and Infinity by name, exponent notation outside
+// [1e-6, 1e21), the shortest decimal otherwise.
 func JSNumber(n float64) string {
-	if math.IsNaN(n) {
+	switch {
+	case math.IsNaN(n):
 		return "NaN"
-	}
-	if n == 0 {
+	case math.IsInf(n, 1):
+		return "Infinity"
+	case math.IsInf(n, -1):
+		return "-Infinity"
+	case n == 0:
 		return "0" // String(-0) is "0"
+	}
+	if abs := math.Abs(n); abs >= 1e21 || abs < 1e-6 {
+		mant, exp, _ := strings.Cut(strconv.FormatFloat(n, 'e', -1, 64), "e")
+		sign := exp[:1]
+		return mant + "e" + sign + strings.TrimLeft(exp[1:], "0")
 	}
 	return strconv.FormatFloat(n, 'f', -1, 64)
 }
