@@ -249,7 +249,7 @@ func sendCmd() plugins.CommandSpec {
 				o.payload = payload
 			} else {
 				if text == "" {
-					text = google.Stdin(in)
+					text = plugins.Stdin(in)
 				}
 				if text == "" && len(o.attachments) == 0 {
 					return nil, run.Fail("INVALID_PARAMS", "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", "")
@@ -261,7 +261,7 @@ func sendCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.send(o))
+			return plugins.Result(a.send(o))
 		},
 		Format: formatSendResult,
 	}
@@ -278,7 +278,7 @@ func readPayload(source any, in plugins.CommandInput, run *plugins.RunContext) (
 		}
 		raw = content
 	} else {
-		text := google.Stdin(in)
+		text := plugins.Stdin(in)
 		if text == "" {
 			return nil, run.Fail("INVALID_PARAMS", "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json")
 		}
@@ -321,7 +321,7 @@ func listCmd() plugins.CommandSpec {
 			"agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
 				return nil, err
 			}
 			asJSON, err := textOrJSON(in, run)
@@ -371,7 +371,7 @@ func getCmd() plugins.CommandSpec {
 			"agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
 				return nil, err
 			}
 			asJSON, err := textOrJSON(in, run)
@@ -453,14 +453,14 @@ func membersCmd() plugins.CommandSpec {
 			`agentio gchat members --space "Engineering"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--space <id-or-name>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--space <id-or-name>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listMembers(in.Option("space")))
+			return plugins.Result(a.listMembers(in.Option("space")))
 		},
 		Format: formatMembers,
 	}
@@ -483,7 +483,7 @@ func userCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.getUser(in.Arg("user-id")))
+			return plugins.Result(a.getUser(in.Arg("user-id")))
 		},
 		Format: formatUser,
 	}
@@ -505,7 +505,7 @@ func directoryRefreshCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.refreshDirectory())
+			return plugins.Result(a.refreshDirectory())
 		},
 		Format: formatDirectoryRefresh,
 	}

@@ -67,7 +67,7 @@ func collectIDs(positional []string, in plugins.CommandInput) []string {
 	if len(positional) > 0 {
 		return positional
 	}
-	return strings.FieldsFunc(google.Stdin(in), jsvalue.IsSpace)
+	return strings.FieldsFunc(plugins.Stdin(in), jsvalue.IsSpace)
 }
 
 // chunkOptions is Bun parseChunkOpts.
@@ -85,8 +85,8 @@ func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
 
 // writeUnless is an AccessFor: read for a dry run or for input Bun rejects
 // before its write check, else write.
-func writeUnless(check func(plugins.CommandInput, google.FailFunc) error) func(plugins.CommandInput) string {
-	access := google.WriteUnlessInvalid(check)
+func writeUnless(check func(plugins.CommandInput, plugins.FailFunc) error) func(plugins.CommandInput) string {
+	access := plugins.WriteUnlessInvalid(check)
 	return func(in plugins.CommandInput) string {
 		if in.Flag("dry-run") {
 			return "read"
@@ -110,7 +110,7 @@ var composeOptions = []plugins.OptionSpec{
 	{Flags: "--inline <cid:path>", Description: "Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)", Repeatable: true},
 }
 
-func checkCompose(in plugins.CommandInput, fail google.FailFunc) error {
+func checkCompose(in plugins.CommandInput, fail plugins.FailFunc) error {
 	_, err := parseSendOptions(in, fail)
 	return err
 }
@@ -140,7 +140,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query"), in.List("label")))
+			return plugins.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query"), in.List("label")))
 		},
 		Format: render,
 	}
@@ -210,7 +210,7 @@ func searchCmd() plugins.CommandSpec {
 			"Combine with spaces (AND), OR, or - to negate.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--query <query>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--query <query>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -239,7 +239,7 @@ func sendCmd() plugins.CommandSpec {
 		Path:        "send",
 		Description: "Send an email",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(checkCompose),
+		AccessFor:   plugins.WriteUnlessInvalid(checkCompose),
 		Operation:   "send email",
 		Input:       "text",
 		Options:     composeOptions,
@@ -268,7 +268,7 @@ func sendCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.send(o))
+			return plugins.Result(a.send(o))
 		},
 		Format: render,
 	}
@@ -279,7 +279,7 @@ func draftCmd() plugins.CommandSpec {
 		Path:        "draft",
 		Description: "Create an email draft (or update an existing one with [draft-id])",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(checkCompose),
+		AccessFor:   plugins.WriteUnlessInvalid(checkCompose),
 		Operation:   "create draft",
 		OperationFor: func(in plugins.CommandInput) string {
 			if in.Arg("draft-id") != "" {
@@ -315,7 +315,7 @@ func draftCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.saveDraft(in.Arg("draft-id"), o))
+			return plugins.Result(a.saveDraft(in.Arg("draft-id"), o))
 		},
 		Format: render,
 	}
@@ -371,8 +371,8 @@ func eachID(ids []string, do func(string) error, logFailure func(string, error),
 }
 
 // checkIDs is Bun's "No ... IDs provided" check on the arguments or stdin.
-func checkIDs(argName, message string) func(plugins.CommandInput, google.FailFunc) error {
-	return func(in plugins.CommandInput, fail google.FailFunc) error {
+func checkIDs(argName, message string) func(plugins.CommandInput, plugins.FailFunc) error {
+	return func(in plugins.CommandInput, fail plugins.FailFunc) error {
 		if len(collectIDs(args(in, argName), in)) == 0 {
 			return fail("INVALID_PARAMS", message, "Pass IDs as args or pipe via stdin")
 		}
@@ -442,7 +442,7 @@ func batchOutcome(result *batchResult) (any, error) {
 	return result, nil
 }
 
-func checkMark(in plugins.CommandInput, fail google.FailFunc) error {
+func checkMark(in plugins.CommandInput, fail plugins.FailFunc) error {
 	read, unread := in.Flag("read"), in.Flag("unread")
 	if !read && !unread {
 		return fail("INVALID_PARAMS", "Specify --read or --unread", "")
@@ -458,7 +458,7 @@ func markCmd() plugins.CommandSpec {
 		Path:        "mark",
 		Description: "Mark one or more messages as read or unread",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(checkMark),
+		AccessFor:   plugins.WriteUnlessInvalid(checkMark),
 		Operation:   "mark email",
 		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s)", Required: true, Variadic: true}},
 		Options: []plugins.OptionSpec{
@@ -573,7 +573,7 @@ func labelsDeleteCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.deleteLabel(in.Arg("name-or-id")))
+			return plugins.Result(a.deleteLabel(in.Arg("name-or-id")))
 		},
 		Format: render,
 	}
@@ -670,7 +670,7 @@ func filtersGetCmd() plugins.CommandSpec {
 }
 
 // filterCriteriaFrom is Bun parseFilterCriteriaFromOptions.
-func filterCriteriaFrom(in plugins.CommandInput, fail google.FailFunc) (filterCriteria, error) {
+func filterCriteriaFrom(in plugins.CommandInput, fail plugins.FailFunc) (filterCriteria, error) {
 	c := filterCriteria{
 		From: in.Option("from"), To: in.Option("to"), Subject: in.Option("subject"), Query: in.Option("query"),
 		NegatedQuery: in.Option("negated-query"), HasAttachment: in.Flag("has-attachment"), ExcludeChats: in.Flag("exclude-chats"),
@@ -698,7 +698,7 @@ func (c filterCriteria) empty() bool {
 }
 
 // checkFilterCreate is the Bun filters create input checks, before its write check.
-func checkFilterCreate(in plugins.CommandInput, fail google.FailFunc) error {
+func checkFilterCreate(in plugins.CommandInput, fail plugins.FailFunc) error {
 	c, err := filterCriteriaFrom(in, fail)
 	if err != nil {
 		return err
@@ -718,7 +718,7 @@ func filtersCreateCmd() plugins.CommandSpec {
 		Path:        "filters create",
 		Description: "Create a Gmail filter",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(checkFilterCreate),
+		AccessFor:   plugins.WriteUnlessInvalid(checkFilterCreate),
 		Operation:   "create filter",
 		Options: []plugins.OptionSpec{
 			{Flags: "--from <email>", Description: "Match sender"},
@@ -812,7 +812,7 @@ func filtersDeleteCmd() plugins.CommandSpec {
 	}
 }
 
-func checkLabel(in plugins.CommandInput, fail google.FailFunc) error {
+func checkLabel(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 {
 		return fail("INVALID_PARAMS", "Specify at least one --apply or --remove", "")
 	}

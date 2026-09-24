@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -33,9 +34,9 @@ func New() *plugins.Plugin {
 var idArg = plugins.ArgumentSpec{Name: "id", Description: "Script project ID", Required: true}
 
 // createInputError is Commander's requiredOption on --title, which Bun
-// reports before enforceWriteAccess (google.WriteUnlessInvalid).
-func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
-	return google.RequireOptions(in, fail, "--title <title>")
+// reports before enforceWriteAccess (plugins.WriteUnlessInvalid).
+func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+	return plugins.RequireOptions(in, fail, "--title <title>")
 }
 
 func createCmd() plugins.CommandSpec {
@@ -43,7 +44,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new Apps Script project (standalone or container-bound)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(createInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
 		Operation:   "create script project",
 		Options: []plugins.OptionSpec{
 			{Flags: "--title <title>", Description: "Script project title"},
@@ -67,7 +68,7 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.create(in.Option("title"), in.Option("parent")))
+			return plugins.Result(a.create(in.Option("title"), in.Option("parent")))
 		},
 		Format: formatProject,
 	}
@@ -88,7 +89,7 @@ func metadataCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.metadata(in.Arg("id")))
+			return plugins.Result(a.metadata(in.Arg("id")))
 		},
 		Format: formatProject,
 	}
@@ -116,7 +117,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(in.Option("parent"), jsvalue.ParseInt(in.Option("limit"))))
+			return plugins.Result(a.list(in.Option("parent"), jsvalue.ParseInt(in.Option("limit"))))
 		},
 		Format: formatList,
 	}
@@ -194,7 +195,7 @@ func pullCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(writePull(root, claspPath, id, files))
+			return plugins.Result(writePull(root, claspPath, id, files))
 		},
 		Format: formatPull,
 	}
@@ -205,7 +206,7 @@ func pushCmd() plugins.CommandSpec {
 		Path:        "push",
 		Description: "Upload all .gs/.html/appsscript.json files in a directory",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(pushInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(pushInputError),
 		Operation:   "push script content",
 		Arguments:   []plugins.ArgumentSpec{{Name: "dir", Description: "Local directory (default: cwd)"}},
 		Options: []plugins.OptionSpec{
@@ -294,7 +295,7 @@ func putCmd() plugins.CommandSpec {
 		Path:        "put",
 		Description: "Replace or add a single script file (--source, --from <path>, or - for stdin)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(putInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(putInputError),
 		Operation:   "update script content",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -333,7 +334,7 @@ func putCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			next, err := putFile(existing, stripExt(name), strings.ToLower(google.Extname(name)), source, run.Fail)
+			next, err := putFile(existing, stripExt(name), strings.ToLower(nodefs.Extname(name)), source, run.Fail)
 			if err != nil {
 				return nil, err
 			}
@@ -350,7 +351,7 @@ func putCmd() plugins.CommandSpec {
 // putFile replaces the source of the existing file named bare, or appends a
 // new one typed by its extension (SERVER_JS without one). Only appsscript may
 // be JSON.
-func putFile(existing []file, bare, ext, source string, fail google.FailFunc) ([]file, error) {
+func putFile(existing []file, bare, ext, source string, fail plugins.FailFunc) ([]file, error) {
 	next := make([]file, 0, len(existing)+1)
 	found := false
 	for _, f := range existing {

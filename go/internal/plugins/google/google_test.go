@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -451,55 +450,6 @@ func TestFormatBytesMatchesBun(t *testing.T) {
 	}
 }
 
-// A failed call returning a typed nil must come back as an untyped nil, or the
-// host would print "null" before the error.
-func TestResultDropsTheTypedNilOnFailure(t *testing.T) {
-	var none *calendar.Event
-	v, err := Result(none, errors.New("boom"))
-	if v != nil || err == nil {
-		t.Fatalf("%#v %v", v, err)
-	}
-	// A value that came with an error is dropped too.
-	v, _ = Result(&calendar.Event{Id: "x"}, errors.New("boom"))
-	if v != nil {
-		t.Fatalf("%#v", v)
-	}
-	if v, err := Result([]string{}, nil); err != nil || v == nil {
-		t.Fatalf("%#v %v", v, err)
-	}
-}
-
-func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
-	var got []string
-	run := &plugins.RunContext{Fail: func(code plugins.ErrorCode, message, suggestion string) error {
-		got = append(got, string(code)+"|"+message+"|"+suggestion)
-		return errors.New(message)
-	}}
-	in := plugins.CommandInput{Options: map[string]any{"space": "", "limit": true, "query": "q"}}
-	if err := RequireOptions(in, run.Fail, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
-		t.Fatal("a bool where a string is required passed")
-	}
-	// Commander's requiredOption checks `=== undefined`: a given "" is present,
-	// while an absent option (nil, as the host leaves it) still fails after it.
-	if err := RequireOptions(in, run.Fail, "--space <id>"); err != nil {
-		t.Fatalf("a given empty string failed: %v", err)
-	}
-	in.Options["missing"] = nil
-	if err := RequireOptions(in, run.Fail, "--space <id>", "--missing <x>"); err == nil {
-		t.Fatal("an absent option after a given empty one passed")
-	}
-	want := []string{
-		"INVALID_PARAMS|required option '--limit <n>' not specified|",
-		"INVALID_PARAMS|required option '--missing <x>' not specified|",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("%q", got)
-	}
-	if err := RequireOptions(in, run.Fail, "--query <q>"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestISOStringIsUTCWithTruncatedMilliseconds(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 999_999_999, time.FixedZone("", -5*3600))
 	if got := ISOString(at); got != "2026-01-02T08:04:05.999Z" {
@@ -621,29 +571,6 @@ func TestDriveServiceUsesCamelTokensAndPageSizeCapsLikeMathMin(t *testing.T) {
 	}
 	if got := strings.Join(sizes, ","); got != "1,100,100,100,0,-3,NaN" {
 		t.Fatalf("pageSize %s", got)
-	}
-}
-
-// A command that validates before enforceWriteAccess answers a read-only
-// profile with its input error: WriteUnlessInvalid reads "read" for that
-// input so the host lets Run report it.
-func TestWriteUnlessInvalidReadsOnlyForRejectedInput(t *testing.T) {
-	calls := 0
-	access := WriteUnlessInvalid(func(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
-		calls++
-		if in.Options["to"] == "" {
-			return fail("INVALID_PARAMS", "--to is required", "")
-		}
-		return nil
-	})
-	if got := access(plugins.CommandInput{Options: map[string]any{"to": ""}}); got != "read" {
-		t.Fatalf("invalid input: %q", got)
-	}
-	if got := access(plugins.CommandInput{Options: map[string]any{"to": "a@example.com"}}); got != "write" {
-		t.Fatalf("valid input: %q", got)
-	}
-	if calls != 2 {
-		t.Fatalf("check ran %d times", calls)
 	}
 }
 
@@ -788,77 +715,15 @@ func TestBatchRequestsReadsExactlyOneSourceAsAnArray(t *testing.T) {
 		if _, err := BatchRequests(in, fail); err == nil || err.Error() != c.want {
 			t.Fatalf("%v: %v", c.opts, err)
 		}
-		if WriteUnlessInvalid(BatchInputError)(in) != "read" {
+		if plugins.WriteUnlessInvalid(BatchInputError)(in) != "read" {
 			t.Fatalf("%v: rejected input is not left to Run", c.opts)
 		}
 	}
 	if _, err := BatchRequests(plugins.CommandInput{Options: map[string]any{"file": filepath.Join(t.TempDir(), "missing.json")}}, fail); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing file: %v", err)
 	}
-	if WriteUnlessInvalid(BatchInputError)(plugins.CommandInput{Options: map[string]any{"requests-json": "[]"}}) != "write" {
+	if plugins.WriteUnlessInvalid(BatchInputError)(plugins.CommandInput{Options: map[string]any{"requests-json": "[]"}}) != "write" {
 		t.Fatal("an empty array is refused by the product after enforceWriteAccess")
-	}
-}
-
-func TestExtnameAndFSErrorsMatchNode(t *testing.T) {
-	// Printed by Node's path.extname.
-	for in, want := range map[string]string{
-		"a.TXT": ".TXT", ".bashrc": "", "a.": ".", "...": ".", "..a": ".a", "x/.b.c": ".c",
-		"dir/": "", "a.b.c": ".c", "..": "", ".": "", "/": "", "noext": "", "a.b/": ".b",
-	} {
-		if got := Extname(in); got != want {
-			t.Errorf("%q: %q want %q", in, got, want)
-		}
-	}
-	for _, c := range []struct {
-		err  error
-		want string
-	}{
-		{&os.PathError{Op: "stat", Path: "x", Err: syscall.ENOENT}, "ENOENT: no such file or directory, stat './x'"},
-		{&os.PathError{Op: "open", Path: "x", Err: syscall.EACCES}, "EACCES: permission denied, stat './x'"},
-		{&os.PathError{Op: "open", Path: "x", Err: syscall.ENOTDIR}, "ENOTDIR: not a directory, stat './x'"},
-		{&os.PathError{Op: "mkdir", Path: "x", Err: syscall.EEXIST}, "EEXIST: file already exists, stat './x'"},
-	} {
-		if got := NodeFSError("stat", "./x", c.err).Error(); got != c.want {
-			t.Errorf("%q", got)
-		}
-	}
-	other := errors.New("disk on fire")
-	if NodeFSError("stat", "x", other) != other {
-		t.Fatal("an unknown error is kept")
-	}
-}
-
-// Messages printed by Bun's fs.promises for the same failures.
-func TestReadFileAndMkdirAllFailLikeNode(t *testing.T) {
-	dir := t.TempDir()
-	file := filepath.Join(dir, "f.txt")
-	if err := os.WriteFile(file, []byte("x"), 0o666); err != nil {
-		t.Fatal(err)
-	}
-	if b, err := ReadFile(file); err != nil || string(b) != "x" {
-		t.Fatalf("%q %v", b, err)
-	}
-	missing := filepath.Join(dir, "missing")
-	for _, c := range []struct {
-		err  error
-		want string
-	}{
-		{func() error { _, err := ReadFile(missing); return err }(), "ENOENT: no such file or directory, open '" + missing + "'"},
-		{func() error { _, err := ReadFile(dir); return err }(), "EISDIR: illegal operation on a directory, read"},
-		{MkdirAll(file), "EEXIST: file already exists, mkdir '" + file + "'"},
-		{MkdirAll(filepath.Join(file, "sub")), "ENOTDIR: not a directory, mkdir '" + filepath.Join(file, "sub") + "'"},
-	} {
-		if c.err == nil || c.err.Error() != c.want {
-			t.Errorf("got %v, want %q", c.err, c.want)
-		}
-	}
-	nested := filepath.Join(dir, "a", "b")
-	if err := MkdirAll(nested); err != nil {
-		t.Fatal(err)
-	}
-	if err := MkdirAll(nested); err != nil {
-		t.Fatalf("an existing directory is fine: %v", err)
 	}
 }
 

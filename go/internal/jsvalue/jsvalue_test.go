@@ -305,6 +305,26 @@ func TestURLEncodingIsJavaScripts(t *testing.T) {
 	}
 }
 
+func TestDecodeURIComponentThrowsWhereJavaScriptDoes(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain":                  "plain",
+		"a%20b%2F%C3%A9+%2b":     "a b/é++",
+		"..%2F..%2Fetc%2Fpasswd": "../../etc/passwd",
+		"%f0%9f%98%80":           "😀",
+		"é%C3%A9":                "éé",
+	} {
+		if got, ok := DecodeURIComponent(in); !ok || got != want {
+			t.Errorf("%q: got %q ok=%v, want %q", in, got, ok, want)
+		}
+	}
+	// Each of these is a URIError in Bun.
+	for _, in := range []string{"%", "%E0%A4%A", "%zz", "%C3", "%C3é", "%ED%A0%80", "%C0%AF", "%FF", "a%2"} {
+		if got, ok := DecodeURIComponent(in); ok {
+			t.Errorf("%q decoded to %q, want a URIError", in, got)
+		}
+	}
+}
+
 func TestLengthAndPadEndCountUTF16Units(t *testing.T) {
 	if Length("a😀é") != 4 || Length("") != 0 {
 		t.Fatal(Length("a😀é"))

@@ -576,7 +576,7 @@ func deref(index *int) int {
 var hexColorPattern = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
 
 // parseHexColor is Bun parseHexColor: #rrggbb as 0-1 channel fractions.
-func parseHexColor(hex string, fail google.FailFunc) (*jsvalue.Object, error) {
+func parseHexColor(hex string, fail plugins.FailFunc) (*jsvalue.Object, error) {
 	cleaned := strings.TrimPrefix(jsvalue.Trim(hex), "#")
 	if !hexColorPattern.MatchString(cleaned) {
 		return nil, fail("INVALID_PARAMS", "Invalid hex color: "+hex, "Use format #rrggbb (e.g., #ff0000)")
@@ -640,7 +640,7 @@ type bounds struct {
 }
 
 // parseCellRange is Bun parseCellRange.
-func parseCellRange(cells string, fail google.FailFunc) (bounds, error) {
+func parseCellRange(cells string, fail plugins.FailFunc) (bounds, error) {
 	if cells == "" {
 		return bounds{}, nil
 	}

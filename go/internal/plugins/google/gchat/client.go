@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	chat "google.golang.org/api/chat/v1"
@@ -279,7 +280,7 @@ func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, e
 		return nil, a.Fail("INVALID_PARAMS", "Failed to read attachment: "+path, "Check that the file exists and is readable")
 	}
 	filename := filepath.Base(path)
-	mime, ok := attachmentMIME[strings.ToLower(google.Extname(filename))]
+	mime, ok := attachmentMIME[strings.ToLower(nodefs.Extname(filename))]
 	if !ok {
 		mime = "application/octet-stream"
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -75,7 +76,7 @@ func getCmd() plugins.CommandSpec {
 			if output == "" {
 				return string(content), nil
 			}
-			if err := google.WriteFile(output, content); err != nil {
+			if err := nodefs.WriteFile(output, content); err != nil {
 				return nil, err
 			}
 			return "Exported to " + output, nil
@@ -84,12 +85,12 @@ func getCmd() plugins.CommandSpec {
 }
 
 // createInputError is the input Bun rejects before enforceWriteAccess
-// (google.WriteUnlessInvalid): the required --title, then the content.
-func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
-	if err := google.RequireOptions(in, fail, "--title <title>"); err != nil {
+// (plugins.WriteUnlessInvalid): the required --title, then the content.
+func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
 		return err
 	}
-	if content, _ := google.OptionOrStdin(in, "content", true); content == "" {
+	if content, _ := plugins.OptionOrStdin(in, "content", true); content == "" {
 		return fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
 	}
 	return nil
@@ -100,7 +101,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new document from Markdown",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(createInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
 		Operation:   "create document",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
@@ -120,12 +121,12 @@ func createCmd() plugins.CommandSpec {
 			if err := createInputError(in, run.Fail); err != nil {
 				return nil, err
 			}
-			content, _ := google.OptionOrStdin(in, "content", true)
+			content, _ := plugins.OptionOrStdin(in, "content", true)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.create(in.Option("title"), content, in.Option("folder")))
+			return plugins.Result(a.create(in.Option("title"), content, in.Option("folder")))
 		},
 		Format: formatCreated,
 	}
@@ -159,7 +160,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
+			return plugins.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
 		},
 		Format: func(v any) string { return google.FormatDriveFiles(v, "Documents", "No documents found") },
 	}
@@ -225,7 +226,7 @@ func tabsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listTabs(in.Arg("doc-id-or-url")))
+			return plugins.Result(a.listTabs(in.Arg("doc-id-or-url")))
 		},
 		Format: formatTabs,
 	}
@@ -238,7 +239,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw documents.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(google.BatchInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{{Name: "doc-id-or-url", Description: "Document ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{

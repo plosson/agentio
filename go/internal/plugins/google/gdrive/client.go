@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	drive "google.golang.org/api/drive/v3"
@@ -421,7 +422,7 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 	if err != nil {
 		return nil, a.Failed("download file", err)
 	}
-	if err := google.WriteFile(outputPath, body); err != nil {
+	if err := nodefs.WriteFile(outputPath, body); err != nil {
 		return nil, a.Failed("download file", err)
 	}
 	return &downloaded{Filename: f.Name, Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
@@ -435,13 +436,13 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return nil, a.Failed("upload file", google.NodeFSError("stat", filePath, err))
+		return nil, a.Failed("upload file", nodefs.NodeFSError("stat", filePath, err))
 	}
 	fileName := name
 	if fileName == "" {
 		fileName = filepath.Base(filePath)
 	}
-	ext := strings.ToLower(google.Extname(filePath))
+	ext := strings.ToLower(nodefs.Extname(filePath))
 	sourceMimeType := mimeType
 	if sourceMimeType == "" {
 		sourceMimeType = extToMime[ext]
@@ -468,11 +469,11 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 		target.Parents = []string{folderID}
 	}
 	if info.IsDir() {
-		return nil, a.Failed("upload file", google.NodeFSError("read", "", syscall.EISDIR))
+		return nil, a.Failed("upload file", nodefs.NodeFSError("read", "", syscall.EISDIR))
 	}
 	body, err := os.Open(filePath)
 	if err != nil {
-		return nil, a.Failed("upload file", google.NodeFSError("open", filePath, err))
+		return nil, a.Failed("upload file", nodefs.NodeFSError("open", filePath, err))
 	}
 	defer body.Close()
 	// ChunkSize(0) sends one multipart request whatever the size, as Bun does.

@@ -43,7 +43,7 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 }
 
 // addInputError is Commander's requiredOption check on --title.
-func addInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func addInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if in.Option("title") == "" {
 		return fail("INVALID_PARAMS", "required option '--title <title>' not specified", "")
 	}
@@ -51,7 +51,7 @@ func addInputError(in plugins.CommandInput, fail google.FailFunc) error {
 }
 
 // updateInputError is Bun's --status check, made before enforceWriteAccess.
-func updateInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func updateInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if status := in.Option("status"); status != "" && status != "needsAction" && status != "completed" {
 		return fail("INVALID_PARAMS", "Invalid status: "+status, "Use: needsAction or completed")
 	}
@@ -59,7 +59,7 @@ func updateInputError(in plugins.CommandInput, fail google.FailFunc) error {
 }
 
 // moveInputError is Bun's --parent/--previous check, made before enforceWriteAccess.
-func moveInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func moveInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if in.Option("parent") == "" && in.Option("previous") == "" {
 		return fail("INVALID_PARAMS", "At least one of --parent or --previous is required", "")
 	}
@@ -91,7 +91,7 @@ func listsListCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listTaskLists(jsvalue.ParseInt(in.Option("limit"))))
+			return plugins.Result(a.listTaskLists(jsvalue.ParseInt(in.Option("limit"))))
 		},
 		Format: formatTaskLists,
 	}
@@ -115,7 +115,7 @@ func listsCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.createTaskList(in.Arg("title")))
+			return plugins.Result(a.createTaskList(in.Arg("title")))
 		},
 		Format: formatTaskListCreated,
 	}
@@ -177,7 +177,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listTasks(listOptions{
+			return plugins.Result(a.listTasks(listOptions{
 				tasklistID:    in.Arg("tasklist-id"),
 				limit:         jsvalue.ParseInt(in.Option("limit")),
 				showCompleted: in.Flag("show-completed") && !in.Flag("no-show-completed"),
@@ -205,7 +205,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.getTask(in.Arg("tasklist-id"), in.Arg("task-id")))
+			return plugins.Result(a.getTask(in.Arg("tasklist-id"), in.Arg("task-id")))
 		},
 		Format: formatTask,
 	}
@@ -216,7 +216,7 @@ func addCmd() plugins.CommandSpec {
 		Path:        "add",
 		Description: "Add a new task",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(addInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(addInputError),
 		Operation:   "create task",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg},
@@ -245,8 +245,8 @@ func addCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			text, given := google.OptionOrStdin(in, "notes", true)
-			return google.Result(a.createTask(createOptions{
+			text, given := plugins.OptionOrStdin(in, "notes", true)
+			return plugins.Result(a.createTask(createOptions{
 				tasklistID: in.Arg("tasklist-id"),
 				title:      in.Option("title"),
 				notes:      text,
@@ -265,7 +265,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update an existing task",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(updateInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(updateInputError),
 		Operation:   "update task",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg, taskArg},
@@ -295,10 +295,10 @@ func updateCmd() plugins.CommandSpec {
 			}
 			o := updateOptions{tasklistID: in.Arg("tasklist-id"), taskID: in.Arg("task-id")}
 			o.title, o.titleGiven = in.LookupOption("title")
-			o.notes, o.notesGiven = google.OptionOrStdin(in, "notes", false)
+			o.notes, o.notesGiven = plugins.OptionOrStdin(in, "notes", false)
 			o.due, o.dueGiven = in.LookupOption("due")
 			o.status, o.statusGiven = in.LookupOption("status")
-			return google.Result(a.updateTask(o))
+			return plugins.Result(a.updateTask(o))
 		},
 		Format: formatTask,
 	}
@@ -319,7 +319,7 @@ func statusCmd(path, alias, description, operation, status, verb, example string
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.updateTask(updateOptions{
+			return plugins.Result(a.updateTask(updateOptions{
 				tasklistID: in.Arg("tasklist-id"), taskID: in.Arg("task-id"), status: status, statusGiven: true,
 			}))
 		},
@@ -393,7 +393,7 @@ func moveCmd() plugins.CommandSpec {
 		Path:        "move",
 		Description: "Move a task (change parent or position)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(moveInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(moveInputError),
 		Operation:   "move task",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg, taskArg},
 		Options: []plugins.OptionSpec{
@@ -417,7 +417,7 @@ func moveCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.moveTask(in.Arg("tasklist-id"), in.Arg("task-id"), in.Option("parent"), in.Option("previous")))
+			return plugins.Result(a.moveTask(in.Arg("tasklist-id"), in.Arg("task-id"), in.Option("parent"), in.Option("previous")))
 		},
 		Format: formatMoved,
 	}

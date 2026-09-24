@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
 // claspFile is the clasp project file pull writes and push reads.
@@ -34,7 +34,7 @@ func localFilename(f file) string {
 // stripExt is Bun stripExt: "Code.gs" and "Code" both name "Code". A name
 // with an extension loses its directory too (Node basename).
 func stripExt(name string) string {
-	ext := google.Extname(name)
+	ext := nodefs.Extname(name)
 	if ext == "" {
 		return name
 	}
@@ -55,7 +55,7 @@ func exists(path string) bool {
 // the parsed value has no scriptId. A JSON null throws Bun's TypeError, which
 // names the variable the command reads it into.
 func claspScriptID(path, variable string) (any, error) {
-	raw, err := google.ReadFile(path)
+	raw, err := nodefs.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -85,12 +85,12 @@ func claspJSON(scriptID string) []byte {
 // preparePull is what Bun pull does before it resolves the profile: create
 // the directory and refuse one whose .clasp.json names another script unless
 // force is set. It returns the directory and its .clasp.json path.
-func preparePull(dir, scriptID string, force bool, fail google.FailFunc) (string, string, error) {
+func preparePull(dir, scriptID string, force bool, fail plugins.FailFunc) (string, string, error) {
 	root, err := targetDir(dir)
 	if err != nil {
 		return "", "", err
 	}
-	if err := google.MkdirAll(root); err != nil {
+	if err := nodefs.MkdirAll(root); err != nil {
 		return "", "", err
 	}
 	claspPath := filepath.Join(root, claspFile)
@@ -112,12 +112,12 @@ func writePull(root, claspPath, scriptID string, files []file) (*pulled, error) 
 	out := &pulled{RootDir: root, ScriptID: scriptID, Files: []pulledFile{}}
 	for _, f := range files {
 		localPath := filepath.Join(root, localFilename(f))
-		if err := google.WriteFile(localPath, []byte(f.Source)); err != nil {
+		if err := nodefs.WriteFile(localPath, []byte(f.Source)); err != nil {
 			return nil, err
 		}
 		out.Files = append(out.Files, pulledFile{LocalPath: localPath, Type: f.Type})
 	}
-	if err := google.WriteFile(claspPath, claspJSON(scriptID)); err != nil {
+	if err := nodefs.WriteFile(claspPath, claspJSON(scriptID)); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -126,7 +126,7 @@ func writePull(root, claspPath, scriptID string, files []file) (*pulled, error) 
 // localProject is what Bun push reads before it resolves the profile: the
 // script id (--id, else .clasp.json) and every .gs, .html and .json file of
 // the directory, in directory order, hidden files skipped.
-func localProject(in plugins.CommandInput, fail google.FailFunc) (string, []file, error) {
+func localProject(in plugins.CommandInput, fail plugins.FailFunc) (string, []file, error) {
 	root, err := targetDir(in.Arg("dir"))
 	if err != nil {
 		return "", nil, err
@@ -159,17 +159,17 @@ func localProject(in plugins.CommandInput, fail google.FailFunc) (string, []file
 		fullPath := filepath.Join(root, name)
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			return "", nil, google.NodeFSError("stat", fullPath, err)
+			return "", nil, nodefs.NodeFSError("stat", fullPath, err)
 		}
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		ext := strings.ToLower(google.Extname(name))
+		ext := strings.ToLower(nodefs.Extname(name))
 		typ, ok := extToType[ext]
 		if !ok {
 			continue
 		}
-		raw, err := google.ReadFile(fullPath)
+		raw, err := nodefs.ReadFile(fullPath)
 		if err != nil {
 			return "", nil, err
 		}
@@ -190,19 +190,19 @@ func localProject(in plugins.CommandInput, fail google.FailFunc) (string, []file
 func readdirNames(dir string) ([]string, error) {
 	f, err := os.Open(dir)
 	if err != nil {
-		return nil, google.NodeFSError("scandir", dir, err)
+		return nil, nodefs.NodeFSError("scandir", dir, err)
 	}
 	defer f.Close()
 	names, err := f.Readdirnames(-1)
 	if err != nil {
-		return nil, google.NodeFSError("scandir", dir, err)
+		return nil, nodefs.NodeFSError("scandir", dir, err)
 	}
 	return names, nil
 }
 
 // putSource is the content Bun put reads before it resolves the profile:
 // --source, else the --from file, else stdin trimmed.
-func putSource(in plugins.CommandInput, fail google.FailFunc) (string, error) {
+func putSource(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	source, from := in.Option("source"), in.Option("from")
 	if source != "" && from != "" {
 		return "", fail("INVALID_PARAMS", "--source and --from are mutually exclusive", "")
@@ -211,7 +211,7 @@ func putSource(in plugins.CommandInput, fail google.FailFunc) (string, error) {
 		return source, nil
 	}
 	if from != "" {
-		raw, err := google.ReadFile(from)
+		raw, err := nodefs.ReadFile(from)
 		if err != nil {
 			return "", err
 		}
@@ -220,17 +220,17 @@ func putSource(in plugins.CommandInput, fail google.FailFunc) (string, error) {
 	if _, ok := in.Stdin.(string); !ok {
 		return "", fail("INVALID_PARAMS", "No content provided", "Pass --source <text>, --from <path>, or pipe content via stdin")
 	}
-	return google.Stdin(in), nil
+	return plugins.Stdin(in), nil
 }
 
 // pushInputError and putInputError are the input rejections Bun reports
-// before enforceWriteAccess (google.WriteUnlessInvalid).
-func pushInputError(in plugins.CommandInput, fail google.FailFunc) error {
+// before enforceWriteAccess (plugins.WriteUnlessInvalid).
+func pushInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	_, _, err := localProject(in, fail)
 	return err
 }
 
-func putInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func putInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	_, err := putSource(in, fail)
 	return err
 }

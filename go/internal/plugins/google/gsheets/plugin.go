@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -44,7 +45,7 @@ func intOption(in plugins.CommandInput, name string) *float64 {
 
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
-func parseValues(in plugins.CommandInput, fail google.FailFunc) ([]any, error) {
+func parseValues(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
 	if raw := in.Option("values-json"); raw != "" {
 		parsed, err := jsvalue.Parse([]byte(raw))
 		if err != nil {
@@ -72,14 +73,14 @@ func parseValues(in plugins.CommandInput, fail google.FailFunc) ([]any, error) {
 }
 
 // valuesInputError is the parseValues check Bun makes before it resolves the profile.
-func valuesInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func valuesInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	_, err := parseValues(in, fail)
 	return err
 }
 
 // choice is Bun parseAlign / parseValign / parseWrap / parseBorder: an empty
 // value is absent, anything else must be one of the lowercased keys.
-func choice(value, name string, choices map[string]string, suggestion string, fail google.FailFunc) (string, error) {
+func choice(value, name string, choices map[string]string, suggestion string, fail plugins.FailFunc) (string, error) {
 	if value == "" {
 		return "", nil
 	}
@@ -90,7 +91,7 @@ func choice(value, name string, choices map[string]string, suggestion string, fa
 }
 
 // parseRawFormat is Bun parseRawFormat: a JSON object, nil when absent.
-func parseRawFormat(raw string, fail google.FailFunc) (*jsvalue.Object, error) {
+func parseRawFormat(raw string, fail plugins.FailFunc) (*jsvalue.Object, error) {
 	if raw == "" {
 		return nil, nil
 	}
@@ -140,7 +141,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
+			return plugins.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
 		},
 		Format: func(v any) string { return google.FormatDriveFiles(v, "Spreadsheets", "No spreadsheets found") },
 	}
@@ -171,7 +172,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.Option("dimension"), in.Option("render")))
+			return plugins.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.Option("dimension"), in.Option("render")))
 		},
 		Format: formatValues,
 	}
@@ -182,7 +183,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update values in a range",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(valuesInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(valuesInputError),
 		Operation:   "update values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B2)"), valuesArg},
 		Options: []plugins.OptionSpec{
@@ -210,7 +211,7 @@ func updateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.update(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input")))
+			return plugins.Result(a.update(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input")))
 		},
 		Format: formatUpdated,
 	}
@@ -221,7 +222,7 @@ func appendCmd() plugins.CommandSpec {
 		Path:        "append",
 		Description: "Append values to a range",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(valuesInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(valuesInputError),
 		Operation:   "append values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A:C)"), valuesArg},
 		Options: []plugins.OptionSpec{
@@ -248,7 +249,7 @@ func appendCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.Option("insert")))
+			return plugins.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.Option("insert")))
 		},
 		Format: formatAppended,
 	}
@@ -272,7 +273,7 @@ func clearCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.clear(in.Arg("spreadsheet-id-or-url"), in.Arg("range")))
+			return plugins.Result(a.clear(in.Arg("spreadsheet-id-or-url"), in.Arg("range")))
 		},
 		Format: formatCleared,
 	}
@@ -347,7 +348,7 @@ func formatCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.format(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), o))
+			return plugins.Result(a.format(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), o))
 		},
 		Format: formatFormatted,
 	}
@@ -380,7 +381,7 @@ func resizeCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.resize(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), intOption(in, "size"), in.Flag("auto")))
+			return plugins.Result(a.resize(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), intOption(in, "size"), in.Flag("auto")))
 		},
 		Format: formatResized,
 	}
@@ -391,7 +392,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw spreadsheets.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(google.BatchInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Options: []plugins.OptionSpec{
@@ -416,7 +417,7 @@ func batchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.batch(in.Arg("spreadsheet-id-or-url"), requests))
+			return plugins.Result(a.batch(in.Arg("spreadsheet-id-or-url"), requests))
 		},
 		Format: formatBatch,
 	}
@@ -439,7 +440,7 @@ func metadataCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.metadata(in.Arg("spreadsheet-id-or-url")))
+			return plugins.Result(a.metadata(in.Arg("spreadsheet-id-or-url")))
 		},
 		Format: formatMetadata,
 	}
@@ -472,7 +473,7 @@ func createCmd() plugins.CommandSpec {
 					names = append(names, jsvalue.Trim(n))
 				}
 			}
-			return google.Result(a.create(in.Arg("title"), names))
+			return plugins.Result(a.create(in.Arg("title"), names))
 		},
 		Format: formatCreated,
 	}
@@ -499,7 +500,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.CopyDriveFile(a.drive, extractSpreadsheetID(in.Arg("spreadsheet-id-or-url")), in.Arg("title"), in.Option("parent"), "copy spreadsheet", spreadsheetURL))
+			return plugins.Result(a.CopyDriveFile(a.drive, extractSpreadsheetID(in.Arg("spreadsheet-id-or-url")), in.Arg("title"), in.Option("parent"), "copy spreadsheet", spreadsheetURL))
 		},
 		Format: formatCreated,
 	}
@@ -528,7 +529,7 @@ func exportCmd() plugins.CommandSpec {
 			"Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -545,7 +546,7 @@ func exportCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			output := in.Option("output")
-			if err := google.WriteFile(output, data); err != nil {
+			if err := nodefs.WriteFile(output, data); err != nil {
 				return nil, err
 			}
 			return fmt.Sprintf("Exported to %s\n  Format: %s\n  Size: %d bytes", output, format, len(data)), nil

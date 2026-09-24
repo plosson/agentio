@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -59,7 +60,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
+			return plugins.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
 		},
 		Format: func(v any) string { return google.FormatDriveFiles(v, "Presentations", "No presentations found") },
 	}
@@ -82,7 +83,7 @@ func metadataCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.metadata(in.Arg("id-or-url")))
+			return plugins.Result(a.metadata(in.Arg("id-or-url")))
 		},
 		Format: formatMetadata,
 	}
@@ -118,7 +119,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.get(in.Arg("id-or-url"), slide))
+			return plugins.Result(a.get(in.Arg("id-or-url"), slide))
 		},
 		Format: formatContent,
 	}
@@ -147,7 +148,7 @@ func exportCmd() plugins.CommandSpec {
 			"Formats: pptx (default), pdf, odp.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -164,7 +165,7 @@ func exportCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			output := in.Option("output")
-			if err := google.WriteFile(output, data); err != nil {
+			if err := nodefs.WriteFile(output, data); err != nil {
 				return nil, err
 			}
 			return fmt.Sprintf("Exported to %s\n  Format: %s\n  Size: %d bytes", output, format, len(data)), nil
@@ -190,7 +191,7 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.create(in.Arg("title")))
+			return plugins.Result(a.create(in.Arg("title")))
 		},
 		Format: formatCreated,
 	}
@@ -217,7 +218,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.CopyDriveFile(a.drive, extractPresentationID(in.Arg("id-or-url")), in.Arg("title"), in.Option("parent"), "copy presentation", presentationURL))
+			return plugins.Result(a.CopyDriveFile(a.drive, extractPresentationID(in.Arg("id-or-url")), in.Arg("title"), in.Option("parent"), "copy presentation", presentationURL))
 		},
 		Format: formatCreated,
 	}
@@ -228,7 +229,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw presentations.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(google.BatchInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
@@ -253,7 +254,7 @@ func batchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.batch(in.Arg("id-or-url"), requests))
+			return plugins.Result(a.batch(in.Arg("id-or-url"), requests))
 		},
 		Format: formatBatch,
 	}

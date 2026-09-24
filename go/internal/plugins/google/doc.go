@@ -11,12 +11,11 @@
 //     Bun clients' error shapes: APIError, NotFoundOr, StatusError, Failed)
 //     beside the google.golang.org/api services it builds with NewService or
 //     DriveService. CallJSON serves the calls those services cannot make.
-//   - Commands: Stdin and OptionOrStdin read piped input as Bun readStdin does.
-//     RequireOptions is Commander's requiredOption. An input check written as
-//     a FailFunc check becomes an AccessFor with WriteUnlessInvalid, so on a
-//     read-only profile the input error wins as in Bun. Result, BatchRequests
-//     and the Drive helpers (ListDriveFiles, ExportDriveFile, CopyDriveFile,
-//     ValidateDriveFiles) cover what several products share.
+//   - Commands: the generic input helpers (Stdin, OptionOrStdin,
+//     RequireOptions, WriteUnlessInvalid, Result) live in package plugins.
+//     BatchRequests (with BatchInputError) and the Drive helpers
+//     (ListDriveFiles, ExportDriveFile, CopyDriveFile, ValidateDriveFiles)
+//     cover what several products share.
 //
 // Nothing here writes the vault; the host persists what these functions
 // return. The product tests share googletest.

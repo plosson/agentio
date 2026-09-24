@@ -1,4 +1,7 @@
-package google
+// Package nodefs gives local file operations the results and error messages
+// Node's path and fs modules give the Bun CLI. It uses only the standard
+// library, so any service may import it.
+package nodefs
 
 import (
 	"errors"

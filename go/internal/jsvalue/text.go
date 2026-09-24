@@ -82,6 +82,49 @@ func EncodeURIComponent(s string) string {
 	return sb.String()
 }
 
+// DecodeURIComponent is decodeURIComponent(s). ok is false where JavaScript
+// throws a URIError: a "%" not followed by two hex digits, or escapes that do
+// not decode to UTF-8 (an encoded surrogate included).
+func DecodeURIComponent(s string) (string, bool) {
+	if !strings.Contains(s, "%") {
+		return s, true
+	}
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			out = append(out, s[i])
+			continue
+		}
+		if i+2 >= len(s) {
+			return "", false
+		}
+		hi, lo := unhex(s[i+1]), unhex(s[i+2])
+		if hi < 0 || lo < 0 {
+			return "", false
+		}
+		out = append(out, byte(hi<<4|lo))
+		i += 2
+	}
+	// Unescaped text is whole characters, so an escaped lead byte followed by
+	// anything but its escaped continuation bytes fails here, as in JavaScript.
+	if !utf8.Valid(out) {
+		return "", false
+	}
+	return string(out), true
+}
+
+func unhex(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return -1
+}
+
 // formEscape is URLSearchParams serialization of one name or value.
 func formEscape(s string) string {
 	var sb strings.Builder

@@ -407,7 +407,7 @@ func (a *api) freeBusy(ids []string, timeMin, timeMax string) (*freeBusy, error)
 }
 
 // parseReminders is Bun's `method:minutes` check for --reminder.
-func parseReminders(specs []string, fail google.FailFunc) ([]*calendar.EventReminder, error) {
+func parseReminders(specs []string, fail plugins.FailFunc) ([]*calendar.EventReminder, error) {
 	var out []*calendar.EventReminder
 	for _, spec := range specs {
 		parts := strings.Split(spec, ":")

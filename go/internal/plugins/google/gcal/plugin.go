@@ -49,24 +49,24 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 }
 
 // createInputError, updateInputError and respondInputError are the input
-// rejections Bun reports before enforceWriteAccess (google.WriteUnlessInvalid).
-func createInputError(in plugins.CommandInput, fail google.FailFunc) error {
-	if err := google.RequireOptions(in, fail, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
+// rejections Bun reports before enforceWriteAccess (plugins.WriteUnlessInvalid).
+func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if err := plugins.RequireOptions(in, fail, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
 		return err
 	}
 	_, err := parseReminders(in.List("reminder"), fail)
 	return err
 }
 
-func updateInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func updateInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if len(in.List("attendee")) > 0 && len(in.List("add-attendee")) > 0 {
 		return fail("INVALID_PARAMS", "Cannot use both --attendee and --add-attendee", "")
 	}
 	return nil
 }
 
-func respondInputError(in plugins.CommandInput, fail google.FailFunc) error {
-	if err := google.RequireOptions(in, fail, "--status <status>"); err != nil {
+func respondInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if err := plugins.RequireOptions(in, fail, "--status <status>"); err != nil {
 		return err
 	}
 	switch strings.ToLower(in.Option("status")) {
@@ -121,7 +121,7 @@ func calendarsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listCalendars(jsvalue.ParseInt(in.Option("limit"))))
+			return plugins.Result(a.listCalendars(jsvalue.ParseInt(in.Option("limit"))))
 		},
 		Format: formatCalendars,
 	}
@@ -161,7 +161,7 @@ func eventsCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			timeMin, timeMax := timeRange(in)
-			return google.Result(a.listEvents(cmp.Or(in.Arg("calendar-id"), "primary"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Option("query")))
+			return plugins.Result(a.listEvents(cmp.Or(in.Arg("calendar-id"), "primary"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Option("query")))
 		},
 		Format: formatEventList,
 	}
@@ -188,7 +188,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.getEvent(in.Arg("calendar-id"), in.Arg("event-id")))
+			return plugins.Result(a.getEvent(in.Arg("calendar-id"), in.Arg("event-id")))
 		},
 		Format: formatEvent,
 	}
@@ -199,7 +199,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new event",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(createInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
 		Operation:   "create event",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-id", Description: "Calendar ID (default: primary)"}},
@@ -245,12 +245,12 @@ func createCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			// Bun create reads stdin when --description is empty.
-			description, descriptionGiven := google.OptionOrStdin(in, "description", true)
+			description, descriptionGiven := plugins.OptionOrStdin(in, "description", true)
 			given := givenFields(in, "summary", "Summary", "location", "Location")
 			if descriptionGiven {
 				given = append(given, "Description")
 			}
-			return google.Result(a.createEvent(createOptions{
+			return plugins.Result(a.createEvent(createOptions{
 				calendarID:   cmp.Or(in.Arg("calendar-id"), "primary"),
 				given:        given,
 				summary:      in.Option("summary"),
@@ -278,7 +278,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update an existing event",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(updateInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(updateInputError),
 		Operation:   "update event",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -319,12 +319,12 @@ func updateCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			// Bun update reads stdin only when --description is absent.
-			description, descriptionGiven := google.OptionOrStdin(in, "description", false)
+			description, descriptionGiven := plugins.OptionOrStdin(in, "description", false)
 			given := givenFields(in, "summary", "Summary", "location", "Location", "color", "ColorId")
 			if descriptionGiven {
 				given = append(given, "Description")
 			}
-			return google.Result(a.updateEvent(updateOptions{
+			return plugins.Result(a.updateEvent(updateOptions{
 				calendarID:   in.Arg("calendar-id"),
 				eventID:      in.Arg("event-id"),
 				given:        given,
@@ -415,7 +415,7 @@ func searchCmd() plugins.CommandSpec {
 			if timeMax == "" {
 				timeMax = google.ISOString(addDays(t, 90))
 			}
-			return google.Result(a.listEvents(in.Option("calendar"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Arg("query")))
+			return plugins.Result(a.listEvents(in.Option("calendar"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Arg("query")))
 		},
 		Format: formatEventList,
 	}
@@ -426,7 +426,7 @@ func respondCmd() plugins.CommandSpec {
 		Path:        "respond",
 		Description: "Respond to an event invitation",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(respondInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(respondInputError),
 		Operation:   "respond to event",
 		Arguments: []plugins.ArgumentSpec{
 			{Name: "calendar-id", Description: "Calendar ID", Required: true},
@@ -481,7 +481,7 @@ func freebusyCmd() plugins.CommandSpec {
 			`  --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--from <datetime>", "--to <datetime>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--from <datetime>", "--to <datetime>"); err != nil {
 				return nil, err
 			}
 			var ids []string
@@ -497,7 +497,7 @@ func freebusyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.freeBusy(ids, in.Option("from"), in.Option("to")))
+			return plugins.Result(a.freeBusy(ids, in.Option("from"), in.Option("to")))
 		},
 		Format: formatFreeBusy,
 	}

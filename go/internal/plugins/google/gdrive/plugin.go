@@ -175,7 +175,7 @@ func listCmd() plugins.CommandSpec {
 				orderBy:      in.Option("order"),
 				includeTrash: in.Flag("trash"),
 			})
-			return google.Result(fileList{Title: "Files", Files: files}, err)
+			return plugins.Result(fileList{Title: "Files", Files: files}, err)
 		},
 		Format: formatFileList,
 	}
@@ -207,7 +207,7 @@ func foldersCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			files, err := a.listFolders(jsvalue.ParseInt(in.Option("limit")), in.Option("parent"), in.Option("query"))
-			return google.Result(fileList{Title: "Folders", Files: files}, err)
+			return plugins.Result(fileList{Title: "Folders", Files: files}, err)
 		},
 		Format: formatFileList,
 	}
@@ -230,7 +230,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.get(in.Arg("file-id-or-url")))
+			return plugins.Result(a.get(in.Arg("file-id-or-url")))
 		},
 		Format: formatFile,
 	}
@@ -256,7 +256,7 @@ func searchCmd() plugins.CommandSpec {
 			`agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
@@ -264,7 +264,7 @@ func searchCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			files, err := a.search(in.Option("query"), in.Option("type"), jsvalue.ParseInt(in.Option("limit")), in.Option("folder"))
-			return google.Result(fileList{Title: "Search Results", Files: files}, err)
+			return plugins.Result(fileList{Title: "Search Results", Files: files}, err)
 		},
 		Format: formatFileList,
 	}
@@ -293,14 +293,14 @@ func downloadCmd() plugins.CommandSpec {
 			"Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := google.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
+			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.download(in.Arg("file-id-or-url"), in.Option("output"), in.Option("export")))
+			return plugins.Result(a.download(in.Arg("file-id-or-url"), in.Option("output"), in.Option("export")))
 		},
 		Format: formatDownloaded,
 	}
@@ -386,7 +386,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.copy(in.Arg("file-id-or-url"), in.Option("name"), in.Option("folder")))
+			return plugins.Result(a.copy(in.Arg("file-id-or-url"), in.Option("name"), in.Option("folder")))
 		},
 		Format: formatCopied,
 	}
@@ -413,7 +413,7 @@ func mkdirCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.mkdir(in.Arg("name"), in.Option("parent")))
+			return plugins.Result(a.mkdir(in.Arg("name"), in.Option("parent")))
 		},
 		Format: formatCreatedFolder,
 	}
@@ -440,7 +440,7 @@ func renameCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.rename(in.Arg("file-id-or-url"), in.Arg("new-name")))
+			return plugins.Result(a.rename(in.Arg("file-id-or-url"), in.Arg("new-name")))
 		},
 		Format: fileLine("Renamed: "),
 	}
@@ -469,7 +469,7 @@ func moveCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.move(in.Arg("file-id-or-url"), in.Arg("folder-id-or-url")))
+			return plugins.Result(a.move(in.Arg("file-id-or-url"), in.Arg("folder-id-or-url")))
 		},
 		Format: formatMoved,
 	}
@@ -495,7 +495,7 @@ func trashCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.trash(in.Arg("file-id-or-url")))
+			return plugins.Result(a.trash(in.Arg("file-id-or-url")))
 		},
 		Format: fileLine("Trashed: "),
 	}
@@ -516,7 +516,7 @@ func permissionsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.permissions(in.Arg("file-id-or-url")))
+			return plugins.Result(a.permissions(in.Arg("file-id-or-url")))
 		},
 		Format: formatPermissions,
 	}
@@ -537,7 +537,7 @@ func shareTarget(in plugins.CommandInput) (kind string, count int) {
 }
 
 // shareInputError is the checks Bun makes before it resolves the profile.
-func shareInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func shareInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	_, count := shareTarget(in)
 	if count == 0 {
 		return fail("INVALID_PARAMS", "Specify one of --anyone, --user, --domain, or --group", "")
@@ -577,7 +577,7 @@ func shareCmd() plugins.CommandSpec {
 		Path:        "share",
 		Description: "Share a file by creating a permission",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(shareInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(shareInputError),
 		Operation:   "share file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -616,7 +616,7 @@ func shareCmd() plugins.CommandSpec {
 				email = in.Option("group")
 			}
 			fileIDOrURL := in.Arg("file-id-or-url")
-			return google.Result(a.share(fileIDOrURL, printedFileID(fileIDOrURL), shareOptions{
+			return plugins.Result(a.share(fileIDOrURL, printedFileID(fileIDOrURL), shareOptions{
 				kind:               kind,
 				role:               in.Option("role"),
 				emailAddress:       email,
@@ -631,7 +631,7 @@ func shareCmd() plugins.CommandSpec {
 }
 
 // unshareInputError is the checks Bun makes before it resolves the profile.
-func unshareInputError(in plugins.CommandInput, fail google.FailFunc) error {
+func unshareInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
 	byID, anyone := in.Option("permission-id") != "", in.Flag("anyone")
 	if !byID && !anyone {
 		return fail("INVALID_PARAMS", "Specify --permission-id or --anyone", "")
@@ -647,7 +647,7 @@ func unshareCmd() plugins.CommandSpec {
 		Path:        "unshare",
 		Description: "Remove a permission from a file",
 		Access:      "write",
-		AccessFor:   google.WriteUnlessInvalid(unshareInputError),
+		AccessFor:   plugins.WriteUnlessInvalid(unshareInputError),
 		Operation:   "remove permission",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
