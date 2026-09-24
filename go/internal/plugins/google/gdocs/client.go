@@ -52,10 +52,6 @@ type batchResult struct {
 	Replies    any    `json:"replies"`
 }
 
-func driveService(ctx context.Context, run *plugins.RunContext) (*drive.Service, error) {
-	return google.NewService(ctx, run, google.Camel, drive.NewService)
-}
-
 // api is GDocsClient. Drive calls go through the typed drive/v3 client. Docs
 // responses are printed or forwarded as the API sent them (structure, batch),
 // so Docs calls send and read ordered JSON at the docs/v1 client's BasePath.
@@ -68,7 +64,7 @@ type api struct {
 }
 
 func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
-	driveSvc, err := driveService(ctx, run)
+	driveSvc, err := google.DriveService(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +133,7 @@ func (a *api) list(limit float64, query string) ([]document, error) {
 	}
 	resp, err := a.drive.Files.List().Q(q).
 		Fields("files(id,name,owners,createdTime,modifiedTime,webViewLink)").
-		OrderBy("modifiedTime desc").Context(a.ctx).Do(pageSize(limit))
+		OrderBy("modifiedTime desc").Context(a.ctx).Do(google.PageSize(limit))
 	if err != nil {
 		return nil, a.apiError("list documents", err)
 	}
@@ -159,14 +155,6 @@ func (a *api) list(limit float64, query string) ([]document, error) {
 		out = append(out, d)
 	}
 	return out, nil
-}
-
-// pageSize is Bun `pageSize: Math.min(limit, 100)`, NaN passed through.
-func pageSize(limit float64) googleapi.CallOption {
-	if limit > 100 {
-		limit = 100
-	}
-	return googleapi.QueryParameter("pageSize", jsvalue.NumberString(limit))
 }
 
 // getDocument is docs.documents.get as the API sent it.

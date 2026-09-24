@@ -52,7 +52,7 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 
 // validate is GDocsClient.validate: one Docs file listed; the account is the stored email.
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
-	svc, err := driveService(ctx, run)
+	svc, err := google.DriveService(ctx, run)
 	if err != nil {
 		return google.ValidationFailure(err), nil
 	}

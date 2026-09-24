@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -585,5 +586,35 @@ func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
 	_, err = CallJSON(context.Background(), run, Camel, "GET", base, "v1/docs/nope", nil)
 	if ErrorCode(err) != "NOT_FOUND" || StatusMessage(err, "f", "Document not found") != "Document not found" {
 		t.Fatalf("%v", err)
+	}
+}
+
+// Every Drive-backed product sends the Camel access token and Bun's capped,
+// NaN-preserving pageSize.
+func TestDriveServiceUsesCamelTokensAndPageSizeCapsLikeMathMin(t *testing.T) {
+	var sizes []string
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
+		if r.Header.Get("Authorization") != "Bearer at-camel" || r.URL.Path != "/api/files" {
+			t.Errorf("%s %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		sizes = append(sizes, r.URL.Query().Get("pageSize"))
+		writeJSON(w, 200, map[string]any{"files": []any{}})
+	})
+	run := &plugins.RunContext{
+		// A Snake key must not be read by a Drive client.
+		Credentials: map[string]any{"accessToken": "at-camel", "access_token": "at-snake", "tokenType": "Bearer"},
+		Fetch:       hostFetch,
+	}
+	svc, err := DriveService(fake.ctx(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []float64{1, 100, 101, 250, 0, -3, math.NaN()} {
+		if _, err := svc.Files.List().Do(PageSize(limit)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(sizes, ","); got != "1,100,100,100,0,-3,NaN" {
+		t.Fatalf("pageSize %s", got)
 	}
 }
