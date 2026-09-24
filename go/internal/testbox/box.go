@@ -1,0 +1,25 @@
+// Package testbox points HOME at a temp directory and clears process caches
+// so a test cannot touch a real vault.
+package testbox
+
+import (
+	"testing"
+
+	"github.com/plosson/agentio/go/internal/auth"
+	"github.com/plosson/agentio/go/internal/vault"
+)
+
+func Isolate(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AGENTIO_TEST", "1")
+	t.Setenv("AGENTIO_PASSPHRASE", "")
+	t.Setenv("AGENTIO_TOKEN", "")
+	t.Setenv("AGENTIO_KEY", "")
+	t.Setenv("AGENTIO_CONFIG", "")
+	t.Setenv("AGENTIO_PASSPHRASE_STORE", "")
+	t.Setenv("AGENTIO_KEEPALIVE_HOURS", "0")
+	t.Setenv("AGENTIO_TRUSTED_IP_HEADER", "")
+	vault.Reset()
+	auth.Reset()
+}
