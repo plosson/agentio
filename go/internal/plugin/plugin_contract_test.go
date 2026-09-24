@@ -1,18 +1,18 @@
-package service_test
+package plugin_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/plosson/agentio/go/internal/service"
-	gmailsvc "github.com/plosson/agentio/go/internal/services/gmail"
-	jirasvc "github.com/plosson/agentio/go/internal/services/jira"
+	"github.com/plosson/agentio/go/internal/plugin"
+	gmailsvc "github.com/plosson/agentio/go/internal/plugins/gmail"
+	jirasvc "github.com/plosson/agentio/go/internal/plugins/jira"
 )
 
 // Stress-test: Gmail and Jira both satisfy ServicePlugin and register side-by-side
 // without special-casing vault or profile.
 func TestGmailAndJiraShareServicePluginContract(t *testing.T) {
-	r := service.NewRegistry()
+	r := plugin.NewRegistry()
 	r.MustRegister(gmailsvc.New())
 	r.MustRegister(jirasvc.New())
 
@@ -30,7 +30,7 @@ func TestGmailAndJiraShareServicePluginContract(t *testing.T) {
 		if p.DisplayName() == "" || p.Description() == "" {
 			t.Fatalf("%s missing display/description", id)
 		}
-		var _ service.ServicePlugin = p
+		var _ plugin.ServicePlugin = p
 		_ = context.Background()
 	}
 }

@@ -30,7 +30,7 @@ Strangler-fig port of the **domain model + boundary signatures + CLI parity**, s
 ## 2. Invariants (never violate)
 
 - [ ] Port **DOMAIN MODEL** and **BOUNDARY SIGNATURES** first, not “just features.”
-- [ ] Go layout idioms: `cmd/`, `internal/`. Bun modularity: **one package per service** under `internal/services/<id>/`.
+- [ ] Go layout idioms: `cmd/`, `internal/`. Bun modularity: **one package per service** under `internal/plugins/<id>/`.
 - [ ] **Core owns:** vault crypto, `VaultContents` shape, daemon, profile CRUD (`SaveProfile` / `DeleteProfile` / `RenameProfile` / `ChooseProfileName` / `ListProfileRefs` / `ResolveProfile` / `AddProfileFromPlugin`), top-level `agentio profile`.
 - [ ] **Service owns:** `Setup` (OAuth) returning credentials + `suggestedProfileName`, API client methods, service CLI for **API cmds only**.
 - [ ] **Service MUST NOT:** write vault crypto, implement profile CRUD, duplicate refresh outside shared lifecycle.
@@ -39,16 +39,25 @@ Strangler-fig port of the **domain model + boundary signatures + CLI parity**, s
 - [ ] Always work on `go-port/*` branches; never merge to `main` without explicit ask.
 - [ ] Push only to **`plosson/agentio`** (plosson GitHub account).
 
+
+### Package naming
+
+- Contract + registry: `internal/plugin` (`plugin.ServicePlugin`, `plugin.Registry`).
+- Implementations: `internal/plugins/<id>/` (e.g. `gmail`, `jira`) — same singular *plugins* concept as Bun `src/plugins/`.
+- **Do not** reintroduce `internal/service` + `internal/services` side by side.
+- Domain word *service* remains valid for vault keys and CLI args (`profile add <service>`).
+- Details: [ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md).
+
 ### Do
 
 - Read ARCHITECTURE.md boundary tables before coding.
-- Register every service via `service.Default.MustRegister` in `internal/cli/register.go`.
+- Register every service via `plugin.Default.MustRegister` in `internal/cli/register.go`.
 - Persist tokens only through `profile.SaveProfile` / host paths.
 - Update COVERAGE.md + this Progress log in the same PR.
 
 ### Don't
 
-- Put `SaveProfile` / vault `Encrypt*` inside `internal/services/*`.
+- Put `SaveProfile` / vault `Encrypt*` inside `internal/plugins/*`.
 - Hardcode `switch service { case "gmail": … }` for profile add — use `Registry.Find`.
 - Copy Bun’s `src/` tree literally under `go/src/`.
 - Mark a command `parity` without §6 checklist complete.
@@ -65,7 +74,7 @@ Full tables: **[ARCHITECTURE.md](./ARCHITECTURE.md)**. Summary agents must repli
 agentio profile add <id> [--profile] [--read-only]
         │
         ▼
-cli/profile.go  →  service.Default.Find(id)
+cli/profile.go  →  plugin.Default.Find(id)
         │
         ▼
 profile.AddProfileFromPlugin(ctx, store, plugin, SetupOptions)
@@ -79,9 +88,9 @@ profile.AddProfileFromPlugin(ctx, store, plugin, SetupOptions)
 
 Numbered steps (copy for each new service):
 
-1. Implement `service.ServicePlugin` in `internal/services/<id>/` (`ID`, `DisplayName`, **honest** `Description`, `Setup`).
+1. Implement `plugin.ServicePlugin` in `internal/plugins/<id>/` (`ID`, `DisplayName`, **honest** `Description`, `Setup`).
 2. `Setup` returns credentials map matching **Bun vault wire keys** (Gmail snake_case OAuth; Jira camelCase `accessToken`/`refreshToken`/`expiryDate`/`cloudId`/`siteUrl`).
-3. `service.Default.MustRegister(New())` in `internal/cli/register.go`.
+3. `plugin.Default.MustRegister(New())` in `internal/cli/register.go`.
 4. Thin `internal/cli/<id>.go` for API commands; profile `add|list|…` are shims calling shared profile helpers — same as Bun `createProfileCommands` / `addProfileWithSetup`.
 5. API cmds resolve profile via `profile.RequireProfile` / `ResolveProfile`, then **shared getFreshCredentials** (Phase 1), then client call.
 6. Do **not** touch `internal/vault` crypto or profile CRUD when adding the service.
@@ -106,7 +115,7 @@ Numbered steps (copy for each new service):
 
 - [x] Vault wire-compat tests (Bun fixture decrypt) present under `go/testdata/`
 - [x] Profile store APIs Bun-named (`SaveProfile`, …) in `internal/profile`
-- [x] `ServicePlugin` + `Registry` in `internal/service`
+- [x] `ServicePlugin` + `Registry` in `internal/plugin`
 - [x] Daemon `GET /health`
 - [x] ARCHITECTURE.md accurate
 - [ ] Description() strings narrowed to implemented cmds only (fix remaining overclaim)
@@ -164,7 +173,7 @@ For each service id (e.g. `jira`, `gmail`):
 1. **Inventory Bun commands** — table: CLI path, flags, purpose, auth, write-gated? Seed/update COVERAGE.md.
 2. **Map domain types** — credentials shape, profile meta, OAuth scopes (match vault wire).
 3. **Implement/verify ServicePlugin** — `Name`/`ID`/`DisplayName`/`Description` **honest**/`Setup`.
-4. **Register** in `service.Registry` via `register.go`.
+4. **Register** in `plugin.Registry` via `register.go`.
 5. **Wire lifecycle refresh BEFORE** any API cmd beyond intentional one-shot smoke.
 6. **Port commands** in dependency order (read → write → bulk). For **EACH** command:
    - Match Bun CLI path and **flag names** unless Go idiom forces alias — document alias in COVERAGE notes
@@ -180,7 +189,7 @@ For each service id (e.g. `jira`, `gmail`):
 
 - [ ] All Bun leaf cmds in COVERAGE.md are `parity` **or** `deferred` with Pierre approval
 - [ ] Lifecycle works (refresh+persist)
-- [ ] No vault writes from `internal/services/<id>`
+- [ ] No vault writes from `internal/plugins/<id>`
 - [ ] `cd go && go test ./...` green
 - [ ] Description() matches implemented surface only
 
@@ -221,11 +230,11 @@ Current seed: Gmail 24 Bun leaf cmds / Go 4 partial+go-only; Jira 11 / Go 4; P0 
 | Anti-pattern | Instead |
 |--------------|---------|
 | Feature port without matching Bun types/signatures | Map types in ARCHITECTURE / service package first |
-| Profile CRUD inside `services/gmail` or `services/jira` | Call `profile.*` from CLI/host only |
-| Hardcoded switch of services instead of Registry | `service.Default.Find` |
+| Profile CRUD inside `plugins/gmail` or `plugins/jira` | Call `profile.*` from CLI/host only |
+| Hardcoded switch of services instead of Registry | `plugin.Default.Find` |
 | `Description()` listing unimplemented cmds | Honest short description |
 | Skipping token refresh persist | Persist in getFreshCredentials before API |
-| Copying Bun directory layout literally under `src/` | `internal/services/<id>/` |
+| Copying Bun directory layout literally under `src/` | `internal/plugins/<id>/` |
 | Merging to main / adding WhatsApp / TS plugin loader | Non-goals |
 | One mega-PR with lifecycle + all Gmail writes | One coherent slice per PR (§9) |
 
@@ -248,6 +257,7 @@ Current seed: Gmail 24 Bun leaf cmds / Go 4 partial+go-only; Jira 11 / Go 4; P0 
 | When (Europe/Brussels) | Commit / tip | What | Next |
 |------------------------|--------------|------|------|
 | 2026-09-24 | `348da02` (+ this docs commit) | Phase 0 largely done: vault + daemon health + Bun-named profile APIs + ServicePlugin registry + Gmail/Jira smoke (`profile-info`/`labels list`, `myself`/`projects`). MIGRATION.md + COVERAGE.md added. P0 gap: no CredentialLifecycle; Description overclaims. | **Phase 1 — auth lifecycle** (shared getFreshCredentials + Google/Jira lifecycles + profile reauth). Then narrow Description(); then Phase 3 Jira remaining cmds. |
+| 2026-09-24 | `99e762d` | **P0 naming:** `internal/service`+`internal/services` → `internal/plugin`+`internal/plugins/{gmail,jira}`. ARCHITECTURE_REVIEW.md. Tests green. | Still Phase 1 auth lifecycle; then Description honesty; relocate Google oauth under plugins/google. |
 
 ---
 

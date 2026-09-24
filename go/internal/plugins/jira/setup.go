@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/plosson/agentio/go/internal/service"
+	"github.com/plosson/agentio/go/internal/plugin"
 )
 
 // ServiceID is Bun ServicePlugin.id for Jira.
@@ -27,7 +27,7 @@ func (Plugin) Description() string {
 
 // Setup mirrors Bun ProfilePlugin.setup / jiraProfileAdd.
 // Returns credentials only — host persists via profile.AddProfileFromPlugin.
-func (Plugin) Setup(ctx context.Context, opts service.SetupOptions) (*service.SetupResult, error) {
+func (Plugin) Setup(ctx context.Context, opts plugin.SetupOptions) (*plugin.SetupResult, error) {
 	_ = opts
 	fmt.Fprintln(os.Stderr, "\nJIRA OAuth Setup")
 	creds, err := PerformOAuth(ctx)
@@ -39,7 +39,7 @@ func (Plugin) Setup(ctx context.Context, opts service.SetupOptions) (*service.Se
 		suggested = u.Hostname()
 	}
 	fmt.Fprintf(os.Stderr, "\nAuthorized for site: %s\n", creds.SiteURL)
-	return &service.SetupResult{
+	return &plugin.SetupResult{
 		Credentials:          creds.ToMap(),
 		SuggestedProfileName: suggested,
 		Info:                 "Test with: agentio jira projects",

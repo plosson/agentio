@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/plosson/agentio/go/internal/profile"
-	jirasvc "github.com/plosson/agentio/go/internal/services/jira"
+	jirasvc "github.com/plosson/agentio/go/internal/plugins/jira"
 	"github.com/spf13/cobra"
 )
 

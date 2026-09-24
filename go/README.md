@@ -3,6 +3,7 @@
 Branch work for [issue #85](https://github.com/plosson/agentio/issues/85) / [PR #86](https://github.com/plosson/agentio/pull/86).
 
 See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the Bun → Go boundary map.
+See **[ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md)** for the expert layout review (service/services → plugin/plugins).
 See **[MIGRATION.md](./MIGRATION.md)** for the agent-followable strangler playbook (phases, per-service checklist, DoD).
 See **[COVERAGE.md](./COVERAGE.md)** for the Gmail/Jira command parity matrix (update in the same PR as ports).
 
@@ -11,7 +12,7 @@ See **[COVERAGE.md](./COVERAGE.md)** for the Gmail/Jira command parity matrix (u
 - AES-256-GCM vault compatible with the Bun `vault.enc` wire format (scrypt N=16384,r=8,p=1)
 - Daemon `agentio daemon start` with `GET /health` (port 7890)
 - **Central profile registry** (`agentio profile add|list|remove|rename`) — services do not own CRUD
-- **`service.ServicePlugin` contract** + registry (Bun plugin boundary)
+- **`plugin.ServicePlugin` contract** + registry (Bun plugin boundary)
 - **Gmail** + **Jira** as first two end-to-end services (OAuth setup → shared persist → API cmds)
 
 **Explicitly out of scope (for now)**
@@ -30,9 +31,9 @@ go/
     vault/                 # AES-GCM/scrypt + VaultContents store
     daemon/                # local HTTP daemon
     profile/               # SaveProfile / DeleteProfile / AddProfileFromPlugin …
-    service/               # ServicePlugin + Registry (Bun plugin contract)
+    plugin/                # ServicePlugin + Registry (Bun plugin contract)
     oauth/                 # shared Google helpers + obscure Reveal
-    services/
+    plugins/
       gmail/               # Gmail Setup + API (implements ServicePlugin)
       jira/                # Jira Setup + API (implements ServicePlugin)
     cli/                   # cobra wiring (profile CRUD is shared)

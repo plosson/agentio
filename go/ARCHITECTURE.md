@@ -5,6 +5,15 @@
 This tree ports **boundaries and signatures**, not a thinner Go-only redesign.
 Package layout follows Go idioms (`cmd/`, `internal/`); the *contracts* mirror Bun.
 
+
+## Package naming (Bun-aligned)
+
+Contract + registry live in **`internal/plugin`** (singular). Implementations live under
+**`internal/plugins/<id>`** (plural), matching Bun `src/plugins/<name>/`.
+There is **no** `internal/service` / `internal/services` duality.
+Vault/profile still use the domain word *service* for credential keys (`credentials[service][name]`).
+See [ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md).
+
 ## Ownership (isolation)
 
 | Concern | Bun | Go | Who owns it |
@@ -14,10 +23,10 @@ Package layout follows Go idioms (`cmd/`, `internal/`); the *contracts* mirror B
 | Profile CRUD | `src/config/profile-store.ts` | `internal/profile` (`SaveProfile`, `DeleteProfile`, …) | **core only** |
 | Profile resolve/list | `src/config/config-manager.ts` | `internal/profile` (`ResolveProfile`, `ListProfileRefs`, …) | **core only** |
 | Host: setup → persist | `src/plugins/profile-host.ts` | `profile.AddProfileFromPlugin` / `PersistSetupResult` | **core only** |
-| Plugin contract | `src/plugins/types.ts` + `src/plugin-sdk` | `internal/service.ServicePlugin` | **shared contract** |
-| Plugin registry | `src/plugins/plugin-registry.ts` | `internal/service.Registry` | **core** |
-| Gmail OAuth + API | `src/plugins/google/gmail/` | `internal/services/gmail` | **service** |
-| Jira OAuth + API | `src/plugins/jira/` | `internal/services/jira` | **service** |
+| Plugin contract | `src/plugins/types.ts` + `src/plugin-sdk` | `internal/plugin.ServicePlugin` | **shared contract** |
+| Plugin registry | `src/plugins/plugin-registry.ts` | `internal/plugin.Registry` | **core** |
+| Gmail OAuth + API | `src/plugins/google/gmail/` | `internal/plugins/gmail` | **plugin** |
+| Jira OAuth + API | `src/plugins/jira/` | `internal/plugins/jira` | **plugin** |
 | Daemon | `src/commands/daemon.ts` + server | `internal/daemon` | **core** |
 | CLI wiring | `src/commands/*`, `declarative.ts` | `internal/cli` | **core** (thin) |
 
@@ -34,11 +43,11 @@ Package layout follows Go idioms (`cmd/`, `internal/`); the *contracts* mirror B
 | `ServicePlugin.id` | `ServicePlugin.ID()` |
 | `ServicePlugin.displayName` | `ServicePlugin.DisplayName()` |
 | `ServicePlugin.description` | `ServicePlugin.Description()` |
-| `ServicePlugin.apiVersion` | `service.APIVersion` (=1) |
+| `ServicePlugin.apiVersion` | `plugin.APIVersion` (=1) |
 | `ProfilePlugin.setup` / `ProfileSpec.setup` | `ServicePlugin.Setup(ctx, SetupOptions)` |
-| `SetupOptions` (`profile?`, `readOnly?`) | `service.SetupOptions` |
-| `SetupResult<Credentials>` (`credentials`, `suggestedProfileName`, `info?`) | `service.SetupResult` |
-| `PluginRegistry` / `SERVICE_PLUGINS` | `service.Registry` / `service.Default` |
+| `SetupOptions` (`profile?`, `readOnly?`) | `plugin.SetupOptions` |
+| `SetupResult<Credentials>` (`credentials`, `suggestedProfileName`, `info?`) | `plugin.SetupResult` |
+| `PluginRegistry` / `SERVICE_PLUGINS` | `plugin.Registry` / `plugin.Default` |
 | `addProfileFromPlugin(plugin, options)` | `profile.AddProfileFromPlugin(ctx, store, plugin, opts)` |
 | `persistSetupResult` | `profile.PersistSetupResult` |
 
@@ -80,8 +89,8 @@ Package layout follows Go idioms (`cmd/`, `internal/`); the *contracts* mirror B
 
 ## Adding a service (proven with Jira)
 
-1. Implement `service.ServicePlugin` under `internal/services/<id>/` (`Setup` returns credentials only).
-2. `service.Default.MustRegister(New())` in `internal/cli/register.go`.
+1. Implement `plugin.ServicePlugin` under `internal/plugins/<id>/` (`Setup` returns credentials only).
+2. `plugin.Default.MustRegister(New())` in `internal/cli/register.go`.
 3. Optional thin CLI under `internal/cli/<id>.go` for API commands; profile shims call `addProfileForService`.
 4. **Do not** touch `internal/vault` or `internal/profile` CRUD.
 

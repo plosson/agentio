@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/plosson/agentio/go/internal/service"
+	"github.com/plosson/agentio/go/internal/plugin"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -63,10 +63,10 @@ func TestChooseProfileNameAndCRUD(t *testing.T) {
 		t.Fatalf("rename: %v %v", outcome, err)
 	}
 
-	saved, err := PersistSetupResult(s, "gmail", &service.SetupResult{
+	saved, err := PersistSetupResult(s, "gmail", &plugin.SetupResult{
 		Credentials:          map[string]any{"access_token": "c"},
 		SuggestedProfileName: "bob@example.com",
-	}, service.SetupOptions{})
+	}, plugin.SetupOptions{})
 	if err != nil || saved != "bob@example.com" {
 		t.Fatalf("persist: %q %v", saved, err)
 	}

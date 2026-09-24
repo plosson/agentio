@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/plosson/agentio/go/internal/profile"
-	gmailsvc "github.com/plosson/agentio/go/internal/services/gmail"
+	gmailsvc "github.com/plosson/agentio/go/internal/plugins/gmail"
 	"github.com/spf13/cobra"
 )
 

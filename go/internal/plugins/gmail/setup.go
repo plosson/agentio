@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/plosson/agentio/go/internal/oauth"
-	"github.com/plosson/agentio/go/internal/service"
+	"github.com/plosson/agentio/go/internal/plugin"
 )
 
 // ServiceID is Bun ServicePlugin.id for Gmail.
@@ -27,7 +27,7 @@ func (Plugin) Description() string {
 
 // Setup mirrors Bun ProfilePlugin.setup / gmailProfileAdd.
 // Returns credentials only — host persists via profile.AddProfileFromPlugin.
-func (Plugin) Setup(ctx context.Context, opts service.SetupOptions) (*service.SetupResult, error) {
+func (Plugin) Setup(ctx context.Context, opts plugin.SetupOptions) (*plugin.SetupResult, error) {
 	_ = opts // host chooses final name; readOnly applied at PersistSetupResult
 	fmt.Fprintln(os.Stderr, "Starting OAuth flow for Gmail...")
 	bundle, err := oauth.PerformGmailOAuth(ctx)
@@ -43,7 +43,7 @@ func (Plugin) Setup(ctx context.Context, opts service.SetupOptions) (*service.Se
 	if email != "" {
 		info = fmt.Sprintf("Email: %s", email)
 	}
-	return &service.SetupResult{
+	return &plugin.SetupResult{
 		Credentials:          bundle.ToMap(),
 		SuggestedProfileName: suggested,
 		Info:                 info,

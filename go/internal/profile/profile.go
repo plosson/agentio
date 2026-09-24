@@ -4,7 +4,7 @@
 //	src/config/config-manager.ts   listProfileRefs, listProfiles, resolveProfile, getProfile, ProfileRef
 //	src/plugins/profile-host.ts    addProfileFromPlugin / persistSetupResult
 //
-// Services only return credentials (service.SetupResult). This package owns
+// Services only return credentials (plugin.SetupResult). This package owns
 // naming + persistence. Vault crypto stays in internal/vault.
 package profile
 
@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/plosson/agentio/go/internal/service"
+	"github.com/plosson/agentio/go/internal/plugin"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -218,7 +218,7 @@ func GetCredentials(s *vault.Store, serviceName, profileName string) (map[string
 
 // PersistSetupResult mirrors Bun persistSetupResult (profile-host.ts):
 // chooseProfileName + saveProfile. Returns the chosen profile name.
-func PersistSetupResult(s *vault.Store, serviceName string, result *service.SetupResult, opts service.SetupOptions) (string, error) {
+func PersistSetupResult(s *vault.Store, serviceName string, result *plugin.SetupResult, opts plugin.SetupOptions) (string, error) {
 	if result == nil {
 		return "", fmt.Errorf("nil setup result")
 	}
@@ -235,18 +235,18 @@ func PersistSetupResult(s *vault.Store, serviceName string, result *service.Setu
 
 // AddProfileFromPlugin mirrors Bun addProfileFromPlugin(plugin, options):
 // plugin.Setup → host PersistSetupResult. Plugins never write the vault.
-func AddProfileFromPlugin(ctx context.Context, s *vault.Store, plugin service.ServicePlugin, opts service.SetupOptions) (name string, result *service.SetupResult, err error) {
-	if plugin == nil {
+func AddProfileFromPlugin(ctx context.Context, s *vault.Store, pl plugin.ServicePlugin, opts plugin.SetupOptions) (name string, result *plugin.SetupResult, err error) {
+	if pl == nil {
 		return "", nil, fmt.Errorf("nil service plugin")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err = plugin.Setup(ctx, opts)
+	result, err = pl.Setup(ctx, opts)
 	if err != nil {
 		return "", nil, err
 	}
-	name, err = PersistSetupResult(s, plugin.ID(), result, opts)
+	name, err = PersistSetupResult(s, pl.ID(), result, opts)
 	if err != nil {
 		return "", result, err
 	}

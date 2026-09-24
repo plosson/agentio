@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/profile"
-	"github.com/plosson/agentio/go/internal/service"
+	"github.com/plosson/agentio/go/internal/plugin"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +16,7 @@ func profileCmd() *cobra.Command {
 		Use:   "profile",
 		Short: "Manage profiles across services (shared registry — Bun profile commands)",
 	}
-	known := func() string { return strings.Join(service.Default.Names(), ", ") }
+	known := func() string { return strings.Join(plugin.Default.Names(), ", ") }
 
 	listCmd := &cobra.Command{
 		Use:   "list [service]",
@@ -30,7 +30,7 @@ func profileCmd() *cobra.Command {
 			filter := ""
 			if len(args) == 1 {
 				filter = args[0]
-				if !service.Default.Has(filter) {
+				if !plugin.Default.Has(filter) {
 					return fmt.Errorf("unknown service: %q (known: %s)", filter, known())
 				}
 			}
@@ -81,7 +81,7 @@ func profileCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, name := args[0], args[1]
-			if !service.Default.Has(svc) {
+			if !plugin.Default.Has(svc) {
 				return fmt.Errorf("unknown service: %q (known: %s)", svc, known())
 			}
 			s, err := openStore()
@@ -106,7 +106,7 @@ func profileCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, from, to := args[0], args[1], args[2]
-			if !service.Default.Has(svc) {
+			if !plugin.Default.Has(svc) {
 				return fmt.Errorf("unknown service: %q (known: %s)", svc, known())
 			}
 			s, err := openStore()
@@ -137,9 +137,9 @@ func profileCmd() *cobra.Command {
 
 // addProfileForService is the host path: registry Find → AddProfileFromPlugin.
 func addProfileForService(ctx context.Context, serviceID, explicitName string, readOnly bool) error {
-	plugin, ok := service.Default.Find(serviceID)
+	pl, ok := plugin.Default.Find(serviceID)
 	if !ok {
-		return fmt.Errorf("unknown service: %q (known: %s)", serviceID, strings.Join(service.Default.Names(), ", "))
+		return fmt.Errorf("unknown service: %q (known: %s)", serviceID, strings.Join(plugin.Default.Names(), ", "))
 	}
 	s, err := openStore()
 	if err != nil {
@@ -148,7 +148,7 @@ func addProfileForService(ctx context.Context, serviceID, explicitName string, r
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
 
-	name, result, err := profile.AddProfileFromPlugin(ctx, s, plugin, service.SetupOptions{
+	name, result, err := profile.AddProfileFromPlugin(ctx, s, pl, plugin.SetupOptions{
 		Profile:  explicitName,
 		ReadOnly: readOnly,
 	})

@@ -1,4 +1,4 @@
-// Package service is the Go mirror of Bun's plugin boundary:
+// Package plugin is the Go mirror of Bun's plugin boundary:
 //
 //	src/plugins/types.ts          ServicePlugin, ProfilePlugin, ProfileAddOptions
 //	src/plugin-sdk/index.ts       SetupOptions, SetupResult, ProfileSpec.setup
@@ -9,7 +9,7 @@
 // AgentIO core owns vault, daemon, profile CRUD, and `agentio profile …` CLI wiring.
 // Plugins never touch vault crypto — they return credentials; the host calls
 // profile.AddProfileFromPlugin → SaveProfile.
-package service
+package plugin
 
 import "context"
 
