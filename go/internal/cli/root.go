@@ -25,6 +25,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/dropbox"
 	"github.com/plosson/agentio/go/internal/plugins/falco"
 	"github.com/plosson/agentio/go/internal/plugins/google/gcal"
+	"github.com/plosson/agentio/go/internal/plugins/google/gchat"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -43,6 +44,7 @@ func init() {
 	plugins.Default.MustRegister(dropbox.New())
 	plugins.Default.MustRegister(falco.New())
 	plugins.Default.MustRegister(gcal.New())
+	plugins.Default.MustRegister(gchat.New())
 }
 
 func Main(args []string) int {
@@ -54,7 +56,7 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetIn(stdin)
-	root.SetArgs(args)
+	root.SetArgs(optionalValues(root, args))
 	err := root.Execute()
 	if err == nil {
 		return 0
@@ -203,7 +205,12 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		if p.Profile != nil {
 			leaf.Flags().String("profile", "", "Profile name (optional if only one profile exists)")
 		}
-		leaf.Flags().Bool("json", false, "Output structured JSON")
+		// A command that declares its own --json (gchat send --json [file]) has
+		// no output flag, as in Bun's declarative adapter.
+		hostJSON := leaf.Flags().Lookup("json") == nil
+		if hostJSON {
+			leaf.Flags().Bool("json", false, "Output structured JSON")
+		}
 		specCopy := spec
 		pluginCopy := p
 		leaf.RunE = func(c *cobra.Command, args []string) error {
@@ -220,7 +227,7 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				}
 			}
 			c.Flags().VisitAll(func(f *pflag.Flag) {
-				if f.Name == "json" {
+				if f.Name == "json" && hostJSON {
 					return
 				}
 				in.Options[f.Name] = flagValue(c.Flags(), f)
@@ -237,7 +244,10 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				in.Stdin = stdin
 			}
 			result, err := host.Execute(context.Background(), reg, pluginCopy, &specCopy, in)
-			asJSON, _ := c.Flags().GetBool("json")
+			asJSON := false
+			if hostJSON {
+				asJSON, _ = c.Flags().GetBool("json")
+			}
 			if err != nil {
 				// Bun prints what a command produced and then throws (a sync
 				// summary before "N documents failed"), so a value returned with
@@ -256,13 +266,20 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	return cmd
 }
 
+// optionalBare is what pflag stores for a `[value]` flag given without a value.
+const optionalBare = "true"
+
 // declareOptions adds plugin OptionSpecs as flags: a <value> flag is a string
-// (a []string when repeatable), anything else (or a bool default) is a switch.
+// (a []string when repeatable), a [value] flag is a string that may be given
+// bare, anything else (or a bool default) is a switch.
 func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 	for _, opt := range opts {
 		fname := longName(opt.Flags)
 		if opt.Repeatable {
 			flags.StringArray(fname, []string{}, opt.Description)
+		} else if isOptionalValue(opt.Flags) {
+			flags.String(fname, "", opt.Description)
+			flags.Lookup(fname).NoOptDefVal = optionalBare
 		} else if _, isBool := opt.DefaultValue.(bool); isBool || !strings.Contains(opt.Flags, "<") {
 			def, _ := opt.DefaultValue.(bool)
 			flags.Bool(fname, def, opt.Description)
@@ -287,8 +304,19 @@ func optionValues(flags *pflag.FlagSet, opts []plugins.OptionSpec) map[string]an
 	return out
 }
 
-// flagValue is a switch as bool, a repeatable flag as []string, anything else as string.
+// flagValue is a switch as bool, a repeatable flag as []string, a [value] flag
+// as nil, true or its string (Commander), anything else as string.
 func flagValue(flags *pflag.FlagSet, f *pflag.Flag) any {
+	if f.NoOptDefVal == optionalBare && f.Value.Type() == "string" {
+		switch {
+		case !f.Changed:
+			return nil
+		case f.Value.String() == optionalBare:
+			return true
+		default:
+			return f.Value.String()
+		}
+	}
 	switch f.Value.Type() {
 	case "bool":
 		b, _ := flags.GetBool(f.Name)
@@ -299,6 +327,43 @@ func flagValue(flags *pflag.FlagSet, f *pflag.Flag) any {
 	default:
 		return f.Value.String()
 	}
+}
+
+func isOptionalValue(flags string) bool {
+	return strings.Contains(flags, "[") && !strings.Contains(flags, "<")
+}
+
+// optionalValues gives a [value] flag Commander's parsing: `--json card.json`
+// takes card.json as the value unless it starts with "-". pflag only takes a
+// value after "=", so the pair is joined before cobra parses the line.
+func optionalValues(root *cobra.Command, args []string) []string {
+	leaf, _, err := root.Find(args)
+	if err != nil || leaf == nil {
+		return args
+	}
+	optional := map[string]bool{}
+	leaf.Flags().VisitAll(func(f *pflag.Flag) {
+		if f.NoOptDefVal == optionalBare && f.Value.Type() == "string" {
+			optional["--"+f.Name] = true
+		}
+	})
+	if len(optional) == 0 {
+		return args
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		if optional[a] && i+1 < len(args) && !(len(args[i+1]) > 1 && args[i+1][0] == '-') {
+			out = append(out, a+"="+args[i+1])
+			i++
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func nested(root *cobra.Command, path string) *cobra.Command {

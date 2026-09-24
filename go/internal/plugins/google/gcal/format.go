@@ -3,7 +3,8 @@ package gcal
 import (
 	"fmt"
 	"strings"
-	"unicode/utf16"
+
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
 func when(d eventDateTime) string {
@@ -18,15 +19,6 @@ func title(e event) string {
 		return "(no title)"
 	}
 	return e.Summary
-}
-
-// truncate is Bun `s.length > n ? s.slice(0, n) + '...' : s` over UTF-16 units.
-func truncate(s string, n int) string {
-	units := utf16.Encode([]rune(s))
-	if len(units) <= n {
-		return s
-	}
-	return string(utf16.Decode(units[:n])) + "..."
 }
 
 // formatCalendars is printGCalCalendarList.
@@ -46,7 +38,7 @@ func formatCalendars(v any) string {
 			lines = append(lines, "    Timezone: "+c.TimeZone)
 		}
 		if c.Description != "" {
-			lines = append(lines, "    > "+truncate(c.Description, 80))
+			lines = append(lines, "    > "+google.Truncate(c.Description, 80))
 		}
 		lines = append(lines, "")
 	}

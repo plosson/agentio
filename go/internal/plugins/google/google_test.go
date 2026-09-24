@@ -443,3 +443,84 @@ func TestFormatBytesMatchesBun(t *testing.T) {
 		}
 	}
 }
+
+func TestParseIntIsJavaScripts(t *testing.T) {
+	for in, want := range map[string]string{"10": "10", " 42abc": "42", "-5": "-5", "+7": "7", "7.9": "7", "abc": "NaN", "": "NaN", "-0": "0", "0x10": "0"} {
+		if got := JSNumber(ParseInt(in)); got != want {
+			t.Errorf("%q: got %s want %s", in, got, want)
+		}
+	}
+}
+
+// Truncate counts UTF-16 units like String.prototype.slice, so an emoji cut
+// in half leaves a lone surrogate (U+FFFD once encoded).
+func TestTruncateCountsUTF16Units(t *testing.T) {
+	cases := map[string]string{
+		"short":                       "short",
+		strings.Repeat("a", 5):        strings.Repeat("a", 5),
+		strings.Repeat("a", 6):        strings.Repeat("a", 5) + "...",
+		strings.Repeat("é", 4) + "😀x": strings.Repeat("é", 4) + "�...",
+	}
+	for in, want := range cases {
+		if got := Truncate(in, 5); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+// A failed call returning a typed nil must come back as an untyped nil, or the
+// host would print "null" before the error.
+func TestResultDropsTheTypedNilOnFailure(t *testing.T) {
+	var none *calendar.Event
+	v, err := Result(none, errors.New("boom"))
+	if v != nil || err == nil {
+		t.Fatalf("%#v %v", v, err)
+	}
+	// A value that came with an error is dropped too.
+	v, _ = Result(&calendar.Event{Id: "x"}, errors.New("boom"))
+	if v != nil {
+		t.Fatalf("%#v", v)
+	}
+	if v, err := Result([]string{}, nil); err != nil || v == nil {
+		t.Fatalf("%#v %v", v, err)
+	}
+}
+
+func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
+	var got []string
+	run := &plugins.RunContext{Fail: func(code plugins.ErrorCode, message, suggestion string) error {
+		got = append(got, string(code)+"|"+message+"|"+suggestion)
+		return errors.New(message)
+	}}
+	in := plugins.CommandInput{Options: map[string]any{"space": "", "limit": true, "query": "q"}}
+	if err := RequireOptions(in, run, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
+		t.Fatal("a bool where a string is required passed")
+	}
+	if err := RequireOptions(in, run, "--space <id>"); err == nil {
+		t.Fatal("an empty string passed")
+	}
+	if err := RequireOptions(in, run, "--missing <x>"); err == nil {
+		t.Fatal("an absent option passed")
+	}
+	want := []string{
+		"INVALID_PARAMS|required option '--limit <n>' not specified|",
+		"INVALID_PARAMS|required option '--space <id>' not specified|",
+		"INVALID_PARAMS|required option '--missing <x>' not specified|",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("%q", got)
+	}
+	if err := RequireOptions(in, run, "--query <q>"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestISOStringIsUTCWithTruncatedMilliseconds(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 999_999_999, time.FixedZone("", -5*3600))
+	if got := ISOString(at); got != "2026-01-02T08:04:05.999Z" {
+		t.Fatal(got)
+	}
+	if got := ISOString(time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)); got != "1999-12-31T23:59:59.000Z" {
+		t.Fatal(got)
+	}
+}

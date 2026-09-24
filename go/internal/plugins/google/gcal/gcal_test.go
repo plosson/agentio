@@ -909,14 +909,6 @@ func TestEventJSONKeepsBunsShape(t *testing.T) {
 	}
 }
 
-func TestParseIntIsJavaScripts(t *testing.T) {
-	for in, want := range map[string]string{"10": "10", " 42abc": "42", "-5": "-5", "+7": "7", "7.9": "7", "abc": "NaN", "": "NaN", "-0": "0", "0x10": "0"} {
-		if got := jsNumber(parseInt(in)); got != want {
-			t.Errorf("%q: got %s want %s", in, got, want)
-		}
-	}
-}
-
 func jsonText(v any) string {
 	raw, _ := json.Marshal(v)
 	return string(raw)

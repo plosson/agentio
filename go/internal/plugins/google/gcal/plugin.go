@@ -3,7 +3,6 @@ package gcal
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/plugins"
@@ -89,15 +88,6 @@ func arg(in plugins.CommandInput, name string) string {
 	return s
 }
 
-// result drops a typed nil on failure: the host prints any non-nil value
-// returned with an error, and Bun printed nothing before throwing.
-func result[T any](v T, err error) (any, error) {
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
-}
-
 // piped is Bun `options.description` falling back to trimmed stdin.
 func piped(value string, stdin any) string {
 	if value != "" {
@@ -105,17 +95,6 @@ func piped(value string, stdin any) string {
 	}
 	text, _ := stdin.(string)
 	return strings.TrimSpace(text)
-}
-
-// required is Commander's requiredOption check, in declaration order.
-func required(in plugins.CommandInput, run *plugins.RunContext, flags ...string) error {
-	for _, f := range flags {
-		name := strings.TrimPrefix(strings.Fields(f)[0], "--")
-		if opt(in, name) == "" {
-			return run.Fail("INVALID_PARAMS", fmt.Sprintf("required option '%s' not specified", f), "")
-		}
-	}
-	return nil
 }
 
 // transparency is Bun's --show-as mapping.
@@ -156,7 +135,7 @@ func calendarsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return result(a.listCalendars(parseInt(opt(in, "limit"))))
+			return google.Result(a.listCalendars(google.ParseInt(opt(in, "limit"))))
 		},
 		Format: formatCalendars,
 	}
@@ -196,7 +175,7 @@ func eventsCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			timeMin, timeMax := timeRange(in)
-			return result(a.listEvents(orPrimary(arg(in, "calendar-id")), parseInt(opt(in, "limit")), timeMin, timeMax, opt(in, "query")))
+			return google.Result(a.listEvents(orPrimary(arg(in, "calendar-id")), google.ParseInt(opt(in, "limit")), timeMin, timeMax, opt(in, "query")))
 		},
 		Format: formatEventList,
 	}
@@ -223,7 +202,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return result(a.getEvent(arg(in, "calendar-id"), arg(in, "event-id")))
+			return google.Result(a.getEvent(arg(in, "calendar-id"), arg(in, "event-id")))
 		},
 		Format: formatEvent,
 	}
@@ -267,7 +246,7 @@ func createCmd() plugins.CommandSpec {
 			`  --to 2024-04-15T10:30:00-07:00 --visibility private --send-updates none`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := required(in, run, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
+			if err := google.RequireOptions(in, run, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
 				return nil, err
 			}
 			reminders, err := parseReminders(list(in, "reminder"), run)
@@ -278,7 +257,7 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return result(a.createEvent(createOptions{
+			return google.Result(a.createEvent(createOptions{
 				calendarID:   orPrimary(arg(in, "calendar-id")),
 				summary:      opt(in, "summary"),
 				description:  piped(opt(in, "description"), in.Stdin),
@@ -344,7 +323,7 @@ func updateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return result(a.updateEvent(updateOptions{
+			return google.Result(a.updateEvent(updateOptions{
 				calendarID:   arg(in, "calendar-id"),
 				eventID:      arg(in, "event-id"),
 				summary:      opt(in, "summary"),
@@ -429,12 +408,12 @@ func searchCmd() plugins.CommandSpec {
 			t := now()
 			timeMin, timeMax := opt(in, "from"), opt(in, "to")
 			if timeMin == "" {
-				timeMin = isoString(addDays(t, -30))
+				timeMin = google.ISOString(addDays(t, -30))
 			}
 			if timeMax == "" {
-				timeMax = isoString(addDays(t, 90))
+				timeMax = google.ISOString(addDays(t, 90))
 			}
-			return result(a.listEvents(opt(in, "calendar"), parseInt(opt(in, "limit")), timeMin, timeMax, arg(in, "query")))
+			return google.Result(a.listEvents(opt(in, "calendar"), google.ParseInt(opt(in, "limit")), timeMin, timeMax, arg(in, "query")))
 		},
 		Format: formatEventList,
 	}
@@ -463,7 +442,7 @@ func respondCmd() plugins.CommandSpec {
 			"agentio gcal respond primary abc123def456 --status tentative",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := required(in, run, "--status <status>"); err != nil {
+			if err := google.RequireOptions(in, run, "--status <status>"); err != nil {
 				return nil, err
 			}
 			status := strings.ToLower(opt(in, "status"))
@@ -504,7 +483,7 @@ func freebusyCmd() plugins.CommandSpec {
 			`  --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := required(in, run, "--from <datetime>", "--to <datetime>"); err != nil {
+			if err := google.RequireOptions(in, run, "--from <datetime>", "--to <datetime>"); err != nil {
 				return nil, err
 			}
 			var ids []string
@@ -520,7 +499,7 @@ func freebusyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return result(a.freeBusy(ids, opt(in, "from"), opt(in, "to")))
+			return google.Result(a.freeBusy(ids, opt(in, "from"), opt(in, "to")))
 		},
 		Format: formatFreeBusy,
 	}

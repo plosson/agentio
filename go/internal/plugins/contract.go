@@ -84,6 +84,9 @@ type ArgumentSpec struct {
 }
 
 type OptionSpec struct {
+	// Flags is the Bun flag syntax. A `[value]` flag (Bun `--json [file]`) is
+	// nil when absent, true when given bare, and the string when given a value;
+	// like Commander it takes the next word unless that word starts with "-".
 	Flags        string
 	Description  string
 	DefaultValue any // string or bool; nil when unset

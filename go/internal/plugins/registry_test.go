@@ -34,7 +34,7 @@ func TestRegistryRejectsABrokenContract(t *testing.T) {
 		{"no example", func(p *Plugin) { p.Commands[0].Examples = nil }, "no examples"},
 		{"no handler", func(p *Plugin) { p.Commands[0].Run = nil }, "no handler"},
 		{"host flag", func(p *Plugin) {
-			p.Commands[0].Options = []OptionSpec{{Flags: "--json", Description: "nope"}}
+			p.Commands[0].Options = []OptionSpec{{Flags: "--profile <name>", Description: "nope"}}
 		}, "host option"},
 		{"bad flag", func(p *Plugin) {
 			p.Commands[0].Options = []OptionSpec{{Flags: "-x", Description: "short only"}}

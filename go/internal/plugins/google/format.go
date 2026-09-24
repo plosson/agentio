@@ -4,6 +4,10 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf16"
 )
 
 // FormatBytes is Bun format.ts formatBytes: one decimal, trailing ".0"
@@ -37,4 +41,52 @@ func toFixed1(x float64) float64 {
 	}
 	n, _ := new(big.Float).SetInt(floor).Float64()
 	return n / 10
+}
+
+// Truncate is Bun `s.length > n ? s.slice(0, n) + '...' : s` over UTF-16 units.
+func Truncate(s string, n int) string {
+	units := utf16.Encode([]rune(s))
+	if len(units) <= n {
+		return s
+	}
+	return string(utf16.Decode(units[:n])) + "..."
+}
+
+// ParseInt is JavaScript parseInt(s, 10): leading digits after optional
+// whitespace and sign, NaN when there are none.
+func ParseInt(s string) float64 {
+	s = strings.TrimLeftFunc(s, unicode.IsSpace)
+	neg := false
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return math.NaN()
+	}
+	n, _ := strconv.ParseFloat(s[:end], 64)
+	if neg {
+		n = -n
+	}
+	return n
+}
+
+// JSNumber is String(n) for the integers ParseInt returns, NaN included.
+func JSNumber(n float64) string {
+	if math.IsNaN(n) {
+		return "NaN"
+	}
+	if n == 0 {
+		return "0" // String(-0) is "0"
+	}
+	return strconv.FormatFloat(n, 'f', -1, 64)
+}
+
+// ISOString is Date.toISOString: UTC, milliseconds, truncated.
+func ISOString(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }

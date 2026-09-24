@@ -9,7 +9,10 @@ import (
 var (
 	pluginID = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	longFlag = regexp.MustCompile(`(?:^|[, ]+)--[a-z][a-z0-9-]*`)
-	hostFlag = regexp.MustCompile(`(?:^|[, ]+)--(?:profile|json)(?:[, =]|$)`)
+	// hostFlag is what the host puts on every command. A command may declare
+	// its own --json (Bun gchat and slack `send --json [file]`); the host then
+	// adds no output flag, as Bun's declarative adapter does.
+	hostFlag = regexp.MustCompile(`(?:^|[, ]+)--profile(?:[, =]|$)`)
 	// setupHostFlag is what the host already puts on `profile add`.
 	setupHostFlag = regexp.MustCompile(`(?:^|[, ]+)--(?:profile|read-only)(?:[, =]|$)`)
 )

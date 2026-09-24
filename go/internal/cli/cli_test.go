@@ -316,3 +316,61 @@ func TestAliasRunsTheCommandAndRepeatableOptionsCollect(t *testing.T) {
 		t.Fatal("an undeclared alias ran the command")
 	}
 }
+
+// Bun gchat `send --json [file]`: a command may declare its own --json, which
+// then carries Commander's optional value instead of the output switch.
+func TestCommandOwnJSONOptionTakesAnOptionalValue(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	var got []plugins.CommandInput
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Commands: []plugins.CommandSpec{{
+			Path: "send", Description: "send", Examples: []string{"agentio desk send"},
+			Arguments: []plugins.ArgumentSpec{{Name: "message"}},
+			Options: []plugins.OptionSpec{
+				{Flags: "--json [file]", Description: "JSON file (or stdin)"},
+				{Flags: "--space <id>", Description: "Space"},
+			},
+			Run: func(_ context.Context, in plugins.CommandInput, _ *plugins.RunContext) (any, error) {
+				got = append(got, in)
+				return map[string]any{"sent": true}, nil
+			},
+			Format: func(any) string { return "sent" },
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		args    []string
+		json    any
+		message any
+		space   string
+	}{
+		{[]string{"desk", "send", "hi"}, nil, "hi", ""},
+		{[]string{"desk", "send", "--json"}, true, nil, ""},
+		{[]string{"desk", "send", "--json", "card.json", "--space", "S"}, "card.json", nil, "S"},
+		{[]string{"desk", "send", "--json=card.json"}, "card.json", nil, ""},
+		{[]string{"desk", "send", "--json", "--space", "S"}, true, nil, "S"},
+		{[]string{"desk", "send", "hi", "--json"}, true, "hi", ""},
+		{[]string{"desk", "send", "--json", "-"}, "-", nil, ""},
+		{[]string{"desk", "send", "--", "--json"}, nil, "--json", ""},
+	}
+	for _, c := range cases {
+		var out, errOut bytes.Buffer
+		if code := Execute(reg, c.args, &out, &errOut, strings.NewReader("")); code != 0 {
+			t.Fatalf("%v: code %d %s", c.args, code, errOut.String())
+		}
+		// No output switch: the result goes through Format.
+		if out.String() != "sent\n" {
+			t.Fatalf("%v: %q", c.args, out.String())
+		}
+		in := got[len(got)-1]
+		if in.Options["json"] != c.json || in.Args["message"] != c.message || in.Options["space"] != c.space {
+			t.Fatalf("%v: %#v %#v", c.args, in.Options, in.Args)
+		}
+	}
+}

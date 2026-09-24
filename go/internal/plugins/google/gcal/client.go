@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
@@ -426,7 +424,7 @@ func parseReminders(specs []string, run *plugins.RunContext) ([]*calendar.EventR
 			return nil, run.Fail("INVALID_PARAMS", "Invalid reminder format: "+spec, "Use format: method:minutes (e.g., popup:30)")
 		}
 		r := &calendar.EventReminder{Method: method, ForceSendFields: []string{"Minutes"}}
-		if n := parseInt(minutes); math.IsNaN(n) {
+		if n := google.ParseInt(minutes); math.IsNaN(n) {
 			// JSON.stringify(NaN) is null.
 			r.ForceSendFields, r.NullFields = nil, []string{"Minutes"}
 		} else {
@@ -516,13 +514,13 @@ func timeRange(in plugins.CommandInput) (string, string) {
 			offset = 1
 		}
 		start := time.Date(t.Year(), t.Month(), t.Day()+offset, 0, 0, 0, 0, time.Local)
-		return isoString(start), isoString(addDays(start, 1))
+		return google.ISOString(start), google.ISOString(addDays(start, 1))
 	case opt(in, "days") != "":
-		days := parseInt(opt(in, "days"))
+		days := google.ParseInt(opt(in, "days"))
 		if math.IsNaN(days) || days <= 0 {
 			return "", ""
 		}
-		return isoString(t), isoString(addDays(t, int(days)))
+		return google.ISOString(t), google.ISOString(addDays(t, int(days)))
 	default:
 		return opt(in, "from"), opt(in, "to")
 	}
@@ -534,49 +532,11 @@ func addDays(t time.Time, n int) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day()+n, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
 }
 
-// isoString is Date.toISOString (UTC, milliseconds, truncated).
-func isoString(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
-}
-
-// parseInt is JavaScript parseInt(s, 10): leading digits after optional
-// whitespace and sign, NaN when there are none.
-func parseInt(s string) float64 {
-	s = strings.TrimLeftFunc(s, unicode.IsSpace)
-	neg := false
-	if s != "" && (s[0] == '-' || s[0] == '+') {
-		neg = s[0] == '-'
-		s = s[1:]
-	}
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return math.NaN()
-	}
-	n, _ := strconv.ParseFloat(s[:end], 64)
-	if neg {
-		n = -n
-	}
-	return n
-}
-
 // maxResults is Bun `maxResults: Math.min(limit, 250)` as googleapis puts it
 // on the query string, NaN included.
 func maxResults(limit float64) googleapi.CallOption {
 	if !math.IsNaN(limit) {
 		limit = math.Min(limit, 250)
 	}
-	return googleapi.QueryParameter("maxResults", jsNumber(limit))
-}
-
-func jsNumber(n float64) string {
-	if math.IsNaN(n) {
-		return "NaN"
-	}
-	if n == 0 {
-		return "0" // String(-0) is "0"
-	}
-	return strconv.FormatFloat(n, 'f', -1, 64)
+	return googleapi.QueryParameter("maxResults", google.JSNumber(limit))
 }

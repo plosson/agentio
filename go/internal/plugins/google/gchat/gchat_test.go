@@ -1,0 +1,1474 @@
+package gchat
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/plosson/agentio/go/internal/auth"
+	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/plugincache"
+	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/google"
+	"github.com/plosson/agentio/go/internal/profile"
+	"github.com/plosson/agentio/go/internal/testbox"
+	"github.com/plosson/agentio/go/internal/vault"
+)
+
+// hit is one request that reached the fake Google.
+type hit struct {
+	Method string
+	Path   string
+	Query  url.Values
+	Auth   string
+	Type   string
+	JSON   map[string]any
+	Form   url.Values
+	Raw    string
+}
+
+type fakeGoogle struct {
+	mu     sync.Mutex
+	hits   []hit
+	handle func(w http.ResponseWriter, h hit)
+	srv    *httptest.Server
+}
+
+func newFake(t *testing.T, handle func(w http.ResponseWriter, h hit)) *fakeGoogle {
+	t.Helper()
+	f := &fakeGoogle{handle: handle}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		h := hit{Method: r.Method, Path: r.URL.Path, Query: r.URL.Query(), Auth: r.Header.Get("Authorization"), Type: r.Header.Get("Content-Type"), Raw: string(raw)}
+		if strings.HasPrefix(h.Type, "application/json") {
+			if err := json.Unmarshal(raw, &h.JSON); err != nil {
+				t.Errorf("non-JSON body %q", raw)
+			}
+		} else if strings.HasPrefix(h.Type, "application/x-www-form-urlencoded") {
+			h.Form, _ = url.ParseQuery(string(raw))
+		}
+		f.mu.Lock()
+		f.hits = append(f.hits, h)
+		f.mu.Unlock()
+		f.handle(w, h)
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// ctx sends the Chat and People clients (both rooted at "/") to the fake.
+func (f *fakeGoogle) ctx() context.Context {
+	return google.WithEndpoints(context.Background(), google.Endpoints{
+		API: f.srv.URL + "/", Token: f.srv.URL + "/token", UserInfo: f.srv.URL + "/userinfo",
+	})
+}
+
+func (f *fakeGoogle) recorded() []hit {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]hit(nil), f.hits...)
+}
+
+func (f *fakeGoogle) paths() []string {
+	var out []string
+	for _, h := range f.recorded() {
+		out = append(out, h.Method+" "+h.Path)
+	}
+	return out
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func apiErr(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": message}})
+}
+
+func setupVault(t *testing.T) *plugins.Registry {
+	t.Helper()
+	testbox.Isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := plugins.NewRegistry(New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg
+}
+
+func oauthCreds(expiry int64) map[string]any {
+	return map[string]any{
+		"type":         "oauth",
+		"accessToken":  "at-old",
+		"refreshToken": "rt-old",
+		"expiryDate":   expiry,
+		"tokenType":    "Bearer",
+		"scope":        "https://www.googleapis.com/auth/chat.messages.create",
+		"email":        "me@example.com",
+	}
+}
+
+func webhookCreds(target string) map[string]any {
+	return map[string]any{"type": "webhook", "webhookUrl": target}
+}
+
+func freshOAuth() map[string]any {
+	return oauthCreds(time.Now().Add(time.Hour).UnixMilli())
+}
+
+func saveProfile(t *testing.T, name string, creds map[string]any, readOnly bool) {
+	t.Helper()
+	opts := profile.SaveOptions{}
+	if readOnly {
+		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
+	}
+	if err := profile.Save("gchat", name, creds, opts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func loadCreds(t *testing.T, name string) map[string]any {
+	t.Helper()
+	c, err := vault.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.Credentials["gchat"][name]
+}
+
+func spec(t *testing.T, path string) *plugins.CommandSpec {
+	t.Helper()
+	p := New()
+	for i := range p.Commands {
+		if p.Commands[i].Path == path {
+			return &p.Commands[i]
+		}
+	}
+	t.Fatalf("no command %q", path)
+	return nil
+}
+
+// input fills the options the way the host does ([] for a repeatable flag,
+// nil for an absent [value] flag, the defaults otherwise), then applies set.
+func input(t *testing.T, path string, args map[string]any, set map[string]any) plugins.CommandInput {
+	t.Helper()
+	in := plugins.CommandInput{Args: map[string]any{}, Options: map[string]any{}}
+	for _, o := range spec(t, path).Options {
+		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
+		switch {
+		case o.Repeatable:
+			in.Options[name] = []string{}
+		case strings.Contains(o.Flags, "["):
+			in.Options[name] = nil
+		case !strings.Contains(o.Flags, "<"):
+			in.Options[name] = false
+		default:
+			d, _ := o.DefaultValue.(string)
+			in.Options[name] = d
+		}
+	}
+	for k, v := range args {
+		in.Args[k] = v
+	}
+	for k, v := range set {
+		in.Options[k] = v
+	}
+	return in
+}
+
+func exec(ctx context.Context, t *testing.T, reg *plugins.Registry, path string, in plugins.CommandInput) (any, error) {
+	t.Helper()
+	return host.Execute(ctx, reg, reg.Find("gchat"), spec(t, path), in)
+}
+
+func render(t *testing.T, path string, v any) string {
+	t.Helper()
+	return spec(t, path).Format(v)
+}
+
+func cliErr(t *testing.T, err error) *clierr.Error {
+	t.Helper()
+	ce, ok := err.(*clierr.Error)
+	if !ok {
+		t.Fatalf("not a CLI error: %#v", err)
+	}
+	return ce
+}
+
+func jsonText(v any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+// captureStderr returns what fn wrote to os.Stderr (RunContext.Log).
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := os.Stderr
+	os.Stderr = w
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	fn()
+	os.Stderr = prev
+	w.Close()
+	return <-done
+}
+
+// useTLS sends the host's fetch (http.DefaultClient) through srv's
+// transport, so an https:// webhook reaches the fake.
+func useTLS(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	prev := http.DefaultClient.Transport
+	http.DefaultClient.Transport = srv.Client().Transport
+	t.Cleanup(func() { http.DefaultClient.Transport = prev })
+}
+
+// The command table is the Bun surface: `bun run src/index.ts gchat --help`
+// and each leaf's --help.
+func TestCommandTableMatchesBun(t *testing.T) {
+	type row struct {
+		args, flags, access, op, input string
+	}
+	want := map[string]row{
+		"send":              {"[message]", "--space <id> --thread <id> --json [file] --attachment <path>*", "write", "send message", "text"},
+		"list":              {"", "--space <id> --limit <n>=10 --thread <id> --since <date> --until <date> --format <format>=text", "read", "", ""},
+		"get":               {"<message-id>", "--space <id> --format <format>=text", "read", "", ""},
+		"spaces":            {"", "--filter <text> --with <user>", "read", "", ""},
+		"members":           {"", "--space <id-or-name>", "read", "", ""},
+		"user":              {"<user-id>", "", "read", "", ""},
+		"directory refresh": {"", "", "read", "", ""},
+	}
+	p := New()
+	if p.ID != "gchat" || p.DisplayName != "Google Chat" ||
+		p.Description != "Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history." {
+		t.Fatalf("identity %q %q %q", p.ID, p.DisplayName, p.Description)
+	}
+	if _, err := plugins.NewRegistry(p); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, c := range p.Commands {
+		order = append(order, c.Path)
+	}
+	if strings.Join(order, ",") != "send,list,get,spaces,members,user,directory refresh" {
+		t.Fatalf("order %v", order)
+	}
+	for _, c := range p.Commands {
+		w, ok := want[c.Path]
+		if !ok {
+			t.Fatalf("unexpected command %q", c.Path)
+		}
+		var args, flags []string
+		for _, a := range c.Arguments {
+			if a.Required {
+				args = append(args, "<"+a.Name+">")
+			} else {
+				args = append(args, "["+a.Name+"]")
+			}
+		}
+		for _, o := range c.Options {
+			f := o.Flags
+			if d, ok := o.DefaultValue.(string); ok {
+				f += "=" + d
+			}
+			if o.Repeatable {
+				f += "*"
+			}
+			flags = append(flags, f)
+		}
+		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input}
+		if got != w {
+			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
+		}
+		if len(c.Examples) == 0 || c.Format == nil {
+			t.Errorf("%s: missing examples or format", c.Path)
+		}
+	}
+	if p.Profile.Refresh == nil || strings.Join(p.Profile.Refresh.SecretFields, ",") != "refreshToken" {
+		t.Fatal("gchat is a camelCase Google lifecycle")
+	}
+}
+
+// scripted answers setup prompts in order; an exhausted script is EOF.
+func scripted(sc *plugins.SetupContext, answers ...string) *[]string {
+	var asked []string
+	sc.Prompt = func(q string, _ bool) (string, error) {
+		asked = append(asked, q)
+		if len(answers) == 0 {
+			return "", io.EOF
+		}
+		a := answers[0]
+		answers = answers[1:]
+		return a, nil
+	}
+	return &asked
+}
+
+func setupContext(logs *[]string) *plugins.SetupContext {
+	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
+	sc.Log = func(parts ...any) {
+		for _, p := range parts {
+			*logs = append(*logs, p.(string))
+		}
+	}
+	sc.OAuth = func(_ context.Context, o plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:3001/callback"}, nil
+	}
+	return sc
+}
+
+func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
+	setupVault(t)
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		switch h.Path {
+		case "/token":
+			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3599, "token_type": "Bearer", "scope": "chat"})
+		case "/userinfo":
+			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+		case "/v1/spaces":
+			if h.Auth != "Bearer at-1" || h.Query.Get("pageSize") != "1" {
+				t.Errorf("chat check %q %v", h.Auth, h.Query)
+			}
+			writeJSON(w, 200, map[string]any{"spaces": []any{}})
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	var logs []string
+	sc := setupContext(&logs)
+	var opts plugins.OAuthSetupOptions
+	sc.OAuth = func(_ context.Context, o plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		opts = o
+		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:3001/callback"}, nil
+	}
+	asked := scripted(sc, "2")
+	var out bytes.Buffer
+	if err := host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(*asked) != 1 || !strings.HasPrefix((*asked)[0], "Choose profile type:\n  1) Webhook") {
+		t.Fatalf("prompts %q", *asked)
+	}
+	authURL, _ := url.Parse(opts.AuthorizationURL("http://localhost:3001/callback"))
+	if got := authURL.Query().Get("scope"); got != strings.Join(google.Scopes["gchat"], " ") || opts.ServiceName != "Google" {
+		t.Fatalf("scope %q", got)
+	}
+	stored := loadCreds(t, "user@example.com")
+	var keys []string
+	for k := range stored {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != "accessToken,email,expiryDate,refreshToken,scope,tokenType,type" {
+		t.Fatalf("keys %v", keys)
+	}
+	if stored["type"] != "oauth" || stored["accessToken"] != "at-1" || stored["refreshToken"] != "rt-1" || stored["email"] != "user@example.com" {
+		t.Fatalf("%#v", stored)
+	}
+	if _, ok := stored["expiryDate"].(json.Number); !ok {
+		t.Fatalf("expiryDate is %T", stored["expiryDate"])
+	}
+	if out.String() != "Profile \"user@example.com\" configured!\nOAuth profile (user@example.com)\nTest with: agentio gchat send \"Hello from agentio\"\n" {
+		t.Fatalf("%q", out.String())
+	}
+	if strings.Join(logs, "|") != "\nGoogle Chat Setup\n|OAuth Setup\n|Starting OAuth flow for Google Chat profile...\n" {
+		t.Fatalf("%q", logs)
+	}
+}
+
+func TestSetupOAuthFailuresSaveNothing(t *testing.T) {
+	setupVault(t)
+	var emailBody any
+	var chatStatus int
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		switch h.Path {
+		case "/token":
+			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1"})
+		case "/userinfo":
+			writeJSON(w, 200, emailBody)
+		default:
+			apiErr(w, chatStatus, "Google Chat app not found.")
+		}
+	})
+	cases := []struct {
+		email   any
+		status  int
+		message string
+		suggest string
+	}{
+		{map[string]any{"id": "1"}, 200, "Failed to fetch user email: No email returned from userinfo endpoint", "Ensure the account has an email address"},
+		{map[string]any{"email": "me@gmail.example.com"}, 404, "Failed to validate Google Chat access: Google Chat app not found.",
+			"Google Chat API requires a Google Workspace account. Personal Gmail accounts cannot use the Chat API."},
+	}
+	for _, c := range cases {
+		emailBody, chatStatus = c.email, c.status
+		var logs []string
+		sc := setupContext(&logs)
+		scripted(sc, "oauth")
+		ce := cliErr(t, host.AddProfile(fake.ctx(), New(), plugins.SetupOptions{}, sc, io.Discard))
+		if ce.Code != clierr.AuthFailed || ce.Message != c.message || ce.Suggestion != c.suggest {
+			t.Errorf("%#v", ce)
+		}
+	}
+	if c, _ := vault.Load(); len(c.Credentials["gchat"]) != 0 {
+		t.Fatal("a failed setup saved a profile")
+	}
+}
+
+func TestSetupWebhookPostsATestMessage(t *testing.T) {
+	setupVault(t)
+	var status int
+	var got []hit
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = append(got, hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	hook := srv.URL + "/v1/spaces/W/messages?key=k"
+	run := func(opts plugins.SetupOptions, answers ...string) (string, []string, error) {
+		var logs []string
+		sc := setupContext(&logs)
+		sc.Fetch = func(ctx context.Context, req *http.Request) (*http.Response, error) {
+			return srv.Client().Do(req.WithContext(ctx))
+		}
+		scripted(sc, answers...)
+		var out bytes.Buffer
+		err := host.AddProfile(context.Background(), New(), opts, sc, &out)
+		return out.String(), logs, err
+	}
+	status = 200
+	out, logs, err := run(plugins.SetupOptions{}, "1", "  "+hook+"  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "Profile \"webhook\" configured!\nWebhook profile\nTest with: agentio gchat send \"Hello from agentio\"\n" {
+		t.Fatalf("%q", out)
+	}
+	if strings.Join(logs[1:], "|") != "Webhook Setup\n|1. In Google Chat, find or create a space|2. Go to Space Settings → Webhooks|3. Create a new webhook and copy the URL\n" {
+		t.Fatalf("%q", logs)
+	}
+	if len(got) != 1 || got[0].Method != "POST" || got[0].Type != "application/json" || got[0].Raw != `{"text":"Test message from agentio"}` {
+		t.Fatalf("%#v", got)
+	}
+	if stored := loadCreds(t, "webhook"); jsonText(stored) != `{"type":"webhook","webhookUrl":"`+hook+`"}` {
+		t.Fatalf("%s", jsonText(stored))
+	}
+	// --profile names a webhook profile.
+	if out, _, err := run(plugins.SetupOptions{Profile: "team"}, "webhook", hook); err != nil || !strings.HasPrefix(out, "Profile \"team\" configured!") {
+		t.Fatalf("%q %v", out, err)
+	}
+	status = 400
+	cases := []struct {
+		answers []string
+		message string
+		suggest string
+	}{
+		{[]string{"1", hook}, "Webhook validation failed: 400", "Check the webhook URL and try again"},
+		{[]string{"1", "  "}, "Webhook URL is required", ""},
+		{[]string{"1", "::not a url"}, "", "Check that the URL is correct and accessible"},
+		{nil, "Interactive input required but not running in terminal", "Run this command in an interactive terminal"},
+		{[]string{"3"}, `Unknown profile type "3"`, "Choose one of the listed types"},
+	}
+	for _, c := range cases {
+		_, _, err := run(plugins.SetupOptions{Profile: "bad"}, c.answers...)
+		ce := cliErr(t, err)
+		if (c.message != "" && ce.Message != c.message) || ce.Suggestion != c.suggest {
+			t.Errorf("%v: %#v", c.answers, ce)
+		}
+	}
+	if c, _ := vault.Load(); c.Credentials["gchat"]["bad"] != nil {
+		t.Fatal("a failed setup saved a profile")
+	}
+}
+
+// Bun never rotates a Google refresh token, and the rest of the map
+// (type, email) survives the refresh.
+func TestStaleTokenRefreshesOnceUnderConcurrentCallers(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", oauthCreds(1), false)
+	var mu sync.Mutex
+	refreshes := 0
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path == "/token" {
+			mu.Lock()
+			refreshes++
+			mu.Unlock()
+			time.Sleep(50 * time.Millisecond)
+			writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 3599, "token_type": "Bearer"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"spaces": []any{}})
+	})
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = auth.GetFresh(fake.ctx(), reg, "gchat", "acme", auth.RefreshOptions{})
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if refreshes != 1 {
+		t.Fatalf("%d refreshes, want 1", refreshes)
+	}
+	if form := fake.recorded()[0].Form; form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "rt-old" {
+		t.Fatalf("refresh request %v", form)
+	}
+	stored := loadCreds(t, "acme")
+	if stored["accessToken"] != "at-new" || stored["refreshToken"] != "rt-old" || stored["type"] != "oauth" ||
+		stored["email"] != "me@example.com" || stored["scope"] != "https://www.googleapis.com/auth/chat.messages.create" {
+		t.Fatalf("%#v", stored)
+	}
+	if _, ok := stored["expiryDate"].(json.Number); !ok {
+		t.Fatalf("expiryDate %T", stored["expiryDate"])
+	}
+	if _, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	all := fake.recorded()
+	if last := all[len(all)-1]; last.Auth != "Bearer at-new" || refreshes != 1 {
+		t.Fatalf("auth %q refreshes %d", last.Auth, refreshes)
+	}
+}
+
+// tests/auth/refresh.test.ts: a webhook profile has nothing to refresh, even
+// when forced.
+func TestWebhookProfileIsNeverRefreshed(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "hook", webhookCreds("https://chat.example.com/hook"), false)
+	fresh, err := auth.GetFresh(context.Background(), reg, "gchat", "hook", auth.RefreshOptions{Force: true})
+	if err != nil || fresh.Refreshed || fresh.Credentials["type"] != "webhook" {
+		t.Fatalf("%#v %v", fresh, err)
+	}
+}
+
+func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", oauthCreds(1), false)
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path == "/token" {
+			writeJSON(w, 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			return
+		}
+		t.Errorf("API called after a failed refresh: %s", h.Path)
+	})
+	got, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil))
+	ce := cliErr(t, err)
+	if got != nil || ce.Code != clierr.TokenExpired || ce.Message != `Token refresh failed for gchat profile "acme": invalid_grant` ||
+		ce.Suggestion != "Re-authenticate with: agentio gchat profile add --profile acme" {
+		t.Fatalf("%#v %#v", got, ce)
+	}
+	if stored := loadCreds(t, "acme"); stored["accessToken"] != "at-old" || stored["refreshToken"] != "rt-old" {
+		t.Fatalf("vault changed: %#v", stored)
+	}
+}
+
+func TestReadOnlyProfileRefusesSendButRunsReads(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "ro", freshOAuth(), true)
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		writeJSON(w, 200, map[string]any{"name": "spaces/S"})
+	})
+	_, err := exec(fake.ctx(), t, reg, "send", input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "S"}))
+	ce := cliErr(t, err)
+	if ce.Code != clierr.PermissionDenied || ce.Message != `Cannot send message: profile "ro" is read-only` ||
+		ce.Suggestion != "To modify this profile's access: agentio gchat profile update --profile ro --no-read-only" {
+		t.Fatalf("%#v", ce)
+	}
+	if n := len(fake.recorded()); n != 0 {
+		t.Fatalf("a refused write reached the API %d times", n)
+	}
+	if _, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(fake.recorded()); n != 1 {
+		t.Fatalf("the read did not run: %d", n)
+	}
+}
+
+func TestValidate(t *testing.T) {
+	var status int
+	var body any
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path != "/v1/spaces" || h.Query.Get("pageSize") != "1" || h.Auth != "Bearer at-old" {
+			t.Errorf("validate called %s %v with %q", h.Path, h.Query, h.Auth)
+		}
+		writeJSON(w, status, body)
+	})
+	v, err := New().Profile.Validate(fake.ctx(), host.NewRunContext(webhookCreds("https://x.example.com"), "hook", fake.ctx()))
+	if err != nil || !v.Valid || v.Info != "webhook" || len(fake.recorded()) != 0 {
+		t.Fatalf("webhook %#v %v", v, err)
+	}
+	run := host.NewRunContext(oauthCreds(1), "acme", fake.ctx())
+	status, body = 200, map[string]any{}
+	if v, _ := New().Profile.Validate(fake.ctx(), run); !v.Valid || v.Info != "me@example.com" {
+		t.Fatalf("%#v", v)
+	}
+	noEmail := oauthCreds(1)
+	delete(noEmail, "email")
+	if v, _ := New().Profile.Validate(fake.ctx(), host.NewRunContext(noEmail, "acme", fake.ctx())); !v.Valid || v.Info != "oauth" {
+		t.Fatalf("%#v", v)
+	}
+	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
+	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "Request had invalid authentication credentials." {
+		t.Fatalf("%#v", v)
+	}
+	status, body = 400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}
+	if v, _ := New().Profile.Validate(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+		t.Fatalf("%#v", v)
+	}
+}
+
+func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
+	reg, err := plugins.NewRegistry(New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds := oauthCreds(5)
+	out := auth.RedactForRemote(reg, "gchat", creds)
+	if _, ok := out["refreshToken"]; ok || out["accessToken"] != "at-old" || out["type"] != "oauth" || out["expiryDate"] != int64(5) {
+		t.Fatalf("%#v", out)
+	}
+	if creds["refreshToken"] != "rt-old" {
+		t.Fatal("redaction changed the caller's map")
+	}
+	hook := auth.RedactForRemote(reg, "gchat", webhookCreds("https://x.example.com"))
+	if hook["webhookUrl"] != "https://x.example.com" {
+		t.Fatalf("%#v", hook)
+	}
+}
+
+func TestListInfoAndReauthenticate(t *testing.T) {
+	if listInfo(webhookCreds("u")) != " - webhook" || listInfo(oauthCreds(1)) != " - oauth" || listInfo(map[string]any{}) != " - oauth" {
+		t.Fatal("list info")
+	}
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path == "/token" {
+			writeJSON(w, 200, map[string]any{"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 60})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"email": "me@example.com"})
+	})
+	var logs []string
+	sc := setupContext(&logs)
+	hook := webhookCreds("https://x.example.com")
+	got, err := New().Profile.Reauthenticate(fake.ctx(), hook, "hook", sc)
+	if err != nil || jsonText(got) != jsonText(hook) || len(fake.recorded()) != 0 {
+		t.Fatalf("%#v %v", got, err)
+	}
+	if strings.Join(logs, "|") != "\nSkipping gchat / hook: webhook profiles don't expire. Run 'agentio gchat profile add' to update." {
+		t.Fatalf("%q", logs)
+	}
+	logs = nil
+	legacy := oauthCreds(1)
+	delete(legacy, "type")
+	got, err = New().Profile.Reauthenticate(fake.ctx(), legacy, "work", sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "oauth" || got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" || got["email"] != "me@example.com" {
+		t.Fatalf("%#v", got)
+	}
+	if _, ok := got["scope"]; ok {
+		t.Fatalf("scope kept %#v", got)
+	}
+	if strings.Join(logs, "|") != "\nRe-authenticating gchat / work...|  Done (me@example.com)" {
+		t.Fatalf("%q", logs)
+	}
+}
+
+func TestSendViaWebhook(t *testing.T) {
+	reg := setupVault(t)
+	var status int
+	var reply string
+	var got []hit
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = append(got, hit{Method: r.Method, Path: r.URL.Path, Type: r.Header.Get("Content-Type"), Raw: string(raw)})
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, reply)
+	}))
+	defer srv.Close()
+	useTLS(t, srv)
+	saveProfile(t, "hook", webhookCreds(srv.URL+"/v1/spaces/W/messages?key=k"), false)
+	ctx := context.Background()
+	status, reply = 200, `{"name":"spaces/W/messages/M1"}`
+	res, err := exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": `Done\! <ok> & more`}, map[string]any{"thread": "ignored"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Method != "POST" || got[0].Type != "application/json" || got[0].Raw != `{"text":"Done! <ok> & more"}` {
+		t.Fatalf("%#v", got)
+	}
+	if render(t, "send", res) != "Message sent\nID: M1" || jsonText(res) != `{"messageId":"M1","text":"Done! \u003cok\u003e \u0026 more","isJsonPayload":false}` {
+		t.Fatalf("%q %s", render(t, "send", res), jsonText(res))
+	}
+	// Stdin text, trimmed; a body that is not JSON keeps the id "unknown".
+	reply = "ok"
+	in := input(t, "send", nil, nil)
+	in.Stdin = "  from stdin\n"
+	if res, err = exec(ctx, t, reg, "send", in); err != nil || got[1].Raw != `{"text":"from stdin"}` || render(t, "send", res) != "Message sent\nID: unknown" {
+		t.Fatalf("%q %v", got[1].Raw, err)
+	}
+	// A JSON file is posted as is.
+	card := filepath.Join(t.TempDir(), "card.json")
+	_ = os.WriteFile(card, []byte(`{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}`), 0o600)
+	reply = `{"name":"spaces/W/messages/M2"}`
+	if res, err = exec(ctx, t, reg, "send", input(t, "send", nil, map[string]any{"json": card})); err != nil {
+		t.Fatal(err)
+	}
+	if got[2].Raw != `{"cardsV2":[{"cardId":"c"}],"n":12345678901234567890}` || render(t, "send", res) != "Message sent\nID: M2\nType: JSON payload" {
+		t.Fatalf("%q %q", got[2].Raw, render(t, "send", res))
+	}
+	status, reply = 403, "no bots"
+	res, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "x"}, nil))
+	if ce := cliErr(t, err); res != nil || ce.Code != clierr.APIError || ce.Message != "Failed to send message via webhook: 403 no bots" ||
+		ce.Suggestion != "Check that the webhook URL is valid and the bot has permission to post" {
+		t.Fatalf("%#v %#v", res, ce)
+	}
+	n := len(got)
+	for _, c := range []struct {
+		path    string
+		in      plugins.CommandInput
+		code    clierr.Code
+		message string
+	}{
+		{"send", input(t, "send", map[string]any{"message": "x"}, map[string]any{"attachment": []string{card}}), clierr.PermissionDenied, "File attachments are not supported for webhook profiles"},
+		{"list", input(t, "list", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing messages is not supported for webhook profiles"},
+		{"get", input(t, "get", map[string]any{"message-id": "M"}, map[string]any{"space": "S"}), clierr.PermissionDenied, "Getting messages is not supported for webhook profiles"},
+		{"spaces", input(t, "spaces", nil, nil), clierr.PermissionDenied, "Listing spaces is not supported for webhook profiles"},
+		{"spaces", input(t, "spaces", nil, map[string]any{"with": "a@example.com"}), clierr.PermissionDenied, "Finding direct message is not supported for webhook profiles"},
+		{"members", input(t, "members", nil, map[string]any{"space": "S"}), clierr.PermissionDenied, "Listing members is not supported for webhook profiles"},
+		{"user", input(t, "user", map[string]any{"user-id": "1"}, nil), clierr.PermissionDenied, "Getting user info is not supported for webhook profiles"},
+		{"directory refresh", input(t, "directory refresh", nil, nil), clierr.PermissionDenied, "Refreshing directory is not supported for webhook profiles"},
+	} {
+		res, err := exec(ctx, t, reg, c.path, c.in)
+		ce := cliErr(t, err)
+		if res != nil || ce.Code != c.code || ce.Message != c.message {
+			t.Errorf("%s: %#v", c.path, ce)
+		}
+	}
+	if len(got) != n {
+		t.Fatal("a refused webhook command made a request")
+	}
+	saveProfile(t, "plain", webhookCreds("http://chat.example.com/hook"), false)
+	_, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "x"}, map[string]any{"profile": "plain"}))
+	if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "Invalid webhook URL - must be HTTPS" || ce.Suggestion != "Check the webhook URL configuration" {
+		t.Fatalf("%#v", ce)
+	}
+}
+
+func TestSendViaOAuth(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		switch {
+		case h.Method == "GET" && h.Path == "/v1/spaces/AAAA":
+			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+		case h.Method == "GET" && strings.HasPrefix(h.Path, "/v1/spaces/"):
+			apiErr(w, 404, "not found")
+		case h.Method == "GET" && h.Path == "/v1/spaces":
+			writeJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/ENG1", "displayName": "Engineering"}}})
+		case h.Method == "POST":
+			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M9"})
+		}
+	})
+	ctx := fake.ctx()
+	res, err := exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "Status update"}, map[string]any{"space": "AAAA"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := fake.recorded()
+	if strings.Join(fake.paths(), ",") != "GET /v1/spaces/AAAA,POST /v1/spaces/AAAA/messages" || jsonText(all[1].JSON) != `{"text":"Status update"}` || all[1].Auth != "Bearer at-old" {
+		t.Fatalf("%v %s", fake.paths(), jsonText(all[1].JSON))
+	}
+	if render(t, "send", res) != "Message sent\nID: M9\nSpace: AAAA" || jsonText(res) != `{"messageId":"M9","spaceId":"AAAA","text":"Status update","isJsonPayload":false}` {
+		t.Fatalf("%q %s", render(t, "send", res), jsonText(res))
+	}
+	// A display name resolves through the space list, case-insensitively.
+	fake.mu.Lock()
+	fake.hits = nil
+	fake.mu.Unlock()
+	if res, err = exec(ctx, t, reg, "send", input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "engineering"})); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fake.paths(), ","); got != "GET /v1/spaces/engineering,GET /v1/spaces,POST /v1/spaces/ENG1/messages" {
+		t.Fatalf("%s", got)
+	}
+	if render(t, "send", res) != "Message sent\nID: M9\nSpace: ENG1" {
+		t.Fatalf("%q", render(t, "send", res))
+	}
+}
+
+func TestSendUploadsAttachmentsBeforeTheMessage(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		switch {
+		case h.Method == "GET":
+			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+		case strings.HasPrefix(h.Path, "/upload/"):
+			writeJSON(w, 200, map[string]any{"attachmentDataRef": map[string]any{"resourceName": "ref-" + h.Query.Get("uploadType")}})
+		default:
+			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA/messages/M1"})
+		}
+	})
+	dir := t.TempDir()
+	png := filepath.Join(dir, "Shot.PNG")
+	notes := filepath.Join(dir, ".notes")
+	_ = os.WriteFile(png, []byte("png-bytes"), 0o600)
+	_ = os.WriteFile(notes, []byte("n"), 0o600)
+	in := input(t, "send", nil, map[string]any{"space": "AAAA", "json": true, "attachment": []string{png, notes}})
+	in.Stdin = ` {"text":"card","attachment":[{"contentName":"old"}]} `
+	res, err := exec(fake.ctx(), t, reg, "send", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := fake.recorded()
+	if strings.Join(fake.paths(), ",") != "GET /v1/spaces/AAAA,POST /upload/v1/spaces/AAAA/attachments:upload,POST /upload/v1/spaces/AAAA/attachments:upload,POST /v1/spaces/AAAA/messages" {
+		t.Fatalf("%v", fake.paths())
+	}
+	for i, want := range []string{"Content-Type: image/png", "Content-Type: application/octet-stream"} {
+		up := all[1+i]
+		if up.Query.Get("uploadType") != "multipart" || !strings.Contains(up.Raw, want) || !strings.Contains(up.Raw, `"filename":"`+filepath.Base([]string{png, notes}[i])+`"`) {
+			t.Fatalf("upload %d %v %q", i, up.Query, up.Raw)
+		}
+	}
+	if got := jsonText(all[3].JSON); got != `{"attachment":[{"contentName":"old"},{"attachmentDataRef":{"resourceName":"ref-multipart"}},{"attachmentDataRef":{"resourceName":"ref-multipart"}}],"text":"card"}` {
+		t.Fatalf("%s", got)
+	}
+	if render(t, "send", res) != "Message sent\nID: M1\nSpace: AAAA\nType: JSON payload" {
+		t.Fatalf("%q", render(t, "send", res))
+	}
+}
+
+func TestSendInputAndAPIErrorsMatchBun(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	var status int
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		switch {
+		case h.Method == "GET":
+			writeJSON(w, 200, map[string]any{"name": "spaces/AAAA"})
+		case strings.HasPrefix(h.Path, "/upload/"):
+			if status == 200 {
+				writeJSON(w, 200, map[string]any{})
+				return
+			}
+			apiErr(w, status, "upload refused")
+		default:
+			apiErr(w, status, "Invalid argument")
+		}
+	})
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.json")
+	_ = os.WriteFile(bad, []byte(`{"text":`), 0o600)
+	file := filepath.Join(dir, "a.txt")
+	_ = os.WriteFile(file, []byte("a"), 0o600)
+	missing := filepath.Join(dir, "missing.json")
+	withStdin := func(in plugins.CommandInput, s string) plugins.CommandInput { in.Stdin = s; return in }
+	cases := []struct {
+		in      plugins.CommandInput
+		code    clierr.Code
+		message string
+		suggest string
+	}{
+		{input(t, "send", map[string]any{"message": "hi"}, map[string]any{"json": true}), clierr.InvalidParams, "Cannot use both text message and --json option",
+			`Use either: agentio gchat send "text" OR agentio gchat send --json file.json`},
+		{input(t, "send", nil, map[string]any{"json": missing}), clierr.InvalidParams, "Failed to read JSON file: " + missing, "Check that the file exists and is readable"},
+		{withStdin(input(t, "send", nil, map[string]any{"json": true}), " \n"), clierr.InvalidParams, "No JSON provided via stdin", "Pipe JSON content: cat message.json | agentio gchat send --json"},
+		{input(t, "send", nil, map[string]any{"json": bad}), clierr.InvalidParams, "Invalid JSON: unexpected EOF", "Check that the JSON is valid"},
+		{withStdin(input(t, "send", nil, nil), "  "), clierr.InvalidParams, "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", ""},
+		{input(t, "send", map[string]any{"message": "hi"}, nil), clierr.InvalidParams, "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile"},
+		{input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{missing}}), clierr.InvalidParams, "Failed to read attachment: " + missing, "Check that the file exists and is readable"},
+	}
+	for _, c := range cases {
+		res, err := exec(fake.ctx(), t, reg, "send", c.in)
+		ce := cliErr(t, err)
+		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
+			t.Errorf("%#v", ce)
+		}
+	}
+	for _, h := range fake.recorded() {
+		if h.Method != "GET" {
+			t.Fatalf("an invalid send posted %s", h.Path)
+		}
+	}
+	api := []struct {
+		status  int
+		in      plugins.CommandInput
+		code    clierr.Code
+		message string
+		suggest string
+	}{
+		{403, input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.PermissionDenied,
+			"Failed to send message: Bot lacks permission for this operation", "Check that the space ID is valid and OAuth token is not expired"},
+		{400, input(t, "send", map[string]any{"message": "hi"}, map[string]any{"space": "AAAA"}), clierr.APIError,
+			"Failed to send message: Invalid argument", "Check that the space ID is valid and OAuth token is not expired"},
+		{400, input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
+			`Failed to upload attachment "a.txt": upload refused`, "Check that the space ID is valid, OAuth scope includes chat.messages.create, and the file is under 200MB"},
+		{200, input(t, "send", nil, map[string]any{"space": "AAAA", "attachment": []string{file}}), clierr.APIError,
+			`Upload of "a.txt" returned no attachmentDataRef`, "Retry, or check that the file size is under the Chat API limit (200MB)"},
+	}
+	for _, c := range api {
+		status = c.status
+		res, err := exec(fake.ctx(), t, reg, "send", c.in)
+		ce := cliErr(t, err)
+		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
+			t.Errorf("%d: %#v", c.status, ce)
+		}
+	}
+}
+
+// chatFake answers the Chat and People calls the read commands make.
+type chatFake struct {
+	messages   []map[string]any // served newest first, two per page
+	directory  []any
+	people     map[string]map[string]any
+	dirStatus  int
+	listStatus int
+}
+
+func (c *chatFake) handle(w http.ResponseWriter, h hit) {
+	switch {
+	case h.Path == "/v1/spaces/S" || h.Path == "/v1/spaces/ENG1":
+		writeJSON(w, 200, map[string]any{"name": strings.TrimPrefix(h.Path, "/v1/")})
+	case h.Path == "/v1/spaces":
+		if h.Query.Get("pageToken") == "" {
+			writeJSON(w, 200, map[string]any{"spaces": []any{
+				map[string]any{"name": "spaces/ENG1", "displayName": "Engineering", "type": "ROOM", "spaceDetails": map[string]any{"description": "Eng team"}},
+				map[string]any{"name": "spaces/DM1", "type": "ROOM", "spaceType": "DIRECT_MESSAGE"},
+			}, "nextPageToken": "p2"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"spaces": []any{map[string]any{"name": "spaces/G1", "displayName": "Group", "spaceType": "GROUP_CHAT"}}})
+	case strings.HasPrefix(h.Path, "/v1/spaces/") && strings.HasSuffix(h.Path, "/messages"):
+		if c.listStatus != 0 {
+			apiErr(w, c.listStatus, "denied")
+			return
+		}
+		start := 0
+		if tok := h.Query.Get("pageToken"); tok != "" {
+			start = int(tok[0] - '0')
+		}
+		end := start + 2
+		if size, _ := strconv.Atoi(h.Query.Get("pageSize")); size >= 0 && size < 2 {
+			end = start + size
+		}
+		if end > len(c.messages) {
+			end = len(c.messages)
+		}
+		reply := map[string]any{"messages": c.messages[start:end]}
+		if end < len(c.messages) {
+			reply["nextPageToken"] = string(rune('0' + end))
+		}
+		writeJSON(w, 200, reply)
+	case strings.HasPrefix(h.Path, "/v1/spaces/") && strings.Contains(h.Path, "/messages/"):
+		for _, m := range c.messages {
+			if "/v1/"+m["name"].(string) == h.Path {
+				writeJSON(w, 200, m)
+				return
+			}
+		}
+		apiErr(w, 404, "Message not found")
+	case strings.HasSuffix(h.Path, "/members"):
+		writeJSON(w, 200, map[string]any{"memberships": []any{
+			map[string]any{"name": "spaces/S/members/1", "role": "ROLE_MANAGER", "state": "JOINED", "member": map[string]any{"name": "users/1", "type": "HUMAN"}},
+			map[string]any{"name": "spaces/S/members/2", "state": "INVITED", "member": map[string]any{"name": "users/2", "displayName": "Chat Two"}},
+			map[string]any{"name": "spaces/S/members/3", "member": map[string]any{"name": "users/3", "type": "BOT", "displayName": "Bot"}},
+			map[string]any{"name": "spaces/S/members/4", "role": "ROLE_MEMBER", "state": "JOINED"},
+		}})
+	case h.Path == "/v1/people:listDirectoryPeople":
+		if c.dirStatus != 0 {
+			apiErr(w, c.dirStatus, "directory off")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"people": c.directory, "nextSyncToken": "sync-1"})
+	case strings.HasPrefix(h.Path, "/v1/people/"):
+		if p, ok := c.people[strings.TrimPrefix(h.Path, "/v1/people/")]; ok {
+			writeJSON(w, 200, p)
+			return
+		}
+		apiErr(w, 404, "Requested entity was not found.")
+	case h.Path == "/v1/spaces:findDirectMessage":
+		switch h.Query.Get("name") {
+		case "users/7":
+			writeJSON(w, 200, map[string]any{"name": "spaces/DM7"})
+		case "users/8":
+			apiErr(w, 403, "scope")
+		default:
+			apiErr(w, 404, "none")
+		}
+	default:
+		apiErr(w, 404, "unexpected "+h.Path)
+	}
+}
+
+func person(id, name, email string) map[string]any {
+	p := map[string]any{"resourceName": "people/" + id}
+	if name != "" {
+		p["names"] = []any{map[string]any{"displayName": name}}
+	}
+	if email != "" {
+		p["emailAddresses"] = []any{map[string]any{"value": email}}
+	}
+	return p
+}
+
+func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	msg := func(n, sender string) map[string]any {
+		return map[string]any{"name": "spaces/S/messages/" + n, "text": "text " + n, "createTime": "2026-04-0" + n + "T10:00:00Z",
+			"lastUpdateTime": "2026-04-0" + n + "T11:00:00Z", "sender": map[string]any{"name": sender, "displayName": "Chat " + sender}, "thread": map[string]any{"name": "spaces/S/threads/t"}}
+	}
+	cf := &chatFake{
+		messages:  []map[string]any{msg("5", "users/1"), msg("4", "users/2"), msg("3", "users/3"), msg("2", "users/1")},
+		directory: []any{person("1", "Alice", "alice@example.com")},
+		people:    map[string]map[string]any{"2": person("2", "Bob", "")},
+	}
+	fake := newFake(t, cf.handle)
+	var res any
+	var err error
+	stderr := captureStderr(t, func() {
+		res, err = exec(fake.ctx(), t, reg, "list", input(t, "list", nil, map[string]any{
+			"space": "S", "limit": "3", "thread": "t", "since": "2026-04-01", "until": "2026-05-01T10:00:00+02:00",
+		}))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lists []hit
+	for _, h := range fake.recorded() {
+		if h.Path == "/v1/spaces/S/messages" {
+			lists = append(lists, h)
+		}
+	}
+	filter := `thread.name = "spaces/S/threads/t" AND createTime > "2026-04-01T00:00:00.000Z" AND createTime < "2026-05-01T08:00:00.000Z"`
+	if len(lists) != 2 || lists[0].Query.Get("pageSize") != "3" || lists[1].Query.Get("pageSize") != "1" ||
+		lists[0].Query.Get("orderBy") != "createTime desc" || lists[0].Query.Get("filter") != filter || lists[1].Query.Get("pageToken") != "2" {
+		t.Fatalf("%#v", lists)
+	}
+	if stderr != "Warning: reached --limit 3; more messages exist before 2026-04-03T10:00:00Z. Raise --limit or narrow the window with --since/--until.\n" {
+		t.Fatalf("%q", stderr)
+	}
+	want := "Messages (3)\n\n[1] spaces/S/messages/5\n    From: Alice <alice@example.com>\n    > text 5\n    Date: 2026-04-05T10:00:00Z\n\n" +
+		"[2] spaces/S/messages/4\n    From: Bob\n    > text 4\n    Date: 2026-04-04T10:00:00Z\n\n" +
+		"[3] spaces/S/messages/3\n    From: Chat users/3\n    > text 3\n    Date: 2026-04-03T10:00:00Z\n"
+	if got := render(t, "list", res); got != want {
+		t.Fatalf("%q", got)
+	}
+	if got := jsonText(res); !strings.HasPrefix(got, `[{"name":"spaces/S/messages/5","createTime":"2026-04-05T10:00:00Z","updateTime":"2026-04-05T11:00:00Z","text":"text 5","sender":{"name":"users/1","displayName":"Alice","email":"alice@example.com"},"thread":{"name":"spaces/S/threads/t"}}`) {
+		t.Fatalf("%s", got)
+	}
+	// The directory was cached where Bun keeps it.
+	path, _ := plugincache.Path("gchat", "me@example.com", "directory")
+	if raw, err := os.ReadFile(path); err != nil || !strings.Contains(string(raw), `"users/1":{"displayName":"Alice","email":"alice@example.com"}`) || !strings.Contains(string(raw), `"syncToken":"sync-1"`) {
+		t.Fatalf("%s %v", raw, err)
+	}
+	// --format json prints the array; no warning when the range is complete.
+	stderr = captureStderr(t, func() {
+		res, err = exec(fake.ctx(), t, reg, "list", input(t, "list", nil, map[string]any{"space": "S", "limit": "abc", "format": "json"}))
+	})
+	if err != nil || stderr != "" {
+		t.Fatalf("%v %q", err, stderr)
+	}
+	if got := render(t, "list", res); !strings.HasPrefix(got, "[\n  {\n    \"name\": \"spaces/S/messages/5\",\n    \"createTime\"") || !strings.HasSuffix(got, "  }\n]") {
+		t.Fatalf("%q", got)
+	}
+	if n := len(res.(shown[[]message]).Value); n != 4 {
+		t.Fatalf("NaN limit is 10: %d", n)
+	}
+}
+
+func TestListAndGetErrorsMatchBun(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	cf := &chatFake{messages: []map[string]any{{"name": "spaces/S/messages/1"}, {"name": "spaces/S/messages/2"}}}
+	fake := newFake(t, cf.handle)
+	const listHint = "Check that the space ID is valid and OAuth token is not expired"
+	cases := []struct {
+		path    string
+		in      plugins.CommandInput
+		status  int
+		code    clierr.Code
+		message string
+		suggest string
+	}{
+		{"list", input(t, "list", nil, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
+		{"list", input(t, "list", nil, map[string]any{"space": "S", "format": "xml"}), 0, clierr.InvalidParams, "Unknown format: xml", "Use --format text or --format json"},
+		{"list", input(t, "list", nil, map[string]any{"space": "  "}), 0, clierr.InvalidParams, "spaceId is required for listing messages", "Specify with --space or configure default in profile"},
+		{"list", input(t, "list", nil, map[string]any{"space": "S", "since": "last week"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
+		{"list", input(t, "list", nil, map[string]any{"space": "S", "until": "2026-02-32"}), 0, clierr.APIError, "Failed to list messages: Invalid Date", listHint},
+		{"list", input(t, "list", nil, map[string]any{"space": "S", "limit": "-1"}), 0, clierr.APIError, "Failed to list messages: Invalid array length", listHint},
+		{"list", input(t, "list", nil, map[string]any{"space": "S"}), 403, clierr.PermissionDenied, "Failed to list messages: Bot lacks permission for this operation", listHint},
+		{"list", input(t, "list", nil, map[string]any{"space": "Nowhere"}), 0, clierr.NotFound, `Space not found: "Nowhere"`, `Use "agentio gchat spaces" to list available spaces`},
+		{"get", input(t, "get", map[string]any{"message-id": "9"}, map[string]any{"space": "S"}), 0, clierr.NotFound, "Failed to get message: Space or message not found", "Check that the space ID and message ID are valid"},
+		{"get", input(t, "get", map[string]any{"message-id": " "}, map[string]any{"space": "S"}), 0, clierr.InvalidParams, "Both spaceId and messageId are required", "Specify with --space and message ID"},
+		{"get", input(t, "get", map[string]any{"message-id": "1"}, nil), 0, clierr.InvalidParams, "required option '--space <id>' not specified", ""},
+	}
+	for _, c := range cases {
+		cf.listStatus = c.status
+		res, err := exec(fake.ctx(), t, reg, c.path, c.in)
+		ce := cliErr(t, err)
+		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
+			t.Errorf("%s %v: %#v", c.path, c.in.Options, ce)
+		}
+	}
+}
+
+func TestGetResolvesTheSpaceByNameAndPrintsTheMessage(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	cf := &chatFake{
+		messages:  []map[string]any{{"name": "spaces/ENG1/messages/7", "text": "line1\nline2", "createTime": "2026-04-01T00:00:00Z", "sender": map[string]any{"name": "users/1"}, "thread": map[string]any{"name": "spaces/ENG1/threads/t"}}},
+		dirStatus: 403,
+		people:    map[string]map[string]any{"1": person("1", "Alice", "alice@example.com")},
+	}
+	fake := newFake(t, cf.handle)
+	res, err := exec(fake.ctx(), t, reg, "get", input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "engineering"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, "get", res); got != "ID: spaces/ENG1/messages/7\nFrom: Alice <alice@example.com>\nDate: 2026-04-01T00:00:00Z\nThread: spaces/ENG1/threads/t\n---\nline1\nline2" {
+		t.Fatalf("%q", got)
+	}
+	// People fields asked for a sender are names and emails only.
+	for _, h := range fake.recorded() {
+		if h.Path == "/v1/people/1" && h.Query.Get("personFields") != "names,emailAddresses" {
+			t.Fatalf("%v", h.Query)
+		}
+	}
+	res, _ = exec(fake.ctx(), t, reg, "get", input(t, "get", map[string]any{"message-id": "7"}, map[string]any{"space": "ENG1", "format": "json"}))
+	if got := render(t, "get", res); !strings.HasPrefix(got, "{\n  \"name\": \"spaces/ENG1/messages/7\",\n  \"createTime\": \"2026-04-01T00:00:00Z\",\n  \"updateTime\": \"") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestSpacesAndDirectMessages(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	cf := &chatFake{directory: []any{person("7", "Grace", "Grace@Example.com"), person("8", "", "h@example.com")}}
+	fake := newFake(t, cf.handle)
+	res, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, "spaces", res); got != "Spaces (3)\n\n[ROOM] ENG1  Engineering  - Eng team\n[DM] DM1  Unnamed\n[DM] G1  Group" {
+		t.Fatalf("%q", got)
+	}
+	res, _ = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"filter": "ENG"}))
+	if got := render(t, "spaces", res); got != "Spaces (1)\n\n[ROOM] ENG1  Engineering  - Eng team" {
+		t.Fatalf("%q", got)
+	}
+	res, _ = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"filter": "zzz"}))
+	if got := render(t, "spaces", res); got != "No spaces found" || jsonText(res) != "[]" {
+		t.Fatalf("%q %s", got, jsonText(res))
+	}
+	// An email resolves through the directory; the DM name comes from it too.
+	res, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.COM"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, "spaces", res); got != "Spaces (1)\n\n[DM] DM7  Grace" {
+		t.Fatalf("%q", got)
+	}
+	cases := []struct {
+		with    string
+		code    clierr.Code
+		message string
+		suggest string
+	}{
+		{"8", clierr.PermissionDenied, `findDirectMessage failed: 403 {"error":{"code":403,"message":"scope"}}` + "\n", "Check that the OAuth scope includes chat.spaces.readonly"},
+		{"users/9", clierr.NotFound, "No direct message space exists with users/9", "Open the chat once in Google Chat to create the DM space"},
+		{"grace", clierr.InvalidParams, `Cannot resolve "grace" to a user`, "Provide an email address, numeric user ID, or users/<id> resource name"},
+		{"nobody@example.com", clierr.NotFound, "Email not found in workspace directory: nobody@example.com", `Run "agentio gchat directory refresh" if the user was added recently`},
+	}
+	for _, c := range cases {
+		res, err := exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": c.with}))
+		ce := cliErr(t, err)
+		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
+			t.Errorf("%s: %#v", c.with, ce)
+		}
+	}
+	// A directory that cannot be fetched is reported when an email needs it.
+	cf.dirStatus = 403
+	if err := os.RemoveAll(filepath.Join(vault.ConfigDir(), "cache")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.com"}))
+	if ce := cliErr(t, err); ce.Code != clierr.APIError || !strings.HasPrefix(ce.Message, "Failed to refresh workspace directory: listDirectoryPeople failed: 403 {") ||
+		ce.Suggestion != "Check OAuth scope and network connectivity" {
+		t.Fatalf("%#v", ce)
+	}
+	noEmail := freshOAuth()
+	delete(noEmail, "email")
+	saveProfile(t, "anon", noEmail, false)
+	_, err = exec(fake.ctx(), t, reg, "spaces", input(t, "spaces", nil, map[string]any{"with": "grace@example.com", "profile": "anon"}))
+	if ce := cliErr(t, err); ce.Code != clierr.ConfigError || ce.Message != "Directory cache requires an OAuth profile with an email" {
+		t.Fatalf("%#v", ce)
+	}
+}
+
+func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	full := person("1", "Alice", "alice@example.com")
+	full["phoneNumbers"] = []any{map[string]any{"value": "+1 555"}, map[string]any{}}
+	full["organizations"] = []any{map[string]any{"title": "CTO", "name": "Acme"}, map[string]any{}}
+	full["photos"] = []any{map[string]any{"url": "https://photo.example.com/a"}}
+	full["locations"] = []any{map[string]any{"value": "Paris"}}
+	cf := &chatFake{
+		people:    map[string]map[string]any{"1": full, "2": {"resourceName": "people/2"}},
+		directory: []any{person("2", "Bob Dir", "bob@example.com")},
+	}
+	fake := newFake(t, cf.handle)
+	res, err := exec(fake.ctx(), t, reg, "members", input(t, "members", nil, map[string]any{"space": "S"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Members (4)\n\n[1] Alice <alice@example.com> [MANAGER]\n    User ID: users/1\n    CTO · Acme\n" +
+		"[2] Bob Dir <bob@example.com> [INVITED]\n    User ID: users/2\n" +
+		"[3] Bot [BOT] [MEMBERSHIP_STATE_UNSPECIFIED]\n    User ID: users/3\n" +
+		"[4] (unknown)"
+	if got := render(t, "members", res); got != want {
+		t.Fatalf("%q", got)
+	}
+	if got := jsonText(res.([]member)[3]); got != `{"name":"spaces/S/members/4","role":"ROLE_MEMBER","state":"JOINED","memberType":"HUMAN"}` {
+		t.Fatalf("%s", got)
+	}
+	for _, h := range fake.recorded() {
+		if h.Path == "/v1/people/1" && h.Query.Get("personFields") != "names,emailAddresses,phoneNumbers,organizations,photos,locations" {
+			t.Fatalf("%v", h.Query)
+		}
+	}
+	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "1"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, "user", res); got != "ID: users/1\nName: Alice\nEmail: alice@example.com\nPhone: +1 555\nOrganizations:\n  - CTO · Acme\nLocation: Paris\nPhoto: https://photo.example.com/a" {
+		t.Fatalf("%q", got)
+	}
+	if got := jsonText(res); got != `{"name":"users/1","displayName":"Alice","email":"alice@example.com","phoneNumbers":["+1 555"],"organizations":[{"name":"Acme","title":"CTO"},{}],"photoUrl":"https://photo.example.com/a","locations":["Paris"]}` {
+		t.Fatalf("%s", got)
+	}
+	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "users/2"}, nil))
+	if err != nil || render(t, "user", res) != "ID: users/2\nName: Bob Dir\nEmail: bob@example.com" {
+		t.Fatalf("%v %q", err, render(t, "user", res))
+	}
+	res, err = exec(fake.ctx(), t, reg, "user", input(t, "user", map[string]any{"user-id": "404"}, nil))
+	if ce := cliErr(t, err); res != nil || ce.Code != clierr.NotFound || ce.Message != `User not found: "404"` || ce.Suggestion != "Check the user ID is valid" {
+		t.Fatalf("%#v", ce)
+	}
+	_, err = exec(fake.ctx(), t, reg, "members", input(t, "members", nil, nil))
+	if ce := cliErr(t, err); ce.Message != "required option '--space <id-or-name>' not specified" {
+		t.Fatalf("%#v", ce)
+	}
+}
+
+func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
+	reg := setupVault(t)
+	saveProfile(t, "acme", freshOAuth(), false)
+	var dirHits []hit
+	var incremental []any
+	incrementalStatus := 200
+	fake := newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path != "/v1/people:listDirectoryPeople" {
+			apiErr(w, 404, "none")
+			return
+		}
+		dirHits = append(dirHits, h)
+		if h.Query.Get("syncToken") != "" {
+			if incrementalStatus != 200 {
+				apiErr(w, incrementalStatus, "expired")
+				return
+			}
+			writeJSON(w, 200, map[string]any{"people": incremental})
+			return
+		}
+		if h.Query.Get("pageToken") == "" {
+			writeJSON(w, 200, map[string]any{"people": []any{person("1", "Alice", "a@example.com"), person("", "Nobody", "")}, "nextPageToken": "p2"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"people": []any{person("2", "", "b@example.com"), person("3", "", "")}, "nextSyncToken": "sync-1"})
+	})
+	clock := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	prev := now
+	now = func() time.Time { return clock }
+	t.Cleanup(func() { now = prev })
+	res, err := exec(fake.ctx(), t, reg, "directory refresh", input(t, "directory refresh", nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := plugincache.Path("gchat", "me@example.com", "directory")
+	if got := render(t, "directory refresh", res); got != "Refreshed: 2 users\nPath: "+path+"\nFetched at: 2026-04-01T10:00:00.000Z" {
+		t.Fatalf("%q", got)
+	}
+	q := dirHits[0].Query
+	if len(dirHits) != 2 || q.Get("readMask") != "names,emailAddresses" || q.Get("sources") != "DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE" ||
+		q.Get("pageSize") != "1000" || q.Get("requestSyncToken") != "true" || dirHits[1].Query.Get("pageToken") != "p2" {
+		t.Fatalf("%#v", dirHits)
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != `{"fetchedAt":"2026-04-01T10:00:00.000Z","syncToken":"sync-1","users":{"users/1":{"displayName":"Alice","email":"a@example.com"},"users/2":{"displayName":"b@example.com","email":"b@example.com"}}}` {
+		t.Fatalf("%s", raw)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode())
+	}
+	// Inside the TTL, resolving an email reads the cache only.
+	a, err := apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(23 * time.Hour)
+	if id, err := a.resolveUserResourceName("B@example.com"); err != nil || id != "users/2" || len(dirHits) != 2 {
+		t.Fatalf("%q %v %d", id, err, len(dirHits))
+	}
+	// After a day the sync token fetches only the changes.
+	clock = clock.Add(2 * time.Hour)
+	deleted := person("1", "", "")
+	deleted["metadata"] = map[string]any{"deleted": true}
+	incremental = []any{deleted, person("4", "Dan", "d@example.com")}
+	a, _ = apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	if id, err := a.resolveUserResourceName("d@example.com"); err != nil || id != "users/4" {
+		t.Fatalf("%q %v", id, err)
+	}
+	if last := dirHits[len(dirHits)-1]; last.Query.Get("syncToken") != "sync-1" || len(dirHits) != 3 {
+		t.Fatalf("%#v", last.Query)
+	}
+	if a.dir.lookup("users/1") != nil || a.dir.data.SyncToken != "sync-1" {
+		t.Fatal("the incremental sync did not apply the deletion or lost the token")
+	}
+	// A rejected sync token falls back to a full fetch.
+	clock = clock.Add(25 * time.Hour)
+	incrementalStatus = 410
+	a, _ = apiFrom(fake.ctx(), host.NewRunContext(freshOAuth(), "acme", fake.ctx()))
+	if id, err := a.resolveUserResourceName("a@example.com"); err != nil || id != "users/1" || len(dirHits) != 6 {
+		t.Fatalf("%q %v %d", id, err, len(dirHits))
+	}
+	// A forced refresh surfaces the directory error as Bun's plain Error.
+	fake.handle = func(w http.ResponseWriter, h hit) { apiErr(w, 403, "no") }
+	res, err = exec(fake.ctx(), t, reg, "directory refresh", input(t, "directory refresh", nil, nil))
+	var ce *clierr.Error
+	if res != nil || err == nil || errors.As(err, &ce) || err.Error() != "listDirectoryPeople failed: 403 {\"error\":{\"code\":403,\"message\":\"no\"}}\n" {
+		t.Fatalf("%#v %v", res, err)
+	}
+}
+
+func TestFormatMatchesBun(t *testing.T) {
+	long := strings.Repeat("x", 100) + "yz"
+	list := shown[[]message]{Value: []message{
+		{Name: "spaces/S/messages/1", CreateTime: "T1", Text: long, Sender: &sender{Name: "users/1", DisplayName: "Ann", Email: "a@example.com"}},
+		{Name: "spaces/S/messages/2", CreateTime: "T2", Sender: &sender{Name: "users/2"}},
+		{Name: "spaces/S/messages/3", CreateTime: "T3"},
+	}}
+	want := "Messages (3)\n\n[1] spaces/S/messages/1\n    From: Ann <a@example.com>\n    > " + strings.Repeat("x", 100) + "...\n    Date: T1\n\n" +
+		"[2] spaces/S/messages/2\n    From: Unknown\n    Date: T2\n\n[3] spaces/S/messages/3\n    Date: T3\n"
+	if got := formatMessageList(list); got != want {
+		t.Fatalf("%q", got)
+	}
+	if formatMessageList(shown[[]message]{Value: []message{}}) != "No messages found" || formatMessageList(shown[[]message]{Value: []message{}, JSON: true}) != "[]" {
+		t.Fatal("empty")
+	}
+	if got := formatMessage(shown[*message]{Value: &message{Name: "m", CreateTime: "T"}}); got != "ID: m\nDate: T" {
+		t.Fatalf("%q", got)
+	}
+	if got := formatSendResult(&sendResult{MessageID: "unknown"}); got != "Message sent\nID: unknown" {
+		t.Fatalf("%q", got)
+	}
+	if formatMembers([]member{}) != "No members found" {
+		t.Fatal("members")
+	}
+	if got := formatUser(&user{Name: "users/1", Organizations: []organization{{}}}); got != "ID: users/1\nOrganizations:" {
+		t.Fatalf("%q", got)
+	}
+	// JSON output keeps <, > and & as Bun's JSON.stringify does.
+	if got := formatMessage(shown[*message]{Value: &message{Name: "a<b>&c", CreateTime: "T", UpdateTime: "U"}, JSON: true}); got != "{\n  \"name\": \"a<b>&c\",\n  \"createTime\": \"T\",\n  \"updateTime\": \"U\"\n}" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestParseDateIsJavaScriptsForISOForms(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	prev := time.Local
+	time.Local = la
+	t.Cleanup(func() { time.Local = prev })
+	// Each pair is what `TZ=America/Los_Angeles bun -e 'new Date(s).toISOString()'` prints.
+	for in, want := range map[string]string{
+		"2026-04-01":                     "2026-04-01T00:00:00.000Z",
+		"2026-04":                        "2026-04-01T00:00:00.000Z",
+		"2026":                           "2026-01-01T00:00:00.000Z",
+		"2026-04Z":                       "2026-04-01T00:00:00.000Z",
+		"+002026-04-01":                  "2026-04-01T00:00:00.000Z",
+		"2026-04-01T10:00":               "2026-04-01T17:00:00.000Z",
+		"2026-04-01t10:00Z":              "2026-04-01T10:00:00.000Z",
+		"2026-04-01 10:00":               "2026-04-01T17:00:00.000Z",
+		"2026-04-01T10:00:00.5":          "2026-04-01T17:00:00.500Z",
+		"2026-04-01T10:00:05.1234Z":      "2026-04-01T10:00:05.123Z",
+		"2026-04-01T10:00:00-0530":       "2026-04-01T15:30:00.000Z",
+		"2026-04-01T10:00+0100":          "2026-04-01T09:00:00.000Z",
+		"2026-04-01 10:00:00+02:00":      "2026-04-01T08:00:00.000Z",
+		"2026-04-01T24:00":               "2026-04-02T07:00:00.000Z",
+		"2026-04-01T24:00:00.000Z":       "2026-04-02T00:00:00.000Z",
+		"2024-02-29":                     "2024-02-29T00:00:00.000Z",
+		"2026-02-29":                     "2026-03-01T00:00:00.000Z",
+		"2026-02-30":                     "2026-03-02T00:00:00.000Z",
+		"2026-04-31":                     "2026-05-01T00:00:00.000Z",
+		" 2026-04-01 ":                   "2026-04-01T07:00:00.000Z",
+		"2026-4-1":                       "2026-04-01T07:00:00.000Z",
+		"2026/04/01":                     "2026-04-01T07:00:00.000Z",
+		"2026/04/01 10:00":               "2026-04-01T17:00:00.000Z",
+		"04/01/2026":                     "2026-04-01T07:00:00.000Z",
+		"1/2/2026":                       "2026-01-02T08:00:00.000Z",
+		"02/30/2026":                     "2026-03-02T08:00:00.000Z",
+		"2026-04-01T10:00:00.123456789Z": "2026-04-01T10:00:00.123Z",
+	} {
+		got, ok := parseDate(in)
+		if !ok || google.ISOString(got) != want {
+			t.Errorf("%q: %v %s", in, ok, google.ISOString(got))
+		}
+	}
+	for _, in := range []string{"", "yesterday", "2026-13-01", "2026-00-10", "2026-04-32", "2026-04-01T25:00", "2026-04-01T24:30",
+		"2026-04-01T24:00:01", "2026-04-01T23:60", "2026-04-01T10:00:60", "2026-04-01T10", "2026-04-01T10:00+01",
+		"2026-04-01T10:00:00.", "2026/4/32", "13/01/2026"} {
+		if _, ok := parseDate(in); ok {
+			t.Errorf("%q parsed", in)
+		}
+	}
+}
