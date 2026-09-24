@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/text/unicode/norm"
 )
@@ -22,9 +23,7 @@ import (
 type jsNum float64
 
 func (n jsNum) MarshalJSON() ([]byte, error) {
-	var b bytes.Buffer
-	writeJS(&b, float64(n))
-	return b.Bytes(), nil
+	return jsvalue.Stringify(float64(n)), nil
 }
 
 // toNumber is JavaScript's numeric coercion of a stored or decoded value.
@@ -38,7 +37,7 @@ func toNumber(v any) float64 {
 		}
 		return 0
 	case string:
-		return jsNumber(t)
+		return jsvalue.Number(t)
 	case jsNum:
 		return float64(t)
 	case float64:
@@ -67,10 +66,10 @@ type tokens struct {
 // requireTokens accepts a token payload only when every field we persist is
 // present. Storing an undefined refresh token disables refresh silently.
 func requireTokens(raw any) (tokens, error) {
-	o, _ := raw.(*object)
+	o, _ := raw.(*jsvalue.Object)
 	var missing []string
 	for _, field := range []string{"access_token", "refresh_token", "expires_in", "refresh_token_expires_in"} {
-		if v, _ := o.get(field); v == nil {
+		if v, _ := o.Get(field); v == nil {
 			missing = append(missing, field)
 		}
 	}
@@ -118,25 +117,22 @@ func networkError(err error) error {
 // login is loginToFalco: password login, optionally with a 2FA code. Falco
 // reports a missing second factor as an error body rather than a status.
 func login(ctx context.Context, do fetchFunc, username, password string, twoFaCode *string) (loginResult, error) {
-	body := newObject()
-	body.set("userName", username)
-	body.set("password", password)
+	body := jsvalue.NewObject()
+	body.Set("userName", username)
+	body.Set("password", password)
 	if twoFaCode != nil {
-		body.set("twoFaCode", *twoFaCode)
+		body.Set("twoFaCode", *twoFaCode)
 	} else {
-		body.set("twoFaCode", nil)
+		body.Set("twoFaCode", nil)
 	}
-	body.set("brand", brand)
-	body.set("impersonate", nil)
+	body.Set("brand", brand)
+	body.Set("impersonate", nil)
 	scopes := make([]any, len(loginScopes))
 	for i, s := range loginScopes {
 		scopes[i] = s
 	}
-	body.set("scopes", scopes)
-	var buf bytes.Buffer
-	writeJS(&buf, body)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/login", &buf)
+	body.Set("scopes", scopes)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/login", bytes.NewReader(jsvalue.Stringify(body)))
 	if err != nil {
 		return loginResult{}, networkError(err)
 	}
@@ -148,10 +144,10 @@ func login(ctx context.Context, do fetchFunc, username, password string, twoFaCo
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
-	text := decodeUTF8(raw)
+	text := jsvalue.DecodeUTF8(raw)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Never echo this body: on success it is the token payload itself.
-		parsed, err := parseJS([]byte(text))
+		parsed, err := jsvalue.Parse([]byte(text))
 		if err != nil || parsed == nil {
 			return loginResult{}, &apiError{
 				code:       "API_ERROR",
@@ -166,9 +162,9 @@ func login(ctx context.Context, do fetchFunc, username, password string, twoFaCo
 		return loginResult{tokens: t}, nil
 	}
 
-	parsed, _ := parseJS([]byte(text))
-	o, _ := parsed.(*object)
-	code, _ := o.str("error")
+	parsed, _ := jsvalue.Parse([]byte(text))
+	o, _ := parsed.(*jsvalue.Object)
+	code, _ := o.Str("error")
 	switch code {
 	case "two_factor_required":
 		return loginResult{twoFactorRequired: true}, nil
@@ -181,7 +177,7 @@ func login(ctx context.Context, do fetchFunc, username, password string, twoFaCo
 			suggestion: "Codes expire quickly. Re-run the command and enter a fresh one.",
 		}
 	}
-	return loginResult{}, &apiError{code: "AUTH_FAILED", message: fmt.Sprintf("Falco login failed (HTTP %d): %s", resp.StatusCode, jsSlice(text, 200))}
+	return loginResult{}, &apiError{code: "AUTH_FAILED", message: fmt.Sprintf("Falco login failed (HTTP %d): %s", resp.StatusCode, jsvalue.Slice(text, 200))}
 }
 
 // refreshToken is refreshFalcoToken. The token rotates, so the result must be
@@ -208,11 +204,11 @@ func refreshToken(ctx context.Context, do fetchFunc, token string) (tokens, erro
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return tokens{}, &apiError{
 			code:       "TOKEN_EXPIRED",
-			message:    fmt.Sprintf("Falco refresh failed (HTTP %d): %s", resp.StatusCode, jsSlice(decodeUTF8(raw), 200)),
+			message:    fmt.Sprintf("Falco refresh failed (HTTP %d): %s", resp.StatusCode, jsvalue.Slice(jsvalue.DecodeUTF8(raw), 200)),
 			suggestion: "Run: agentio reauth",
 		}
 	}
-	parsed, err := parseJS([]byte(decodeUTF8(raw)))
+	parsed, err := jsvalue.Parse([]byte(jsvalue.DecodeUTF8(raw)))
 	if err != nil {
 		return tokens{}, fmt.Errorf("JSON Parse error: Unable to parse JSON string")
 	}
@@ -222,11 +218,9 @@ func refreshToken(ctx context.Context, do fetchFunc, token string) (tokens, erro
 // revoke is best-effort; Falco does not report a useful failure here. It runs
 // when reauthentication supersedes a token, not when a profile is removed.
 func revoke(ctx context.Context, do fetchFunc, token any) {
-	body := newObject()
-	body.set("RefreshToken", token)
-	var buf bytes.Buffer
-	writeJS(&buf, body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/revoke-refresh-token", &buf)
+	body := jsvalue.NewObject()
+	body.Set("RefreshToken", token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL+"/revoke-refresh-token", bytes.NewReader(jsvalue.Stringify(body)))
 	if err != nil {
 		return
 	}
@@ -240,7 +234,7 @@ func revoke(ctx context.Context, do fetchFunc, token any) {
 // --- credential lifecycle -------------------------------------------------------
 
 func applies(creds map[string]any) bool {
-	return truthy(creds["refreshToken"])
+	return jsvalue.Truthy(creds["refreshToken"])
 }
 
 // stale is `expiryDate === undefined || now + bufferMs >= expiryDate`. Falco
@@ -258,7 +252,7 @@ func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 	if raw, present := creds["refreshExpiryDate"]; present && float64(time.Now().UnixMilli()) >= toNumber(raw) {
 		return nil, &apiError{code: "TOKEN_EXPIRED", message: "The Falco refresh token has expired", suggestion: "Run: agentio reauth"}
 	}
-	t, err := refreshToken(ctx, defaultFetch, jsString(orNull(creds["refreshToken"])))
+	t, err := refreshToken(ctx, defaultFetch, jsvalue.String(orNull(creds["refreshToken"])))
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +265,7 @@ func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 // reads as empty.
 func promptText(setup *plugins.SetupContext, question string) string {
 	answer, _ := setup.Prompt(question, false)
-	return jsTrim(answer)
+	return jsvalue.Trim(answer)
 }
 
 func promptPassword(setup *plugins.SetupContext, question string) string {
@@ -294,7 +288,7 @@ func promptChoice(setup *plugins.SetupContext, message string, names []string) (
 		if err != nil {
 			return 0, setup.Fail("INVALID_PARAMS", "An organization choice is required", "")
 		}
-		n, err := strconv.Atoi(jsTrim(answer))
+		n, err := strconv.Atoi(jsvalue.Trim(answer))
 		if err == nil && n >= 1 && n <= len(names) {
 			return n - 1, nil
 		}
@@ -381,8 +375,8 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 
 // putIfPresent copies a field the way an object literal does: JSON.stringify
 // drops an undefined value, so an absent field is not stored.
-func putIfPresent(dst map[string]any, key string, src *object, field string) {
-	if v, ok := src.get(field); ok {
+func putIfPresent(dst map[string]any, key string, src *jsvalue.Object, field string) {
+	if v, ok := src.Get(field); ok {
 		dst[key] = v
 	}
 }
@@ -408,7 +402,7 @@ func slugifyOrganization(name string) string {
 	slug := stripMarks(strings.ToLower(name))
 	slug = nonSlug.ReplaceAllString(slug, "-")
 	slug = edgeDashes.ReplaceAllString(slug, "")
-	slug = jsSlice(slug, 64)
+	slug = jsvalue.Slice(slug, 64)
 	slug = trailDashes.ReplaceAllString(slug, "")
 	if slug == "" {
 		return "falco"
@@ -425,7 +419,7 @@ func reauth(ctx context.Context, creds map[string]any, profileName string, setup
 			fmt.Sprintf("Profile \"%s\" has no stored Falco credentials", profileName),
 			"Run: agentio falco profile add --profile "+profileName)
 	}
-	email := jsString(orNull(creds["userEmail"]))
+	email := jsvalue.String(orNull(creds["userEmail"]))
 	setup.Log(fmt.Sprintf("\nRe-authenticating falco / %s (%s)", profileName, email))
 	password := promptPassword(setup, "? Password: ")
 	if password == "" {
@@ -470,5 +464,5 @@ func listInfo(creds map[string]any) string {
 	if org == nil {
 		org = orNull(creds["organizationId"])
 	}
-	return fmt.Sprintf(" - %s (%s)", jsString(orNull(creds["userEmail"])), jsString(org))
+	return fmt.Sprintf(" - %s (%s)", jsvalue.String(orNull(creds["userEmail"])), jsvalue.String(org))
 }

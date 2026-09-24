@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-pdf/fpdf"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // A rendition of a UBL invoice for documents that embed no PDF. It follows
@@ -210,11 +212,11 @@ func formatMoney(amount *string, currency string) string {
 	if amount == nil || *amount == "" {
 		return "—"
 	}
-	n := jsNumber(*amount)
+	n := jsvalue.Number(*amount)
 	if math.IsNaN(n) || math.IsInf(n, 0) {
 		return *amount + " " + currency
 	}
-	return toFixed(n, 2) + " " + currency
+	return jsvalue.ToFixed(n, 2) + " " + currency
 }
 
 func addressLines(p ublParty) []string {
@@ -321,13 +323,13 @@ func (r *renderer) drawLinesTable(inv *ublInvoice) {
 		x = marginX
 
 		qty := line.quantity
-		quantity := jsNumberString(jsNumber(qty))
+		quantity := jsvalue.NumberString(jsvalue.Number(qty))
 		if line.unitCode != nil {
 			quantity += " " + *line.unitCode
 		}
 		vat := "—"
 		if line.taxPercent != nil {
-			vat = jsNumberString(jsNumber(*line.taxPercent)) + "%"
+			vat = jsvalue.NumberString(jsvalue.Number(*line.taxPercent)) + "%"
 		}
 		first := ""
 		if len(wrapped) > 0 {
@@ -383,7 +385,7 @@ func (r *renderer) drawTotalsBlock(inv *ublInvoice) {
 	for _, t := range inv.taxSubtotals {
 		label := "VAT"
 		if t.taxPercent != nil {
-			label += " " + jsNumberString(jsNumber(*t.taxPercent)) + "%"
+			label += " " + jsvalue.NumberString(jsvalue.Number(*t.taxPercent)) + "%"
 		}
 		if t.taxCategory != nil {
 			label += " [" + *t.taxCategory + "]"
@@ -502,8 +504,8 @@ func renderUblToPdf(inv *ublInvoice) ([]byte, error) {
 	rightEnd := r.drawParty(inv.buyer, marginX+colWidth+20, colWidth, r.cursorY)
 	r.cursorY = math.Min(leftEnd, rightEnd) - 12
 
-	if inv.note != nil && jsTrim(*inv.note) != "" {
-		noteLines := r.wrap(9, jsTrim(*inv.note), a4Width-marginX*2)
+	if inv.note != nil && jsvalue.Trim(*inv.note) != "" {
+		noteLines := r.wrap(9, jsvalue.Trim(*inv.note), a4Width-marginX*2)
 		if len(noteLines) > 4 {
 			noteLines = noteLines[:4]
 		}

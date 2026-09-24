@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"regexp"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 const (
@@ -26,7 +28,7 @@ func slugify(input string, maxLen int) string {
 	if len([]rune(s)) <= maxLen {
 		return s
 	}
-	return trailDashes.ReplaceAllString(jsSlice(s, maxLen), "")
+	return trailDashes.ReplaceAllString(jsvalue.Slice(s, maxLen), "")
 }
 
 func slugifyNumber(input string) string {
@@ -36,7 +38,7 @@ func slugifyNumber(input string) string {
 	if utf16Len(s) <= numberMax {
 		return s
 	}
-	return trailDashes.ReplaceAllString(jsSlice(s, numberMax), "")
+	return trailDashes.ReplaceAllString(jsvalue.Slice(s, numberMax), "")
 }
 
 func utf16Len(s string) int {
@@ -78,32 +80,32 @@ func deref(s *string, fallback string) string {
 }
 
 // buildBasename is YYYY-MM-DD_<supplier-slug>_<number-slug> for a Peppol document.
-func buildBasename(doc *object) string {
-	date := deref(firstOf(firstTenChars(doc.text("documentDate")), firstTenChars(doc.text("downloadDate"))), "0000-00-00")
-	supplier := slugify(jsTrim(deref(doc.text("supplierName"), "")), supplierMax)
+func buildBasename(doc *jsvalue.Object) string {
+	date := deref(firstOf(firstTenChars(doc.Text("documentDate")), firstTenChars(doc.Text("downloadDate"))), "0000-00-00")
+	supplier := slugify(jsvalue.Trim(deref(doc.Text("supplierName"), "")), supplierMax)
 	if supplier == "" {
 		supplier = "unknown"
 	}
-	number := slugifyNumber(jsTrim(deref(firstOf(doc.text("invoiceReference"), doc.text("documentNumber")), "")))
+	number := slugifyNumber(jsvalue.Trim(deref(firstOf(doc.Text("invoiceReference"), doc.Text("documentNumber")), "")))
 	if number == "" {
-		number = jsSlice(deref(doc.text("id"), ""), 8)
+		number = jsvalue.Slice(deref(doc.Text("id"), ""), 8)
 	}
 	return fmt.Sprintf("%s_%s_%s", date, supplier, number)
 }
 
 // buildBillingBasename is YYYY-MM-DD_<customer-slug>_<number> for an outbound
 // billing document; credit notes get a CN_ prefix on the number.
-func buildBillingBasename(doc *object) string {
-	date := deref(firstOf(firstTenChars(doc.text("SendDate")), firstTenChars(doc.text("CreationDate"))), "0000-00-00")
-	customer := slugify(jsTrim(deref(doc.text("CustomerName"), "")), supplierMax)
+func buildBillingBasename(doc *jsvalue.Object) string {
+	date := deref(firstOf(firstTenChars(doc.Text("SendDate")), firstTenChars(doc.Text("CreationDate"))), "0000-00-00")
+	customer := slugify(jsvalue.Trim(deref(doc.Text("CustomerName"), "")), supplierMax)
 	if customer == "" {
 		customer = "unknown"
 	}
-	number := slugifyNumber(deref(doc.text("DocumentNumber"), ""))
+	number := slugifyNumber(deref(doc.Text("DocumentNumber"), ""))
 	if number == "" {
-		number = jsSlice(deref(doc.text("Id"), ""), 8)
+		number = jsvalue.Slice(deref(doc.Text("Id"), ""), 8)
 	}
-	if t, _ := doc.str("Type"); t == "CreditNote" {
+	if t, _ := doc.Str("Type"); t == "CreditNote" {
 		number = "CN_" + number
 	}
 	return fmt.Sprintf("%s_%s_%s", date, customer, number)

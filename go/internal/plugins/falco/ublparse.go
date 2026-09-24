@@ -6,6 +6,8 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // Minimal UBL Invoice / CreditNote parser for Peppol BIS Billing 3.0. The XML
@@ -58,13 +60,13 @@ var ublArrayTags = map[string]bool{
 
 // parseXMLTree returns the document as fast-xml-parser would: an object keyed
 // by root element name.
-func parseXMLTree(src string) (*object, error) {
+func parseXMLTree(src string) (*jsvalue.Object, error) {
 	dec := xml.NewDecoder(strings.NewReader(src))
 	// Belgian invoices routinely carry accented names as entities; HTML named
 	// entities are decoded too, as with htmlEntities: true.
 	dec.Entity = xml.HTMLEntity
 	dec.Strict = true
-	doc := newObject()
+	doc := jsvalue.NewObject()
 	repeated := map[string]bool{}
 	for {
 		tok, err := dec.Token()
@@ -86,31 +88,31 @@ func parseXMLTree(src string) (*object, error) {
 
 // addChild stores a child element: a listed tag is always an array, and any
 // other tag becomes an array once it repeats.
-func addChild(parent *object, repeated map[string]bool, name string, v any) {
-	existing, present := parent.get(name)
+func addChild(parent *jsvalue.Object, repeated map[string]bool, name string, v any) {
+	existing, present := parent.Get(name)
 	switch {
 	case ublArrayTags[name]:
 		arr, _ := existing.([]any)
-		parent.set(name, append(arr, v))
+		parent.Set(name, append(arr, v))
 	case !present:
-		parent.set(name, v)
+		parent.Set(name, v)
 	case repeated[name]:
-		parent.set(name, append(existing.([]any), v))
+		parent.Set(name, append(existing.([]any), v))
 	default:
-		parent.set(name, []any{existing, v})
+		parent.Set(name, []any{existing, v})
 		repeated[name] = true
 	}
 }
 
 func readElement(dec *xml.Decoder, start xml.StartElement) (any, error) {
-	node := newObject()
+	node := jsvalue.NewObject()
 	repeated := map[string]bool{}
 	hasChildren := false
 	for _, a := range start.Attr {
 		if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
 			continue
 		}
-		node.set("@_"+a.Name.Local, a.Value)
+		node.Set("@_"+a.Name.Local, a.Value)
 	}
 	var text strings.Builder
 	for {
@@ -132,12 +134,12 @@ func readElement(dec *xml.Decoder, start xml.StartElement) (any, error) {
 		case xml.CharData:
 			text.Write(t)
 		case xml.EndElement:
-			trimmed := jsTrim(text.String())
-			if !hasChildren && len(node.keys) == 0 {
+			trimmed := jsvalue.Trim(text.String())
+			if !hasChildren && len(node.Keys()) == 0 {
 				return trimmed, nil
 			}
 			if trimmed != "" {
-				node.set("#text", trimmed)
+				node.Set("#text", trimmed)
 			}
 			return node, nil
 		}
@@ -145,11 +147,9 @@ func readElement(dec *xml.Decoder, start xml.StartElement) (any, error) {
 }
 
 func child(node any, key string) any {
-	o, _ := node.(*object)
-	if o == nil {
-		return nil
-	}
-	return o.vals[key]
+	o, _ := node.(*jsvalue.Object)
+	v, _ := o.Get(key)
+	return v
 }
 
 func textOf(node any) *string {
@@ -159,9 +159,9 @@ func textOf(node any) *string {
 			return nil
 		}
 		return &t
-	case *object:
-		if s, ok := t.vals["#text"].(string); ok {
-			s = jsTrim(s)
+	case *jsvalue.Object:
+		if s, ok := t.Str("#text"); ok {
+			s = jsvalue.Trim(s)
 			if s == "" {
 				return nil
 			}
@@ -172,8 +172,8 @@ func textOf(node any) *string {
 }
 
 func numAttr(node any, attr string) *string {
-	if o, ok := node.(*object); ok {
-		if s, ok := o.vals["@_"+attr].(string); ok && s != "" {
+	if o, ok := node.(*jsvalue.Object); ok {
+		if s, ok := o.Str("@_" + attr); ok && s != "" {
 			return &s
 		}
 	}
@@ -305,14 +305,14 @@ func parseUbl(src string) (*ublInvoice, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, _ := doc.get("Invoice")
+	root, _ := doc.Get("Invoice")
 	if root == nil {
-		root, _ = doc.get("CreditNote")
+		root, _ = doc.Get("CreditNote")
 	}
 	if jsFalsy(root) {
 		return nil, errors.New("Not a UBL Invoice or CreditNote document")
 	}
-	_, isCredit := doc.get("CreditNote")
+	_, isCredit := doc.Get("CreditNote")
 
 	linesKey := "InvoiceLine"
 	kind := "Invoice"

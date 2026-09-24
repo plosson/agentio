@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -70,12 +71,12 @@ func containsInsensitive(haystack *string, needle string) bool {
 }
 
 // filterPeppolDocuments narrows client-side; the endpoint has no equivalents.
-func filterPeppolDocuments(documents []*object, since, sender string) []*object {
+func filterPeppolDocuments(documents []*jsvalue.Object, since, sender string) []*jsvalue.Object {
 	result := documents
 	if since != "" {
-		var kept []*object
+		var kept []*jsvalue.Object
 		for _, d := range result {
-			if jsSlice(deref(d.text("documentDate"), ""), 10) >= since {
+			if jsvalue.Slice(deref(d.Text("documentDate"), ""), 10) >= since {
 				kept = append(kept, d)
 			}
 		}
@@ -83,9 +84,9 @@ func filterPeppolDocuments(documents []*object, since, sender string) []*object 
 	}
 	if sender != "" {
 		needle := strings.ToLower(sender)
-		var kept []*object
+		var kept []*jsvalue.Object
 		for _, d := range result {
-			if containsInsensitive(d.text("supplierVatNumber"), needle) || containsInsensitive(d.text("supplierName"), needle) {
+			if containsInsensitive(d.Text("supplierVatNumber"), needle) || containsInsensitive(d.Text("supplierName"), needle) {
 				kept = append(kept, d)
 			}
 		}
@@ -105,8 +106,8 @@ func fileExists(path string) bool {
 }
 
 // is is `value === ref` for a string ref.
-func is(o *object, key, ref string) bool {
-	s, ok := o.str(key)
+func is(o *jsvalue.Object, key, ref string) bool {
+	s, ok := o.Str(key)
 	return ok && s == ref
 }
 
@@ -169,7 +170,7 @@ func peppolGetCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
-			xml := decodeUTF8(payload)
+			xml := jsvalue.DecodeUTF8(payload)
 			res := &written{Bytes: len(payload)}
 			toStdout := output == "-"
 			xmlPath := id + ".xml"

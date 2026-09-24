@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/plosson/agentio/go/internal/plugins/google"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // formatSendResult is printGChatSendResult.
@@ -58,7 +58,7 @@ func formatMessageList(v any) string {
 			lines = append(lines, "    From: "+from(m.Sender))
 		}
 		if m.Text != "" {
-			lines = append(lines, "    > "+google.Truncate(m.Text, 100))
+			lines = append(lines, "    > "+jsvalue.Truncate(m.Text, 100))
 		}
 		lines = append(lines, "    Date: "+m.CreateTime, "")
 	}

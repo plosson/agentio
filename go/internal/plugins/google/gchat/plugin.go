@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -348,7 +349,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			limit := google.ParseInt(opt(in, "limit"))
+			limit := jsvalue.ParseInt(opt(in, "limit"))
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -366,7 +367,7 @@ func listCmd() plugins.CommandSpec {
 					oldest = messages[len(messages)-1].CreateTime
 				}
 				run.Log(fmt.Sprintf("Warning: reached --limit %s; more messages exist before %s. Raise --limit or narrow the window with --since/--until.",
-					google.JSNumber(limit), oldest))
+					jsvalue.NumberString(limit), oldest))
 			}
 			return shown[[]message]{Value: messages, JSON: asJSON}, nil
 		},

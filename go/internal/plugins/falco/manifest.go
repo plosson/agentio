@@ -1,11 +1,12 @@
 package falco
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // manifest is the sync directory's .manifest.json: the Falco document id
@@ -42,28 +43,28 @@ func loadManifest(dir string) *manifest {
 	if err != nil {
 		return emptyManifest()
 	}
-	parsed, err := parseJS(raw)
+	parsed, err := jsvalue.Parse(raw)
 	if err != nil {
 		return emptyManifest()
 	}
-	o, _ := parsed.(*object)
+	o, _ := parsed.(*jsvalue.Object)
 	if o == nil {
 		return emptyManifest()
 	}
-	version, _ := o.get("version")
+	version, _ := o.Get("version")
 	if n, ok := version.(json.Number); !ok || toNumber(n) != 1 {
 		return emptyManifest()
 	}
-	entries, _ := valueOf(o, "entries").(*object)
+	entries, _ := valueOf(o, "entries").(*jsvalue.Object)
 	if entries == nil {
 		return emptyManifest()
 	}
 	m := &manifest{updatedAt: isoNow(), entries: map[string]string{}}
-	if s, ok := o.str("updated_at"); ok {
+	if s, ok := o.Str("updated_at"); ok {
 		m.updatedAt = s
 	}
-	for _, id := range entries.keys {
-		if basename, ok := entries.str(id); ok {
+	for _, id := range entries.Keys() {
+		if basename, ok := entries.Str(id); ok {
 			m.set(id, basename)
 		}
 	}
@@ -74,21 +75,16 @@ func loadManifest(dir string) *manifest {
 // with a fresh timestamp, readable by the owner only.
 func saveManifest(dir string, m *manifest) error {
 	m.updatedAt = isoNow()
-	entries := newObject()
+	entries := jsvalue.NewObject()
 	for _, id := range m.ids {
-		entries.set(id, m.entries[id])
+		entries.Set(id, m.entries[id])
 	}
-	out := newObject()
-	out.set("version", 1)
-	out.set("updated_at", m.updatedAt)
-	out.set("entries", entries)
-	var compact, indented bytes.Buffer
-	writeJS(&compact, out)
-	if err := json.Indent(&indented, compact.Bytes(), "", "  "); err != nil {
-		return err
-	}
+	out := jsvalue.NewObject()
+	out.Set("version", 1)
+	out.Set("updated_at", m.updatedAt)
+	out.Set("entries", entries)
 	path := manifestPath(dir)
-	if err := os.WriteFile(path, indented.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(path, jsvalue.StringifyIndent(out), 0o600); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)

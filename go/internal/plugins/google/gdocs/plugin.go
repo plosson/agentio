@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -212,7 +213,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(google.ParseInt(opt(in, "limit")), opt(in, "query")))
+			return google.Result(a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query")))
 		},
 		Format: formatList,
 	}
@@ -327,7 +328,7 @@ func batchCmd() plugins.CommandSpec {
 				}
 				source = raw
 			}
-			parsed, err := google.ParseJSON(source)
+			parsed, err := jsvalue.Parse(source)
 			if err != nil {
 				return nil, run.Fail("INVALID_PARAMS", "Invalid JSON: "+err.Error(), "")
 			}

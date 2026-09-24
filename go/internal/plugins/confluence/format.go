@@ -3,18 +3,9 @@ package confluence
 import (
 	"fmt"
 	"strings"
-	"unicode/utf16"
-)
 
-// truncate is JavaScript's `s.length > n ? s.slice(0, n) + '...' : s`, which
-// counts UTF-16 code units, not runes.
-func truncate(s string, n int) string {
-	units := utf16.Encode([]rune(s))
-	if len(units) > n {
-		return string(utf16.Decode(units[:n])) + "..."
-	}
-	return s
-}
+	"github.com/plosson/agentio/go/internal/jsvalue"
+)
 
 func trimFinal(s string) string {
 	return strings.TrimSuffix(s, "\n")
@@ -35,7 +26,7 @@ func formatSpaces(v any) string {
 		fmt.Fprintf(&b, "    ID: %s\n", s.ID)
 		fmt.Fprintf(&b, "    Type: %s | Status: %s\n", s.Type, s.Status)
 		if s.Description != "" {
-			fmt.Fprintf(&b, "    > %s\n", truncate(s.Description, 100))
+			fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(s.Description, 100))
 		}
 		b.WriteString("\n")
 	}
@@ -111,7 +102,7 @@ func formatComments(v any) string {
 		if c.AuthorID != "" {
 			fmt.Fprintf(&b, "    Author: %s\n", c.AuthorID)
 		}
-		fmt.Fprintf(&b, "    > %s\n", truncate(c.Body, 200))
+		fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(c.Body, 200))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
@@ -139,7 +130,7 @@ func formatSearch(v any) string {
 			fmt.Fprintf(&b, "    Link: %s\n", r.URL)
 		}
 		if r.Excerpt != "" {
-			fmt.Fprintf(&b, "    > %s\n", truncate(r.Excerpt, 150))
+			fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(r.Excerpt, 150))
 		}
 		b.WriteString("\n")
 	}

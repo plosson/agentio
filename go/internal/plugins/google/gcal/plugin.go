@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
@@ -135,7 +136,7 @@ func calendarsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listCalendars(google.ParseInt(opt(in, "limit"))))
+			return google.Result(a.listCalendars(jsvalue.ParseInt(opt(in, "limit"))))
 		},
 		Format: formatCalendars,
 	}
@@ -175,7 +176,7 @@ func eventsCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			timeMin, timeMax := timeRange(in)
-			return google.Result(a.listEvents(orPrimary(arg(in, "calendar-id")), google.ParseInt(opt(in, "limit")), timeMin, timeMax, opt(in, "query")))
+			return google.Result(a.listEvents(orPrimary(arg(in, "calendar-id")), jsvalue.ParseInt(opt(in, "limit")), timeMin, timeMax, opt(in, "query")))
 		},
 		Format: formatEventList,
 	}
@@ -413,7 +414,7 @@ func searchCmd() plugins.CommandSpec {
 			if timeMax == "" {
 				timeMax = google.ISOString(addDays(t, 90))
 			}
-			return google.Result(a.listEvents(opt(in, "calendar"), google.ParseInt(opt(in, "limit")), timeMin, timeMax, arg(in, "query")))
+			return google.Result(a.listEvents(opt(in, "calendar"), jsvalue.ParseInt(opt(in, "limit")), timeMin, timeMax, arg(in, "query")))
 		},
 		Format: formatEventList,
 	}

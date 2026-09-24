@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -90,7 +91,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 	res := &syncResult{tally: syncTally{Directory: output, PDFsEmbedded: &embedded, PDFsRendered: &rendered}}
 	t := &res.tally
 	for _, d := range documents {
-		id := deref(d.text("id"), "undefined")
+		id := deref(d.Text("id"), "undefined")
 		basename, renamed, err := resolveBasename(id, buildBasename(d), m, basenameToID, func(from, to string) error {
 			return renameIfPresent(output, from, to, ".xml", ".pdf")
 		})
@@ -117,7 +118,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 				t.Failed++
 				continue
 			}
-			xml = decodeUTF8(raw)
+			xml = jsvalue.DecodeUTF8(raw)
 			t.Skipped++
 		} else {
 			payload, err := c.downloadPeppolDocumentUbl(id)
@@ -129,7 +130,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 				t.Failed++
 				continue
 			}
-			xml = decodeUTF8(payload)
+			xml = jsvalue.DecodeUTF8(payload)
 			t.Downloaded++
 		}
 
@@ -181,7 +182,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	}
 	types := map[string]bool{}
 	for _, v := range strings.Split(opt(in, "include"), ",") {
-		if v = jsTrim(v); v != "" {
+		if v = jsvalue.Trim(v); v != "" {
 			types[v] = true
 		}
 	}
@@ -200,16 +201,16 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	if err != nil {
 		return nil, failed(run.Fail, err)
 	}
-	var documents []*object
+	var documents []*jsvalue.Object
 	for _, d := range all {
-		if since != "" && jsSlice(deref(firstOf(d.text("SendDate"), d.text("CreationDate")), ""), 10) < since {
+		if since != "" && jsvalue.Slice(deref(firstOf(d.Text("SendDate"), d.Text("CreationDate")), ""), 10) < since {
 			continue
 		}
-		if customer := opt(in, "customer"); customer != "" && !containsInsensitive(d.text("CustomerName"), strings.ToLower(customer)) {
+		if customer := opt(in, "customer"); customer != "" && !containsInsensitive(d.Text("CustomerName"), strings.ToLower(customer)) {
 			continue
 		}
 		// The endpoint can be over-inclusive, so keep only what was asked for.
-		if t, ok := d.str("Type"); !ok || !types[t] {
+		if t, ok := d.Str("Type"); !ok || !types[t] {
 			continue
 		}
 		documents = append(documents, d)
@@ -223,7 +224,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	res := &syncResult{tally: syncTally{Directory: output}}
 	t := &res.tally
 	for _, d := range documents {
-		id := deref(d.text("Id"), "undefined")
+		id := deref(d.Text("Id"), "undefined")
 		basename, renamed, err := resolveBasename(id, buildBillingBasename(d), m, basenameToID, func(from, to string) error {
 			return renameIfPresent(output, from, to, ".pdf")
 		})
@@ -257,19 +258,19 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	return res, failIfAnyFailed(run, t.Failed, len(documents))
 }
 
-func matchesPeppolRef(d *object, ref string) bool {
+func matchesPeppolRef(d *jsvalue.Object, ref string) bool {
 	return is(d, "id", ref) || is(d, "invoiceReference", ref) || is(d, "documentNumber", ref) ||
 		is(d, "fiduciaryDocumentId", ref) || is(d, "paymentReference", ref)
 }
 
-func noRef(d *object) string {
-	return deref(firstOf(d.text("invoiceReference"), d.text("documentNumber")), "(no ref)")
+func noRef(d *jsvalue.Object) string {
+	return deref(firstOf(d.Text("invoiceReference"), d.Text("documentNumber")), "(no ref)")
 }
 
 // resolveImportPeppolDocument matches the same refs as mark-paid's Peppol
 // fallback but never looks at /document/invoices, the import's destination.
-func resolveImportPeppolDocument(ref string, documents []*object) (*object, error) {
-	var matches []*object
+func resolveImportPeppolDocument(ref string, documents []*jsvalue.Object) (*jsvalue.Object, error) {
+	var matches []*jsvalue.Object
 	for _, d := range documents {
 		if matchesPeppolRef(d, ref) {
 			matches = append(matches, d)
@@ -278,7 +279,7 @@ func resolveImportPeppolDocument(ref string, documents []*object) (*object, erro
 	if len(matches) > 1 {
 		lines := make([]string, len(matches))
 		for i, d := range matches {
-			lines[i] = fmt.Sprintf("  %s  id=%s  state=%s", noRef(d), deref(d.text("id"), "undefined"), deref(d.text("importState"), "-"))
+			lines[i] = fmt.Sprintf("  %s  id=%s  state=%s", noRef(d), deref(d.Text("id"), "undefined"), deref(d.Text("importState"), "-"))
 		}
 		return nil, &apiError{
 			code:       "INVALID_PARAMS",
@@ -308,15 +309,15 @@ func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.
 		return nil, failed(run.Fail, err)
 	}
 	label := describePeppolPaymentTarget(document)
-	if v, _ := document.get("doNotImport"); truthy(v) {
+	if v, _ := document.Get("doNotImport"); jsvalue.Truthy(v) {
 		return nil, run.Fail("INVALID_PARAMS", label+" is marked do-not-import", "Clear that flag in Falco before importing, or pick another document")
 	}
 	if is(document, "importState", "Imported") {
 		return nil, run.Fail("INVALID_PARAMS", label+" is already imported", "Nothing to do. Run: agentio falco peppol list")
 	}
-	id := deref(document.text("id"), "undefined")
+	id := deref(document.Text("id"), "undefined")
 	if flag(in, "dry-run") {
-		run.Log(fmt.Sprintf("Would import %s (id=%s, state=%s)", label, id, deref(document.text("importState"), dash)))
+		run.Log(fmt.Sprintf("Would import %s (id=%s, state=%s)", label, id, deref(document.Text("importState"), dash)))
 		return record{value: document, asJSON: asJSON}, nil
 	}
 
@@ -329,10 +330,10 @@ func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.
 	if confirmed {
 		mark = " ✓"
 	}
-	run.Log(fmt.Sprintf("%s: %s -> %s%s", label, deref(document.text("importState"), "?"), deref(updated.text("importState"), "?"), mark))
+	run.Log(fmt.Sprintf("%s: %s -> %s%s", label, deref(document.Text("importState"), "?"), deref(updated.Text("importState"), "?"), mark))
 
 	// Best-effort: show the register row when Falco has finished creating it.
-	var invoice *object
+	var invoice *jsvalue.Object
 	if invoices, err := c.listAllInvoices(); err != nil {
 		run.Log("  could not re-read invoice register: " + err.Error())
 	} else {
@@ -344,22 +345,22 @@ func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.
 		}
 	}
 	if invoice != nil {
-		run.Log(fmt.Sprintf("  invoice register: %s  id=%s", describeInvoice(invoice), deref(invoice.text("id"), "undefined")))
+		run.Log(fmt.Sprintf("  invoice register: %s  id=%s", describeInvoice(invoice), deref(invoice.Text("id"), "undefined")))
 	} else if confirmed {
 		run.Log("  invoice register: not visible yet (import accepted)")
 	}
 
-	out := newObject()
-	out.set("document", updated)
+	out := jsvalue.NewObject()
+	out.Set("document", updated)
 	if invoice != nil {
-		out.set("invoice", invoice)
+		out.Set("invoice", invoice)
 	} else {
-		out.set("invoice", nil)
+		out.Set("invoice", nil)
 	}
 	res := record{value: out, asJSON: asJSON}
 	if !confirmed {
 		return res, run.Fail("API_ERROR",
-			"Falco accepted the import but importState is "+deref(updated.text("importState"), "unknown"),
+			"Falco accepted the import but importState is "+deref(updated.Text("importState"), "unknown"),
 			"Re-run with the same ref to confirm, or check the Falco purchase-invoices view")
 	}
 	return res, nil
@@ -367,14 +368,14 @@ func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.
 
 // markPaidTarget is either an invoice-register row or a Peppol inbox row.
 type markPaidTarget struct {
-	invoice, document *object
+	invoice, document *jsvalue.Object
 }
 
 // resolveMarkPaidTarget prefers the local invoice register and falls back to
 // the Peppol inbox when the register has no match: organizations that import
 // Peppol documents into a fiduciary never see them under /document/invoices.
-func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*object) (markPaidTarget, error) {
-	var invoiceMatches []*object
+func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*jsvalue.Object) (markPaidTarget, error) {
+	var invoiceMatches []*jsvalue.Object
 	for _, i := range invoices {
 		if is(i, "id", ref) || is(i, "peppolInvoiceId", ref) || is(i, "invoiceReference", ref) {
 			invoiceMatches = append(invoiceMatches, i)
@@ -383,8 +384,8 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*object) (mar
 	if len(invoiceMatches) > 1 {
 		lines := make([]string, len(invoiceMatches))
 		for n, i := range invoiceMatches {
-			lines[n] = fmt.Sprintf("  %s  id=%s  peppol=%s", deref(i.text("invoiceReference"), "(no ref)"),
-				deref(i.text("id"), "undefined"), deref(i.text("peppolInvoiceId"), "-"))
+			lines[n] = fmt.Sprintf("  %s  id=%s  peppol=%s", deref(i.Text("invoiceReference"), "(no ref)"),
+				deref(i.Text("id"), "undefined"), deref(i.Text("peppolInvoiceId"), "-"))
 		}
 		return markPaidTarget{}, &apiError{
 			code:       "INVALID_PARAMS",
@@ -396,7 +397,7 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*object) (mar
 		return markPaidTarget{invoice: invoiceMatches[0]}, nil
 	}
 
-	var peppolMatches []*object
+	var peppolMatches []*jsvalue.Object
 	for _, d := range peppolDocuments {
 		if matchesPeppolRef(d, ref) {
 			peppolMatches = append(peppolMatches, d)
@@ -405,7 +406,7 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*object) (mar
 	if len(peppolMatches) > 1 {
 		lines := make([]string, len(peppolMatches))
 		for n, d := range peppolMatches {
-			lines[n] = fmt.Sprintf("  %s  id=%s  fiduciary=%s", noRef(d), deref(d.text("id"), "undefined"), deref(d.text("fiduciaryDocumentId"), "-"))
+			lines[n] = fmt.Sprintf("  %s  id=%s  fiduciary=%s", noRef(d), deref(d.Text("id"), "undefined"), deref(d.Text("fiduciaryDocumentId"), "-"))
 		}
 		return markPaidTarget{}, &apiError{
 			code:       "INVALID_PARAMS",
@@ -449,7 +450,7 @@ func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunC
 	}
 	// Only read the Peppol inbox when the register has nothing, which keeps the
 	// common path on one list call.
-	var peppolDocuments []*object
+	var peppolDocuments []*jsvalue.Object
 	if hits == 0 {
 		if peppolDocuments, err = c.listAllPeppolDocuments(nil); err != nil {
 			return nil, failed(run.Fail, err)
@@ -468,9 +469,9 @@ func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunC
 	} else {
 		row, label = target.document, describePeppolPaymentTarget(target.document)
 		write = c.setPeppolDocumentPaymentStatus
-		reread = func() ([]*object, error) { return c.listAllPeppolDocuments(nil) }
+		reread = func() ([]*jsvalue.Object, error) { return c.listAllPeppolDocuments(nil) }
 	}
-	id := deref(row.text("id"), "undefined")
+	id := deref(row.Text("id"), "undefined")
 
 	if is(row, "paymentStatus", status) {
 		run.Log(fmt.Sprintf("%s is already %s; nothing to do.", label, status))
@@ -482,7 +483,7 @@ func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunC
 
 	// The write has landed. Everything below only confirms it, so a failure
 	// here must never be reported as though the change did not happen.
-	var updated *object
+	var updated *jsvalue.Object
 	if rows, err := reread(); err != nil {
 		run.Log("  could not re-read to confirm: " + err.Error())
 	} else {
@@ -496,9 +497,9 @@ func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunC
 	confirmed := updated != nil && is(updated, "paymentStatus", status)
 	to := status
 	if updated != nil {
-		to = deref(updated.text("paymentStatus"), status)
+		to = deref(updated.Text("paymentStatus"), status)
 	}
-	run.Log(paymentStatusChange(label, row.text("paymentStatus"), to, confirmed))
+	run.Log(paymentStatusChange(label, row.Text("paymentStatus"), to, confirmed))
 
 	var res any
 	if updated != nil {

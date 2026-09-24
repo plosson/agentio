@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf16"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 var htmlTag = regexp.MustCompile(`<[^>]*>`)
@@ -13,31 +14,9 @@ func trimFinal(s string) string {
 	return strings.TrimSuffix(s, "\n")
 }
 
-// jsSpace is the set JavaScript's \s and String.prototype.trim match.
-func jsSpace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200a
-}
-
 // collapseSpace is `.replace(/\s+/g, ' ').trim()`.
 func collapseSpace(s string) string {
-	return strings.Join(strings.FieldsFunc(s, jsSpace), " ")
-}
-
-func utf16Len(s string) int {
-	return len(utf16.Encode([]rune(s)))
-}
-
-// substring100 is `s.substring(0, 100)`, counted in UTF-16 units.
-func substring100(s string) string {
-	units := utf16.Encode([]rune(s))
-	if len(units) > 100 {
-		return string(utf16.Decode(units[:100]))
-	}
-	return s
+	return strings.Join(strings.FieldsFunc(s, jsvalue.IsSpace), " ")
 }
 
 func flagSuffix(pinned, closed, archived bool) string {
@@ -76,10 +55,10 @@ func formatCategories(v any) string {
 		fmt.Fprintf(&b, "    Slug: %s\n", c.Slug)
 		fmt.Fprintf(&b, "    Topics: %d | Posts: %d\n", c.TopicCount, c.PostCount)
 		if c.Description != "" {
-			desc := substring100(htmlTag.ReplaceAllString(c.Description, ""))
+			desc := jsvalue.Slice(htmlTag.ReplaceAllString(c.Description, ""), 100)
 			if desc != "" {
 				more := ""
-				if utf16Len(c.Description) > 100 {
+				if jsvalue.Slice(c.Description, 100) != c.Description {
 					more = "..."
 				}
 				fmt.Fprintf(&b, "    > %s%s\n", desc, more)

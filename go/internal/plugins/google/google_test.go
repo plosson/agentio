@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/auth"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	calendar "google.golang.org/api/calendar/v3"
 	"google.golang.org/api/googleapi"
@@ -447,30 +447,6 @@ func TestFormatBytesMatchesBun(t *testing.T) {
 	}
 }
 
-func TestParseIntIsJavaScripts(t *testing.T) {
-	for in, want := range map[string]string{"10": "10", " 42abc": "42", "-5": "-5", "+7": "7", "7.9": "7", "abc": "NaN", "": "NaN", "-0": "0", "0x10": "0"} {
-		if got := JSNumber(ParseInt(in)); got != want {
-			t.Errorf("%q: got %s want %s", in, got, want)
-		}
-	}
-}
-
-// Truncate counts UTF-16 units like String.prototype.slice, so an emoji cut
-// in half leaves a lone surrogate (U+FFFD once encoded).
-func TestTruncateCountsUTF16Units(t *testing.T) {
-	cases := map[string]string{
-		"short":                       "short",
-		strings.Repeat("a", 5):        strings.Repeat("a", 5),
-		strings.Repeat("a", 6):        strings.Repeat("a", 5) + "...",
-		strings.Repeat("é", 4) + "😀x": strings.Repeat("é", 4) + "�...",
-	}
-	for in, want := range cases {
-		if got := Truncate(in, 5); got != want {
-			t.Errorf("%q: got %q want %q", in, got, want)
-		}
-	}
-}
-
 // A failed call returning a typed nil must come back as an untyped nil, or the
 // host would print "null" before the error.
 func TestResultDropsTheTypedNilOnFailure(t *testing.T) {
@@ -555,65 +531,6 @@ func TestStatusMessageUsesTheProductTextFor403And404(t *testing.T) {
 	}
 }
 
-func TestJSNumberIsJavaScriptsString(t *testing.T) {
-	tenth, fifth := 0.1, 0.2
-	cases := map[float64]string{
-		0: "0", math.Copysign(0, -1): "0", 12: "12", -3.5: "-3.5", tenth + fifth: "0.30000000000000004",
-		1e21: "1e+21", 1.5e22: "1.5e+22", 1e-7: "1e-7", -2.5e-8: "-2.5e-8", 0.000001: "0.000001",
-		123456789012345680000: "123456789012345680000", math.Inf(1): "Infinity", math.Inf(-1): "-Infinity", math.NaN(): "NaN",
-	}
-	for in, want := range cases {
-		if got := JSNumber(in); got != want {
-			t.Errorf("%v: got %q want %q", in, got, want)
-		}
-	}
-}
-
-// Google escapes <, >, =, & and ' in its JSON; JSON.parse then JSON.stringify
-// prints them as is, keeps key order and keeps false and zero values.
-func TestParseJSONRoundTripsLikeJSONStringify(t *testing.T) {
-	raw := `{"z":1,"a":{"bold":false,"n":0,"f":1.50,"e":1E2,"big":1e400},"s":"a<b=&' \"\\\b\f\n\r\t\u0001é","arr":[],"obj":{},"nul":null,"z":2}`
-	v, err := ParseJSON([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := v.(*Object).MarshalJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"z":2,"a":{"bold":false,"n":0,"f":1.5,"e":100,"big":null},"s":"a<b=&'` + " " + `\"\\\b\f\n\r\t\u0001é","arr":[],"obj":{},"nul":null}`
-	if string(got) != want {
-		t.Fatalf("\n got %s\nwant %s", got, want)
-	}
-	// Indented by an encoder that does not escape HTML, as the host prints --json.
-	var b strings.Builder
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(map[string]any{"v": v}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(b.String(), "\"s\": \"a<b=&' ") || !strings.Contains(b.String(), "\"arr\": [],") {
-		t.Fatalf("%s", b.String())
-	}
-	obj := v.(*Object)
-	if z, ok := obj.Get("z"); !ok || z != json.Number("2") {
-		t.Fatalf("%v", z)
-	}
-	if _, ok := obj.Get("missing"); ok {
-		t.Fatal("missing key present")
-	}
-	var nilObj *Object
-	if _, ok := nilObj.Get("x"); ok {
-		t.Fatal("nil object has keys")
-	}
-	for _, bad := range []string{`{"a":`, `{} {}`, `[1,]`, ``} {
-		if _, err := ParseJSON([]byte(bad)); err == nil {
-			t.Errorf("%q parsed", bad)
-		}
-	}
-}
-
 func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
 	waits := noSleep(t)
 	var bodies []string
@@ -652,7 +569,7 @@ func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
 	if bodies[0] != body {
 		t.Fatalf("body rewritten: %s", bodies[0])
 	}
-	if out, _ := v.(*Object).MarshalJSON(); string(out) != `{"replies":[{}],"documentId":"d1"}` {
+	if out, _ := v.(*jsvalue.Object).MarshalJSON(); string(out) != `{"replies":[{}],"documentId":"d1"}` {
 		t.Fatalf("%s", out)
 	}
 	// A failed POST is not retried (gaxios leaves POST alone).

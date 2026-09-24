@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 	"unicode/utf16"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -170,15 +170,10 @@ func headerSafeJSON(v any) (string, error) {
 
 var identifierPath = regexp.MustCompile(`^(id|rev|ns):`)
 
-// jsSpace is the set String.prototype.trim removes.
-func jsSpace(r rune) bool {
-	return unicode.IsSpace(r) || r == '\ufeff'
-}
-
 // normalizePath is normalizeDropboxPath: the root is "", everything else is
 // absolute with no trailing slash, and id:/rev:/ns: identifiers pass through.
 func normalizePath(input string) string {
-	trimmed := strings.TrimFunc(input, jsSpace)
+	trimmed := jsvalue.Trim(input)
 	if trimmed == "" || trimmed == "/" {
 		return ""
 	}
@@ -265,7 +260,7 @@ func responseError(resp *http.Response, operation string) error {
 	}
 	return &apiError{
 		code:       errorCodeFor(resp.StatusCode, summary),
-		message:    fmt.Sprintf("Dropbox %s failed (%d): %s", operation, resp.StatusCode, strings.TrimFunc(summary, jsSpace)),
+		message:    fmt.Sprintf("Dropbox %s failed (%d): %s", operation, resp.StatusCode, jsvalue.Trim(summary)),
 		suggestion: suggestionFor(resp.StatusCode, summary),
 	}
 }
@@ -531,7 +526,7 @@ func (a *api) upload(filePath, destination string, overwrite bool) (uploadResult
 	// A destination ending in "/" (or the root) means "keep the local name".
 	normalized := normalizePath(destination)
 	remote := normalized
-	if normalized == "" || strings.HasSuffix(strings.TrimFunc(destination, jsSpace), "/") {
+	if normalized == "" || strings.HasSuffix(jsvalue.Trim(destination), "/") {
 		remote = normalized + "/" + filepath.Base(filePath)
 	}
 	mode := "add"

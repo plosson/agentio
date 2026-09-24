@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -150,7 +151,7 @@ func setTokens(creds map[string]any, data tokenResponse) {
 // ask is Bun's prompt(): the answer is trimmed and a closed stdin reads as empty.
 func ask(setup *plugins.SetupContext, question string) string {
 	answer, _ := setup.Prompt(question, false)
-	return strings.TrimFunc(answer, jsSpace)
+	return jsvalue.Trim(answer)
 }
 
 // authorise shows the authorisation URL and reads back the pasted code.
@@ -182,7 +183,7 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	if appKey == "" {
 		appKey, _ = setup.Prompt("? App key: ", false)
 	}
-	appKey = strings.TrimFunc(appKey, jsSpace)
+	appKey = jsvalue.Trim(appKey)
 	if appKey == "" {
 		return nil, setup.Fail("INVALID_PARAMS", "App key is required", "")
 	}

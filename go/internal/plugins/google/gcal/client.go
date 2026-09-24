@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	calendar "google.golang.org/api/calendar/v3"
@@ -424,7 +425,7 @@ func parseReminders(specs []string, run *plugins.RunContext) ([]*calendar.EventR
 			return nil, run.Fail("INVALID_PARAMS", "Invalid reminder format: "+spec, "Use format: method:minutes (e.g., popup:30)")
 		}
 		r := &calendar.EventReminder{Method: method, ForceSendFields: []string{"Minutes"}}
-		if n := google.ParseInt(minutes); math.IsNaN(n) {
+		if n := jsvalue.ParseInt(minutes); math.IsNaN(n) {
 			// JSON.stringify(NaN) is null.
 			r.ForceSendFields, r.NullFields = nil, []string{"Minutes"}
 		} else {
@@ -516,7 +517,7 @@ func timeRange(in plugins.CommandInput) (string, string) {
 		start := time.Date(t.Year(), t.Month(), t.Day()+offset, 0, 0, 0, 0, time.Local)
 		return google.ISOString(start), google.ISOString(addDays(start, 1))
 	case opt(in, "days") != "":
-		days := google.ParseInt(opt(in, "days"))
+		days := jsvalue.ParseInt(opt(in, "days"))
 		if math.IsNaN(days) || days <= 0 {
 			return "", ""
 		}
@@ -538,5 +539,5 @@ func maxResults(limit float64) googleapi.CallOption {
 	if !math.IsNaN(limit) {
 		limit = math.Min(limit, 250)
 	}
-	return googleapi.QueryParameter("maxResults", google.JSNumber(limit))
+	return googleapi.QueryParameter("maxResults", jsvalue.NumberString(limit))
 }

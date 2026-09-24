@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -83,7 +84,7 @@ func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *clie
 	// The host refreshes before handing credentials over, so an access token is
 	// present in practice; an empty one simply fails the first call as 401.
 	token, _ := creds["accessToken"].(string)
-	return &client{ctx: ctx, fetch: fetch, accessToken: token, organizationID: jsString(orNull(creds["organizationId"]))}
+	return &client{ctx: ctx, fetch: fetch, accessToken: token, organizationID: jsvalue.String(orNull(creds["organizationId"]))}
 }
 
 // orNull keeps String(undefined) out of a URL: a missing id reads as "undefined".
@@ -127,8 +128,8 @@ func (c *client) send(method, url string, headers [][2]string, body []byte, what
 
 func (c *client) fail(status int, body, what string) error {
 	detail := ""
-	if jsTrim(body) != "" {
-		detail = ": " + jsSlice(body, 200)
+	if jsvalue.Trim(body) != "" {
+		detail = ": " + jsvalue.Slice(body, 200)
 	}
 	suggestion := ""
 	if status == 401 {
@@ -142,7 +143,7 @@ func (c *client) fail(status int, body, what string) error {
 }
 
 func malformed(what, text string) error {
-	return &apiError{code: "API_ERROR", message: fmt.Sprintf("Falco returned malformed JSON while %s: %s", what, jsSlice(text, 200))}
+	return &apiError{code: "API_ERROR", message: fmt.Sprintf("Falco returned malformed JSON while %s: %s", what, jsvalue.Slice(text, 200))}
 }
 
 // getJSON returns nil for an empty body, as Bun's getJson returns null.
@@ -151,14 +152,14 @@ func (c *client) getJSON(pathAndQuery, what string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	text := decodeUTF8(resp.body)
+	text := jsvalue.DecodeUTF8(resp.body)
 	if !resp.ok() {
 		return nil, c.fail(resp.status, text, what)
 	}
 	if text == "" {
 		return nil, nil
 	}
-	v, err := parseJS([]byte(text))
+	v, err := jsvalue.Parse([]byte(text))
 	if err != nil {
 		return nil, malformed(what, text)
 	}
@@ -166,13 +167,13 @@ func (c *client) getJSON(pathAndQuery, what string) (any, error) {
 }
 
 // objects reads a JSON array of records. A non-array reads as empty.
-func objects(v any) []*object {
+func objects(v any) []*jsvalue.Object {
 	arr, _ := v.([]any)
-	out := make([]*object, 0, len(arr))
+	out := make([]*jsvalue.Object, 0, len(arr))
 	for _, e := range arr {
-		o, _ := e.(*object)
+		o, _ := e.(*jsvalue.Object)
 		if o == nil {
-			o = newObject()
+			o = jsvalue.NewObject()
 		}
 		out = append(out, o)
 	}
@@ -187,7 +188,7 @@ type organization struct {
 }
 
 type userMe struct {
-	raw                            *object
+	raw                            *jsvalue.Object
 	id, email, firstName, lastName string
 	organizations                  []organization
 }
@@ -197,47 +198,47 @@ func (c *client) getUserMe() (userMe, error) {
 	if err != nil {
 		return userMe{}, err
 	}
-	o, _ := v.(*object)
+	o, _ := v.(*jsvalue.Object)
 	me := userMe{raw: o}
 	if o == nil {
 		return me, nil
 	}
-	me.id = jsString(orNull(valueOf(o, "id")))
-	me.email = jsString(orNull(valueOf(o, "email")))
-	me.firstName = jsString(orNull(valueOf(o, "firstName")))
-	me.lastName = jsString(orNull(valueOf(o, "lastName")))
+	me.id = jsvalue.String(orNull(valueOf(o, "id")))
+	me.email = jsvalue.String(orNull(valueOf(o, "email")))
+	me.firstName = jsvalue.String(orNull(valueOf(o, "firstName")))
+	me.lastName = jsvalue.String(orNull(valueOf(o, "lastName")))
 	orgs, _ := valueOf(o, "organizations").([]any)
 	for _, e := range orgs {
-		org, _ := e.(*object)
+		org, _ := e.(*jsvalue.Object)
 		if org == nil {
 			continue
 		}
-		id, _ := org.str("id")
+		id, _ := org.Str("id")
 		me.organizations = append(me.organizations, organization{
-			id: id, name: jsString(orNull(valueOf(org, "name"))), vatNumber: org.text("vatNumber"),
+			id: id, name: jsvalue.String(orNull(valueOf(org, "name"))), vatNumber: org.Text("vatNumber"),
 		})
 	}
 	return me, nil
 }
 
-func valueOf(o *object, key string) any {
-	v, _ := o.get(key)
+func valueOf(o *jsvalue.Object, key string) any {
+	v, _ := o.Get(key)
 	return v
 }
 
 // --- Peppol inbox ---------------------------------------------------------------
 
 // listPeppolDocuments requests every state; narrowing happens client-side.
-func (c *client) listPeppolDocuments(last *cursor) ([]*object, error) {
-	q := newQuery()
+func (c *client) listPeppolDocuments(last *cursor) ([]*jsvalue.Object, error) {
+	q := jsvalue.NewSearchParams()
 	for _, k := range []string{"showNotImported", "showImported", "showProcessing", "showAccepted", "showRejected", "showNoResponse"} {
-		q.set(k, "true")
+		q.Set(k, "true")
 	}
-	q.set("selfBilling", "false")
+	q.Set("selfBilling", "false")
 	// Bun skips only undefined and "": a null id is sent as "null".
 	if last != nil && last.present {
-		if s := jsString(last.value); s != "" {
-			q.set("last", s)
+		if s := jsvalue.String(last.value); s != "" {
+			q.Set("last", s)
 		}
 	}
 	v, err := c.getJSON("/peppol/documents/"+c.organizationID+"?"+q.String(), "listing Peppol documents")
@@ -258,8 +259,8 @@ type cursor struct {
 
 // walk follows the `last=<id>` cursor until the server stops returning new
 // records. A page of records already seen means the cursor is not advancing.
-func walk(fetchPage func(last *cursor) ([]*object, error), onPage pageProgress) ([]*object, error) {
-	var all []*object
+func walk(fetchPage func(last *cursor) ([]*jsvalue.Object, error), onPage pageProgress) ([]*jsvalue.Object, error) {
+	var all []*jsvalue.Object
 	seen := map[string]bool{}
 	var last *cursor
 	for page := 0; page < maxPages; page++ {
@@ -272,13 +273,12 @@ func walk(fetchPage func(last *cursor) ([]*object, error), onPage pageProgress) 
 		}
 		added := 0
 		for _, rec := range chunk {
-			id, _ := rec.get("id")
-			var key bytes.Buffer
-			writeJS(&key, id)
-			if seen[key.String()] {
+			id, _ := rec.Get("id")
+			key := string(jsvalue.Stringify(id))
+			if seen[key] {
 				continue
 			}
-			seen[key.String()] = true
+			seen[key] = true
 			all = append(all, rec)
 			added++
 		}
@@ -290,12 +290,12 @@ func walk(fetchPage func(last *cursor) ([]*object, error), onPage pageProgress) 
 		}
 		oldest := chunk[len(chunk)-1]
 		last = &cursor{}
-		last.value, last.present = oldest.get("id")
+		last.value, last.present = oldest.Get("id")
 	}
 	return all, nil
 }
 
-func (c *client) listAllPeppolDocuments(onPage pageProgress) ([]*object, error) {
+func (c *client) listAllPeppolDocuments(onPage pageProgress) ([]*jsvalue.Object, error) {
 	return walk(c.listPeppolDocuments, onPage)
 }
 
@@ -304,13 +304,13 @@ var htmlType = regexp.MustCompile(`(?i)html`)
 // downloadPeppolDocumentUbl returns the raw UBL XML for one Peppol document.
 func (c *client) downloadPeppolDocumentUbl(documentID string) ([]byte, error) {
 	what := "downloading document " + documentID
-	resp, err := c.send(http.MethodGet, apiURL+"/peppol/document/"+encodeURIComponent(documentID),
+	resp, err := c.send(http.MethodGet, apiURL+"/peppol/document/"+jsvalue.EncodeURIComponent(documentID),
 		[][2]string{{"Accept", "application/xml"}}, nil, what)
 	if err != nil {
 		return nil, err
 	}
 	if !resp.ok() {
-		return nil, c.fail(resp.status, decodeUTF8(resp.body), what)
+		return nil, c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
 	}
 	contentType := resp.contentType
 	if contentType == "" {
@@ -330,14 +330,14 @@ func (c *client) downloadPeppolDocumentUbl(documentID string) ([]byte, error) {
 
 // --- Invoices (the payment-status view) ----------------------------------------
 
-func (c *client) listInvoices(last *cursor) ([]*object, error) {
-	q := newQuery()
-	q.set("organizationId", c.organizationID)
-	q.set("take", "100")
-	q.set("sortBy", "createdAt")
-	q.set("sortDirection", "desc")
-	if last != nil && truthy(last.value) {
-		q.set("last", jsString(last.value))
+func (c *client) listInvoices(last *cursor) ([]*jsvalue.Object, error) {
+	q := jsvalue.NewSearchParams()
+	q.Set("organizationId", c.organizationID)
+	q.Set("take", "100")
+	q.Set("sortBy", "createdAt")
+	q.Set("sortDirection", "desc")
+	if last != nil && jsvalue.Truthy(last.value) {
+		q.Set("last", jsvalue.String(last.value))
 	}
 	v, err := c.getJSON("/document/invoices?"+q.String(), "listing invoices")
 	if err != nil {
@@ -346,7 +346,7 @@ func (c *client) listInvoices(last *cursor) ([]*object, error) {
 	return objects(v), nil
 }
 
-func (c *client) listAllInvoices() ([]*object, error) {
+func (c *client) listAllInvoices() ([]*jsvalue.Object, error) {
 	return walk(c.listInvoices, nil)
 }
 
@@ -357,9 +357,9 @@ func jsonBody(pairs ...string) []byte {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		writeJSString(&b, pairs[i])
+		b.WriteString(jsvalue.Quote(pairs[i]))
 		b.WriteByte(':')
-		writeJSString(&b, pairs[i+1])
+		b.WriteString(jsvalue.Quote(pairs[i+1]))
 	}
 	b.WriteByte('}')
 	return b.Bytes()
@@ -377,7 +377,7 @@ func (c *client) setInvoicePaymentStatus(documentID, status string) error {
 		return err
 	}
 	if !resp.ok() {
-		return c.fail(resp.status, decodeUTF8(resp.body), what)
+		return c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
 	}
 	return nil
 }
@@ -386,13 +386,13 @@ func (c *client) setInvoicePaymentStatus(documentID, status string) error {
 // is { Status }, not { PaymentStatus }, matching UpdatePeppolInvoiceStatus.
 func (c *client) setPeppolDocumentPaymentStatus(documentID, status string) error {
 	what := "updating Peppol payment status for " + documentID
-	resp, err := c.send(http.MethodPut, apiURL+"/peppol/document/"+encodeURIComponent(documentID)+"/status", jsonContent,
+	resp, err := c.send(http.MethodPut, apiURL+"/peppol/document/"+jsvalue.EncodeURIComponent(documentID)+"/status", jsonContent,
 		jsonBody("Status", status), what)
 	if err != nil {
 		return err
 	}
 	if !resp.ok() {
-		return c.fail(resp.status, decodeUTF8(resp.body), what)
+		return c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
 	}
 	return nil
 }
@@ -401,14 +401,14 @@ var alreadyImported = regexp.MustCompile(`(?i)already_imported`)
 
 // importPeppolDocumentToFalco is the desktop transferToFalcoDocument call.
 // Falco answers an already-imported document with HTTP 400 already_imported.
-func (c *client) importPeppolDocumentToFalco(documentID string) (*object, error) {
+func (c *client) importPeppolDocumentToFalco(documentID string) (*jsvalue.Object, error) {
 	what := fmt.Sprintf("importing Peppol document %s into the invoice register", documentID)
 	resp, err := c.send(http.MethodPost, apiURL+"/peppol/transfer-falco", jsonContent,
 		jsonBody("PeppolDocumentId", documentID), what)
 	if err != nil {
 		return nil, err
 	}
-	text := decodeUTF8(resp.body)
+	text := jsvalue.DecodeUTF8(resp.body)
 	if !resp.ok() {
 		if resp.status == 400 && alreadyImported.MatchString(text) {
 			return nil, &apiError{
@@ -422,13 +422,13 @@ func (c *client) importPeppolDocumentToFalco(documentID string) (*object, error)
 	if text == "" {
 		return nil, &apiError{code: "API_ERROR", message: "Falco returned an empty body while " + what}
 	}
-	v, err := parseJS([]byte(text))
+	v, err := jsvalue.Parse([]byte(text))
 	if err != nil {
 		return nil, malformed(what, text)
 	}
-	o, _ := v.(*object)
+	o, _ := v.(*jsvalue.Object)
 	if o == nil {
-		o = newObject()
+		o = jsvalue.NewObject()
 	}
 	return o, nil
 }
@@ -439,7 +439,7 @@ type billingTypes struct {
 	invoices, creditNotes, estimates, advancePayments, proformas bool
 }
 
-func (c *client) listBillingDocuments(t billingTypes) ([]*object, error) {
+func (c *client) listBillingDocuments(t billingTypes) ([]*jsvalue.Object, error) {
 	what := "listing billing documents"
 	body, _ := json.Marshal(struct {
 		Invoices        bool
@@ -449,34 +449,34 @@ func (c *client) listBillingDocuments(t billingTypes) ([]*object, error) {
 		Proformas       bool
 		Offset          int
 	}{t.invoices, t.creditNotes, t.estimates, t.advancePayments, t.proformas, 0})
-	resp, err := c.send(http.MethodPost, billingAPIURL+"/api.billing/billing-documents/period/"+encodeURIComponent(c.organizationID),
+	resp, err := c.send(http.MethodPost, billingAPIURL+"/api.billing/billing-documents/period/"+jsvalue.EncodeURIComponent(c.organizationID),
 		jsonContent, body, what)
 	if err != nil {
 		return nil, err
 	}
-	text := decodeUTF8(resp.body)
+	text := jsvalue.DecodeUTF8(resp.body)
 	if !resp.ok() {
 		return nil, c.fail(resp.status, text, what)
 	}
-	v, err := parseJS([]byte(text))
+	v, err := jsvalue.Parse([]byte(text))
 	if err != nil || v == nil {
 		// JSON.parse failing and reading a property of null both land in the
 		// same catch in Bun.
 		return nil, malformed(what, text)
 	}
-	o, _ := v.(*object)
+	o, _ := v.(*jsvalue.Object)
 	docs, _ := valueOf(o, "BillingDocuments").([]any)
 	return objects(docs), nil
 }
 
 func (c *client) downloadBillingDocumentPdf(documentID string) ([]byte, error) {
 	what := "downloading billing document " + documentID
-	resp, err := c.send(http.MethodGet, billingAPIURL+"/api.billing/billing-documents/src/"+encodeURIComponent(documentID), nil, nil, what)
+	resp, err := c.send(http.MethodGet, billingAPIURL+"/api.billing/billing-documents/src/"+jsvalue.EncodeURIComponent(documentID), nil, nil, what)
 	if err != nil {
 		return nil, err
 	}
 	if !resp.ok() {
-		return nil, c.fail(resp.status, decodeUTF8(resp.body), what)
+		return nil, c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
 	}
 	return resp.body, nil
 }

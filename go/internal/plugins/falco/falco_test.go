@@ -22,6 +22,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
@@ -859,7 +860,7 @@ func TestPaginationWalksTheCursorAndStops(t *testing.T) {
 	}
 	var ids []string
 	for _, d := range docs {
-		id, _ := d.str("id")
+		id, _ := d.Str("id")
 		ids = append(ids, id)
 	}
 	hits := fake.recorded()
@@ -1094,17 +1095,17 @@ func TestSyncPlan(t *testing.T) {
 	}
 }
 
-func obj(t *testing.T, raw string) *object {
+func obj(t *testing.T, raw string) *jsvalue.Object {
 	t.Helper()
-	v, err := parseJS([]byte(raw))
+	v, err := jsvalue.Parse([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return v.(*object)
+	return v.(*jsvalue.Object)
 }
 
-func objs(t *testing.T, raws ...string) []*object {
-	var out []*object
+func objs(t *testing.T, raws ...string) []*jsvalue.Object {
+	var out []*jsvalue.Object
 	for _, r := range raws {
 		out = append(out, obj(t, r))
 	}
@@ -1168,13 +1169,13 @@ func TestResolveImportPeppolDocument(t *testing.T) {
 // tests/plugins/falco/naming.test.ts
 func TestBasenames(t *testing.T) {
 	base := `{"id":"7f2c1e90-1111-2222-3333-444455556666","documentNumber":"2026-0042","documentDate":"2026-07-14T00:00:00Z","downloadDate":null,"supplierName":"Acme BV","invoiceReference":null}`
-	with := func(field, value string) *object {
+	with := func(field, value string) *jsvalue.Object {
 		o := obj(t, base)
-		v, _ := parseJS([]byte(value))
-		o.set(field, v)
+		v, _ := jsvalue.Parse([]byte(value))
+		o.Set(field, v)
 		return o
 	}
-	cases := map[string]*object{
+	cases := map[string]*jsvalue.Object{
 		"2026-07-14_acme-bv_2026-0042":           obj(t, base),
 		"2026-07-14_losson-associes_2026-0042":   with("supplierName", `"Losson & Associés"`),
 		"2026-07-14_acme-bv_INV-2026-9":          with("invoiceReference", `"INV/2026/9"`),
@@ -1185,7 +1186,7 @@ func TestBasenames(t *testing.T) {
 	noNumber := with("documentNumber", "null")
 	cases["2026-07-14_acme-bv_7f2c1e90"] = noNumber
 	download := with("documentDate", "null")
-	download.set("downloadDate", "2026-08-01T10:00:00Z")
+	download.Set("downloadDate", "2026-08-01T10:00:00Z")
 	cases["2026-08-01_acme-bv_2026-0042"] = download
 	for want, doc := range cases {
 		if got := buildBasename(doc); got != want {
@@ -1366,27 +1367,5 @@ func TestRenderingFollowsPdfLib(t *testing.T) {
 	d := "2026-07-14T00:00:00Z"
 	if formatDate(&d) != "14/07/2026" || formatDate(nil) != "—" {
 		t.Fatal("formatDate")
-	}
-}
-
-func TestJavaScriptValueRules(t *testing.T) {
-	for f, want := range map[float64]string{2.5: "2.5", 1e21: "1e+21", 1e-7: "1e-7", 0.000001: "0.000001", -3: "-3", 12345678901234567890: "12345678901234567000"} {
-		if got := jsNumberString(f); got != want {
-			t.Errorf("%v -> %s, want %s", f, got, want)
-		}
-	}
-	for f, want := range map[float64]string{0.125: "0.13", -0.125: "-0.13", 1.005: "1.00", -0.001: "-0.00", 2.675: "2.67"} {
-		if got := toFixed(f, 2); got != want {
-			t.Errorf("toFixed(%v) = %s, want %s", f, got, want)
-		}
-	}
-	var b bytes.Buffer
-	writeJS(&b, obj(t, `{"b":1,"a":"<&>\u2028\u0001","b":2.50}`))
-	if b.String() != "{\"b\":2.5,\"a\":\"<&>\u2028\\u0001\"}" {
-		t.Fatalf("%s", b.String())
-	}
-	if jsSlice("a😀b", 2) != "a\ufffd" || jsSlice("abc", 10) != "abc" || encodeURIComponent("a b/é!*'()~") != "a%20b%2F%C3%A9!*'()~" ||
-		formEscape("a b~*") != "a+b%7E*" {
-		t.Fatal("string helpers")
 	}
 }

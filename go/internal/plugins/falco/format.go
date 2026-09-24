@@ -1,53 +1,44 @@
 package falco
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 const dash = "—"
-
-// stringifyJS is JSON.stringify(v, null, 2).
-func stringifyJS(v any) string {
-	var compact, indented bytes.Buffer
-	writeJS(&compact, v)
-	if err := json.Indent(&indented, compact.Bytes(), "", "  "); err != nil {
-		return compact.String()
-	}
-	return indented.String()
-}
 
 func fmtDate(iso *string) string {
 	if iso == nil || *iso == "" {
 		return dash
 	}
-	return jsSlice(*iso, 10)
+	return jsvalue.Slice(*iso, 10)
 }
 
 // fmtAmount is the amount and its currency ("€" for EUR), trimmed, or a dash
 // when the amount is falsy.
-func fmtAmount(o *object, amountKey, currencyKey string) string {
-	amount, _ := o.get(amountKey)
-	if !truthy(amount) {
+func fmtAmount(o *jsvalue.Object, amountKey, currencyKey string) string {
+	amount, _ := o.Get(amountKey)
+	if !jsvalue.Truthy(amount) {
 		return dash
 	}
 	symbol := ""
-	if c := o.text(currencyKey); c != nil {
+	if c := o.Text(currencyKey); c != nil {
 		symbol = *c
-		if cur, _ := o.str(currencyKey); cur == "EUR" {
+		if cur, _ := o.Str(currencyKey); cur == "EUR" {
 			symbol = "€"
 		}
 	}
-	return jsTrim(jsString(amount) + " " + symbol)
+	return jsvalue.Trim(jsvalue.String(amount) + " " + symbol)
 }
 
 // pad left-aligns, truncating with an ellipsis so columns never drift.
 func pad(value string, width int) string {
 	n := utf16Len(value)
 	if n >= width {
-		return jsSlice(value, width-1) + "…"
+		return jsvalue.Slice(value, width-1) + "…"
 	}
 	return value + strings.Repeat(" ", width-n)
 }
@@ -56,55 +47,55 @@ func pad(value string, width int) string {
 func padLeft(value string, width int) string {
 	n := utf16Len(value)
 	if n >= width {
-		return jsSlice(value, width-1) + "…"
+		return jsvalue.Slice(value, width-1) + "…"
 	}
 	return strings.Repeat(" ", width-n) + value
 }
 
-func formatPeppolDocuments(documents []*object) string {
+func formatPeppolDocuments(documents []*jsvalue.Object) string {
 	if len(documents) == 0 {
 		return "No Peppol documents match."
 	}
 	header := pad("DATE", 11) + pad("NUMBER", 18) + pad("SUPPLIER", 40) + padLeft("AMOUNT", 14) + "  " + pad("STATE", 14) + "ID"
 	lines := []string{header, strings.Repeat("-", utf16Len(header))}
 	for _, d := range documents {
-		supplier := deref(d.text("supplierName"), "?")
-		if vat, _ := d.get("supplierVatNumber"); truthy(vat) {
-			supplier += " (" + jsString(vat) + ")"
+		supplier := deref(d.Text("supplierName"), "?")
+		if vat, _ := d.Get("supplierVatNumber"); jsvalue.Truthy(vat) {
+			supplier += " (" + jsvalue.String(vat) + ")"
 		}
 		lines = append(lines,
-			pad(fmtDate(d.text("documentDate")), 11)+
-				pad(deref(d.text("documentNumber"), dash), 18)+
+			pad(fmtDate(d.Text("documentDate")), 11)+
+				pad(deref(d.Text("documentNumber"), dash), 18)+
 				pad(supplier, 40)+
 				padLeft(fmtAmount(d, "amount", "currency"), 14)+
 				"  "+
-				pad(deref(d.text("importState"), dash), 14)+
-				deref(d.text("id"), "undefined"))
+				pad(deref(d.Text("importState"), dash), 14)+
+				deref(d.Text("id"), "undefined"))
 	}
 	lines = append(lines, "", fmt.Sprintf("%d document(s)", len(documents)))
 	return strings.Join(lines, "\n")
 }
 
-func describeInvoice(inv *object) string {
-	ref := deref(inv.text("invoiceReference"), deref(inv.text("id"), "undefined"))
-	return fmt.Sprintf("%s (%s, %s)", ref, deref(inv.text("supplierName"), "?"), fmtAmount(inv, "amount", "invoiceCurrency"))
+func describeInvoice(inv *jsvalue.Object) string {
+	ref := deref(inv.Text("invoiceReference"), deref(inv.Text("id"), "undefined"))
+	return fmt.Sprintf("%s (%s, %s)", ref, deref(inv.Text("supplierName"), "?"), fmtAmount(inv, "amount", "invoiceCurrency"))
 }
 
 // describePeppolPaymentTarget has describeInvoice's shape, for inbox rows that
 // never reach /document/invoices.
-func describePeppolPaymentTarget(d *object) string {
-	ref := deref(firstOf(d.text("invoiceReference"), d.text("documentNumber"), d.text("id")), "undefined")
-	return fmt.Sprintf("%s (%s, %s)", ref, deref(d.text("supplierName"), "?"), fmtAmount(d, "amount", "currency"))
+func describePeppolPaymentTarget(d *jsvalue.Object) string {
+	ref := deref(firstOf(d.Text("invoiceReference"), d.Text("documentNumber"), d.Text("id")), "undefined")
+	return fmt.Sprintf("%s (%s, %s)", ref, deref(d.Text("supplierName"), "?"), fmtAmount(d, "amount", "currency"))
 }
 
-func describePeppolDocument(d *object) string {
-	return fmt.Sprintf("%s  %s  %s", fmtDate(d.text("documentDate")), deref(d.text("supplierName"), "?"), fmtAmount(d, "amount", "currency"))
+func describePeppolDocument(d *jsvalue.Object) string {
+	return fmt.Sprintf("%s  %s  %s", fmtDate(d.Text("documentDate")), deref(d.Text("supplierName"), "?"), fmtAmount(d, "amount", "currency"))
 }
 
-func describeBillingDocument(d *object) string {
-	date := fmtDate(firstOf(d.text("SendDate"), d.text("CreationDate")))
-	return jsTrim(fmt.Sprintf("%s  %s  %s %s", date, deref(d.text("CustomerName"), "?"),
-		deref(d.text("FinalAmount"), "?"), deref(d.text("CurrencyCode"), "")))
+func describeBillingDocument(d *jsvalue.Object) string {
+	date := fmtDate(firstOf(d.Text("SendDate"), d.Text("CreationDate")))
+	return jsvalue.Trim(fmt.Sprintf("%s  %s  %s %s", date, deref(d.Text("CustomerName"), "?"),
+		deref(d.Text("FinalAmount"), "?"), deref(d.Text("CurrencyCode"), "")))
 }
 
 func paymentStatusChange(label string, from *string, to string, confirmed bool) string {
@@ -127,7 +118,7 @@ func fileWritten(path string, n int, note string) string {
 // peppolList prints as the Bun table, or as the documents with --format json.
 // The host's --json is always the documents.
 type peppolList struct {
-	documents []*object
+	documents []*jsvalue.Object
 	asJSON    bool
 }
 
@@ -140,9 +131,7 @@ func (l peppolList) value() []any {
 }
 
 func (l peppolList) MarshalJSON() ([]byte, error) {
-	var b bytes.Buffer
-	writeJS(&b, l.value())
-	return b.Bytes(), nil
+	return jsvalue.Stringify(l.value()), nil
 }
 
 func formatPeppolList(v any) string {
@@ -151,7 +140,7 @@ func formatPeppolList(v any) string {
 		return ""
 	}
 	if l.asJSON {
-		return stringifyJS(l.value())
+		return string(jsvalue.StringifyIndent(l.value()))
 	}
 	return formatPeppolDocuments(l.documents)
 }
@@ -164,9 +153,7 @@ type record struct {
 }
 
 func (r record) MarshalJSON() ([]byte, error) {
-	var b bytes.Buffer
-	writeJS(&b, r.value)
-	return b.Bytes(), nil
+	return jsvalue.Stringify(r.value), nil
 }
 
 func formatRecord(v any) string {
@@ -174,7 +161,7 @@ func formatRecord(v any) string {
 	if !ok || !r.asJSON {
 		return ""
 	}
-	return stringifyJS(r.value)
+	return string(jsvalue.StringifyIndent(r.value))
 }
 
 // written is peppol get: the XML on stdout for --output -, otherwise the

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	docs "google.golang.org/api/docs/v1"
@@ -165,17 +166,17 @@ func pageSize(limit float64) googleapi.CallOption {
 	if limit > 100 {
 		limit = 100
 	}
-	return googleapi.QueryParameter("pageSize", google.JSNumber(limit))
+	return googleapi.QueryParameter("pageSize", jsvalue.NumberString(limit))
 }
 
 // getDocument is docs.documents.get as the API sent it.
-func (a *api) getDocument(documentID string, includeTabsContent bool, operation string) (*google.Object, error) {
+func (a *api) getDocument(documentID string, includeTabsContent bool, operation string) (*jsvalue.Object, error) {
 	path := "v1/documents/" + url.PathEscape(documentID) + "?includeTabsContent=" + strconv.FormatBool(includeTabsContent)
 	v, err := google.CallJSON(a.ctx, a.run, google.Camel, "GET", a.docsBase, path, nil)
 	if err != nil {
 		return nil, a.apiError(operation, err)
 	}
-	doc, _ := v.(*google.Object)
+	doc, _ := v.(*jsvalue.Object)
 	return doc, nil
 }
 
@@ -222,13 +223,13 @@ func (a *api) batch(docIDOrURL string, requests []any) (*batchResult, error) {
 	if len(requests) == 0 {
 		return nil, a.fail("INVALID_PARAMS", "requests must be a non-empty array", "")
 	}
-	body := append(append([]byte(`{"requests":`), google.Stringify(requests)...), '}')
+	body := append(append([]byte(`{"requests":`), jsvalue.Stringify(requests)...), '}')
 	v, err := google.CallJSON(a.ctx, a.run, google.Camel, "POST", a.docsBase, "v1/documents/"+url.PathEscape(documentID)+":batchUpdate", body)
 	if err != nil {
 		return nil, a.apiError("execute batch update", err)
 	}
 	var replies any = []any{}
-	if resp, ok := v.(*google.Object); ok {
+	if resp, ok := v.(*jsvalue.Object); ok {
 		if r, _ := resp.Get("replies"); r != nil {
 			replies = r
 		}
@@ -237,12 +238,12 @@ func (a *api) batch(docIDOrURL string, requests []any) (*batchResult, error) {
 }
 
 // children is `obj?.[key] ?? []` for a list of objects.
-func children(obj *google.Object, key string) []*google.Object {
+func children(obj *jsvalue.Object, key string) []*jsvalue.Object {
 	v, _ := obj.Get(key)
 	items, _ := v.([]any)
-	var out []*google.Object
+	var out []*jsvalue.Object
 	for _, item := range items {
-		if o, ok := item.(*google.Object); ok {
+		if o, ok := item.(*jsvalue.Object); ok {
 			out = append(out, o)
 		}
 	}
@@ -250,15 +251,15 @@ func children(obj *google.Object, key string) []*google.Object {
 }
 
 // tabProperty is `tab.tabProperties?.[key] ?? ""`.
-func tabProperty(t *google.Object, key string) string {
+func tabProperty(t *jsvalue.Object, key string) string {
 	props, _ := t.Get("tabProperties")
-	obj, _ := props.(*google.Object)
+	obj, _ := props.(*jsvalue.Object)
 	v, _ := obj.Get(key)
 	s, _ := v.(string)
 	return s
 }
 
-func flattenTabs(tabs []*google.Object, depth int) []tab {
+func flattenTabs(tabs []*jsvalue.Object, depth int) []tab {
 	out := []tab{}
 	for _, t := range tabs {
 		out = append(out, tab{ID: tabProperty(t, "tabId"), Title: tabProperty(t, "title"), Depth: depth})
@@ -267,7 +268,7 @@ func flattenTabs(tabs []*google.Object, depth int) []tab {
 	return out
 }
 
-func findTab(tabs []*google.Object, tabID string) *google.Object {
+func findTab(tabs []*jsvalue.Object, tabID string) *jsvalue.Object {
 	for _, t := range tabs {
 		if tabProperty(t, "tabId") == tabID {
 			return t

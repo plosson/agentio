@@ -2,12 +2,10 @@ package google
 
 import (
 	"math"
-	"math/big"
 	"strconv"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf16"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // FormatBytes is Bun format.ts formatBytes: one decimal, trailing ".0"
@@ -23,77 +21,9 @@ func FormatBytes(bytes int64) string {
 		unit = sizes[i]
 	}
 	value := float64(bytes) / math.Pow(1024, float64(i))
-	return strconv.FormatFloat(toFixed1(value), 'f', -1, 64) + " " + unit
-}
-
-// toFixed1 is parseFloat(x.toFixed(1)): the exact binary value rounded to one
-// decimal, a tie going up (JavaScript picks the larger n).
-func toFixed1(x float64) float64 {
-	exact := new(big.Float).SetPrec(256).SetFloat64(x)
-	exact.Mul(exact, big.NewFloat(10))
-	floor, _ := exact.Int(nil)
-	if exact.Sign() < 0 && new(big.Float).SetInt(floor).Cmp(exact) != 0 {
-		floor.Sub(floor, big.NewInt(1))
-	}
-	rem := new(big.Float).SetPrec(256).Sub(exact, new(big.Float).SetInt(floor))
-	if rem.Cmp(big.NewFloat(0.5)) >= 0 {
-		floor.Add(floor, big.NewInt(1))
-	}
-	n, _ := new(big.Float).SetInt(floor).Float64()
-	return n / 10
-}
-
-// Truncate is Bun `s.length > n ? s.slice(0, n) + '...' : s` over UTF-16 units.
-func Truncate(s string, n int) string {
-	units := utf16.Encode([]rune(s))
-	if len(units) <= n {
-		return s
-	}
-	return string(utf16.Decode(units[:n])) + "..."
-}
-
-// ParseInt is JavaScript parseInt(s, 10): leading digits after optional
-// whitespace and sign, NaN when there are none.
-func ParseInt(s string) float64 {
-	s = strings.TrimLeftFunc(s, unicode.IsSpace)
-	neg := false
-	if s != "" && (s[0] == '-' || s[0] == '+') {
-		neg = s[0] == '-'
-		s = s[1:]
-	}
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return math.NaN()
-	}
-	n, _ := strconv.ParseFloat(s[:end], 64)
-	if neg {
-		n = -n
-	}
-	return n
-}
-
-// JSNumber is String(n): NaN and Infinity by name, exponent notation outside
-// [1e-6, 1e21), the shortest decimal otherwise.
-func JSNumber(n float64) string {
-	switch {
-	case math.IsNaN(n):
-		return "NaN"
-	case math.IsInf(n, 1):
-		return "Infinity"
-	case math.IsInf(n, -1):
-		return "-Infinity"
-	case n == 0:
-		return "0" // String(-0) is "0"
-	}
-	if abs := math.Abs(n); abs >= 1e21 || abs < 1e-6 {
-		mant, exp, _ := strings.Cut(strconv.FormatFloat(n, 'e', -1, 64), "e")
-		sign := exp[:1]
-		return mant + "e" + sign + strings.TrimLeft(exp[1:], "0")
-	}
-	return strconv.FormatFloat(n, 'f', -1, 64)
+	// parseFloat(value.toFixed(1)) + " " + unit
+	fixed, _ := strconv.ParseFloat(jsvalue.ToFixed(value, 1), 64)
+	return jsvalue.NumberString(fixed) + " " + unit
 }
 
 // ISOString is Date.toISOString: UTC, milliseconds, truncated.

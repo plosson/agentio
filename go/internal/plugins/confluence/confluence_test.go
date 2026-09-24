@@ -17,6 +17,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/obscure"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
@@ -737,7 +738,7 @@ func TestResponseMappingAndFormat(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 	// Truncation counts UTF-16 units like String.prototype.slice.
-	if truncate(strings.Repeat("😀", 60), 100) != strings.Repeat("😀", 50)+"..." {
+	if jsvalue.Truncate(strings.Repeat("😀", 60), 100) != strings.Repeat("😀", 50)+"..." {
 		t.Fatal("utf16 truncate")
 	}
 	// ADF bodies flatten blocks with blank lines and hard breaks with newlines.

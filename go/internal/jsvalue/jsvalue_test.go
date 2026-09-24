@@ -1,0 +1,305 @@
+package jsvalue
+
+import (
+	"encoding/json"
+	"math"
+	"strings"
+	"testing"
+)
+
+// Expected values below were printed by Bun.
+
+func mustObject(t *testing.T, raw string) *Object {
+	t.Helper()
+	v, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v.(*Object)
+}
+
+func TestNumberStringIsJavaScriptsString(t *testing.T) {
+	tenth, fifth := 0.1, 0.2
+	cases := map[float64]string{
+		0: "0", math.Copysign(0, -1): "0", 12: "12", -3: "-3", 2.5: "2.5", -3.5: "-3.5", tenth + fifth: "0.30000000000000004",
+		1e21: "1e+21", 1.5e22: "1.5e+22", 1e-7: "1e-7", -2.5e-8: "-2.5e-8", 0.000001: "0.000001", 5e-324: "5e-324",
+		12345678901234567890: "12345678901234567000", 123456789012345680000: "123456789012345680000",
+		math.Inf(1): "Infinity", math.Inf(-1): "-Infinity", math.NaN(): "NaN",
+	}
+	for in, want := range cases {
+		if got := NumberString(in); got != want {
+			t.Errorf("%v: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestToFixedRoundsTheExactBinaryValue(t *testing.T) {
+	cases := []struct {
+		in     float64
+		digits int
+		want   string
+	}{
+		{0.125, 2, "0.13"}, {-0.125, 2, "-0.13"}, {1.005, 2, "1.00"}, {-0.001, 2, "-0.00"}, {2.675, 2, "2.67"},
+		{math.Copysign(0, -1), 2, "0.00"}, {0.05, 1, "0.1"}, {1.25, 1, "1.3"}, {1.35, 1, "1.4"}, {5, 0, "5"},
+		{1e21, 2, "1e+21"}, {math.NaN(), 2, "NaN"}, {math.Inf(-1), 2, "-Infinity"},
+	}
+	for _, c := range cases {
+		if got := ToFixed(c.in, c.digits); got != c.want {
+			t.Errorf("(%v).toFixed(%d) = %s, want %s", c.in, c.digits, got, c.want)
+		}
+	}
+}
+
+func TestParseIntIsJavaScripts(t *testing.T) {
+	cases := map[string]string{
+		"10": "10", " 42abc": "42", "-5": "-5", "+7": "7", "7.9": "7", "abc": "NaN", "": "NaN", "-0": "0", "0x10": "0",
+		"+": "NaN", "- 5": "NaN", "1e3": "1", "\uFEFF5": "5", "\u20285": "5", "\u00a0\u30009": "9",
+		// U+0085 and U+180E are Go spaces but not JavaScript ones.
+		"\u00855": "NaN", "\u180E5": "NaN",
+		"123456789012345678901234567890": "1.2345678901234568e+29",
+	}
+	for in, want := range cases {
+		if got := NumberString(ParseInt(in)); got != want {
+			t.Errorf("%q: got %s want %s", in, got, want)
+		}
+	}
+	if !math.Signbit(ParseInt("-0")) {
+		t.Error("parseInt('-0') is -0")
+	}
+}
+
+func TestNumberIsJavaScriptsNumber(t *testing.T) {
+	cases := map[string]string{
+		"": "0", "  ": "0", " 7 ": "7", "\uFEFF5": "5", "\u00855": "NaN", " 0x1F ": "31", "0b101": "5", "0o17": "15",
+		"-0x10": "NaN", "0x": "NaN", "0x-1": "NaN", "1_000": "NaN", "1e1000": "Infinity", "-1e1000": "-Infinity",
+		".5": "0.5", "5.": "5", "+.5e1": "5", "Infinity": "Infinity", "+Infinity": "Infinity", "-Infinity": "-Infinity",
+		"Infinityx": "NaN", "infinity": "NaN", "1,5": "NaN", "12abc": "NaN", "--1": "NaN", "1e": "NaN",
+	}
+	for in, want := range cases {
+		if got := NumberString(Number(in)); got != want {
+			t.Errorf("Number(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestStringIsJavaScriptsString(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{nil, "null"}, {"s", "s"}, {true, "true"}, {json.Number("1.50"), "1.5"}, {json.Number("1e400"), "Infinity"},
+		{json.Number("-0"), "0"}, {2.5, "2.5"}, {int64(-7), "-7"}, {3, "3"},
+		{[]any{json.Number("1"), nil, "a", []any{"b", "c"}}, "1,,a,b,c"}, {NewObject(), "[object Object]"},
+	}
+	for _, c := range cases {
+		if got := String(c.in); got != c.want {
+			t.Errorf("String(%#v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestTruthyIsJavaScripts(t *testing.T) {
+	// 1e-400 underflows to 0 in JavaScript too.
+	falsy := []any{nil, false, "", json.Number("0"), json.Number("-0"), json.Number("0.0"), json.Number("1e-400"), 0.0, math.NaN(), int64(0), 0}
+	truthy := []any{true, "0", " ", json.Number("0.1"), -1.0, int64(1), []any{}, NewObject()}
+	for _, v := range falsy {
+		if Truthy(v) {
+			t.Errorf("%#v is falsy", v)
+		}
+	}
+	for _, v := range truthy {
+		if !Truthy(v) {
+			t.Errorf("%#v is truthy", v)
+		}
+	}
+}
+
+// Google and Falco escape <, >, =, & and ' in their JSON; JSON.parse then
+// JSON.stringify prints them as is, keeps key order and keeps false and zero.
+func TestParseRoundTripsLikeJSONStringify(t *testing.T) {
+	raw := `{"z":1,"a":{"bold":false,"n":0,"f":1.50,"e":1E2,"big":1e400,"neg":-0},"s":"a<b=&' \"\\\b\f\n\r\t\u0001\u007f\u2028é\u003c","arr":[],"obj":{},"nul":null,"z":2}`
+	v, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.(*Object).MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"z":2,"a":{"bold":false,"n":0,"f":1.5,"e":100,"big":null,"neg":0},"s":"a<b=&'` + " " + `\"\\\b\f\n\r\t\u0001` + "\u007f\u2028é<" + `","arr":[],"obj":{},"nul":null}`
+	if string(got) != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	// Indented by an encoder that does not escape HTML, as the host prints --json.
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(map[string]any{"v": v}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "\"s\": \"a<b=&' ") || !strings.Contains(b.String(), "\"arr\": [],") {
+		t.Fatalf("%s", b.String())
+	}
+	obj := v.(*Object)
+	if z, ok := obj.Get("z"); !ok || z != json.Number("2") {
+		t.Fatalf("%v", z)
+	}
+	if _, ok := obj.Get("missing"); ok {
+		t.Fatal("missing key present")
+	}
+	if n, ok := obj.Get("nul"); !ok || n != nil {
+		t.Fatal("null is present, not undefined")
+	}
+	var nilObj *Object
+	if _, ok := nilObj.Get("x"); ok || nilObj.Keys() != nil || nilObj.Text("x") != nil {
+		t.Fatal("nil object has keys")
+	}
+	if string(Stringify(nilObj)) != "null" {
+		t.Fatal("nil object is null")
+	}
+	for _, bad := range []string{`{"a":`, `{} {}`, `[1,]`, ``, `{"a" 1}`, `[1 2]`, `{1:2}`, `NaN`, `'a'`} {
+		if _, err := Parse([]byte(bad)); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
+
+func TestDuplicateKeysKeepFirstPositionAndLastValue(t *testing.T) {
+	o := mustObject(t, `{"b":1,"a":"<&>\u2028\u0001","b":2.50}`)
+	if got := string(Stringify(o)); got != "{\"b\":2.5,\"a\":\"<&>\u2028\\u0001\"}" {
+		t.Fatalf("%s", got)
+	}
+	keys := o.Keys()
+	if strings.Join(keys, ",") != "b,a" {
+		t.Fatalf("%q", keys)
+	}
+	// Keys is a copy: changing it does not reorder the object.
+	keys[0] = "zzz"
+	o.Set("c", nil)
+	o.Set("b", true)
+	if got := string(Stringify(o)); got != "{\"b\":true,\"a\":\"<&>\u2028\\u0001\",\"c\":null}" {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestObjectFieldAccessors(t *testing.T) {
+	o := mustObject(t, `{"s":"x","n":12.0,"null":null,"f":false,"arr":[1,null,"a"],"o":{}}`)
+	if s, ok := o.Str("s"); !ok || s != "x" {
+		t.Fatal("string field")
+	}
+	for _, k := range []string{"n", "null", "f", "missing", "o"} {
+		if _, ok := o.Str(k); ok {
+			t.Errorf("%s read as a string", k)
+		}
+	}
+	text := func(k string) string {
+		p := o.Text(k)
+		if p == nil {
+			return "<nil>"
+		}
+		return *p
+	}
+	for k, want := range map[string]string{"s": "x", "n": "12", "null": "<nil>", "missing": "<nil>", "f": "false", "arr": "1,,a", "o": "[object Object]"} {
+		if got := text(k); got != want {
+			t.Errorf("text(%s) = %q, want %q", k, got, want)
+		}
+	}
+}
+
+type marshaler struct{}
+
+func (marshaler) MarshalJSON() ([]byte, error) { return []byte(`{"html":"<&>"}`), nil }
+
+func TestStringifyPlainGoValues(t *testing.T) {
+	arr := []any{
+		math.NaN(), math.Inf(1), math.Copysign(0, -1), 1e21, 1e-7, 3, int64(-4), json.Number("1e400"), json.Number("abc"),
+		marshaler{}, map[string]int{"k": 1}, "é\U0001F600",
+	}
+	want := `[null,null,0,1e+21,1e-7,3,-4,null,null,{"html":"<&>"},{"k":1},"é` + "\U0001F600" + `"]`
+	if got := string(Stringify(arr)); got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	if Quote("a\"b\\c\x1f</script>") != `"a\"b\\c\u001f</script>"` {
+		t.Fatal(Quote("a\"b\\c\x1f</script>"))
+	}
+	// Invalid UTF-8 becomes U+FFFD, as a JavaScript string could not hold it.
+	if Quote("a\xffb") != "\"a\uFFFDb\"" {
+		t.Fatal(Quote("a\xffb"))
+	}
+}
+
+func TestStringifyIndentIsTwoSpaces(t *testing.T) {
+	o := mustObject(t, `{"a":[],"b":{},"c":[1,{"d":"<"}]}`)
+	want := "{\n  \"a\": [],\n  \"b\": {},\n  \"c\": [\n    1,\n    {\n      \"d\": \"<\"\n    }\n  ]\n}"
+	if got := string(StringifyIndent(o)); got != want {
+		t.Fatalf("\n got %s\nwant %s", got, want)
+	}
+	if string(StringifyIndent(NewObject())) != "{}" || string(StringifyIndent([]any{})) != "[]" || string(StringifyIndent("x")) != `"x"` {
+		t.Fatal("empty containers")
+	}
+}
+
+// Slice and Truncate count UTF-16 units like String.prototype.slice, so an
+// emoji cut in half leaves a lone surrogate (U+FFFD once encoded).
+func TestSliceAndTruncateCountUTF16Units(t *testing.T) {
+	if Slice("a😀b", 2) != "a\uFFFD" || Slice("a😀b", 3) != "a😀" || Slice("abc", 10) != "abc" || Slice("abc", 0) != "" || Slice("", 3) != "" {
+		t.Fatal("slice")
+	}
+	cases := map[string]string{
+		"short":                       "short",
+		"":                            "",
+		strings.Repeat("a", 5):        strings.Repeat("a", 5),
+		strings.Repeat("a", 6):        strings.Repeat("a", 5) + "...",
+		strings.Repeat("é", 4) + "😀x": strings.Repeat("é", 4) + "\uFFFD...",
+		"abc😀":                        "abc😀",
+		"abcd😀":                       "abcd\uFFFD...",
+		"😀😀😀":                         "😀😀\uFFFD...",
+	}
+	for in, want := range cases {
+		if got := Truncate(in, 5); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestTrimUsesJavaScriptWhitespace(t *testing.T) {
+	if Trim("\uFEFF\u00a0\u2029 x y\u3000\t") != "x y" || Trim("\u0085x\u0085") != "\u0085x\u0085" || Trim("\u180Ex") != "\u180Ex" {
+		t.Fatal("trim")
+	}
+}
+
+func TestDecodeUTF8IsTextDecoder(t *testing.T) {
+	cases := map[string]string{
+		"\xEF\xBB\xBFabc":          "abc",
+		"\xEF\xBB\xBF\xEF\xBB\xBF": "\uFEFF",
+		"a\xffb":                   "a\uFFFDb",
+		"\xe2\x82":                 "\uFFFD\uFFFD",
+		"é😀":                       "é😀",
+		"":                         "",
+	}
+	for in, want := range cases {
+		if got := DecodeUTF8([]byte(in)); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestURLEncodingIsJavaScripts(t *testing.T) {
+	if EncodeURIComponent("a b/é!*'()~-_.?&=+%") != "a%20b%2F%C3%A9!*'()~-_.%3F%26%3D%2B%25" {
+		t.Fatal(EncodeURIComponent("a b/é!*'()~-_.?&=+%"))
+	}
+	if formEscape("a b~*") != "a+b%7E*" {
+		t.Fatal("formEscape")
+	}
+	q := NewSearchParams()
+	q.Set("b", "1 2")
+	q.Set("a&", "é")
+	q.Set("b", "3")
+	if q.String() != "b=3&a%26=%C3%A9" {
+		t.Fatal(q.String())
+	}
+	if NewSearchParams().String() != "" {
+		t.Fatal("empty params")
+	}
+}

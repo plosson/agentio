@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/plosson/agentio/go/internal/plugins/google"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 func when(d eventDateTime) string {
@@ -38,7 +38,7 @@ func formatCalendars(v any) string {
 			lines = append(lines, "    Timezone: "+c.TimeZone)
 		}
 		if c.Description != "" {
-			lines = append(lines, "    > "+google.Truncate(c.Description, 80))
+			lines = append(lines, "    > "+jsvalue.Truncate(c.Description, 80))
 		}
 		lines = append(lines, "")
 	}
