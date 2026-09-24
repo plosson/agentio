@@ -31,16 +31,6 @@ func listInfo(creds map[string]any) string {
 	return ""
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 // failed turns a client error into the host error Bun's handleError prints.
 func failed(run *plugins.RunContext, err error) error {
 	if ae, ok := err.(*apiError); ok {
@@ -67,8 +57,8 @@ func listCmd() plugins.CommandSpec {
 			"agentio discourse list --profile meta",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			page, _ := jsParseInt(opt(in, "page")) // NaN > 0 is false: no page
-			topics, err := newAPI(ctx, run.Credentials, run.Fetch).listTopics(opt(in, "category"), page)
+			page, _ := jsParseInt(in.Option("page")) // NaN > 0 is false: no page
+			topics, err := newAPI(ctx, run.Credentials, run.Fetch).listTopics(in.Option("category"), page)
 			if err != nil {
 				return nil, failed(run, err)
 			}
@@ -91,7 +81,7 @@ func getCmd() plugins.CommandSpec {
 			"agentio discourse get 12345 --profile meta",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			id, ok := jsParseInt(arg(in, "topic-id"))
+			id, ok := jsParseInt(in.Arg("topic-id"))
 			if !ok {
 				return nil, run.Fail("INVALID_PARAMS", "Topic ID must be a number", "")
 			}

@@ -38,21 +38,6 @@ func New() *plugins.Plugin {
 	}
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 func clientOf(ctx context.Context, run *plugins.RunContext) *client {
 	return newClient(ctx, run.Credentials, run.Fetch)
 }
@@ -130,7 +115,7 @@ func peppolListCmd() plugins.CommandSpec {
 			"agentio falco peppol list --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			since := opt(in, "since")
+			since := in.Option("since")
 			if err := requireIsoDate(run, since, "--since"); err != nil {
 				return nil, err
 			}
@@ -138,7 +123,7 @@ func peppolListCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
-			return peppolList{documents: filterPeppolDocuments(docs, since, opt(in, "sender")), asJSON: opt(in, "format") == "json"}, nil
+			return peppolList{documents: filterPeppolDocuments(docs, since, in.Option("sender")), asJSON: in.Option("format") == "json"}, nil
 		},
 		Format: formatPeppolList,
 	}
@@ -165,7 +150,7 @@ func peppolGetCmd() plugins.CommandSpec {
 			"agentio falco peppol get 7f2c1e90-... --output -",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			id, output := arg(in, "id"), opt(in, "output")
+			id, output := in.Arg("id"), in.Option("output")
 			payload, err := clientOf(ctx, run).downloadPeppolDocumentUbl(id)
 			if err != nil {
 				return nil, failed(run.Fail, err)
@@ -194,7 +179,7 @@ func peppolGetCmd() plugins.CommandSpec {
 				res.XMLPath = xmlPath
 				run.Log(fileWritten(xmlPath, len(payload), ""))
 			}
-			if !flag(in, "extract-pdf") {
+			if !in.Flag("extract-pdf") {
 				return res, nil
 			}
 
@@ -295,7 +280,7 @@ func importCmd() plugins.CommandSpec {
 		Operation:   "import a Peppol document into the invoice register",
 		// A dry run writes nothing, so Bun skips the write check for it.
 		AccessFor: func(in plugins.CommandInput) string {
-			if flag(in, "dry-run") {
+			if in.Flag("dry-run") {
 				return "read"
 			}
 			return "write"

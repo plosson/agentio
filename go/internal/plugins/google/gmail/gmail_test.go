@@ -577,7 +577,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 }
 
 func TestListInfoAndReauthenticate(t *testing.T) {
-	if listInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || listInfo(map[string]any{}) != "" {
+	if google.EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || google.EmailListInfo(map[string]any{}) != "" {
 		t.Fatal("list info")
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {

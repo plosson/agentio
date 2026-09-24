@@ -32,25 +32,10 @@ func New() *plugins.Plugin {
 	}
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 // intOption is a Commander option parsed with parseInt: nil when absent, NaN
 // when the value has no leading digits.
 func intOption(in plugins.CommandInput, name string) *float64 {
-	s := opt(in, name)
+	s := in.Option(name)
 	if s == "" {
 		return nil
 	}
@@ -61,7 +46,7 @@ func intOption(in plugins.CommandInput, name string) *float64 {
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
 func parseValues(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) ([]any, error) {
-	if raw := opt(in, "values-json"); raw != "" {
+	if raw := in.Option("values-json"); raw != "" {
 		parsed, err := jsvalue.Parse([]byte(raw))
 		if err != nil {
 			return nil, fail("INVALID_PARAMS", "Invalid JSON values: "+jsvalue.ParseErrorMessage([]byte(raw)), "")
@@ -156,7 +141,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query")))
+			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
 		},
 		Format: func(v any) string { return google.FormatDriveFiles(v, "Spreadsheets", "No spreadsheets found") },
 	}
@@ -187,7 +172,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.get(arg(in, "spreadsheet-id-or-url"), arg(in, "range"), opt(in, "dimension"), opt(in, "render")))
+			return google.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.Option("dimension"), in.Option("render")))
 		},
 		Format: formatValues,
 	}
@@ -226,7 +211,7 @@ func updateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.update(arg(in, "spreadsheet-id-or-url"), arg(in, "range"), values, opt(in, "input")))
+			return google.Result(a.update(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input")))
 		},
 		Format: formatUpdated,
 	}
@@ -264,7 +249,7 @@ func appendCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.append(arg(in, "spreadsheet-id-or-url"), arg(in, "range"), values, opt(in, "input"), opt(in, "insert")))
+			return google.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.Option("insert")))
 		},
 		Format: formatAppended,
 	}
@@ -288,7 +273,7 @@ func clearCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.clear(arg(in, "spreadsheet-id-or-url"), arg(in, "range")))
+			return google.Result(a.clear(in.Arg("spreadsheet-id-or-url"), in.Arg("range")))
 		},
 		Format: formatCleared,
 	}
@@ -332,38 +317,38 @@ func formatCmd() plugins.CommandSpec {
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			o := formatOptions{
-				bold:         flag(in, "bold"),
-				italic:       flag(in, "italic"),
-				underline:    flag(in, "underline"),
+				bold:         in.Flag("bold"),
+				italic:       in.Flag("italic"),
+				underline:    in.Flag("underline"),
 				fontSize:     intOption(in, "font-size"),
-				fontFamily:   opt(in, "font-family"),
-				textColor:    opt(in, "text-color"),
-				background:   opt(in, "background"),
-				numberFormat: opt(in, "number-format"),
-				merge:        flag(in, "merge"),
-				clearFormat:  flag(in, "clear-format"),
+				fontFamily:   in.Option("font-family"),
+				textColor:    in.Option("text-color"),
+				background:   in.Option("background"),
+				numberFormat: in.Option("number-format"),
+				merge:        in.Flag("merge"),
+				clearFormat:  in.Flag("clear-format"),
 			}
 			var err error
-			if o.align, err = choice(opt(in, "align"), "align", map[string]string{"left": "LEFT", "center": "CENTER", "centre": "CENTER", "right": "RIGHT"}, "Use left, center, or right", run.Fail); err != nil {
+			if o.align, err = choice(in.Option("align"), "align", map[string]string{"left": "LEFT", "center": "CENTER", "centre": "CENTER", "right": "RIGHT"}, "Use left, center, or right", run.Fail); err != nil {
 				return nil, err
 			}
-			if o.valign, err = choice(opt(in, "valign"), "valign", map[string]string{"top": "TOP", "middle": "MIDDLE", "center": "MIDDLE", "bottom": "BOTTOM"}, "Use top, middle, or bottom", run.Fail); err != nil {
+			if o.valign, err = choice(in.Option("valign"), "valign", map[string]string{"top": "TOP", "middle": "MIDDLE", "center": "MIDDLE", "bottom": "BOTTOM"}, "Use top, middle, or bottom", run.Fail); err != nil {
 				return nil, err
 			}
-			if o.wrap, err = choice(opt(in, "wrap"), "wrap", map[string]string{"overflow": "OVERFLOW_CELL", "clip": "CLIP", "wrap": "WRAP"}, "Use overflow, clip, or wrap", run.Fail); err != nil {
+			if o.wrap, err = choice(in.Option("wrap"), "wrap", map[string]string{"overflow": "OVERFLOW_CELL", "clip": "CLIP", "wrap": "WRAP"}, "Use overflow, clip, or wrap", run.Fail); err != nil {
 				return nil, err
 			}
-			if o.border, err = choice(opt(in, "border"), "border", map[string]string{"all": "all", "outer": "outer", "none": "none"}, "Use all, outer, or none", run.Fail); err != nil {
+			if o.border, err = choice(in.Option("border"), "border", map[string]string{"all": "all", "outer": "outer", "none": "none"}, "Use all, outer, or none", run.Fail); err != nil {
 				return nil, err
 			}
-			if o.raw, err = parseRawFormat(opt(in, "raw"), run.Fail); err != nil {
+			if o.raw, err = parseRawFormat(in.Option("raw"), run.Fail); err != nil {
 				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.format(arg(in, "spreadsheet-id-or-url"), arg(in, "range"), o))
+			return google.Result(a.format(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), o))
 		},
 		Format: formatFormatted,
 	}
@@ -396,7 +381,7 @@ func resizeCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.resize(arg(in, "spreadsheet-id-or-url"), arg(in, "range"), intOption(in, "size"), flag(in, "auto")))
+			return google.Result(a.resize(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), intOption(in, "size"), in.Flag("auto")))
 		},
 		Format: formatResized,
 	}
@@ -432,7 +417,7 @@ func batchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.batch(arg(in, "spreadsheet-id-or-url"), requests))
+			return google.Result(a.batch(in.Arg("spreadsheet-id-or-url"), requests))
 		},
 		Format: formatBatch,
 	}
@@ -455,7 +440,7 @@ func metadataCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.metadata(arg(in, "spreadsheet-id-or-url")))
+			return google.Result(a.metadata(in.Arg("spreadsheet-id-or-url")))
 		},
 		Format: formatMetadata,
 	}
@@ -483,12 +468,12 @@ func createCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			var names []string
-			if sheets := opt(in, "sheets"); sheets != "" {
+			if sheets := in.Option("sheets"); sheets != "" {
 				for _, n := range strings.Split(sheets, ",") {
 					names = append(names, jsvalue.Trim(n))
 				}
 			}
-			return google.Result(a.create(arg(in, "title"), names))
+			return google.Result(a.create(in.Arg("title"), names))
 		},
 		Format: formatCreated,
 	}
@@ -515,7 +500,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.copy(arg(in, "spreadsheet-id-or-url"), arg(in, "title"), opt(in, "parent")))
+			return google.Result(a.copy(in.Arg("spreadsheet-id-or-url"), in.Arg("title"), in.Option("parent")))
 		},
 		Format: formatCreated,
 	}
@@ -551,16 +536,16 @@ func exportCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			format := strings.ToLower(opt(in, "format"))
+			format := strings.ToLower(in.Option("format"))
 			mimeType, ok := exportMimeTypes[format]
 			if !ok {
 				return nil, run.Fail("INVALID_PARAMS", "Unknown format: "+format, "Use xlsx, pdf, csv, ods, or tsv")
 			}
-			data, err := a.export(arg(in, "spreadsheet-id-or-url"), mimeType)
+			data, err := a.export(in.Arg("spreadsheet-id-or-url"), mimeType)
 			if err != nil {
 				return nil, err
 			}
-			output := opt(in, "output")
+			output := in.Option("output")
 			if err := os.WriteFile(output, data, 0o666); err != nil {
 				return nil, err
 			}

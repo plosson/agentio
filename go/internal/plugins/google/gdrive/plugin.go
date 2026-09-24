@@ -49,9 +49,9 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	setup.Log("Google Drive Setup\n")
 	var accessLevel string
 	switch {
-	case flag(opts.Options, "readonly") || opts.ReadOnly:
+	case opts.Flag("readonly") || opts.ReadOnly:
 		accessLevel = "readonly"
-	case flag(opts.Options, "full"):
+	case opts.Flag("full"):
 		accessLevel = "full"
 	default:
 		setup.Log("Access level options:")
@@ -138,21 +138,6 @@ func listInfo(creds map[string]any) string {
 	return " - " + jsvalue.String(email) + " (" + access + ")"
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(options map[string]any, name string) bool {
-	b, _ := options[name].(bool)
-	return b
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 func listCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "list",
@@ -184,11 +169,11 @@ func listCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			files, err := a.list(listOptions{
-				limit:        jsvalue.ParseInt(opt(in, "limit")),
-				folderID:     opt(in, "folder"),
-				query:        opt(in, "query"),
-				orderBy:      opt(in, "order"),
-				includeTrash: flag(in.Options, "trash"),
+				limit:        jsvalue.ParseInt(in.Option("limit")),
+				folderID:     in.Option("folder"),
+				query:        in.Option("query"),
+				orderBy:      in.Option("order"),
+				includeTrash: in.Flag("trash"),
 			})
 			return google.Result(fileList{Title: "Files", Files: files}, err)
 		},
@@ -221,7 +206,7 @@ func foldersCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			files, err := a.listFolders(jsvalue.ParseInt(opt(in, "limit")), opt(in, "parent"), opt(in, "query"))
+			files, err := a.listFolders(jsvalue.ParseInt(in.Option("limit")), in.Option("parent"), in.Option("query"))
 			return google.Result(fileList{Title: "Folders", Files: files}, err)
 		},
 		Format: formatFileList,
@@ -245,7 +230,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.get(arg(in, "file-id-or-url")))
+			return google.Result(a.get(in.Arg("file-id-or-url")))
 		},
 		Format: formatFile,
 	}
@@ -278,7 +263,7 @@ func searchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			files, err := a.search(opt(in, "query"), opt(in, "type"), jsvalue.ParseInt(opt(in, "limit")), opt(in, "folder"))
+			files, err := a.search(in.Option("query"), in.Option("type"), jsvalue.ParseInt(in.Option("limit")), in.Option("folder"))
 			return google.Result(fileList{Title: "Search Results", Files: files}, err)
 		},
 		Format: formatFileList,
@@ -315,7 +300,7 @@ func downloadCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.download(arg(in, "file-id-or-url"), opt(in, "output"), opt(in, "export")))
+			return google.Result(a.download(in.Arg("file-id-or-url"), in.Option("output"), in.Option("export")))
 		},
 		Format: formatDownloaded,
 	}
@@ -354,11 +339,11 @@ func putCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			result, err := a.upload(arg(in, "file-path"), opt(in, "name"), opt(in, "folder"), opt(in, "type"), flag(in.Options, "convert"))
+			result, err := a.upload(in.Arg("file-path"), in.Option("name"), in.Option("folder"), in.Option("type"), in.Flag("convert"))
 			if err != nil {
 				return nil, err
 			}
-			if flag(in.Options, "public") {
+			if in.Flag("public") {
 				share, err := a.share(result.ID, result.ID, shareOptions{kind: "anyone", role: "reader"})
 				if err != nil {
 					// Bun printed the upload before the share failed.
@@ -401,7 +386,7 @@ func copyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.copy(arg(in, "file-id-or-url"), opt(in, "name"), opt(in, "folder")))
+			return google.Result(a.copy(in.Arg("file-id-or-url"), in.Option("name"), in.Option("folder")))
 		},
 		Format: formatCopied,
 	}
@@ -428,7 +413,7 @@ func mkdirCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.mkdir(arg(in, "name"), opt(in, "parent")))
+			return google.Result(a.mkdir(in.Arg("name"), in.Option("parent")))
 		},
 		Format: formatCreatedFolder,
 	}
@@ -455,7 +440,7 @@ func renameCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.rename(arg(in, "file-id-or-url"), arg(in, "new-name")))
+			return google.Result(a.rename(in.Arg("file-id-or-url"), in.Arg("new-name")))
 		},
 		Format: fileLine("Renamed: "),
 	}
@@ -484,7 +469,7 @@ func moveCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.move(arg(in, "file-id-or-url"), arg(in, "folder-id-or-url")))
+			return google.Result(a.move(in.Arg("file-id-or-url"), in.Arg("folder-id-or-url")))
 		},
 		Format: formatMoved,
 	}
@@ -510,7 +495,7 @@ func trashCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.trash(arg(in, "file-id-or-url")))
+			return google.Result(a.trash(in.Arg("file-id-or-url")))
 		},
 		Format: fileLine("Trashed: "),
 	}
@@ -531,7 +516,7 @@ func permissionsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.permissions(arg(in, "file-id-or-url")))
+			return google.Result(a.permissions(in.Arg("file-id-or-url")))
 		},
 		Format: formatPermissions,
 	}
@@ -560,10 +545,10 @@ func shareInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, strin
 	if count > 1 {
 		return fail("INVALID_PARAMS", "--anyone, --user, --domain, and --group are mutually exclusive", "")
 	}
-	if flag(in.Options, "allow-discovery") && !flag(in.Options, "anyone") {
+	if in.Flag("allow-discovery") && !in.Flag("anyone") {
 		return fail("INVALID_PARAMS", "--allow-discovery only applies with --anyone", "")
 	}
-	switch role := opt(in, "role"); role {
+	switch role := in.Option("role"); role {
 	case "reader", "commenter", "writer":
 	default:
 		return fail("INVALID_PARAMS", "Invalid role: "+role, "Use reader, commenter, or writer")
@@ -626,19 +611,19 @@ func shareCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			kind, _ := shareTarget(in)
-			email := opt(in, "user")
+			email := in.Option("user")
 			if email == "" {
-				email = opt(in, "group")
+				email = in.Option("group")
 			}
-			fileIDOrURL := arg(in, "file-id-or-url")
+			fileIDOrURL := in.Arg("file-id-or-url")
 			return google.Result(a.share(fileIDOrURL, printedFileID(fileIDOrURL), shareOptions{
 				kind:               kind,
-				role:               opt(in, "role"),
+				role:               in.Option("role"),
 				emailAddress:       email,
-				domain:             opt(in, "domain"),
-				emailMessage:       opt(in, "message"),
-				notify:             flag(in.Options, "notify"),
-				allowFileDiscovery: flag(in.Options, "allow-discovery"),
+				domain:             in.Option("domain"),
+				emailMessage:       in.Option("message"),
+				notify:             in.Flag("notify"),
+				allowFileDiscovery: in.Flag("allow-discovery"),
 			}))
 		},
 		Format: formatShared,
@@ -647,7 +632,7 @@ func shareCmd() plugins.CommandSpec {
 
 // unshareInputError is the checks Bun makes before it resolves the profile.
 func unshareInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
-	byID, anyone := opt(in, "permission-id") != "", flag(in.Options, "anyone")
+	byID, anyone := in.Option("permission-id") != "", in.Flag("anyone")
 	if !byID && !anyone {
 		return fail("INVALID_PARAMS", "Specify --permission-id or --anyone", "")
 	}
@@ -683,9 +668,9 @@ func unshareCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			fileIDOrURL := arg(in, "file-id-or-url")
-			permissionID := opt(in, "permission-id")
-			if flag(in.Options, "anyone") {
+			fileIDOrURL := in.Arg("file-id-or-url")
+			permissionID := in.Option("permission-id")
+			if in.Flag("anyone") {
 				perms, err := a.permissions(fileIDOrURL)
 				if err != nil {
 					return nil, err

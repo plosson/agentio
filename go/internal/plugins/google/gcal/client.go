@@ -509,21 +509,21 @@ func dt(v *calendar.EventDateTime) eventDateTime {
 func timeRange(in plugins.CommandInput) (string, string) {
 	t := now()
 	switch {
-	case flag(in, "today"), flag(in, "tomorrow"):
+	case in.Flag("today"), in.Flag("tomorrow"):
 		offset := 0
-		if !flag(in, "today") {
+		if !in.Flag("today") {
 			offset = 1
 		}
 		start := time.Date(t.Year(), t.Month(), t.Day()+offset, 0, 0, 0, 0, time.Local)
 		return google.ISOString(start), google.ISOString(addDays(start, 1))
-	case opt(in, "days") != "":
-		days := jsvalue.ParseInt(opt(in, "days"))
+	case in.Option("days") != "":
+		days := jsvalue.ParseInt(in.Option("days"))
 		if math.IsNaN(days) || days <= 0 {
 			return "", ""
 		}
 		return google.ISOString(t), google.ISOString(addDays(t, int(days)))
 	default:
-		return opt(in, "from"), opt(in, "to")
+		return in.Option("from"), in.Option("to")
 	}
 }
 

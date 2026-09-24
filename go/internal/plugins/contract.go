@@ -31,6 +31,18 @@ type SetupOptions struct {
 	Options map[string]any
 }
 
+// Option is a <value> setup option; absent or of another type is "".
+func (o SetupOptions) Option(name string) string {
+	s, _ := o.Options[name].(string)
+	return s
+}
+
+// Flag is a switch setup option; absent or of another type is false.
+func (o SetupOptions) Flag(name string) bool {
+	b, _ := o.Options[name].(bool)
+	return b
+}
+
 type SetupResult struct {
 	Credentials          map[string]any
 	SuggestedProfileName string
@@ -100,6 +112,30 @@ type CommandInput struct {
 	Args    map[string]any
 	Options map[string]any
 	Stdin   any // nil, string, or decoded JSON object
+}
+
+// Arg is a string argument; absent or of another type is "".
+func (in CommandInput) Arg(name string) string {
+	s, _ := in.Args[name].(string)
+	return s
+}
+
+// Option is a <value> option; absent or of another type is "".
+func (in CommandInput) Option(name string) string {
+	s, _ := in.Options[name].(string)
+	return s
+}
+
+// Flag is a switch option; absent or of another type is false.
+func (in CommandInput) Flag(name string) bool {
+	b, _ := in.Options[name].(bool)
+	return b
+}
+
+// List is a Repeatable option; absent or of another type is nil.
+func (in CommandInput) List(name string) []string {
+	values, _ := in.Options[name].([]string)
+	return values
 }
 
 type CommandSpec struct {

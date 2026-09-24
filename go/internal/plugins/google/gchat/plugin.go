@@ -195,24 +195,9 @@ func stringify(v any, indent string) ([]byte, error) {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func list(in plugins.CommandInput, name string) []string {
-	values, _ := in.Options[name].([]string)
-	return values
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 // textOrJSON is Bun's `--format <format>` check.
 func textOrJSON(in plugins.CommandInput, run *plugins.RunContext) (bool, error) {
-	switch format := opt(in, "format"); format {
+	switch format := in.Option("format"); format {
 	case "text":
 		return false, nil
 	case "json":
@@ -256,8 +241,8 @@ func sendCmd() plugins.CommandSpec {
 			"  agentio gchat send --json --space spaces/AAAA1234",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			o := sendOptions{spaceID: opt(in, "space"), attachments: list(in, "attachment")}
-			text := arg(in, "message")
+			o := sendOptions{spaceID: in.Option("space"), attachments: in.List("attachment")}
+			text := in.Arg("message")
 			if source, ok := in.Options["json"]; ok && source != nil {
 				if text != "" {
 					return nil, run.Fail("INVALID_PARAMS", "Cannot use both text message and --json option",
@@ -349,14 +334,14 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			limit := jsvalue.ParseInt(opt(in, "limit"))
+			limit := jsvalue.ParseInt(in.Option("limit"))
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
 			messages, truncated, err := a.list(listOptions{
-				spaceID: opt(in, "space"), limit: limit, threadID: opt(in, "thread"),
-				since: opt(in, "since"), until: opt(in, "until"),
+				spaceID: in.Option("space"), limit: limit, threadID: in.Option("thread"),
+				since: in.Option("since"), until: in.Option("until"),
 			})
 			if err != nil {
 				return nil, err
@@ -403,7 +388,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			msg, err := a.get(opt(in, "space"), arg(in, "message-id"))
+			msg, err := a.get(in.Option("space"), in.Arg("message-id"))
 			if err != nil {
 				return nil, err
 			}
@@ -435,7 +420,7 @@ func spacesCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			if with := opt(in, "with"); with != "" {
+			if with := in.Option("with"); with != "" {
 				dm, err := a.findDirectMessage(with)
 				if err != nil {
 					return nil, err
@@ -446,7 +431,7 @@ func spacesCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			if filter := strings.ToLower(opt(in, "filter")); filter != "" {
+			if filter := strings.ToLower(in.Option("filter")); filter != "" {
 				kept := []space{}
 				for _, s := range spaces {
 					if strings.Contains(strings.ToLower(s.DisplayName), filter) {
@@ -481,7 +466,7 @@ func membersCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listMembers(opt(in, "space")))
+			return google.Result(a.listMembers(in.Option("space")))
 		},
 		Format: formatMembers,
 	}
@@ -504,7 +489,7 @@ func userCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.getUser(arg(in, "user-id")))
+			return google.Result(a.getUser(in.Arg("user-id")))
 		},
 		Format: formatUser,
 	}

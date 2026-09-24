@@ -238,13 +238,13 @@ type attachmentFile struct {
 // and the stdin fallback for the body, checked in Bun's order.
 func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, error) {
 	var spec *composeSpec
-	if path := opt(in, "spec"); path != "" {
+	if path := in.Option("spec"); path != "" {
 		var err error
 		if spec, err = loadComposeSpec(path, fail); err != nil {
 			return nil, err
 		}
 	}
-	resolved, err := resolveComposeText(opt(in, "subject"), opt(in, "subject-file"), opt(in, "body"), opt(in, "body-file"), spec, fail)
+	resolved, err := resolveComposeText(in.Option("subject"), in.Option("subject-file"), in.Option("body"), in.Option("body-file"), spec, fail)
 	if err != nil {
 		return nil, err
 	}
@@ -260,12 +260,12 @@ func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, err
 		}
 		return []string{}
 	}
-	to := pick(list(in, "to"), spec.to)
-	cc := pick(list(in, "cc"), spec.cc)
-	bcc := pick(list(in, "bcc"), spec.bcc)
-	attachmentPaths := pick(list(in, "attachment"), spec.attachments)
+	to := pick(in.List("to"), spec.to)
+	cc := pick(in.List("cc"), spec.cc)
+	bcc := pick(in.List("bcc"), spec.bcc)
+	attachmentPaths := pick(in.List("attachment"), spec.attachments)
 
-	replyTo := opt(in, "reply-to")
+	replyTo := in.Option("reply-to")
 	if replyTo == "" && spec.replyTo != nil {
 		replyTo = *spec.replyTo
 	}
@@ -292,7 +292,7 @@ func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, err
 	for _, path := range attachmentPaths {
 		attachments = append(attachments, attachmentFile{path: path, filename: basename(path)})
 	}
-	for _, spec := range list(in, "inline") {
+	for _, spec := range in.List("inline") {
 		i := strings.Index(spec, ":")
 		if i < 0 {
 			return nil, fail("INVALID_PARAMS", "Invalid inline format: "+spec, "Use format: contentId:filepath (e.g., logo:./logo.png)")
@@ -301,7 +301,7 @@ func parseSendOptions(in plugins.CommandInput, fail failFunc) (*sendOptions, err
 		attachments = append(attachments, attachmentFile{path: path, filename: basename(path), contentID: spec[:i]})
 	}
 
-	isHTML := flag(in, "html") || (spec.html != nil && *spec.html)
+	isHTML := in.Flag("html") || (spec.html != nil && *spec.html)
 	return &sendOptions{
 		to: to, cc: cc, bcc: bcc,
 		subject:     resolved.subject,

@@ -41,7 +41,7 @@ func failIfAnyFailed(run *plugins.RunContext, failedCount, total int) error {
 }
 
 func requireOutput(run *plugins.RunContext, in plugins.CommandInput) (string, error) {
-	output := opt(in, "output")
+	output := in.Option("output")
 	if output == "" {
 		return "", run.Fail("INVALID_PARAMS", "required option '--output <dir>' not specified", "")
 	}
@@ -66,7 +66,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 	if err != nil {
 		return nil, err
 	}
-	since := opt(in, "since")
+	since := in.Option("since")
 	if err := requireIsoDate(run, since, "--since"); err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 	if err != nil {
 		return nil, failed(run.Fail, err)
 	}
-	documents := filterPeppolDocuments(all, since, opt(in, "sender"))
+	documents := filterPeppolDocuments(all, since, in.Option("sender"))
 	if len(documents) == 0 {
 		return &syncResult{tally: syncTally{Directory: output}, empty: "No matching documents."}, nil
 	}
@@ -103,7 +103,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 		}
 		xmlPath := filepath.Join(output, basename+".xml")
 		pdfPath := filepath.Join(output, basename+".pdf")
-		plan := planDocumentWork(fileExists(xmlPath), fileExists(pdfPath), flag(in, "extract-pdf"), flag(in, "force"))
+		plan := planDocumentWork(fileExists(xmlPath), fileExists(pdfPath), in.Flag("extract-pdf"), in.Flag("force"))
 		if plan.skip {
 			t.Skipped++
 			continue
@@ -176,12 +176,12 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	if err != nil {
 		return nil, err
 	}
-	since := opt(in, "since")
+	since := in.Option("since")
 	if err := requireIsoDate(run, since, "--since"); err != nil {
 		return nil, err
 	}
 	types := map[string]bool{}
-	for _, v := range strings.Split(opt(in, "include"), ",") {
+	for _, v := range strings.Split(in.Option("include"), ",") {
 		if v = jsvalue.Trim(v); v != "" {
 			types[v] = true
 		}
@@ -206,7 +206,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 		if since != "" && jsvalue.Slice(deref(firstOf(d.Text("SendDate"), d.Text("CreationDate")), ""), 10) < since {
 			continue
 		}
-		if customer := opt(in, "customer"); customer != "" && !containsInsensitive(d.Text("CustomerName"), strings.ToLower(customer)) {
+		if customer := in.Option("customer"); customer != "" && !containsInsensitive(d.Text("CustomerName"), strings.ToLower(customer)) {
 			continue
 		}
 		// The endpoint can be over-inclusive, so keep only what was asked for.
@@ -235,7 +235,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 			t.Renamed++
 		}
 		pdfPath := filepath.Join(output, basename+".pdf")
-		if !flag(in, "force") && fileExists(pdfPath) {
+		if !in.Flag("force") && fileExists(pdfPath) {
 			t.Skipped++
 			continue
 		}
@@ -299,12 +299,12 @@ func resolveImportPeppolDocument(ref string, documents []*jsvalue.Object) (*jsva
 
 func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 	c := clientOf(ctx, run)
-	asJSON := opt(in, "format") == "json"
+	asJSON := in.Option("format") == "json"
 	documents, err := c.listAllPeppolDocuments(nil)
 	if err != nil {
 		return nil, failed(run.Fail, err)
 	}
-	document, err := resolveImportPeppolDocument(arg(in, "ref"), documents)
+	document, err := resolveImportPeppolDocument(in.Arg("ref"), documents)
 	if err != nil {
 		return nil, failed(run.Fail, err)
 	}
@@ -316,7 +316,7 @@ func runPeppolImport(ctx context.Context, in plugins.CommandInput, run *plugins.
 		return nil, run.Fail("INVALID_PARAMS", label+" is already imported", "Nothing to do. Run: agentio falco peppol list")
 	}
 	id := deref(document.Text("id"), "undefined")
-	if flag(in, "dry-run") {
+	if in.Flag("dry-run") {
 		run.Log(fmt.Sprintf("Would import %s (id=%s, state=%s)", label, id, deref(document.Text("importState"), dash)))
 		return record{value: document, asJSON: asJSON}, nil
 	}
@@ -427,15 +427,15 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*jsvalue.Obje
 func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 	// Validate what was typed before --unpaid overrides it, so a bad --status
 	// is never silently discarded by the shortcut.
-	status := opt(in, "status")
+	status := in.Option("status")
 	if status != "Paid" && status != "NotPaid" {
 		return nil, run.Fail("INVALID_PARAMS", "--status must be Paid or NotPaid, got: "+status, "")
 	}
-	if flag(in, "unpaid") {
+	if in.Flag("unpaid") {
 		status = "NotPaid"
 	}
-	asJSON := opt(in, "format") == "json"
-	ref := arg(in, "ref")
+	asJSON := in.Option("format") == "json"
+	ref := in.Arg("ref")
 	c := clientOf(ctx, run)
 
 	invoices, err := c.listAllInvoices()

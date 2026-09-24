@@ -179,7 +179,7 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	setup.Log("  3. Copy the App key from the Settings tab\n")
 	setup.Log("No redirect URI is needed - Dropbox shows the code in the browser.\n")
 
-	appKey, _ := opts.Options["app-key"].(string)
+	appKey := opts.Option("app-key")
 	if appKey == "" {
 		appKey, _ = setup.Prompt("? App key: ", false)
 	}

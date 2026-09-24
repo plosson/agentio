@@ -21,7 +21,7 @@ func New() *plugins.Plugin {
 			Validate:       validate,
 			Reauthenticate: google.Reauthenticate("gcal", google.Snake),
 			Refresh:        google.Snake.RefreshSpec(),
-			ListInfo:       listInfo,
+			ListInfo:       google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			calendarsCmd(), eventsCmd(), getCmd(), createCmd(), updateCmd(),
@@ -60,33 +60,6 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 		info = "me"
 	}
 	return plugins.ValidationResult{Valid: true, Info: info}, nil
-}
-
-func listInfo(creds map[string]any) string {
-	if email, _ := creds["email"].(string); email != "" {
-		return " - " + email
-	}
-	return ""
-}
-
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func list(in plugins.CommandInput, name string) []string {
-	values, _ := in.Options[name].([]string)
-	return values
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
 }
 
 // piped is Bun `options.description` falling back to trimmed stdin.
@@ -136,7 +109,7 @@ func calendarsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listCalendars(jsvalue.ParseInt(opt(in, "limit"))))
+			return google.Result(a.listCalendars(jsvalue.ParseInt(in.Option("limit"))))
 		},
 		Format: formatCalendars,
 	}
@@ -176,7 +149,7 @@ func eventsCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			timeMin, timeMax := timeRange(in)
-			return google.Result(a.listEvents(orPrimary(arg(in, "calendar-id")), jsvalue.ParseInt(opt(in, "limit")), timeMin, timeMax, opt(in, "query")))
+			return google.Result(a.listEvents(orPrimary(in.Arg("calendar-id")), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Option("query")))
 		},
 		Format: formatEventList,
 	}
@@ -203,7 +176,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.getEvent(arg(in, "calendar-id"), arg(in, "event-id")))
+			return google.Result(a.getEvent(in.Arg("calendar-id"), in.Arg("event-id")))
 		},
 		Format: formatEvent,
 	}
@@ -250,7 +223,7 @@ func createCmd() plugins.CommandSpec {
 			if err := google.RequireOptions(in, run, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
 				return nil, err
 			}
-			reminders, err := parseReminders(list(in, "reminder"), run)
+			reminders, err := parseReminders(in.List("reminder"), run)
 			if err != nil {
 				return nil, err
 			}
@@ -259,21 +232,21 @@ func createCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			return google.Result(a.createEvent(createOptions{
-				calendarID:   orPrimary(arg(in, "calendar-id")),
-				summary:      opt(in, "summary"),
-				description:  piped(opt(in, "description"), in.Stdin),
-				location:     opt(in, "location"),
-				start:        opt(in, "from"),
-				end:          opt(in, "to"),
-				allDay:       flag(in, "all-day"),
-				attendees:    list(in, "attendee"),
-				recurrence:   list(in, "rrule"),
+				calendarID:   orPrimary(in.Arg("calendar-id")),
+				summary:      in.Option("summary"),
+				description:  piped(in.Option("description"), in.Stdin),
+				location:     in.Option("location"),
+				start:        in.Option("from"),
+				end:          in.Option("to"),
+				allDay:       in.Flag("all-day"),
+				attendees:    in.List("attendee"),
+				recurrence:   in.List("rrule"),
 				reminders:    reminders,
-				colorID:      opt(in, "color"),
-				visibility:   opt(in, "visibility"),
-				transparency: transparency(opt(in, "show-as")),
-				sendUpdates:  opt(in, "send-updates"),
-				withMeet:     flag(in, "with-meet"),
+				colorID:      in.Option("color"),
+				visibility:   in.Option("visibility"),
+				transparency: transparency(in.Option("show-as")),
+				sendUpdates:  in.Option("send-updates"),
+				withMeet:     in.Flag("with-meet"),
 			}))
 		},
 		Format: formatEventCreated,
@@ -317,7 +290,7 @@ func updateCmd() plugins.CommandSpec {
 			"agentio gcal update primary abc123def456 --show-as free",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if len(list(in, "attendee")) > 0 && len(list(in, "add-attendee")) > 0 {
+			if len(in.List("attendee")) > 0 && len(in.List("add-attendee")) > 0 {
 				return nil, run.Fail("INVALID_PARAMS", "Cannot use both --attendee and --add-attendee", "")
 			}
 			a, err := apiFrom(ctx, run)
@@ -325,20 +298,20 @@ func updateCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			return google.Result(a.updateEvent(updateOptions{
-				calendarID:   arg(in, "calendar-id"),
-				eventID:      arg(in, "event-id"),
-				summary:      opt(in, "summary"),
-				description:  piped(opt(in, "description"), in.Stdin),
-				location:     opt(in, "location"),
-				start:        opt(in, "from"),
-				end:          opt(in, "to"),
-				allDay:       flag(in, "all-day"),
-				attendees:    list(in, "attendee"),
-				addAttendees: list(in, "add-attendee"),
-				colorID:      opt(in, "color"),
-				visibility:   opt(in, "visibility"),
-				transparency: transparency(opt(in, "show-as")),
-				sendUpdates:  opt(in, "send-updates"),
+				calendarID:   in.Arg("calendar-id"),
+				eventID:      in.Arg("event-id"),
+				summary:      in.Option("summary"),
+				description:  piped(in.Option("description"), in.Stdin),
+				location:     in.Option("location"),
+				start:        in.Option("from"),
+				end:          in.Option("to"),
+				allDay:       in.Flag("all-day"),
+				attendees:    in.List("attendee"),
+				addAttendees: in.List("add-attendee"),
+				colorID:      in.Option("color"),
+				visibility:   in.Option("visibility"),
+				transparency: transparency(in.Option("show-as")),
+				sendUpdates:  in.Option("send-updates"),
 			}))
 		},
 		Format: formatEvent,
@@ -369,8 +342,8 @@ func deleteCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			calendarID, eventID := arg(in, "calendar-id"), arg(in, "event-id")
-			if err := a.deleteEvent(calendarID, eventID, opt(in, "send-updates")); err != nil {
+			calendarID, eventID := in.Arg("calendar-id"), in.Arg("event-id")
+			if err := a.deleteEvent(calendarID, eventID, in.Option("send-updates")); err != nil {
 				return nil, err
 			}
 			return deleted{CalendarID: calendarID, EventID: eventID}, nil
@@ -407,14 +380,14 @@ func searchCmd() plugins.CommandSpec {
 			}
 			// Default search range: 30 days past to 90 days future.
 			t := now()
-			timeMin, timeMax := opt(in, "from"), opt(in, "to")
+			timeMin, timeMax := in.Option("from"), in.Option("to")
 			if timeMin == "" {
 				timeMin = google.ISOString(addDays(t, -30))
 			}
 			if timeMax == "" {
 				timeMax = google.ISOString(addDays(t, 90))
 			}
-			return google.Result(a.listEvents(opt(in, "calendar"), jsvalue.ParseInt(opt(in, "limit")), timeMin, timeMax, arg(in, "query")))
+			return google.Result(a.listEvents(in.Option("calendar"), jsvalue.ParseInt(in.Option("limit")), timeMin, timeMax, in.Arg("query")))
 		},
 		Format: formatEventList,
 	}
@@ -446,17 +419,17 @@ func respondCmd() plugins.CommandSpec {
 			if err := google.RequireOptions(in, run, "--status <status>"); err != nil {
 				return nil, err
 			}
-			status := strings.ToLower(opt(in, "status"))
+			status := strings.ToLower(in.Option("status"))
 			switch status {
 			case "accepted", "declined", "tentative":
 			default:
-				return nil, run.Fail("INVALID_PARAMS", "Invalid status: "+opt(in, "status"), "Use: accepted, declined, or tentative")
+				return nil, run.Fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			ev, err := a.respond(arg(in, "calendar-id"), arg(in, "event-id"), status, opt(in, "comment"))
+			ev, err := a.respond(in.Arg("calendar-id"), in.Arg("event-id"), status, in.Option("comment"))
 			if err != nil {
 				return nil, err
 			}
@@ -488,7 +461,7 @@ func freebusyCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			var ids []string
-			for _, id := range strings.Split(arg(in, "calendar-ids"), ",") {
+			for _, id := range strings.Split(in.Arg("calendar-ids"), ",") {
 				if id = strings.TrimSpace(id); id != "" {
 					ids = append(ids, id)
 				}
@@ -500,7 +473,7 @@ func freebusyCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.freeBusy(ids, opt(in, "from"), opt(in, "to")))
+			return google.Result(a.freeBusy(ids, in.Option("from"), in.Option("to")))
 		},
 		Format: formatFreeBusy,
 	}

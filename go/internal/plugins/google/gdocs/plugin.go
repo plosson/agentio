@@ -31,21 +31,6 @@ func New() *plugins.Plugin {
 	}
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 // piped is Bun `options.content` falling back to readStdin() (trimmed).
 func piped(value string, stdin any) string {
 	if value != "" {
@@ -78,7 +63,7 @@ func getCmd() plugins.CommandSpec {
 		// Bun prints the markdown (or "Exported to <file>") with console.log, so
 		// the result is a string the host prints as is, an empty one included.
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			format, output := strings.ToLower(opt(in, "format")), opt(in, "output")
+			format, output := strings.ToLower(in.Option("format")), in.Option("output")
 			if format != "markdown" && format != "docx" {
 				return nil, run.Fail("INVALID_PARAMS", "Unknown format: "+format, "Use --format markdown or --format docx")
 			}
@@ -93,7 +78,7 @@ func getCmd() plugins.CommandSpec {
 			if format == "docx" {
 				mimeType, operation = docxMimeType, "export document as docx"
 			}
-			content, err := a.export(arg(in, "doc-id-or-url"), mimeType, operation)
+			content, err := a.export(in.Arg("doc-id-or-url"), mimeType, operation)
 			if err != nil {
 				return nil, err
 			}
@@ -132,7 +117,7 @@ func createCmd() plugins.CommandSpec {
 			if err := google.RequireOptions(in, run, "--title <title>"); err != nil {
 				return nil, err
 			}
-			content := piped(opt(in, "content"), in.Stdin)
+			content := piped(in.Option("content"), in.Stdin)
 			if content == "" {
 				return nil, run.Fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
 			}
@@ -140,7 +125,7 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.create(opt(in, "title"), content, opt(in, "folder")))
+			return google.Result(a.create(in.Option("title"), content, in.Option("folder")))
 		},
 		Format: formatCreated,
 	}
@@ -174,7 +159,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query")))
+			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query")))
 		},
 		Format: func(v any) string { return google.FormatDriveFiles(v, "Documents", "No documents found") },
 	}
@@ -208,14 +193,14 @@ func structureCmd() plugins.CommandSpec {
 			"location/range of every batch request that writes to it.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if opt(in, "tab") != "" && flag(in, "all-tabs") {
+			if in.Option("tab") != "" && in.Flag("all-tabs") {
 				return nil, run.Fail("INVALID_PARAMS", "--tab and --all-tabs are mutually exclusive", "")
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return a.structure(arg(in, "doc-id-or-url"), opt(in, "tab"), flag(in, "all-tabs"))
+			return a.structure(in.Arg("doc-id-or-url"), in.Option("tab"), in.Flag("all-tabs"))
 		},
 	}
 }
@@ -240,7 +225,7 @@ func tabsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.listTabs(arg(in, "doc-id-or-url")))
+			return google.Result(a.listTabs(in.Arg("doc-id-or-url")))
 		},
 		Format: formatTabs,
 	}
@@ -283,7 +268,7 @@ func batchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			result, err := a.batch(arg(in, "doc-id-or-url"), requests)
+			result, err := a.batch(in.Arg("doc-id-or-url"), requests)
 			if err != nil {
 				return nil, err
 			}

@@ -30,7 +30,7 @@ func New() *plugins.Plugin {
 			Validate:       validate,
 			Reauthenticate: google.Reauthenticate("gmail", google.Snake),
 			Refresh:        google.Snake.RefreshSpec(),
-			ListInfo:       listInfo,
+			ListInfo:       google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			listCmd(), getCmd(), searchCmd(), sendCmd(), draftCmd(), draftDeleteCmd(),
@@ -70,33 +70,6 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: true, Info: email}, nil
 }
 
-func listInfo(creds map[string]any) string {
-	if email, _ := creds["email"].(string); email != "" {
-		return " - " + email
-	}
-	return ""
-}
-
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func list(in plugins.CommandInput, name string) []string {
-	values, _ := in.Options[name].([]string)
-	return values
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 func args(in plugins.CommandInput, name string) []string {
 	values, _ := in.Args[name].([]string)
 	return values
@@ -114,11 +87,11 @@ func collectIDs(positional []string, stdin any) []string {
 
 // chunkOptions is Bun parseChunkOpts.
 func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
-	size := jsvalue.ParseInt(orDefault(opt(in, "chunk-size"), "1000"))
+	size := jsvalue.ParseInt(orDefault(in.Option("chunk-size"), "1000"))
 	if math.IsNaN(size) || size == 0 {
 		size = 1000
 	}
-	retries := jsvalue.ParseInt(orDefault(opt(in, "max-retries"), "5"))
+	retries := jsvalue.ParseInt(orDefault(in.Option("max-retries"), "5"))
 	if math.IsNaN(retries) {
 		retries = 0
 	}
@@ -130,7 +103,7 @@ func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
 func writeUnless(check func(plugins.CommandInput, failFunc) error) func(plugins.CommandInput) string {
 	access := google.WriteUnlessInvalid(check)
 	return func(in plugins.CommandInput) string {
-		if flag(in, "dry-run") {
+		if in.Flag("dry-run") {
 			return "read"
 		}
 		return access(in)
@@ -182,7 +155,7 @@ func listCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query"), list(in, "label")))
+			return google.Result(a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query"), in.List("label")))
 		},
 		Format: render,
 	}
@@ -211,11 +184,11 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			m, err := a.get(arg(in, "message-id"), opt(in, "format"))
+			m, err := a.get(in.Arg("message-id"), in.Option("format"))
 			if err != nil {
 				return nil, err
 			}
-			if flag(in, "body-only") {
+			if in.Flag("body-only") {
 				return *m.Body, nil
 			}
 			return m, nil
@@ -259,11 +232,11 @@ func searchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			result, err := a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query"), nil)
+			result, err := a.list(jsvalue.ParseInt(in.Option("limit")), in.Option("query"), nil)
 			if err != nil {
 				return nil, err
 			}
-			if flag(in, "ids-only") {
+			if in.Flag("ids-only") {
 				ids := idList{}
 				for _, m := range result.Messages {
 					ids = append(ids, m.ID)
@@ -324,7 +297,7 @@ func draftCmd() plugins.CommandSpec {
 		AccessFor:   google.WriteUnlessInvalid(checkCompose),
 		Operation:   "create draft",
 		OperationFor: func(in plugins.CommandInput) string {
-			if arg(in, "draft-id") != "" {
+			if in.Arg("draft-id") != "" {
 				return "update draft"
 			}
 			return "create draft"
@@ -357,7 +330,7 @@ func draftCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.saveDraft(arg(in, "draft-id"), o))
+			return google.Result(a.saveDraft(in.Arg("draft-id"), o))
 		},
 		Format: render,
 	}
@@ -456,7 +429,7 @@ func archiveCmd() plugins.CommandSpec {
 			}
 			ids := collectIDs(args(in, "message-id"), in.Stdin)
 			chunkSize, maxRetries := chunkOptions(in)
-			if flag(in, "dry-run") {
+			if in.Flag("dry-run") {
 				return &dryRunPlan{Action: "archive", TotalIDs: len(ids), ChunkSize: chunkSize,
 					Chunks: (len(ids) + chunkSize - 1) / chunkSize, AddLabels: []string{}, RemoveLabels: []string{"INBOX"}}, nil
 			}
@@ -485,7 +458,7 @@ func batchOutcome(result *batchResult) (any, error) {
 }
 
 func checkMark(in plugins.CommandInput, fail failFunc) error {
-	read, unread := flag(in, "read"), flag(in, "unread")
+	read, unread := in.Flag("read"), in.Flag("unread")
 	if !read && !unread {
 		return fail("INVALID_PARAMS", "Specify --read or --unread", "")
 	}
@@ -521,7 +494,7 @@ func markCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			read := flag(in, "read")
+			read := in.Flag("read")
 			var done markedList
 			for _, id := range args(in, "message-id") {
 				if err := a.mark(id, read); err != nil {
@@ -585,7 +558,7 @@ func labelsCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			l, err := a.createLabel(arg(in, "name"))
+			l, err := a.createLabel(in.Arg("name"))
 			if err != nil {
 				return nil, err
 			}
@@ -615,7 +588,7 @@ func labelsDeleteCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return google.Result(a.deleteLabel(arg(in, "name-or-id")))
+			return google.Result(a.deleteLabel(in.Arg("name-or-id")))
 		},
 		Format: render,
 	}
@@ -642,11 +615,11 @@ func labelsRenameCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			l, err := a.renameLabel(arg(in, "old"), arg(in, "new"))
+			l, err := a.renameLabel(in.Arg("old"), in.Arg("new"))
 			if err != nil {
 				return nil, err
 			}
-			return &labelRenamed{Old: arg(in, "old"), Label: *l}, nil
+			return &labelRenamed{Old: in.Arg("old"), Label: *l}, nil
 		},
 		Format: render,
 	}
@@ -697,7 +670,7 @@ func filtersGetCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			f, err := a.getFilter(arg(in, "id"))
+			f, err := a.getFilter(in.Arg("id"))
 			if err != nil {
 				return nil, err
 			}
@@ -714,10 +687,10 @@ func filtersGetCmd() plugins.CommandSpec {
 // filterCriteriaFrom is Bun parseFilterCriteriaFromOptions.
 func filterCriteriaFrom(in plugins.CommandInput, fail failFunc) (filterCriteria, error) {
 	c := filterCriteria{
-		From: opt(in, "from"), To: opt(in, "to"), Subject: opt(in, "subject"), Query: opt(in, "query"),
-		NegatedQuery: opt(in, "negated-query"), HasAttachment: flag(in, "has-attachment"), ExcludeChats: flag(in, "exclude-chats"),
+		From: in.Option("from"), To: in.Option("to"), Subject: in.Option("subject"), Query: in.Option("query"),
+		NegatedQuery: in.Option("negated-query"), HasAttachment: in.Flag("has-attachment"), ExcludeChats: in.Flag("exclude-chats"),
 	}
-	sizeRaw, comparison := opt(in, "size"), opt(in, "size-comparison")
+	sizeRaw, comparison := in.Option("size"), in.Option("size-comparison")
 	if (sizeRaw != "") != (comparison != "") {
 		return c, fail("INVALID_PARAMS", "--size and --size-comparison must be set together", "")
 	}
@@ -749,7 +722,7 @@ func checkFilterCreate(in plugins.CommandInput, fail failFunc) error {
 		return fail("INVALID_PARAMS", "At least one criterion is required",
 			"Use --from, --to, --subject, --query, --negated-query, --has-attachment, --exclude-chats, or --size")
 	}
-	if len(list(in, "apply")) == 0 && len(list(in, "remove")) == 0 && opt(in, "forward") == "" {
+	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 && in.Option("forward") == "" {
 		return fail("INVALID_PARAMS", "At least one action is required", "Use --apply, --remove, or --forward")
 	}
 	return nil
@@ -799,15 +772,15 @@ func filtersCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			add, err := a.resolveLabelIDs(list(in, "apply"))
+			add, err := a.resolveLabelIDs(in.List("apply"))
 			if err != nil {
 				return nil, err
 			}
-			remove, err := a.resolveLabelIDs(list(in, "remove"))
+			remove, err := a.resolveLabelIDs(in.List("remove"))
 			if err != nil {
 				return nil, err
 			}
-			action := filterAction{Forward: opt(in, "forward")}
+			action := filterAction{Forward: in.Option("forward")}
 			if len(add) > 0 {
 				action.AddLabelIDs = add
 			}
@@ -855,7 +828,7 @@ func filtersDeleteCmd() plugins.CommandSpec {
 }
 
 func checkLabel(in plugins.CommandInput, fail failFunc) error {
-	if len(list(in, "apply")) == 0 && len(list(in, "remove")) == 0 {
+	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 {
 		return fail("INVALID_PARAMS", "Specify at least one --apply or --remove", "")
 	}
 	return checkIDs("id", "No IDs provided")(in, fail)
@@ -894,11 +867,11 @@ func labelCmd() plugins.CommandSpec {
 			if err := checkLabel(in, run.Fail); err != nil {
 				return nil, err
 			}
-			apply, remove := list(in, "apply"), list(in, "remove")
+			apply, remove := in.List("apply"), in.List("remove")
 			ids := collectIDs(args(in, "id"), in.Stdin)
-			isThread := flag(in, "thread")
+			isThread := in.Flag("thread")
 			chunkSize, maxRetries := chunkOptions(in)
-			if flag(in, "dry-run") {
+			if in.Flag("dry-run") {
 				if isThread {
 					run.Log(fmt.Sprintf("would expand %d thread(s) to messages; chunk count below assumes 1 message/thread", len(ids)))
 				}
@@ -968,14 +941,14 @@ func attachmentCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			results, err := a.allAttachments(arg(in, "message-id"))
+			results, err := a.allAttachments(in.Arg("message-id"))
 			if err != nil {
 				return nil, err
 			}
 			if len(results) == 0 {
 				return noAttachments{}, nil
 			}
-			name := opt(in, "name")
+			name := in.Option("name")
 			var chosen []downloaded
 			for _, r := range results {
 				if name == "" || r.attachment.Filename == name {
@@ -987,7 +960,7 @@ func attachmentCmd() plugins.CommandSpec {
 			}
 			out := &downloads{Count: len(chosen), Files: []downloadedFile{}}
 			for _, r := range chosen {
-				path := filepath.Join(opt(in, "output"), r.attachment.Filename)
+				path := filepath.Join(in.Option("output"), r.attachment.Filename)
 				if err := writeFile(path, r.data); err != nil {
 					return out, err
 				}
@@ -1021,11 +994,11 @@ func exportCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			m, err := a.get(arg(in, "message-id"), "html")
+			m, err := a.get(in.Arg("message-id"), "html")
 			if err != nil {
 				return nil, err
 			}
-			output := opt(in, "output")
+			output := in.Option("output")
 			if err := exportPDF(m, output, run); err != nil {
 				return nil, err
 			}

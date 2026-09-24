@@ -43,21 +43,6 @@ func listInfo(creds map[string]any) string {
 	return ""
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func flag(in plugins.CommandInput, name string) bool {
-	b, _ := in.Options[name].(bool)
-	return b
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 func apiOf(ctx context.Context, run *plugins.RunContext) *api {
 	return newAPI(ctx, run.Credentials, run.Fetch)
 }
@@ -116,12 +101,12 @@ func listCmd() plugins.CommandSpec {
 			"# Casing is preserved but matching is case-insensitive.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			limit, err := parseLimit(run, opt(in, "limit"))
+			limit, err := parseLimit(run, in.Option("limit"))
 			if err != nil {
 				return nil, err
 			}
-			path := arg(in, "path")
-			entries, err := apiOf(ctx, run).list(path, limit, flag(in, "recursive"), flag(in, "folders"))
+			path := in.Arg("path")
+			entries, err := apiOf(ctx, run).list(path, limit, in.Flag("recursive"), in.Flag("folders"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -148,7 +133,7 @@ func getCmd() plugins.CommandSpec {
 			"agentio dropbox get /Documents",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			e, err := apiOf(ctx, run).get(arg(in, "path"))
+			e, err := apiOf(ctx, run).get(in.Arg("path"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -179,14 +164,14 @@ func searchCmd() plugins.CommandSpec {
 			"# Newly uploaded files can take a few minutes to become searchable.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if opt(in, "query") == "" {
+			if in.Option("query") == "" {
 				return nil, run.Fail("INVALID_PARAMS", "required option '--query <text>' not specified", "")
 			}
-			limit, err := parseLimit(run, opt(in, "limit"))
+			limit, err := parseLimit(run, in.Option("limit"))
 			if err != nil {
 				return nil, err
 			}
-			entries, err := apiOf(ctx, run).search(opt(in, "query"), opt(in, "path"), limit, flag(in, "filename-only"))
+			entries, err := apiOf(ctx, run).search(in.Option("query"), in.Option("path"), limit, in.Flag("filename-only"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -217,7 +202,7 @@ func downloadCmd() plugins.CommandSpec {
 			"# Folder downloads are capped by Dropbox at 20 GB and 10,000 files.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			r, err := apiOf(ctx, run).download(arg(in, "path"), opt(in, "output"))
+			r, err := apiOf(ctx, run).download(in.Arg("path"), in.Option("output"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -251,7 +236,7 @@ func putCmd() plugins.CommandSpec {
 			"# Files above 150 MB are uploaded in 8 MB chunks automatically.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			r, err := apiOf(ctx, run).upload(arg(in, "file-path"), opt(in, "path"), flag(in, "overwrite"))
+			r, err := apiOf(ctx, run).upload(in.Arg("file-path"), in.Option("path"), in.Flag("overwrite"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -275,7 +260,7 @@ func mkdirCmd() plugins.CommandSpec {
 			"agentio dropbox mkdir /Reports/2026/Q1",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			e, err := apiOf(ctx, run).mkdir(arg(in, "path"))
+			e, err := apiOf(ctx, run).mkdir(in.Arg("path"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -297,7 +282,7 @@ func relocateCmd(path, description, operation, endpoint, prefix string, examples
 		},
 		Examples: examples,
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			e, err := apiOf(ctx, run).relocate(endpoint, arg(in, "from"), arg(in, "to"))
+			e, err := apiOf(ctx, run).relocate(endpoint, in.Arg("from"), in.Arg("to"))
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
@@ -349,8 +334,8 @@ func deleteCmd() plugins.CommandSpec {
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a := apiOf(ctx, run)
-			path := arg(in, "path")
-			if !flag(in, "force") {
+			path := in.Arg("path")
+			if !in.Flag("force") {
 				e, err := a.get(path)
 				if err != nil {
 					return nil, failed(run.Fail, err)
@@ -388,7 +373,7 @@ func linkCmd() plugins.CommandSpec {
 		Operation:   "create a shared link",
 		// A temporary link creates nothing, so Bun skips the write check for it.
 		AccessFor: func(in plugins.CommandInput) string {
-			if flag(in, "temporary") {
+			if in.Flag("temporary") {
 				return "read"
 			}
 			return "write"
@@ -409,10 +394,10 @@ func linkCmd() plugins.CommandSpec {
 			a := apiOf(ctx, run)
 			var l link
 			var err error
-			if flag(in, "temporary") {
-				l, err = a.temporaryLink(arg(in, "path"))
+			if in.Flag("temporary") {
+				l, err = a.temporaryLink(in.Arg("path"))
 			} else {
-				l, err = a.sharedLink(arg(in, "path"))
+				l, err = a.sharedLink(in.Arg("path"))
 			}
 			if err != nil {
 				return nil, failed(run.Fail, err)

@@ -840,7 +840,7 @@ func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
 
 func TestIDsComeFromDriveURLs(t *testing.T) {
 	for in, want := range map[string]string{
-		"abc":                                          "abc",
+		"abc": "abc",
 		"https://drive.google.com/file/d/F-1_x/view":   "F-1_x",
 		"https://drive.google.com/drive/folders/D9":    "D9",
 		"https://drive.google.com/open?id=Q1&usp=x":    "Q1",

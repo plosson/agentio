@@ -41,16 +41,6 @@ func listInfo(creds map[string]any) string {
 	return ""
 }
 
-func opt(in plugins.CommandInput, name string) string {
-	s, _ := in.Options[name].(string)
-	return s
-}
-
-func arg(in plugins.CommandInput, name string) string {
-	s, _ := in.Args[name].(string)
-	return s
-}
-
 func piped(content string, stdin any) string {
 	if content != "" {
 		return content
@@ -77,7 +67,7 @@ func spacesCmd() plugins.CommandSpec {
 			"agentio confluence spaces --limit 10",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listSpaces(limitQuery(opt(in, "limit"), 50), opt(in, "type"))
+			return apiFrom(ctx, run).listSpaces(limitQuery(in.Option("limit"), 50), in.Option("type"))
 		},
 		Format: formatSpaces,
 	}
@@ -103,7 +93,7 @@ func pagesCmd() plugins.CommandSpec {
 			"agentio confluence pages --space ENG --limit 50",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listPages(opt(in, "space"), opt(in, "space-id"), opt(in, "parent"), limitQuery(opt(in, "limit"), 25))
+			return apiFrom(ctx, run).listPages(in.Option("space"), in.Option("space-id"), in.Option("parent"), limitQuery(in.Option("limit"), 25))
 		},
 		Format: formatPages,
 	}
@@ -127,13 +117,13 @@ func getCmd() plugins.CommandSpec {
 			"agentio confluence get 123456 --format atlas_doc_format",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			format := opt(in, "format")
+			format := in.Option("format")
 			switch format {
 			case "storage", "atlas_doc_format", "view":
 			default:
 				return nil, run.Fail("INVALID_PARAMS", fmt.Sprintf("Invalid format %q. Use storage, atlas_doc_format, or view.", format), "")
 			}
-			return apiFrom(ctx, run).getPage(arg(in, "page-id"), format)
+			return apiFrom(ctx, run).getPage(in.Arg("page-id"), format)
 		},
 		Format: formatPage,
 	}
@@ -160,7 +150,7 @@ func searchCmd() plugins.CommandSpec {
 			`agentio confluence search --space ENG --type page --text "onboarding"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).search(opt(in, "cql"), opt(in, "space"), opt(in, "type"), opt(in, "text"), limitQuery(opt(in, "limit"), 25))
+			return apiFrom(ctx, run).search(in.Option("cql"), in.Option("space"), in.Option("type"), in.Option("text"), limitQuery(in.Option("limit"), 25))
 		},
 		Format: formatSearch,
 	}
@@ -189,17 +179,17 @@ func createCmd() plugins.CommandSpec {
 			`agentio confluence create --title "Sub Page" --space ENG --parent 123456 --content "<p>Content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if opt(in, "title") == "" {
+			if in.Option("title") == "" {
 				return nil, run.Fail("INVALID_PARAMS", "required option '--title <title>' not specified", "")
 			}
-			if opt(in, "space") == "" && opt(in, "space-id") == "" {
+			if in.Option("space") == "" && in.Option("space-id") == "" {
 				return nil, run.Fail("INVALID_PARAMS", "--space or --space-id is required", "")
 			}
-			body := piped(opt(in, "content"), in.Stdin)
+			body := piped(in.Option("content"), in.Stdin)
 			if body == "" {
 				return nil, run.Fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
 			}
-			return apiFrom(ctx, run).createPage(opt(in, "space"), opt(in, "space-id"), opt(in, "title"), opt(in, "parent"), body)
+			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.Option("parent"), body)
 		},
 		Format: formatCreated,
 	}
@@ -226,11 +216,11 @@ func updateCmd() plugins.CommandSpec {
 			`agentio confluence update 123456 --title "New Title" --content "<p>New content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			body := piped(opt(in, "content"), in.Stdin)
+			body := piped(in.Option("content"), in.Stdin)
 			if body == "" {
 				return nil, run.Fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
 			}
-			return apiFrom(ctx, run).updatePage(arg(in, "page-id"), opt(in, "title"), body)
+			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.Option("title"), body)
 		},
 		Format: formatUpdated,
 	}
@@ -247,7 +237,7 @@ func commentsCmd() plugins.CommandSpec {
 			"agentio confluence comments 123456",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listComments(arg(in, "page-id"))
+			return apiFrom(ctx, run).listComments(in.Arg("page-id"))
 		},
 		Format: formatComments,
 	}
@@ -271,14 +261,14 @@ func commentCmd() plugins.CommandSpec {
 			`echo "LGTM" | agentio confluence comment 123456`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			body := arg(in, "body")
+			body := in.Arg("body")
 			if body == "" {
 				body = piped("", in.Stdin)
 			}
 			if body == "" {
 				return nil, run.Fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
 			}
-			return apiFrom(ctx, run).addComment(arg(in, "page-id"), body)
+			return apiFrom(ctx, run).addComment(in.Arg("page-id"), body)
 		},
 		Format: formatComment,
 	}
