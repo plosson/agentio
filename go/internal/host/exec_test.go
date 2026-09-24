@@ -264,3 +264,25 @@ func TestOAuthUsesAPinnedCallbackPort(t *testing.T) {
 		t.Fatalf("res %#v redirect %q", res, redirect)
 	}
 }
+
+// Bun prints JSON.stringify(value, null, 2), which leaves <, > and & as-is.
+func TestPrintResultJSONDoesNotEscapeHTML(t *testing.T) {
+	value := map[string]any{"body": "<p>a & b</p>", "n": 1}
+	want := "{\n  \"body\": \"<p>a & b</p>\",\n  \"n\": 1\n}\n"
+	for _, tc := range []struct {
+		name   string
+		spec   *plugins.CommandSpec
+		asJSON bool
+	}{
+		{"--json", &plugins.CommandSpec{Format: func(any) string { return "formatted" }}, true},
+		{"no Format fallback", &plugins.CommandSpec{}, false},
+	} {
+		var out bytes.Buffer
+		if err := PrintResult(&out, tc.spec, value, tc.asJSON); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if out.String() != want {
+			t.Fatalf("%s: got %q, want %q", tc.name, out.String(), want)
+		}
+	}
+}

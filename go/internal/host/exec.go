@@ -64,12 +64,7 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 // PrintResult writes a command result. --json wins; otherwise format, then JSON.
 func PrintResult(w io.Writer, spec *plugins.CommandSpec, result any, asJSON bool) error {
 	if asJSON {
-		raw, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintln(w, string(raw))
-		return err
+		return writeJSON(w, result)
 	}
 	if spec.Format != nil {
 		rendered := spec.Format(result)
@@ -86,12 +81,15 @@ func PrintResult(w io.Writer, spec *plugins.CommandSpec, result any, asJSON bool
 	if result == nil {
 		return nil
 	}
-	raw, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(w, string(raw))
-	return err
+	return writeJSON(w, result)
+}
+
+// writeJSON matches JSON.stringify(value, null, 2): no HTML escaping of <, >, &.
+func writeJSON(w io.Writer, value any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
 }
 
 // ParseStdin turns raw stdin into the command's declared input.
