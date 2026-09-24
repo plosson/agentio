@@ -42,7 +42,11 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 			return nil, err
 		}
 		profileName = name
-		if spec.Access == "write" {
+		access := spec.Access
+		if spec.AccessFor != nil {
+			access = spec.AccessFor(in)
+		}
+		if access == "write" {
 			operation := spec.Operation
 			if operation == "" {
 				operation = spec.Path

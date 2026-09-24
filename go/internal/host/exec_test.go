@@ -286,3 +286,71 @@ func TestPrintResultJSONDoesNotEscapeHTML(t *testing.T) {
 		}
 	}
 }
+
+// Bun's dropbox link calls enforceWriteAccess only without --temporary.
+func TestAccessForDecidesTheGateFromTheInput(t *testing.T) {
+	testbox.Isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	ran := 0
+	r, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+				return nil, nil
+			},
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
+			},
+		},
+		Commands: []plugins.CommandSpec{{
+			Path: "link", Description: "link", Access: "write", Operation: "create a shared link",
+			AccessFor: func(in plugins.CommandInput) string {
+				if TruthyOption(in.Options["temporary"]) {
+					return "read"
+				}
+				return "write"
+			},
+			Examples: []string{"agentio desk link"},
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) {
+				ran++
+				return "ok", nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	p := r.Find("desk")
+	_, err = Execute(context.Background(), r, p, command(p, "link"), plugins.CommandInput{Options: map[string]any{"temporary": false}})
+	ce, ok := err.(*clierr.Error)
+	if !ok || ce.Code != clierr.PermissionDenied || ce.Message != `Cannot create a shared link: profile "ro" is read-only` || ran != 0 {
+		t.Fatalf("write form: %#v ran %d", err, ran)
+	}
+	res, err := Execute(context.Background(), r, p, command(p, "link"), plugins.CommandInput{Options: map[string]any{"temporary": true}})
+	if err != nil || res != "ok" || ran != 1 {
+		t.Fatalf("read form: %#v %v ran %d", res, err, ran)
+	}
+}
+
+// Bun utils/stdin confirm: "<question> (y/n): ", only y or yes (any case) agree.
+func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
+	for answer, want := range map[string]bool{"y\n": true, " YES \n": true, "n\n": false, "yep\n": false, "\n": false, "": false} {
+		var errOut bytes.Buffer
+		got, _ := confirm(Streams{In: strings.NewReader(answer), Err: &errOut}, `Delete file "/a"?`)
+		if got != want {
+			t.Errorf("%q: got %v", answer, got)
+		}
+		if errOut.String() != `Delete file "/a"? (y/n): ` {
+			t.Fatalf("prompt %q", errOut.String())
+		}
+	}
+	if NewRunContext(nil, "p", nil).Confirm == nil {
+		t.Fatal("RunContext has no Confirm")
+	}
+}

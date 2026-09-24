@@ -22,6 +22,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
+	"github.com/plosson/agentio/go/internal/plugins/dropbox"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -37,6 +38,7 @@ func init() {
 	plugins.Default.MustRegister(ping.New())
 	plugins.Default.MustRegister(confluence.New())
 	plugins.Default.MustRegister(discourse.New())
+	plugins.Default.MustRegister(dropbox.New())
 }
 
 func Main(args []string) int {
@@ -192,16 +194,7 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		default:
 			leaf.Args = cobra.RangeArgs(req, len(spec.Arguments))
 		}
-		for _, opt := range spec.Options {
-			fname := longName(opt.Flags)
-			if _, isBool := opt.DefaultValue.(bool); isBool || !strings.Contains(opt.Flags, "<") {
-				def, _ := opt.DefaultValue.(bool)
-				leaf.Flags().Bool(fname, def, opt.Description)
-			} else {
-				def, _ := opt.DefaultValue.(string)
-				leaf.Flags().String(fname, def, opt.Description)
-			}
-		}
+		declareOptions(leaf.Flags(), spec.Options)
 		if p.Profile != nil {
 			leaf.Flags().String("profile", "", "Profile name (optional if only one profile exists)")
 		}
@@ -257,6 +250,40 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	return cmd
 }
 
+// declareOptions adds plugin OptionSpecs as flags: a <value> flag is a string,
+// anything else (or a bool default) is a switch.
+func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
+	for _, opt := range opts {
+		fname := longName(opt.Flags)
+		if _, isBool := opt.DefaultValue.(bool); isBool || !strings.Contains(opt.Flags, "<") {
+			def, _ := opt.DefaultValue.(bool)
+			flags.Bool(fname, def, opt.Description)
+		} else {
+			def, _ := opt.DefaultValue.(string)
+			flags.String(fname, def, opt.Description)
+		}
+	}
+}
+
+// optionValues reads back the flags declareOptions added.
+func optionValues(flags *pflag.FlagSet, opts []plugins.OptionSpec) map[string]any {
+	out := map[string]any{}
+	for _, opt := range opts {
+		name := longName(opt.Flags)
+		f := flags.Lookup(name)
+		if f == nil {
+			continue
+		}
+		if f.Value.Type() == "bool" {
+			b, _ := flags.GetBool(name)
+			out[name] = b
+			continue
+		}
+		out[name] = f.Value.String()
+	}
+	return out
+}
+
 func nested(root *cobra.Command, path string) *cobra.Command {
 	cur := root
 	for _, part := range strings.Fields(path) {
@@ -297,10 +324,12 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		Use:   "add",
 		Short: "Add a new " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return host.AddProfile(context.Background(), p, plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly}, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
+			opts := plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly, Options: optionValues(cmd.Flags(), p.Profile.SetupOptions)}
+			return host.AddProfile(context.Background(), p, opts, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
 		},
 	}
 	add.Flags().StringVar(&profileName, "profile", "", "Profile name")
+	declareOptions(add.Flags(), p.Profile.SetupOptions)
 	add.Flags().BoolVar(&readOnly, "read-only", false, "Create as read-only profile (blocks write operations)")
 	list := &cobra.Command{
 		Use:   "list",

@@ -10,6 +10,8 @@ var (
 	pluginID = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	longFlag = regexp.MustCompile(`(?:^|[, ]+)--[a-z][a-z0-9-]*`)
 	hostFlag = regexp.MustCompile(`(?:^|[, ]+)--(?:profile|json)(?:[, =]|$)`)
+	// setupHostFlag is what the host already puts on `profile add`.
+	setupHostFlag = regexp.MustCompile(`(?:^|[, ]+)--(?:profile|read-only)(?:[, =]|$)`)
 )
 
 var reservedIDs = map[string]bool{
@@ -64,6 +66,16 @@ func (r *Registry) add(p *Plugin) error {
 	}
 	if p.Profile != nil && (p.Profile.Setup == nil || p.Profile.Validate == nil) {
 		return fmt.Errorf("plugin %s has an invalid profile contract", p.ID)
+	}
+	if p.Profile != nil {
+		for _, opt := range p.Profile.SetupOptions {
+			if !longFlag.MatchString(opt.Flags) {
+				return fmt.Errorf("plugin %s profile add has invalid option flags: %s", p.ID, opt.Flags)
+			}
+			if setupHostFlag.MatchString(opt.Flags) {
+				return fmt.Errorf("plugin %s profile add redeclares host option: %s", p.ID, opt.Flags)
+			}
+		}
 	}
 	paths := map[string]bool{}
 	for i := range p.Commands {

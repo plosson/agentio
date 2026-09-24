@@ -96,6 +96,7 @@ func NewRunContext(creds map[string]any, profileName string, ctx context.Context
 		Signal:      ctx,
 		Fetch:       fetch,
 		Log:         func(parts ...any) { fmt.Fprintln(os.Stderr, parts...) },
+		Confirm:     func(q string) (bool, error) { return confirm(StdStreams(), q) },
 		Fail:        fail,
 	}
 }
@@ -122,7 +123,7 @@ func prompt(s Streams, question string, secret bool) (string, error) {
 }
 
 func confirm(s Streams, question string) (bool, error) {
-	answer, err := prompt(s, question+" [y/N]", false)
+	answer, err := prompt(s, question+" (y/n): ", false)
 	if err != nil {
 		return false, err
 	}

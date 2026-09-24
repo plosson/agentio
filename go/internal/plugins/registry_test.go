@@ -48,6 +48,18 @@ func TestRegistryRejectsABrokenContract(t *testing.T) {
 		{"profile missing validate", func(p *Plugin) {
 			p.Profile = &ProfileSpec{Setup: nopSetup}
 		}, "invalid profile"},
+		{"setup option redeclares --read-only", func(p *Plugin) {
+			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate,
+				SetupOptions: []OptionSpec{{Flags: "--read-only", Description: "nope"}}}
+		}, "profile add redeclares host option"},
+		{"setup option redeclares --profile", func(p *Plugin) {
+			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate,
+				SetupOptions: []OptionSpec{{Flags: "--profile <name>", Description: "nope"}}}
+		}, "profile add redeclares host option"},
+		{"setup option without a long flag", func(p *Plugin) {
+			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate,
+				SetupOptions: []OptionSpec{{Flags: "-k <key>", Description: "short only"}}}
+		}, "profile add has invalid option"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

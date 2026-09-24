@@ -172,3 +172,48 @@ func TestProfileListAppendsTheServiceListInfo(t *testing.T) {
 		t.Fatalf("code %d\n%q\n%s", code, out.String(), errOut.String())
 	}
 }
+
+// Bun dropbox `profile add --app-key <key>`: a service flag on profile add.
+func TestProfileAddPassesServiceSetupOptions(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	var got plugins.SetupOptions
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			SetupOptions: []plugins.OptionSpec{
+				{Flags: "--app-key <key>", Description: "App key"},
+				{Flags: "--sandbox", Description: "Sandbox"},
+			},
+			Setup: func(_ context.Context, opts plugins.SetupOptions, _ *plugins.SetupContext) (*plugins.SetupResult, error) {
+				got = opts
+				return &plugins.SetupResult{Credentials: map[string]any{"k": "v"}, SuggestedProfileName: "auto"}, nil
+			},
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
+			},
+		},
+		Commands: []plugins.CommandSpec{{
+			Path: "ping", Description: "ping", Examples: []string{"agentio desk ping"},
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) { return "pong", nil },
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := Execute(reg, []string{"desk", "profile", "add", "--app-key", "k1", "--profile", "mine", "--read-only"}, &out, &errOut, strings.NewReader(""))
+	if code != 0 {
+		t.Fatalf("code %d %s", code, errOut.String())
+	}
+	if got.Profile != "mine" || !got.ReadOnly || got.Options["app-key"] != "k1" || got.Options["sandbox"] != false || len(got.Options) != 2 {
+		t.Fatalf("%#v", got)
+	}
+	// The top-level `profile add <service>` keeps Bun's fixed flags only.
+	code = Execute(reg, []string{"profile", "add", "desk", "--app-key", "k1"}, &out, &errOut, strings.NewReader(""))
+	if code == 0 {
+		t.Fatal("top-level profile add accepted a service flag")
+	}
+}

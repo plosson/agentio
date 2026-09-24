@@ -25,6 +25,9 @@ type ValidationResult struct {
 type SetupOptions struct {
 	Profile  string
 	ReadOnly bool
+	// Options holds the ProfileSpec.SetupOptions flags given to `profile add`,
+	// keyed by long name (Bun: `--app-key <key>` arrives as "app-key").
+	Options map[string]any
 }
 
 type SetupResult struct {
@@ -68,7 +71,9 @@ type RunContext struct {
 	Signal      context.Context
 	Fetch       func(ctx context.Context, req *http.Request) (*http.Response, error)
 	Log         func(parts ...any)
-	Fail        func(code ErrorCode, message, suggestion string) error
+	// Confirm asks a yes/no question on the terminal (Bun utils/stdin confirm).
+	Confirm func(question string) (bool, error)
+	Fail    func(code ErrorCode, message, suggestion string) error
 }
 
 type ArgumentSpec struct {
@@ -99,6 +104,9 @@ type CommandSpec struct {
 	Input string
 	// Access is "", "read", or "write". Omitted access is treated as read.
 	Access string
+	// AccessFor, when set, decides the access from the parsed input instead of
+	// Access, for a Bun command that calls enforceWriteAccess only on some flags.
+	AccessFor func(in CommandInput) string
 	// Operation names the action in the read-only refusal ("Cannot <operation>").
 	// Empty uses Path.
 	Operation string
@@ -120,6 +128,8 @@ type ProfileSpec struct {
 	Validate       func(ctx context.Context, run *RunContext) (ValidationResult, error)
 	Reauthenticate func(ctx context.Context, credentials map[string]any, profileName string, setup *SetupContext) (map[string]any, error)
 	Refresh        *RefreshSpec
+	// SetupOptions are extra `<service> profile add` flags (Bun: dropbox --app-key).
+	SetupOptions []OptionSpec
 	// ListInfo is appended to a profile's line in `profile list` (Bun getExtraInfo).
 	ListInfo func(credentials map[string]any) string
 }
