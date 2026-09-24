@@ -23,6 +23,19 @@ func TestInputAccessorsReturnZeroForMissingOrMistypedValues(t *testing.T) {
 	if in.List("tag") != nil || in.List("missing") != nil {
 		t.Fatal("List must be nil for a non-slice or missing value")
 	}
+	if v, ok := in.LookupOption("limit"); !ok || v != "10" {
+		t.Fatal("LookupOption must report a given value")
+	}
+	in.Options["due"] = ""
+	if v, ok := in.LookupOption("due"); !ok || v != "" {
+		t.Fatal("LookupOption must report an explicit empty value as given")
+	}
+	in.Options["title"] = nil
+	for _, name := range []string{"title", "force", "missing"} {
+		if _, ok := in.LookupOption(name); ok {
+			t.Fatalf("LookupOption(%q) reported a value that was not a given string", name)
+		}
+	}
 	var empty CommandInput
 	if empty.Arg("x") != "" || empty.Option("x") != "" || empty.Flag("x") || empty.List("x") != nil {
 		t.Fatal("nil maps must read as zero values")

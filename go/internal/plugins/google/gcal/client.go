@@ -13,7 +13,6 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	calendar "google.golang.org/api/calendar/v3"
-	"google.golang.org/api/googleapi"
 )
 
 // now is the clock behind --today, --tomorrow, --days and the search range.
@@ -185,7 +184,7 @@ func (a *api) notFoundOr(prefix, eventID string, err error) error {
 }
 
 func (a *api) listCalendars(limit float64) ([]calendarEntry, error) {
-	resp, err := a.svc.CalendarList.List().Context(a.ctx).Do(maxResults(limit))
+	resp, err := a.svc.CalendarList.List().Context(a.ctx).Do(google.MaxResults(limit, 250))
 	if err != nil {
 		return nil, a.apiError("Calendar API error", err)
 	}
@@ -210,7 +209,7 @@ func (a *api) listEvents(calendarID string, limit float64, timeMin, timeMax, que
 	if query != "" {
 		call.Q(query)
 	}
-	resp, err := call.Do(maxResults(limit))
+	resp, err := call.Do(google.MaxResults(limit, 250))
 	if err != nil {
 		return nil, a.apiError("Calendar API error", err)
 	}
@@ -531,13 +530,4 @@ func timeRange(in plugins.CommandInput) (string, string) {
 func addDays(t time.Time, n int) time.Time {
 	t = t.In(time.Local)
 	return time.Date(t.Year(), t.Month(), t.Day()+n, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
-}
-
-// maxResults is Bun `maxResults: Math.min(limit, 250)` as googleapis puts it
-// on the query string, NaN included.
-func maxResults(limit float64) googleapi.CallOption {
-	if !math.IsNaN(limit) {
-		limit = math.Min(limit, 250)
-	}
-	return googleapi.QueryParameter("maxResults", jsvalue.NumberString(limit))
 }

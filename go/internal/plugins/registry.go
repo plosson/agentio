@@ -87,6 +87,8 @@ func (r *Registry) add(p *Plugin) error {
 	for i := range p.Commands {
 		names[p.Commands[i].Path] = true
 	}
+	// defaults holds the groups that already have a default command.
+	defaults := map[string]bool{}
 	for i := range p.Commands {
 		cmd := &p.Commands[i]
 		if strings.TrimSpace(cmd.Path) == "" {
@@ -125,6 +127,12 @@ func (r *Registry) add(p *Plugin) error {
 			}
 		}
 		parent := strings.Join(segments[:len(segments)-1], " ")
+		if cmd.Default {
+			if defaults[parent] || names[parent] {
+				return fmt.Errorf("plugin %s command %s cannot be the default of its group", p.ID, cmd.Path)
+			}
+			defaults[parent] = true
+		}
 		for _, alias := range cmd.Aliases {
 			full := strings.TrimSpace(parent + " " + alias)
 			if !pluginID.MatchString(alias) || alias == "profile" || names[full] {

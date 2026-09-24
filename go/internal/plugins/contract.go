@@ -126,6 +126,13 @@ func (in CommandInput) Option(name string) string {
 	return s
 }
 
+// LookupOption is a <value> option and whether it was given, so an explicit
+// empty value is told apart from an absent one (Bun `options.due !== undefined`).
+func (in CommandInput) LookupOption(name string) (string, bool) {
+	s, ok := in.Options[name].(string)
+	return s, ok
+}
+
 // Flag is a switch option; absent or of another type is false.
 func (in CommandInput) Flag(name string) bool {
 	b, _ := in.Options[name].(bool)
@@ -145,6 +152,9 @@ type CommandSpec struct {
 	Options     []OptionSpec
 	// Aliases are other names for the last Path segment (Bun `.alias('list')`).
 	Aliases []string
+	// Default runs this command when its parent group is given no subcommand
+	// (Bun `.command('list', { isDefault: true })`).
+	Default bool
 	// Input is "", "none", "text", or "json".
 	Input string
 	// Access is "", "read", or "write". Omitted access is treated as read.

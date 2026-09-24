@@ -418,8 +418,75 @@ func TestCommandOwnJSONOptionTakesAnOptionalValue(t *testing.T) {
 			t.Fatalf("%v: %q", c.args, out.String())
 		}
 		in := got[len(got)-1]
-		if in.Options["json"] != c.json || in.Args["message"] != c.message || in.Options["space"] != c.space {
+		if in.Options["json"] != c.json || in.Args["message"] != c.message || in.Option("space") != c.space {
 			t.Fatalf("%v: %#v %#v", c.args, in.Options, in.Args)
 		}
+	}
+}
+
+// Bun `.command('list', { isDefault: true })`: the group alone, or with the
+// default's options, runs the default; `--help` on the group stays the group's.
+// An absent <value> option is not an explicit "" (Bun `options.due !== undefined`).
+func TestDefaultSubcommandAndAbsentOptions(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	var ran []string
+	var got []plugins.CommandInput
+	handler := func(name string) func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) {
+		return func(_ context.Context, in plugins.CommandInput, _ *plugins.RunContext) (any, error) {
+			ran = append(ran, name)
+			got = append(got, in)
+			return name, nil
+		}
+	}
+	reg, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Commands: []plugins.CommandSpec{
+			{Path: "lists list", Description: "List lists", Default: true, Examples: []string{"agentio desk lists list"},
+				Options: []plugins.OptionSpec{{Flags: "--limit <n>", Description: "Max", DefaultValue: "100"}},
+				Run:     handler("list")},
+			{Path: "lists create", Description: "Create a list", Examples: []string{"agentio desk lists create x"},
+				Arguments: []plugins.ArgumentSpec{{Name: "title", Required: true}}, Run: handler("create")},
+			{Path: "update", Description: "Update", Examples: []string{"agentio desk update"},
+				Options: []plugins.OptionSpec{{Flags: "--due <date>", Description: "Due"}, {Flags: "--title <t>", Description: "Title"}},
+				Run:     handler("update")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(args ...string) (int, string) {
+		var out, errOut bytes.Buffer
+		code := Execute(reg, args, &out, &errOut, strings.NewReader(""))
+		return code, out.String() + errOut.String()
+	}
+	if code, out := exec("desk", "lists"); code != 0 || out != "list\n" {
+		t.Fatalf("group alone: %d %q", code, out)
+	}
+	if code, out := exec("desk", "lists", "--limit", "5"); code != 0 || out != "list\n" || got[len(got)-1].Option("limit") != "5" {
+		t.Fatalf("group with the default's option: %d %q %#v", code, out, got[len(got)-1].Options)
+	}
+	if code, out := exec("desk", "lists", "create", "x"); code != 0 || out != "create\n" {
+		t.Fatalf("sibling: %d %q", code, out)
+	}
+	before := len(ran)
+	if code, out := exec("desk", "lists", "--help"); code != 0 || len(ran) != before || !strings.Contains(out, "create") {
+		t.Fatalf("group help ran a command or lost the group: %d %q", code, out)
+	}
+
+	if code, out := exec("desk", "update", "--due", ""); code != 0 {
+		t.Fatalf("update: %d %s", code, out)
+	}
+	in := got[len(got)-1]
+	if due, ok := in.LookupOption("due"); !ok || due != "" {
+		t.Fatalf("an explicit empty --due must be given: %#v", in.Options)
+	}
+	if _, ok := in.LookupOption("title"); ok || in.Option("title") != "" {
+		t.Fatalf("an absent --title must not be given: %#v", in.Options)
+	}
+	if exec("desk", "lists"); got[len(got)-1].Option("limit") != "100" {
+		t.Fatalf("a default value must still be given: %#v", got[len(got)-1].Options)
 	}
 }

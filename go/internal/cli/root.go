@@ -33,6 +33,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google/gscript"
 	"github.com/plosson/agentio/go/internal/plugins/google/gsheets"
 	"github.com/plosson/agentio/go/internal/plugins/google/gslides"
+	"github.com/plosson/agentio/go/internal/plugins/google/gtasks"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -59,6 +60,7 @@ func init() {
 	plugins.Default.MustRegister(gsheets.New())
 	plugins.Default.MustRegister(gslides.New())
 	plugins.Default.MustRegister(gscript.New())
+	plugins.Default.MustRegister(gtasks.New())
 }
 
 func Main(args []string) int {
@@ -70,7 +72,7 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetIn(stdin)
-	root.SetArgs(optionalValues(root, args))
+	root.SetArgs(optionalValues(root, defaultSubcommands(root, args)))
 	err := root.Execute()
 	if err == nil {
 		return 0
@@ -199,6 +201,13 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		}
 		leaf.Use = use
 		leaf.Aliases = spec.Aliases
+		if spec.Default {
+			group := leaf.Parent()
+			if group.Annotations == nil {
+				group.Annotations = map[string]string{}
+			}
+			group.Annotations[defaultCommand] = leaf.Name()
+		}
 		if len(spec.Examples) > 0 {
 			leaf.Example = strings.Join(spec.Examples, "\n")
 		}
@@ -344,6 +353,11 @@ func flagValue(flags *pflag.FlagSet, f *pflag.Flag) any {
 		values, _ := flags.GetStringArray(f.Name)
 		return values
 	default:
+		// Commander leaves an absent <value> option without a default
+		// undefined, which is not an explicit "" (LookupOption).
+		if !f.Changed && f.DefValue == "" {
+			return nil
+		}
 		return f.Value.String()
 	}
 }
@@ -383,6 +397,57 @@ func optionalValues(root *cobra.Command, args []string) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+// defaultCommand is the group annotation naming its CommandSpec.Default child.
+const defaultCommand = "agentio-default-command"
+
+// defaultSubcommands gives a group with a Default command Commander's
+// dispatch: `gtasks lists --limit 5` runs `gtasks lists list --limit 5`.
+// Asking the group itself for help still shows the group, as in Commander.
+func defaultSubcommands(root *cobra.Command, args []string) []string {
+	group, _, err := root.Find(args)
+	if err != nil || group == nil || group.Annotations[defaultCommand] == "" {
+		return args
+	}
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "-h" || a == "--help" {
+			return args
+		}
+	}
+	// Find the argument that named the group: walk the command words from
+	// the root, skipping flags, and insert the default right after it.
+	var chain []*cobra.Command
+	for c := group; c != root && c != nil; c = c.Parent() {
+		chain = append([]*cobra.Command{c}, chain...)
+	}
+	at := -1
+	for i, a := range args {
+		if len(chain) == 0 {
+			break
+		}
+		if a == "--" {
+			return args
+		}
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if chain[0].Name() != a && !chain[0].HasAlias(a) {
+			return args
+		}
+		chain = chain[1:]
+		at = i
+	}
+	if len(chain) != 0 || at < 0 {
+		return args
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, args[:at+1]...)
+	out = append(out, group.Annotations[defaultCommand])
+	return append(out, args[at+1:]...)
 }
 
 func nested(root *cobra.Command, path string) *cobra.Command {

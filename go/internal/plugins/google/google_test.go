@@ -859,3 +859,26 @@ func TestReadFileAndMkdirAllFailLikeNode(t *testing.T) {
 		t.Fatalf("an existing directory is fine: %v", err)
 	}
 }
+
+// Math.min(limit, max) on the query string, NaN and negatives passed through.
+func TestMaxResultsCapsLikeMathMin(t *testing.T) {
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
+		writeJSON(w, 200, map[string]any{"items": []any{}})
+	})
+	run := &plugins.RunContext{Credentials: map[string]any{"access_token": "at"}, Fetch: hostFetch}
+	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		limit float64
+		want  string
+	}{{1000, "100"}, {7, "7"}, {-3, "-3"}, {math.NaN(), "NaN"}} {
+		if _, err := svc.CalendarList.List().Do(MaxResults(c.limit, 100)); err != nil {
+			t.Fatal(err)
+		}
+		if got := fake.hits[len(fake.hits)-1].URL.Query().Get("maxResults"); got != c.want {
+			t.Errorf("%v: %q, want %q", c.limit, got, c.want)
+		}
+	}
+}

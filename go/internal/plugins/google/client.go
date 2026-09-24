@@ -3,11 +3,14 @@ package google
 import (
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/oauth2"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -55,6 +58,15 @@ func ClientOptions(ctx context.Context, run *plugins.RunContext, keys Keys) []op
 		opts = append(opts, option.WithEndpoint(ep))
 	}
 	return opts
+}
+
+// MaxResults is Bun `maxResults: Math.min(limit, max)` as googleapis puts it
+// on the query string: a --limit that parseInt read as NaN is sent as "NaN".
+func MaxResults(limit, max float64) googleapi.CallOption {
+	if !math.IsNaN(limit) {
+		limit = math.Min(limit, max)
+	}
+	return googleapi.QueryParameter("maxResults", jsvalue.NumberString(limit))
 }
 
 // HTTPClient sends the stored access token through the host's Fetch, with

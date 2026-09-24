@@ -53,6 +53,19 @@ func TestRegistryRejectsABrokenContract(t *testing.T) {
 			p.Commands[0].Aliases = []string{"profile"}
 		}, "invalid or duplicate alias"},
 		{"alias not a command word", func(p *Plugin) { p.Commands[0].Aliases = []string{"Ls"} }, "invalid or duplicate alias"},
+		{"two defaults in one group", func(p *Plugin) {
+			p.Commands[0].Default = true
+			p.Commands = append(p.Commands, CommandSpec{
+				Path: "items get", Description: "Get", Examples: []string{"agentio acme items get"},
+				Default: true, Run: p.Commands[0].Run,
+			})
+		}, "cannot be the default"},
+		{"default under a command", func(p *Plugin) {
+			p.Commands[0].Default = true
+			p.Commands = append(p.Commands, CommandSpec{
+				Path: "items", Description: "Items", Examples: []string{"agentio acme items"}, Run: p.Commands[0].Run,
+			})
+		}, "cannot be the default"},
 		{"required after optional", func(p *Plugin) {
 			p.Commands[0].Arguments = []ArgumentSpec{{Name: "maybe"}, {Name: "need", Required: true}}
 		}, "required argument after"},
