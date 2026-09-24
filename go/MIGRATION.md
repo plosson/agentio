@@ -257,7 +257,7 @@ Current seed: Gmail 24 Bun leaf cmds / Go 4 partial+go-only; Jira 11 / Go 4; P0 
 | When (Europe/Brussels) | Commit / tip | What | Next |
 |------------------------|--------------|------|------|
 | 2026-09-24 | `348da02` (+ this docs commit) | Phase 0 largely done: vault + daemon health + Bun-named profile APIs + ServicePlugin registry + Gmail/Jira smoke (`profile-info`/`labels list`, `myself`/`projects`). MIGRATION.md + COVERAGE.md added. P0 gap: no CredentialLifecycle; Description overclaims. | **Phase 1 — auth lifecycle** (shared getFreshCredentials + Google/Jira lifecycles + profile reauth). Then narrow Description(); then Phase 3 Jira remaining cmds. |
-| 2026-09-24 | `99e762d` | **P0 naming:** `internal/service`+`internal/services` → `internal/plugin`+`internal/plugins/{gmail,jira}`. ARCHITECTURE_REVIEW.md. Tests green. | Still Phase 1 auth lifecycle; then Description honesty; relocate Google oauth under plugins/google. |
+| 2026-09-24 | `0fb3d5f` | **P0 naming:** `internal/service`+`internal/services` → `internal/plugin`+`internal/plugins/{gmail,jira}`. ARCHITECTURE_REVIEW.md. Tests green. | Still Phase 1 auth lifecycle; then Description honesty; relocate Google oauth under plugins/google. |
 
 ---
 
