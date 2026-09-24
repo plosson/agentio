@@ -30,6 +30,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google/gdocs"
 	"github.com/plosson/agentio/go/internal/plugins/google/gdrive"
 	"github.com/plosson/agentio/go/internal/plugins/google/gmail"
+	"github.com/plosson/agentio/go/internal/plugins/google/gsheets"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -53,6 +54,7 @@ func init() {
 	plugins.Default.MustRegister(gdrive.New())
 	plugins.Default.MustRegister(github.New())
 	plugins.Default.MustRegister(gmail.New())
+	plugins.Default.MustRegister(gsheets.New())
 }
 
 func Main(args []string) int {

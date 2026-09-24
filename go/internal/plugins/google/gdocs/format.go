@@ -5,26 +5,6 @@ import (
 	"strings"
 )
 
-// formatList is printGDocsList.
-func formatList(v any) string {
-	docs, _ := v.([]document)
-	if len(docs) == 0 {
-		return "No documents found"
-	}
-	lines := []string{fmt.Sprintf("Documents (%d)", len(docs)), ""}
-	for i, d := range docs {
-		lines = append(lines, fmt.Sprintf("[%d] %s", i+1, d.Title), "    ID: "+d.ID)
-		if d.Owner != "" {
-			lines = append(lines, "    Owner: "+d.Owner)
-		}
-		if d.ModifiedTime != "" {
-			lines = append(lines, "    Modified: "+d.ModifiedTime)
-		}
-		lines = append(lines, "    Link: "+d.WebViewLink, "")
-	}
-	return strings.Join(lines, "\n")
-}
-
 // formatCreated is printGDocCreated.
 func formatCreated(v any) string {
 	c, _ := v.(*created)

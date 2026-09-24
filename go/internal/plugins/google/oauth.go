@@ -245,6 +245,30 @@ func Reauthenticate(service string, keys Keys) func(context.Context, map[string]
 	}
 }
 
+// Setup is the Bun profile.setup of the Camel products that ask nothing
+// before the OAuth flow (gdocs, gsheets, gslides, gscript): service is both
+// the Scopes key and the CLI noun, displayName the product name Bun logs.
+func Setup(service, displayName string) func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+	return func(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
+		setup.Log("Starting OAuth flow for " + displayName + "...\n")
+		tokens, err := PerformOAuth(ctx, setup, service)
+		if err != nil {
+			return nil, err
+		}
+		email, err := FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
+		if err != nil {
+			return nil, setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
+		}
+		creds := Camel.Merge(nil, tokens)
+		creds["email"] = email
+		return &plugins.SetupResult{
+			Credentials:          creds,
+			SuggestedProfileName: email,
+			Info:                 "Email: " + email + "\nTest with: agentio " + service + " list",
+		}, nil
+	}
+}
+
 func expiryMs(tok *oauth2.Token) int64 {
 	if tok.Expiry.IsZero() {
 		return 0

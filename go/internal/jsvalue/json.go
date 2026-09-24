@@ -312,6 +312,9 @@ func (p *jscParser) value() string {
 			return `Unexpected identifier "` + word + `"`
 		}
 	}
+	if strings.IndexByte(",:]}", c) >= 0 {
+		return "Unexpected token '" + string(c) + "'"
+	}
 	r, _ := utf8.DecodeRune(p.s[p.i:])
 	return "Unrecognized token '" + string(r) + "'"
 }
@@ -372,13 +375,14 @@ func (p *jscParser) container(end byte) string {
 		p.i++
 		return ""
 	}
-	for {
+	for first := true; ; first = false {
 		p.ws()
-		if p.i >= len(p.s) {
-			return expected
-		}
 		if end == '}' {
-			if p.s[p.i] != '"' {
+			// An empty "{" wants its close; after a comma a name is due.
+			if p.i >= len(p.s) && first {
+				return expected
+			}
+			if p.i >= len(p.s) || p.s[p.i] != '"' {
 				return "Property name must be a string literal"
 			}
 			if msg := p.str(); msg != "" {
@@ -389,6 +393,8 @@ func (p *jscParser) container(end byte) string {
 				return "Expected ':' before value in object property definition"
 			}
 			p.i++
+		} else if !first && p.i < len(p.s) && p.s[p.i] == ']' {
+			return "Unexpected comma at the end of array expression"
 		}
 		if msg := p.value(); msg != "" {
 			return msg

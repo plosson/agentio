@@ -379,6 +379,18 @@ func TestParseErrorMessageIsJavaScriptCores(t *testing.T) {
 		"nul":       `Unexpected identifier "nul"`,
 		"{}}":       "Unable to parse JSON string",
 		"é":         "Unrecognized token 'é'",
+		"[":         "Unexpected EOF",
+		"[1,":       "Unexpected EOF",
+		"[[1,":      "Unexpected EOF",
+		`{"a":`:     "Unexpected EOF",
+		`{"a":1,`:   "Property name must be a string literal",
+		"{ ":        "Expected '}'",
+		"[1,]":      "Unexpected comma at the end of array expression",
+		"[1,,2]":    "Unexpected token ','",
+		"]":         "Unexpected token ']'",
+		"[}":        "Unexpected token '}'",
+		`{"a":,}`:   "Unexpected token ','",
+		"[1 2]":     "Expected ']'",
 	}
 	for in, want := range cases {
 		if got := ParseErrorMessage([]byte(in)); got != "JSON Parse error: "+want {

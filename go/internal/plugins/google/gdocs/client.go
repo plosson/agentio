@@ -21,16 +21,6 @@ const (
 	docxMimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
 
-// document is GDocsDocument.
-type document struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Owner        string `json:"owner,omitempty"`
-	CreatedTime  string `json:"createdTime,omitempty"`
-	ModifiedTime string `json:"modifiedTime,omitempty"`
-	WebViewLink  string `json:"webViewLink"`
-}
-
 // created is GDocsCreateResult.
 type created struct {
 	ID          string `json:"id"`
@@ -126,35 +116,12 @@ func (a *api) create(title, markdown, folderID string) (*created, error) {
 	return out, nil
 }
 
-func (a *api) list(limit float64, query string) ([]document, error) {
-	q := "mimeType='" + docMimeType + "' and trashed=false"
-	if query != "" {
-		q += " and " + query
-	}
-	resp, err := a.drive.Files.List().Q(q).
-		Fields("files(id,name,owners,createdTime,modifiedTime,webViewLink)").
-		OrderBy("modifiedTime desc").Context(a.ctx).Do(google.PageSize(limit))
+func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
+	files, err := google.ListDriveFiles(a.ctx, a.drive, docMimeType, query, limit, "https://docs.google.com/document/d/")
 	if err != nil {
 		return nil, a.apiError("list documents", err)
 	}
-	out := []document{}
-	for _, f := range resp.Files {
-		d := document{ID: f.Id, Title: f.Name, CreatedTime: f.CreatedTime, ModifiedTime: f.ModifiedTime, WebViewLink: f.WebViewLink}
-		if d.Title == "" {
-			d.Title = "Untitled"
-		}
-		if len(f.Owners) > 0 && f.Owners[0] != nil {
-			d.Owner = f.Owners[0].DisplayName
-			if d.Owner == "" {
-				d.Owner = f.Owners[0].EmailAddress
-			}
-		}
-		if d.WebViewLink == "" {
-			d.WebViewLink = "https://docs.google.com/document/d/" + f.Id
-		}
-		out = append(out, d)
-	}
-	return out, nil
+	return files, nil
 }
 
 // getDocument is docs.documents.get as the API sent it.

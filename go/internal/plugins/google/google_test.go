@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -639,5 +641,158 @@ func TestWriteUnlessInvalidReadsOnlyForRejectedInput(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("check ran %d times", calls)
+	}
+}
+
+// Setup is the gdocs/gsheets/gslides/gscript profile.setup: Camel keys, the
+// product's scopes and log line, and Bun's email failure.
+func TestSetupStoresCamelKeysAndNamesTheProduct(t *testing.T) {
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		switch r.URL.Path {
+		case "/token":
+			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 60, "token_type": "Bearer"})
+		case "/userinfo":
+			writeJSON(w, 200, map[string]any{"email": "user@example.com"})
+		}
+	})
+	sc := setupContext("code-1")
+	var logs, scopes []string
+	sc.Log = func(parts ...any) { logs = append(logs, fmt.Sprint(parts...)) }
+	oauth := sc.OAuth
+	sc.OAuth = func(ctx context.Context, opts plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		u, _ := url.Parse(opts.AuthorizationURL("http://localhost:3000/callback"))
+		scopes = append(scopes, u.Query().Get("scope"))
+		return oauth(ctx, opts)
+	}
+	res, err := Setup("gslides", "Google Slides")(fake.ctx(), plugins.SetupOptions{}, sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Credentials["accessToken"] != "at-1" || res.Credentials["refreshToken"] != "rt-1" || res.Credentials["email"] != "user@example.com" {
+		t.Fatalf("%#v", res.Credentials)
+	}
+	if _, ok := res.Credentials["access_token"]; ok {
+		t.Fatal("snake_case key")
+	}
+	if res.SuggestedProfileName != "user@example.com" || res.Info != "Email: user@example.com\nTest with: agentio gslides list" {
+		t.Fatalf("%#v", res)
+	}
+	if strings.Join(logs, "|") != "Starting OAuth flow for Google Slides...\n" || scopes[0] != strings.Join(Scopes["gslides"], " ") {
+		t.Fatalf("%q %q", logs, scopes)
+	}
+	fake.handle = func(w http.ResponseWriter, r *http.Request, _ int) {
+		if r.URL.Path == "/token" {
+			writeJSON(w, 200, map[string]any{"access_token": "at-1"})
+			return
+		}
+		w.WriteHeader(500)
+	}
+	var failed []string
+	sc.Fail = func(code plugins.ErrorCode, message, suggestion string) error {
+		failed = append(failed, code+"|"+message+"|"+suggestion)
+		return errors.New(message)
+	}
+	if _, err := Setup("gscript", "Google Apps Script")(fake.ctx(), plugins.SetupOptions{}, sc); err == nil ||
+		strings.Join(failed, "") != "AUTH_FAILED|Failed to fetch user email: Failed to fetch user info: 500|Ensure the account has an email address" {
+		t.Fatalf("%v %q", err, failed)
+	}
+	if EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || EmailListInfo(map[string]any{"email": 1}) != "" {
+		t.Fatal("list info")
+	}
+}
+
+// ListDriveFiles, FormatDriveFiles and ValidateDriveFiles are the Drive list
+// and validate the Drive-backed products share.
+func TestDriveFilesListFormatAndValidate(t *testing.T) {
+	var status int
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		if status != 200 {
+			writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": "invalid_grant"}})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"files": []any{
+			map[string]any{"id": "p1", "name": "Deck", "owners": []any{map[string]any{"displayName": "", "emailAddress": "ann@example.com"}}, "createdTime": "c", "modifiedTime": "m"},
+			map[string]any{"id": "p2", "owners": []any{}, "webViewLink": "https://example.com/p2"},
+		}})
+	})
+	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at", "email": "me@example.com"}, Fetch: hostFetch}
+	svc, err := DriveService(fake.ctx(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status = 200
+	files, err := ListDriveFiles(fake.ctx(), svc, "application/x-thing", "starred = true", 7, "https://example.com/d/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := fake.hits[0].URL.Query()
+	if q.Get("q") != "mimeType='application/x-thing' and trashed=false and starred = true" || q.Get("pageSize") != "7" ||
+		q.Get("fields") != "files(id,name,owners,createdTime,modifiedTime,webViewLink)" || q.Get("orderBy") != "modifiedTime desc" {
+		t.Fatalf("%v", q)
+	}
+	if got := jsonText(files); got != `[{"id":"p1","title":"Deck","owner":"ann@example.com","createdTime":"c","modifiedTime":"m","webViewLink":"https://example.com/d/p1"},{"id":"p2","title":"Untitled","webViewLink":"https://example.com/p2"}]` {
+		t.Fatal(got)
+	}
+	want := "Things (2)\n\n[1] Deck\n    ID: p1\n    Owner: ann@example.com\n    Modified: m\n    Link: https://example.com/d/p1\n\n[2] Untitled\n    ID: p2\n    Link: https://example.com/p2\n"
+	if got := FormatDriveFiles(files, "Things", "No things found"); got != want {
+		t.Fatalf("%q", got)
+	}
+	if FormatDriveFiles([]DriveFile{}, "Things", "No things found") != "No things found" || FormatDriveFiles(nil, "Things", "none") != "none" {
+		t.Fatal("empty list")
+	}
+	v, err := ValidateDriveFiles("application/x-thing")(fake.ctx(), run)
+	if err != nil || !v.Valid || v.Info != "me@example.com" {
+		t.Fatalf("%#v %v", v, err)
+	}
+	if q := fake.hits[1].URL.Query(); q.Get("pageSize") != "1" || q.Get("q") != "mimeType='application/x-thing'" {
+		t.Fatalf("%v", q)
+	}
+	status = 400
+	if v, _ := ValidateDriveFiles("application/x-thing")(fake.ctx(), run); v.Valid || v.Error != "refresh token expired, re-authenticate" {
+		t.Fatalf("%#v", v)
+	}
+	if _, err := ListDriveFiles(fake.ctx(), svc, "application/x-thing", "", 10, ""); Code(err) != 400 {
+		t.Fatalf("list error %v", err)
+	}
+}
+
+// BatchRequests is the --requests-json / --file input of the batch escape
+// hatches, rejected with Bun's messages before the profile is used.
+func TestBatchRequestsReadsExactlyOneSourceAsAnArray(t *testing.T) {
+	fail := func(code plugins.ErrorCode, message, suggestion string) error {
+		return errors.New(code + "|" + message + "|" + suggestion)
+	}
+	file := filepath.Join(t.TempDir(), "requests.json")
+	if err := os.WriteFile(file, []byte(`[{"b":1,"a":{"x":false}}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range []map[string]any{{"requests-json": `[{"b":1,"a":{"x":false}}]`, "file": ""}, {"file": file}} {
+		got, err := BatchRequests(plugins.CommandInput{Options: opts}, fail)
+		if err != nil || string(jsvalue.Stringify(got)) != `[{"b":1,"a":{"x":false}}]` {
+			t.Fatalf("%v: %s %v", opts, jsvalue.Stringify(got), err)
+		}
+	}
+	for _, c := range []struct {
+		opts map[string]any
+		want string
+	}{
+		{map[string]any{}, "INVALID_PARAMS|Provide --requests-json or --file|"},
+		{map[string]any{"requests-json": "[]", "file": file}, "INVALID_PARAMS|--requests-json and --file are mutually exclusive|"},
+		{map[string]any{"requests-json": "[1,"}, "INVALID_PARAMS|Invalid JSON: JSON Parse error: Unexpected EOF|"},
+		{map[string]any{"requests-json": `{"a":1}`}, "INVALID_PARAMS|Input must be a JSON array of Request objects|"},
+	} {
+		in := plugins.CommandInput{Options: c.opts}
+		if _, err := BatchRequests(in, fail); err == nil || err.Error() != c.want {
+			t.Fatalf("%v: %v", c.opts, err)
+		}
+		if WriteUnlessInvalid(BatchInputError)(in) != "read" {
+			t.Fatalf("%v: rejected input is not left to Run", c.opts)
+		}
+	}
+	if _, err := BatchRequests(plugins.CommandInput{Options: map[string]any{"file": filepath.Join(t.TempDir(), "missing.json")}}, fail); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file: %v", err)
+	}
+	if WriteUnlessInvalid(BatchInputError)(plugins.CommandInput{Options: map[string]any{"requests-json": "[]"}}) != "write" {
+		t.Fatal("an empty array is refused by the product after enforceWriteAccess")
 	}
 }

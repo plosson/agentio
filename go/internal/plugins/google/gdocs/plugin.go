@@ -19,55 +19,16 @@ func New() *plugins.Plugin {
 		DisplayName: "Google Docs",
 		Description: "Use when interacting with Google Docs via the agentio CLI - list, read, create.",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
+			Setup:          google.Setup("gdocs", "Google Docs"),
+			Validate:       google.ValidateDriveFiles(docMimeType),
 			Reauthenticate: google.Reauthenticate("gdocs", google.Camel),
 			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       listInfo,
+			ListInfo:       google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			getCmd(), createCmd(), listCmd(), structureCmd(), tabsCmd(), batchCmd(),
 		},
 	}
-}
-
-func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {
-	setup.Log("Starting OAuth flow for Google Docs...\n")
-	tokens, err := google.PerformOAuth(ctx, setup, "gdocs")
-	if err != nil {
-		return nil, err
-	}
-	email, err := google.FetchUserEmail(ctx, setup.Fetch, tokens.AccessToken)
-	if err != nil {
-		return nil, setup.Fail("AUTH_FAILED", "Failed to fetch user email: "+err.Error(), "Ensure the account has an email address")
-	}
-	creds := google.Camel.Merge(nil, tokens)
-	creds["email"] = email
-	return &plugins.SetupResult{
-		Credentials:          creds,
-		SuggestedProfileName: email,
-		Info:                 "Email: " + email + "\nTest with: agentio gdocs list",
-	}, nil
-}
-
-// validate is GDocsClient.validate: one Docs file listed; the account is the stored email.
-func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
-	svc, err := google.DriveService(ctx, run)
-	if err != nil {
-		return google.ValidationFailure(err), nil
-	}
-	if _, err := svc.Files.List().PageSize(1).Q("mimeType='" + docMimeType + "'").Context(ctx).Do(); err != nil {
-		return google.ValidationFailure(err), nil
-	}
-	email, _ := run.Credentials["email"].(string)
-	return plugins.ValidationResult{Valid: true, Info: email}, nil
-}
-
-func listInfo(creds map[string]any) string {
-	if email, _ := creds["email"].(string); email != "" {
-		return " - " + email
-	}
-	return ""
 }
 
 func opt(in plugins.CommandInput, name string) string {
@@ -215,7 +176,7 @@ func listCmd() plugins.CommandSpec {
 			}
 			return google.Result(a.list(jsvalue.ParseInt(opt(in, "limit")), opt(in, "query")))
 		},
-		Format: formatList,
+		Format: func(v any) string { return google.FormatDriveFiles(v, "Documents", "No documents found") },
 	}
 }
 
@@ -292,6 +253,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw documents.batchUpdate requests (escape hatch)",
 		Access:      "write",
+		AccessFor:   google.WriteUnlessInvalid(google.BatchInputError),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{{Name: "doc-id-or-url", Description: "Document ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -313,28 +275,9 @@ func batchCmd() plugins.CommandSpec {
 			"https://developers.google.com/docs/api/reference/rest/v1/documents/request",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			requestsJSON, file := opt(in, "requests-json"), opt(in, "file")
-			if requestsJSON == "" && file == "" {
-				return nil, run.Fail("INVALID_PARAMS", "Provide --requests-json or --file", "")
-			}
-			if requestsJSON != "" && file != "" {
-				return nil, run.Fail("INVALID_PARAMS", "--requests-json and --file are mutually exclusive", "")
-			}
-			source := []byte(requestsJSON)
-			if file != "" {
-				raw, err := os.ReadFile(file)
-				if err != nil {
-					return nil, err
-				}
-				source = raw
-			}
-			parsed, err := jsvalue.Parse(source)
+			requests, err := google.BatchRequests(in, run.Fail)
 			if err != nil {
-				return nil, run.Fail("INVALID_PARAMS", "Invalid JSON: "+err.Error(), "")
-			}
-			requests, ok := parsed.([]any)
-			if !ok {
-				return nil, run.Fail("INVALID_PARAMS", "Input must be a JSON array of Request objects", "")
+				return nil, err
 			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {

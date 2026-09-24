@@ -467,6 +467,11 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	if n := len(fake.recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
+	// Bun checks the batch input before enforceWriteAccess.
+	_, err := exec(fake.ctx(), t, reg, "batch", input(t, "batch", map[string]any{"doc-id-or-url": "d1"}, nil))
+	if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "Provide --requests-json or --file" {
+		t.Fatalf("%#v", ce)
+	}
 	for _, path := range []string{"get", "list", "structure", "tabs"} {
 		if _, err := exec(fake.ctx(), t, reg, path, input(t, path, map[string]any{"doc-id-or-url": "d1"}, nil)); err != nil {
 			t.Fatalf("%s: %v", path, err)
@@ -519,7 +524,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 }
 
 func TestListInfoAndReauthenticate(t *testing.T) {
-	if listInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || listInfo(map[string]any{}) != "" {
+	if google.EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || google.EmailListInfo(map[string]any{}) != "" {
 		t.Fatal("list info")
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -600,7 +605,7 @@ func TestListSendsTheBunQueryAndFillsFallbacks(t *testing.T) {
 	if got := printed(t, "list", docs, false); got != wantText {
 		t.Fatalf("%q", got)
 	}
-	if got := printed(t, "list", []document{}, false); got != "No documents found\n" {
+	if got := printed(t, "list", []google.DriveFile{}, false); got != "No documents found\n" {
 		t.Fatalf("%q", got)
 	}
 }

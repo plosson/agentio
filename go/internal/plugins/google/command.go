@@ -3,8 +3,10 @@ package google
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -42,3 +44,50 @@ func WriteUnlessInvalid(check func(plugins.CommandInput, func(plugins.ErrorCode,
 }
 
 var errInvalid = errors.New("invalid")
+
+// EmailListInfo is the Bun getExtraInfo every Google product shows in
+// `profile list`: " - <email>" when the profile has one.
+func EmailListInfo(creds map[string]any) string {
+	if email, _ := creds["email"].(string); email != "" {
+		return " - " + email
+	}
+	return ""
+}
+
+// BatchRequests is the input the Bun batchUpdate escape hatches (gdocs,
+// gsheets, gslides) read before they resolve the profile: exactly one of
+// --requests-json and --file, holding a JSON array, kept in order.
+func BatchRequests(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) ([]any, error) {
+	requestsJSON, _ := in.Options["requests-json"].(string)
+	file, _ := in.Options["file"].(string)
+	if requestsJSON == "" && file == "" {
+		return nil, fail("INVALID_PARAMS", "Provide --requests-json or --file", "")
+	}
+	if requestsJSON != "" && file != "" {
+		return nil, fail("INVALID_PARAMS", "--requests-json and --file are mutually exclusive", "")
+	}
+	source := []byte(requestsJSON)
+	if file != "" {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		source = raw
+	}
+	parsed, err := jsvalue.Parse(source)
+	if err != nil {
+		return nil, fail("INVALID_PARAMS", "Invalid JSON: "+jsvalue.ParseErrorMessage(source), "")
+	}
+	requests, ok := parsed.([]any)
+	if !ok {
+		return nil, fail("INVALID_PARAMS", "Input must be a JSON array of Request objects", "")
+	}
+	return requests, nil
+}
+
+// BatchInputError is BatchRequests' rejection, for WriteUnlessInvalid: Bun
+// reports bad input before enforceWriteAccess.
+func BatchInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+	_, err := BatchRequests(in, fail)
+	return err
+}
