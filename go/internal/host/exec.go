@@ -75,6 +75,10 @@ func PrintResult(w io.Writer, spec *plugins.CommandSpec, result any, asJSON bool
 	}
 	if spec.Format != nil {
 		rendered := spec.Format(result)
+		if rendered != "" && spec.Verbatim {
+			_, err := io.WriteString(w, rendered)
+			return err
+		}
 		if rendered != "" {
 			_, err := fmt.Fprintln(w, rendered)
 			return err

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -16,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -1365,33 +1363,5 @@ func TestFormatMatchesBun(t *testing.T) {
 	}
 	if got := printed(t, "move", &file{ID: "pdf1", Name: "report <final>.pdf"}, false); got != "Moved: report <final>.pdf (pdf1)\n" {
 		t.Fatalf("%q", got)
-	}
-}
-
-func TestExtnameAndFSErrorsMatchNode(t *testing.T) {
-	// Printed by Node's path.extname.
-	for in, want := range map[string]string{
-		"a.TXT": ".TXT", ".bashrc": "", "a.": ".", "...": ".", "..a": ".a", "x/.b.c": ".c",
-		"dir/": "", "a.b.c": ".c", "..": "", ".": "", "/": "", "noext": "",
-	} {
-		if got := extname(in); got != want {
-			t.Errorf("%q: %q want %q", in, got, want)
-		}
-	}
-	for _, c := range []struct {
-		err  error
-		want string
-	}{
-		{&os.PathError{Op: "stat", Path: "x", Err: syscall.ENOENT}, "ENOENT: no such file or directory, stat './x'"},
-		{&os.PathError{Op: "open", Path: "x", Err: syscall.EACCES}, "EACCES: permission denied, stat './x'"},
-		{&os.PathError{Op: "open", Path: "x", Err: syscall.ENOTDIR}, "ENOTDIR: not a directory, stat './x'"},
-	} {
-		if got := nodeFSError("stat", "./x", c.err).Error(); got != c.want {
-			t.Errorf("%q", got)
-		}
-	}
-	other := errors.New("disk on fire")
-	if nodeFSError("stat", "x", other) != other {
-		t.Fatal("an unknown error is kept")
 	}
 }

@@ -287,6 +287,29 @@ func TestPrintResultJSONDoesNotEscapeHTML(t *testing.T) {
 	}
 }
 
+// Bun gscript get writes a file with process.stdout.write: no newline is
+// added, and --json still prints the value.
+func TestPrintResultVerbatimAddsNoNewline(t *testing.T) {
+	spec := &plugins.CommandSpec{Verbatim: true, Format: func(v any) string { return v.(string) }}
+	for value, want := range map[string]string{"a\nb": "a\nb", "ends\n": "ends\n", "": ""} {
+		var out bytes.Buffer
+		if err := PrintResult(&out, spec, value, false); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != want {
+			t.Fatalf("%q: got %q", value, out.String())
+		}
+	}
+	var out bytes.Buffer
+	if err := PrintResult(&out, spec, "x", true); err != nil || out.String() != "\"x\"\n" {
+		t.Fatalf("--json: %q %v", out.String(), err)
+	}
+	out.Reset()
+	if err := PrintResult(&out, &plugins.CommandSpec{Format: spec.Format}, "x", false); err != nil || out.String() != "x\n" {
+		t.Fatalf("default: %q %v", out.String(), err)
+	}
+}
+
 // Bun's dropbox link calls enforceWriteAccess only without --temporary.
 func TestAccessForDecidesTheGateFromTheInput(t *testing.T) {
 	testbox.Isolate(t)

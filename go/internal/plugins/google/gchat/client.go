@@ -290,7 +290,7 @@ func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, e
 		return nil, a.fail("INVALID_PARAMS", "Failed to read attachment: "+path, "Check that the file exists and is readable")
 	}
 	filename := filepath.Base(path)
-	mime, ok := attachmentMIME[strings.ToLower(extname(filename))]
+	mime, ok := attachmentMIME[strings.ToLower(google.Extname(filename))]
 	if !ok {
 		mime = "application/octet-stream"
 	}
@@ -858,15 +858,6 @@ func lastSegment(name string) string {
 		return s
 	}
 	return "unknown"
-}
-
-// extname is node path.extname: a leading dot does not start an extension.
-func extname(base string) string {
-	i := strings.LastIndex(base, ".")
-	if i <= 0 || strings.Trim(base, ".") == "" {
-		return ""
-	}
-	return base[i:]
 }
 
 var (

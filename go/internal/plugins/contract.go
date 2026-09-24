@@ -164,6 +164,9 @@ type CommandSpec struct {
 	// then throw).
 	Run    func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
 	Format func(value any) string
+	// Verbatim prints Format's text as is, without the newline the host
+	// otherwise adds (Bun process.stdout.write instead of console.log).
+	Verbatim bool
 }
 
 // ExitStatus ends a command with Code and no error line, after any value

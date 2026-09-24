@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
-	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -426,23 +424,9 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 		return nil, a.apiError("download file", err)
 	}
 	if err := os.WriteFile(outputPath, body, 0o666); err != nil {
-		return nil, a.apiError("download file", nodeFSError("open", outputPath, err))
+		return nil, a.apiError("download file", google.NodeFSError("open", outputPath, err))
 	}
 	return &downloaded{Filename: f.Name, Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
-}
-
-// extname is Node path.extname: the last "." of the basename onward, except a
-// leading dot (".bashrc") or "..".
-func extname(p string) string {
-	base := filepath.Base(p)
-	if base == ".." || base == "/" {
-		return ""
-	}
-	i := strings.LastIndex(base, ".")
-	if i <= 0 {
-		return ""
-	}
-	return base[i:]
 }
 
 var lastExtension = regexp.MustCompile(`\.[^.]+$`)
@@ -453,13 +437,13 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return nil, a.apiError("upload file", nodeFSError("stat", filePath, err))
+		return nil, a.apiError("upload file", google.NodeFSError("stat", filePath, err))
 	}
 	fileName := name
 	if fileName == "" {
 		fileName = filepath.Base(filePath)
 	}
-	ext := strings.ToLower(extname(filePath))
+	ext := strings.ToLower(google.Extname(filePath))
 	sourceMimeType := mimeType
 	if sourceMimeType == "" {
 		sourceMimeType = extToMime[ext]
@@ -486,11 +470,11 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 		target.Parents = []string{folderID}
 	}
 	if info.IsDir() {
-		return nil, a.apiError("upload file", nodeFSError("read", "", syscall.EISDIR))
+		return nil, a.apiError("upload file", google.NodeFSError("read", "", syscall.EISDIR))
 	}
 	body, err := os.Open(filePath)
 	if err != nil {
-		return nil, a.apiError("upload file", nodeFSError("open", filePath, err))
+		return nil, a.apiError("upload file", google.NodeFSError("open", filePath, err))
 	}
 	defer body.Close()
 	// ChunkSize(0) sends one multipart request whatever the size, as Bun does.
@@ -636,32 +620,4 @@ func (a *api) unshare(fileIDOrURL, permissionID string) error {
 		return a.apiError("remove permission", err)
 	}
 	return nil
-}
-
-// nodeFSError gives a local file failure the message Node's fs throws
-// ("ENOENT: no such file or directory, stat './x'"). It carries no numeric
-// code, so it maps to API_ERROR as in Bun.
-func nodeFSError(syscallName, path string, err error) error {
-	var errno syscall.Errno
-	if !errors.As(err, &errno) {
-		return err
-	}
-	var code, text string
-	switch {
-	case errors.Is(errno, fs.ErrNotExist):
-		code, text = "ENOENT", "no such file or directory"
-	case errno == syscall.EACCES || errno == syscall.EPERM:
-		code, text = "EACCES", "permission denied"
-	case errno == syscall.EISDIR:
-		code, text = "EISDIR", "illegal operation on a directory"
-	case errno == syscall.ENOTDIR:
-		code, text = "ENOTDIR", "not a directory"
-	default:
-		return err
-	}
-	message := code + ": " + text + ", " + syscallName
-	if path != "" {
-		message += " '" + path + "'"
-	}
-	return errors.New(message)
 }

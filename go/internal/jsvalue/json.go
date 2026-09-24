@@ -378,11 +378,12 @@ func (p *jscParser) container(end byte) string {
 	for first := true; ; first = false {
 		p.ws()
 		if end == '}' {
-			// An empty "{" wants its close; after a comma a name is due.
-			if p.i >= len(p.s) && first {
-				return expected
-			}
+			// The first member of "{" is its close or a name; after a comma a
+			// name is due.
 			if p.i >= len(p.s) || p.s[p.i] != '"' {
+				if first {
+					return expected
+				}
 				return "Property name must be a string literal"
 			}
 			if msg := p.str(); msg != "" {

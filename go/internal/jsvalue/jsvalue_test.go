@@ -391,6 +391,10 @@ func TestParseErrorMessageIsJavaScriptCores(t *testing.T) {
 		"[}":        "Unexpected token '}'",
 		`{"a":,}`:   "Unexpected token ','",
 		"[1 2]":     "Expected ']'",
+		"{bad":      "Expected '}'",
+		"{1}":       "Expected '}'",
+		"{,":        "Expected '}'",
+		`{"a":1,1`:  "Property name must be a string literal",
 	}
 	for in, want := range cases {
 		if got := ParseErrorMessage([]byte(in)); got != "JSON Parse error: "+want {
