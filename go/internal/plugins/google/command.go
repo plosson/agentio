@@ -1,6 +1,7 @@
 package google
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,3 +28,17 @@ func RequireOptions(in plugins.CommandInput, run *plugins.RunContext, flags ...s
 	}
 	return nil
 }
+
+// WriteUnlessInvalid is an AccessFor that lets input check rejects reach Run,
+// which reports it: a Bun command that validates its input before calling
+// enforceWriteAccess answers a read-only profile with the input error.
+func WriteUnlessInvalid(check func(plugins.CommandInput, func(plugins.ErrorCode, string, string) error) error) func(plugins.CommandInput) string {
+	return func(in plugins.CommandInput) string {
+		if check(in, func(plugins.ErrorCode, string, string) error { return errInvalid }) != nil {
+			return "read"
+		}
+		return "write"
+	}
+}
+
+var errInvalid = errors.New("invalid")

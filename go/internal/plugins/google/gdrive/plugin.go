@@ -571,17 +571,6 @@ func shareInputError(in plugins.CommandInput, fail func(plugins.ErrorCode, strin
 	return nil
 }
 
-// writeUnlessInvalid lets invalid input reach Run, which reports it: Bun
-// validates before its write check.
-func writeUnlessInvalid(check func(plugins.CommandInput, func(plugins.ErrorCode, string, string) error) error) func(plugins.CommandInput) string {
-	return func(in plugins.CommandInput) string {
-		if check(in, func(plugins.ErrorCode, string, string) error { return fmt.Errorf("invalid") }) != nil {
-			return "read"
-		}
-		return "write"
-	}
-}
-
 var shareFileIDPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`/file/d/([a-zA-Z0-9_-]+)`),
 	regexp.MustCompile(`id=([a-zA-Z0-9_-]+)`),
@@ -603,7 +592,7 @@ func shareCmd() plugins.CommandSpec {
 		Path:        "share",
 		Description: "Share a file by creating a permission",
 		Access:      "write",
-		AccessFor:   writeUnlessInvalid(shareInputError),
+		AccessFor:   google.WriteUnlessInvalid(shareInputError),
 		Operation:   "share file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -673,7 +662,7 @@ func unshareCmd() plugins.CommandSpec {
 		Path:        "unshare",
 		Description: "Remove a permission from a file",
 		Access:      "write",
-		AccessFor:   writeUnlessInvalid(unshareInputError),
+		AccessFor:   google.WriteUnlessInvalid(unshareInputError),
 		Operation:   "remove permission",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{

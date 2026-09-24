@@ -48,6 +48,9 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 		}
 		if access == "write" {
 			operation := spec.Operation
+			if spec.OperationFor != nil {
+				operation = spec.OperationFor(in)
+			}
 			if operation == "" {
 				operation = spec.Path
 			}

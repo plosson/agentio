@@ -9,6 +9,7 @@ package plugins
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 )
 
@@ -118,13 +119,24 @@ type CommandSpec struct {
 	// Operation names the action in the read-only refusal ("Cannot <operation>").
 	// Empty uses Path.
 	Operation string
-	Examples  []string
+	// OperationFor, when set, names the action from the parsed input instead of
+	// Operation (Bun gmail draft: "update draft" with an id, else "create draft").
+	OperationFor func(in CommandInput) string
+	Examples     []string
 	// Run returns the value the host prints. A non-nil value returned together
 	// with an error is printed first, then the error is rendered (Bun: output,
 	// then throw).
 	Run    func(ctx context.Context, in CommandInput, run *RunContext) (any, error)
 	Format func(value any) string
 }
+
+// ExitStatus ends a command with Code and no error line, after any value
+// returned with it is printed (Bun: output, then process.exit(code)).
+type ExitStatus struct {
+	Code int
+}
+
+func (e *ExitStatus) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
 
 // RefreshSpec is profile.refresh. Run must not persist; the host does.
 type RefreshSpec struct {

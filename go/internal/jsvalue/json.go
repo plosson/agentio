@@ -13,6 +13,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -251,4 +252,159 @@ func writeString(b *bytes.Buffer, s string) {
 		}
 	}
 	b.WriteByte('"')
+}
+
+// ParseErrorMessage is the message Bun's JSON.parse throws for raw, which is
+// not valid JSON: JavaScriptCore's wording for an empty input, a bare word, a
+// stray character, an unterminated string or container, a bad property, and
+// text after a complete value.
+func ParseErrorMessage(raw []byte) string {
+	p := &jscParser{s: raw}
+	msg := p.value()
+	if msg == "" {
+		p.ws()
+		if p.i < len(p.s) {
+			msg = "Unable to parse JSON string"
+		}
+	}
+	if msg == "" {
+		msg = "Unable to parse JSON string"
+	}
+	return "JSON Parse error: " + msg
+}
+
+type jscParser struct {
+	s []byte
+	i int
+}
+
+func (p *jscParser) ws() {
+	for p.i < len(p.s) && strings.IndexByte(" \t\r\n", p.s[p.i]) >= 0 {
+		p.i++
+	}
+}
+
+func (p *jscParser) value() string {
+	p.ws()
+	if p.i >= len(p.s) {
+		return "Unexpected EOF"
+	}
+	c := p.s[p.i]
+	switch {
+	case c == '{':
+		return p.container('}')
+	case c == '[':
+		return p.container(']')
+	case c == '"':
+		return p.str()
+	case c == '-' || c >= '0' && c <= '9':
+		p.number()
+		return ""
+	case c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$':
+		start := p.i
+		for p.i < len(p.s) && (isWordByte(p.s[p.i])) {
+			p.i++
+		}
+		switch word := string(p.s[start:p.i]); word {
+		case "true", "false", "null":
+			return ""
+		default:
+			return `Unexpected identifier "` + word + `"`
+		}
+	}
+	r, _ := utf8.DecodeRune(p.s[p.i:])
+	return "Unrecognized token '" + string(r) + "'"
+}
+
+// number consumes a JSON number: a leading 0 stands alone, as in JSC.
+func (p *jscParser) number() {
+	digits := func() {
+		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
+			p.i++
+		}
+	}
+	if p.s[p.i] == '-' {
+		p.i++
+	}
+	if p.i < len(p.s) && p.s[p.i] == '0' {
+		p.i++
+	} else {
+		digits()
+	}
+	if p.i < len(p.s) && p.s[p.i] == '.' {
+		p.i++
+		digits()
+	}
+	if p.i < len(p.s) && (p.s[p.i] == 'e' || p.s[p.i] == 'E') {
+		p.i++
+		if p.i < len(p.s) && (p.s[p.i] == '+' || p.s[p.i] == '-') {
+			p.i++
+		}
+		digits()
+	}
+}
+
+func isWordByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$'
+}
+
+func (p *jscParser) str() string {
+	p.i++
+	for p.i < len(p.s) {
+		switch p.s[p.i] {
+		case '\\':
+			p.i += 2
+		case '"':
+			p.i++
+			return ""
+		default:
+			p.i++
+		}
+	}
+	return "Unterminated string"
+}
+
+func (p *jscParser) container(end byte) string {
+	expected := "Expected '" + string(end) + "'"
+	p.i++
+	p.ws()
+	if p.i < len(p.s) && p.s[p.i] == end {
+		p.i++
+		return ""
+	}
+	for {
+		p.ws()
+		if p.i >= len(p.s) {
+			return expected
+		}
+		if end == '}' {
+			if p.s[p.i] != '"' {
+				return "Property name must be a string literal"
+			}
+			if msg := p.str(); msg != "" {
+				return msg
+			}
+			p.ws()
+			if p.i >= len(p.s) || p.s[p.i] != ':' {
+				return "Expected ':' before value in object property definition"
+			}
+			p.i++
+		}
+		if msg := p.value(); msg != "" {
+			return msg
+		}
+		p.ws()
+		if p.i >= len(p.s) {
+			return expected
+		}
+		switch p.s[p.i] {
+		case ',':
+			p.i++
+		case end:
+			p.i++
+			return ""
+		default:
+			return expected
+		}
+	}
 }

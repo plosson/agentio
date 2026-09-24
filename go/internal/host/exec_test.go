@@ -338,6 +338,57 @@ func TestAccessForDecidesTheGateFromTheInput(t *testing.T) {
 	}
 }
 
+// Bun gmail draft refuses "Cannot update draft" with an id and "Cannot create
+// draft" without one: the operation in the refusal comes from the input.
+func TestOperationForNamesTheRefusalFromTheInput(t *testing.T) {
+	testbox.Isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	ran := 0
+	r, err := plugins.NewRegistry(&plugins.Plugin{
+		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
+		Profile: &plugins.ProfileSpec{
+			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
+				return nil, nil
+			},
+			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
+				return plugins.ValidationResult{Valid: true}, nil
+			},
+		},
+		Commands: []plugins.CommandSpec{{
+			Path: "draft", Description: "draft", Access: "write", Operation: "draft",
+			OperationFor: func(in plugins.CommandInput) string {
+				if id, _ := in.Args["id"].(string); id != "" {
+					return "update draft"
+				}
+				return "create draft"
+			},
+			Arguments: []plugins.ArgumentSpec{{Name: "id"}},
+			Examples:  []string{"agentio desk draft"},
+			Run: func(context.Context, plugins.CommandInput, *plugins.RunContext) (any, error) {
+				ran++
+				return "ok", nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	p := r.Find("desk")
+	for id, want := range map[string]string{"": `Cannot create draft: profile "ro" is read-only`, "r-1": `Cannot update draft: profile "ro" is read-only`} {
+		_, err = Execute(context.Background(), r, p, command(p, "draft"), plugins.CommandInput{Args: map[string]any{"id": id}, Options: map[string]any{}})
+		ce, ok := err.(*clierr.Error)
+		if !ok || ce.Code != clierr.PermissionDenied || ce.Message != want || ran != 0 {
+			t.Fatalf("id %q: %#v ran %d", id, err, ran)
+		}
+	}
+}
+
 // Bun utils/stdin confirm: "<question> (y/n): ", only y or yes (any case) agree.
 func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
 	for answer, want := range map[string]bool{"y\n": true, " YES \n": true, "n\n": false, "yep\n": false, "\n": false, "": false} {

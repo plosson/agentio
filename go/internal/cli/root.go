@@ -29,6 +29,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google/gchat"
 	"github.com/plosson/agentio/go/internal/plugins/google/gdocs"
 	"github.com/plosson/agentio/go/internal/plugins/google/gdrive"
+	"github.com/plosson/agentio/go/internal/plugins/google/gmail"
 	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -51,6 +52,7 @@ func init() {
 	plugins.Default.MustRegister(gdocs.New())
 	plugins.Default.MustRegister(gdrive.New())
 	plugins.Default.MustRegister(github.New())
+	plugins.Default.MustRegister(gmail.New())
 }
 
 func Main(args []string) int {
@@ -66,6 +68,10 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 	err := root.Execute()
 	if err == nil {
 		return 0
+	}
+	var exit *plugins.ExitStatus
+	if errors.As(err, &exit) {
+		return exit.Code
 	}
 	var ce *clierr.Error
 	if errors.As(err, &ce) {

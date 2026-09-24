@@ -124,3 +124,118 @@ func (q *SearchParams) String() string {
 	}
 	return strings.Join(parts, "&")
 }
+
+// Length is s.length: UTF-16 code units.
+func Length(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= 0x10000 {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// PadEnd is s.padEnd(n): spaces up to n UTF-16 code units.
+func PadEnd(s string, n int) string {
+	if l := Length(s); l < n {
+		return s + strings.Repeat(" ", n-l)
+	}
+	return s
+}
+
+// BufferString is Buffer#toString('utf-8'): a BOM is kept and each maximal
+// invalid subpart becomes one U+FFFD (a truncated "\xe2\x82" is one, where
+// TextDecoder gives two).
+func BufferString(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	var sb strings.Builder
+	for len(b) > 0 {
+		r, size := utf8.DecodeRune(b)
+		if r != utf8.RuneError || size > 1 {
+			sb.WriteRune(r)
+			b = b[size:]
+			continue
+		}
+		sb.WriteRune(utf8.RuneError)
+		b = b[invalidSubpart(b):]
+	}
+	return sb.String()
+}
+
+// invalidSubpart is the length of the maximal subpart of an ill-formed
+// sequence at b[0] (Unicode 3.9, "U+FFFD substitution of maximal subparts").
+func invalidSubpart(b []byte) int {
+	lead := b[0]
+	var need int
+	lo, hi := byte(0x80), byte(0xBF)
+	switch {
+	case lead >= 0xC2 && lead <= 0xDF:
+		need = 1
+	case lead == 0xE0:
+		need, lo = 2, 0xA0
+	case lead == 0xED:
+		need, hi = 2, 0x9F
+	case lead >= 0xE1 && lead <= 0xEF:
+		need = 2
+	case lead == 0xF0:
+		need, lo = 3, 0x90
+	case lead == 0xF4:
+		need, hi = 3, 0x8F
+	case lead >= 0xF1 && lead <= 0xF3:
+		need = 3
+	default:
+		return 1
+	}
+	n := 1
+	for n <= need && n < len(b) {
+		c := b[n]
+		if n > 1 {
+			lo, hi = 0x80, 0xBF
+		}
+		if c < lo || c > hi {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// DecodeBase64 is Buffer.from(s, 'base64'): the standard and URL-safe
+// alphabets both decode, other characters are skipped, and "=" ends the input.
+func DecodeBase64(s string) []byte {
+	out := make([]byte, 0, len(s)*3/4)
+	var acc uint32
+	bits := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var v byte
+		switch {
+		case c >= 'A' && c <= 'Z':
+			v = c - 'A'
+		case c >= 'a' && c <= 'z':
+			v = c - 'a' + 26
+		case c >= '0' && c <= '9':
+			v = c - '0' + 52
+		case c == '+' || c == '-':
+			v = 62
+		case c == '/' || c == '_':
+			v = 63
+		case c == '=':
+			return out
+		default:
+			continue
+		}
+		acc = acc<<6 | uint32(v)
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(acc>>bits))
+		}
+	}
+	return out
+}

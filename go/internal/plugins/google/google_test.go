@@ -618,3 +618,26 @@ func TestDriveServiceUsesCamelTokensAndPageSizeCapsLikeMathMin(t *testing.T) {
 		t.Fatalf("pageSize %s", got)
 	}
 }
+
+// A command that validates before enforceWriteAccess answers a read-only
+// profile with its input error: WriteUnlessInvalid reads "read" for that
+// input so the host lets Run report it.
+func TestWriteUnlessInvalidReadsOnlyForRejectedInput(t *testing.T) {
+	calls := 0
+	access := WriteUnlessInvalid(func(in plugins.CommandInput, fail func(plugins.ErrorCode, string, string) error) error {
+		calls++
+		if in.Options["to"] == "" {
+			return fail("INVALID_PARAMS", "--to is required", "")
+		}
+		return nil
+	})
+	if got := access(plugins.CommandInput{Options: map[string]any{"to": ""}}); got != "read" {
+		t.Fatalf("invalid input: %q", got)
+	}
+	if got := access(plugins.CommandInput{Options: map[string]any{"to": "a@example.com"}}); got != "write" {
+		t.Fatalf("valid input: %q", got)
+	}
+	if calls != 2 {
+		t.Fatalf("check ran %d times", calls)
+	}
+}

@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -301,5 +302,87 @@ func TestURLEncodingIsJavaScripts(t *testing.T) {
 	}
 	if NewSearchParams().String() != "" {
 		t.Fatal("empty params")
+	}
+}
+
+func TestLengthAndPadEndCountUTF16Units(t *testing.T) {
+	if Length("a😀é") != 4 || Length("") != 0 {
+		t.Fatal(Length("a😀é"))
+	}
+	if PadEnd("ab", 4) != "ab  " || PadEnd("😀", 4) != "😀  " || PadEnd("abcde", 4) != "abcde" {
+		t.Fatalf("%q", PadEnd("😀", 4))
+	}
+}
+
+func TestBufferStringKeepsTheBOMAndReplacesMaximalSubparts(t *testing.T) {
+	cases := map[string]string{
+		"\xe2\x82":                  "�",
+		"\xe2\x82A":                 "�A",
+		"\xed\xa0\x80":              "���",
+		"\xf0\x9f\x98":              "�",
+		"\xc0\xaf":                  "��",
+		"\xf4\x90\x80\x80":          "����",
+		"\xef\xbb\xbf\xef\xbb\xbfA": "\uFEFF\uFEFFA",
+		"a\xffb":                    "a�b",
+		"\xe0\x80A":                 "��A",
+		"é😀":                        "é😀",
+	}
+	for in, want := range cases {
+		if got := BufferString([]byte(in)); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestDecodeBase64IsBufferFrom(t *testing.T) {
+	cases := map[string]string{
+		"SGVsbG8-_w":          "Hello>\xff",
+		"SGV sbG8=QQ==":       "Hello",
+		"QUJD\nRA":            "ABCD",
+		"Q":                   "",
+		"":                    "",
+		"4pyTIMOgIGxhIG1vZGU": "✓ à la mode",
+	}
+	for in, want := range cases {
+		if got := string(DecodeBase64(in)); got != want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestLocaleCompareSortsLikeBun(t *testing.T) {
+	names := []string{"b", "A", "a", "B", "_x", "Z/y", "auto/receipts", "Auto", "école", "ecole", "Zebra", "zebra", "10", "9", "INBOX", "[Imap]/Sent", "label-1", "label_1", "Label 2", "CATEGORY_PERSONAL", "Category", "😀x", "Ärger", "Arger", "a b", "ab", "a-b"}
+	want := []string{"_x", "[Imap]/Sent", "😀x", "10", "9", "a", "A", "a b", "a-b", "ab", "Arger", "Ärger", "Auto", "auto/receipts", "b", "B", "Category", "CATEGORY_PERSONAL", "ecole", "école", "INBOX", "Label 2", "label_1", "label-1", "Z/y", "zebra", "Zebra"}
+	sort.SliceStable(names, func(i, j int) bool { return LocaleCompare(names[i], names[j]) < 0 })
+	if strings.Join(names, "|") != strings.Join(want, "|") {
+		t.Fatalf("got  %q\nwant %q", names, want)
+	}
+	if LocaleCompare("a", "A") != -1 || LocaleCompare("A", "a") != 1 || LocaleCompare("a", "a") != 0 {
+		t.Fatal("case order")
+	}
+}
+
+func TestParseErrorMessageIsJavaScriptCores(t *testing.T) {
+	cases := map[string]string{
+		"":          "Unexpected EOF",
+		" ":         "Unexpected EOF",
+		"{":         "Expected '}'",
+		`{"a":1,}`:  "Property name must be a string literal",
+		"x":         `Unexpected identifier "x"`,
+		"[1":        "Expected ']'",
+		`{"a":1} x`: "Unable to parse JSON string",
+		"tru":       `Unexpected identifier "tru"`,
+		`"abc`:      "Unterminated string",
+		`{"a" 1}`:   "Expected ':' before value in object property definition",
+		"12a":       "Unable to parse JSON string",
+		`{"a":01}`:  "Expected '}'",
+		"nul":       `Unexpected identifier "nul"`,
+		"{}}":       "Unable to parse JSON string",
+		"é":         "Unrecognized token 'é'",
+	}
+	for in, want := range cases {
+		if got := ParseErrorMessage([]byte(in)); got != "JSON Parse error: "+want {
+			t.Errorf("%q: got %q want %q", in, got, want)
+		}
 	}
 }
