@@ -593,17 +593,25 @@ func TestGoogleTestInputIsWhatTheCLIBuildsWithoutFlags(t *testing.T) {
 	}
 }
 
-// A new vault must be encrypted with the passphrase that gets stored, even when
-// AGENTIO_PASSPHRASE holds another one, or the next load fails and wipes it.
-func TestNewVaultUsesTheGivenPassphraseOverTheEnv(t *testing.T) {
-	const key = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
-	blob, err := vault.Encrypt(`{"version":1,"config":{"profiles":{"board":["desk"]}},"credentials":{"board":{"desk":{"token":"sek"}}}}`, key)
+// exportKey encrypts exportedBlob, a one-profile export as `vault export` makes.
+const exportKey = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+
+func exportedBlob(t *testing.T) string {
+	t.Helper()
+	blob, err := vault.Encrypt(`{"version":1,"config":{"profiles":{"board":["desk"]}},"credentials":{"board":{"desk":{"token":"sek"}}}}`, exportKey)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return blob
+}
+
+// A new vault must be encrypted with the passphrase that gets stored, even when
+// AGENTIO_PASSPHRASE holds another one, or the next load fails and wipes it.
+func TestNewVaultUsesTheGivenPassphraseOverTheEnv(t *testing.T) {
+	blob := exportedBlob(t)
 	for name, args := range map[string][]string{
 		"init":   {"vault", "init", "--passphrase", "new-pass-456", "--no-migrate"},
-		"import": {"vault", "import", "--key", key, "--passphrase", "new-pass-456"},
+		"import": {"vault", "import", "--key", exportKey, "--passphrase", "new-pass-456"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			initCLI(t)
@@ -632,7 +640,7 @@ func TestNewVaultUsesTheGivenPassphraseOverTheEnv(t *testing.T) {
 	t.Run("set", func(t *testing.T) {
 		initCLI(t)
 		t.Setenv("AGENTIO_CONFIG", blob)
-		if code, _, errOut := run(t, "vault", "import", "--key", key, "--passphrase", "new-pass-456"); code != 0 {
+		if code, _, errOut := run(t, "vault", "import", "--key", exportKey, "--passphrase", "new-pass-456"); code != 0 {
 			t.Fatal(errOut)
 		}
 		t.Setenv("AGENTIO_PASSPHRASE", "old-pass-123")
@@ -646,14 +654,10 @@ func TestNewVaultUsesTheGivenPassphraseOverTheEnv(t *testing.T) {
 
 // A failed write must not be reported as an import.
 func TestImportReportsAFailedVaultWrite(t *testing.T) {
-	const key = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
-	blob, err := vault.Encrypt(`{"version":1,"config":{"profiles":{"board":["desk"]}},"credentials":{"board":{"desk":{"token":"sek"}}}}`, key)
-	if err != nil {
-		t.Fatal(err)
-	}
+	blob := exportedBlob(t)
 	for name, args := range map[string][]string{
-		"replace": {"vault", "import", "--key", key},
-		"merge":   {"vault", "import", "--key", key, "--merge"},
+		"replace": {"vault", "import", "--key", exportKey},
+		"merge":   {"vault", "import", "--key", exportKey, "--merge"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			initCLI(t)

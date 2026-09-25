@@ -3,6 +3,7 @@ package vault
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -162,8 +163,27 @@ func loadAt(path string, wipeOnBadFile bool) (*Contents, error) {
 	return cloned, err
 }
 
-func decryptPayload(encoded, pw string, wipe bool) (*Contents, error) {
+var errNotJSON = errors.New("vault contents are not valid JSON")
+
+// DecryptContents decrypts a vault file and decodes its contents. It does not
+// check the version.
+func DecryptContents(encoded, pw string) (*Contents, error) {
 	plain, err := Decrypt(encoded, pw)
+	if err != nil {
+		return nil, err
+	}
+	contents, err := decodeContents([]byte(plain))
+	if err != nil {
+		return nil, errNotJSON
+	}
+	return contents, nil
+}
+
+func decryptPayload(encoded, pw string, wipe bool) (*Contents, error) {
+	contents, err := DecryptContents(encoded, pw)
+	if errors.Is(err, errNotJSON) {
+		return nil, clierr.New(clierr.VaultCorrupt, "Vault contents are not valid JSON", "Restore from backup or run: agentio vault reset")
+	}
 	if err != nil {
 		if StructurallyValid(encoded) {
 			if wipe {
@@ -176,10 +196,6 @@ func decryptPayload(encoded, pw string, wipe bool) (*Contents, error) {
 			return nil, clierr.New(clierr.AuthFailed, "Wrong passphrase for vault", suggestion)
 		}
 		return nil, clierr.New(clierr.VaultCorrupt, "Vault file is malformed", "Restore from backup or run: agentio vault reset")
-	}
-	contents, err := decodeContents([]byte(plain))
-	if err != nil {
-		return nil, clierr.New(clierr.VaultCorrupt, "Vault contents are not valid JSON", "Restore from backup or run: agentio vault reset")
 	}
 	if contents.Version != CurrentVersion {
 		return nil, clierr.New(clierr.VaultCorrupt,

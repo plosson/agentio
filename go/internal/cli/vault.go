@@ -151,11 +151,7 @@ func vaultSet() *cobra.Command {
 				return err
 			}
 			// Count from what was decrypted: a load would take AGENTIO_PASSPHRASE first.
-			var contents vault.Contents
-			plain, err := vault.Decrypt(string(encoded), passphrase)
-			if err == nil {
-				err = json.Unmarshal([]byte(plain), &contents)
-			}
+			contents, err := vault.DecryptContents(string(encoded), passphrase)
 			if err != nil {
 				return clierr.New(clierr.AuthFailed, "Could not decrypt "+vaultPath, "Wrong passphrase, or the file is not an agentio vault")
 			}

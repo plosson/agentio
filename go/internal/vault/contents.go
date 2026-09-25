@@ -18,22 +18,21 @@ type ProfileValue struct {
 	extra         map[string]json.RawMessage
 }
 
+// profileObject is the object form of a ProfileValue.
+type profileObject struct {
+	Name     string `json:"name"`
+	ReadOnly *bool  `json:"readOnly,omitempty"`
+}
+
 func (p ProfileValue) MarshalJSON() ([]byte, error) {
 	if p.bare && !p.ReadOnly {
 		return json.Marshal(p.Name)
 	}
-	obj := struct {
-		Name     string `json:"name"`
-		ReadOnly *bool  `json:"readOnly,omitempty"`
-	}{Name: p.Name}
+	obj := profileObject{Name: p.Name}
 	if p.ReadOnly || p.readOnlyFalse {
 		obj.ReadOnly = &p.ReadOnly
 	}
-	b, err := json.Marshal(obj)
-	if err != nil {
-		return nil, err
-	}
-	return withUnknown(b, p.extra)
+	return marshalKeeping(obj, p.extra)
 }
 
 func (p *ProfileValue) UnmarshalJSON(b []byte) error {
@@ -46,19 +45,13 @@ func (p *ProfileValue) UnmarshalJSON(b []byte) error {
 		p.bare = true
 		return json.Unmarshal(b, &p.Name)
 	}
-	var obj struct {
-		Name     string `json:"name"`
-		ReadOnly *bool  `json:"readOnly"`
-	}
-	if err := json.Unmarshal(b, &obj); err != nil {
+	var obj profileObject
+	extra, err := unmarshalKeeping(b, &obj)
+	if err != nil {
 		return err
 	}
 	if obj.Name == "" {
 		return fmt.Errorf("profile entry has no name")
-	}
-	extra, err := unknownMembers(b, "name", "readOnly")
-	if err != nil {
-		return err
 	}
 	p.Name = obj.Name
 	p.ReadOnly = obj.ReadOnly != nil && *obj.ReadOnly
@@ -124,29 +117,13 @@ type APIKey struct {
 	extra map[string]json.RawMessage
 }
 
-func (k APIKey) MarshalJSON() ([]byte, error) {
-	type plain APIKey
-	b, err := json.Marshal(plain(k))
-	if err != nil {
-		return nil, err
-	}
-	return withUnknown(b, k.extra)
-}
+type plainAPIKey APIKey
 
-func (k *APIKey) UnmarshalJSON(b []byte) error {
-	type plain APIKey
-	var v plain
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	extra, err := unknownMembers(b, "id", "name", "secretHash", "hint", "allowedProfiles",
-		"readOnly", "canManageProfiles", "canAddProfiles", "createdAt", "lastUsedAt")
-	if err != nil {
-		return err
-	}
-	*k = APIKey(v)
-	k.extra = extra
-	return nil
+func (k APIKey) MarshalJSON() ([]byte, error) { return marshalKeeping(plainAPIKey(k), k.extra) }
+
+func (k *APIKey) UnmarshalJSON(b []byte) (err error) {
+	k.extra, err = unmarshalKeeping(b, (*plainAPIKey)(k))
+	return err
 }
 
 func (k APIKey) Manage() bool {
@@ -167,28 +144,13 @@ type Config struct {
 	extra map[string]json.RawMessage
 }
 
-func (c Config) MarshalJSON() ([]byte, error) {
-	type plain Config
-	b, err := json.Marshal(plain(c))
-	if err != nil {
-		return nil, err
-	}
-	return withUnknown(b, c.extra)
-}
+type plainConfig Config
 
-func (c *Config) UnmarshalJSON(b []byte) error {
-	type plain Config
-	var v plain
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	extra, err := unknownMembers(b, "profiles", "apiKeys")
-	if err != nil {
-		return err
-	}
-	*c = Config(v)
-	c.extra = extra
-	return nil
+func (c Config) MarshalJSON() ([]byte, error) { return marshalKeeping(plainConfig(c), c.extra) }
+
+func (c *Config) UnmarshalJSON(b []byte) (err error) {
+	c.extra, err = unmarshalKeeping(b, (*plainConfig)(c))
+	return err
 }
 
 // Contents is the decrypted vault document. Top-level keys Go does not model
@@ -201,28 +163,13 @@ type Contents struct {
 	extra map[string]json.RawMessage
 }
 
-func (c Contents) MarshalJSON() ([]byte, error) {
-	type plain Contents
-	b, err := json.Marshal(plain(c))
-	if err != nil {
-		return nil, err
-	}
-	return withUnknown(b, c.extra)
-}
+type plainContents Contents
 
-func (c *Contents) UnmarshalJSON(b []byte) error {
-	type plain Contents
-	var v plain
-	if err := decodeNumbers(b, &v); err != nil {
-		return err
-	}
-	extra, err := unknownMembers(b, "version", "config", "credentials")
-	if err != nil {
-		return err
-	}
-	*c = Contents(v)
-	c.extra = extra
-	return nil
+func (c Contents) MarshalJSON() ([]byte, error) { return marshalKeeping(plainContents(c), c.extra) }
+
+func (c *Contents) UnmarshalJSON(b []byte) (err error) {
+	c.extra, err = unmarshalKeeping(b, (*plainContents)(c))
+	return err
 }
 
 func (c *Contents) normalize() {
@@ -236,7 +183,7 @@ func (c *Contents) normalize() {
 
 func decodeContents(raw []byte) (*Contents, error) {
 	var c Contents
-	if err := decodeNumbers(raw, &c); err != nil {
+	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, err
 	}
 	c.normalize()
