@@ -544,6 +544,19 @@ func TestFormatBytesMatchesBun(t *testing.T) {
 			t.Errorf("%d: got %q want %q", in, got, w)
 		}
 	}
+	// Sizes as an answer may give them; printed by Bun's formatBytes.
+	for _, c := range []struct {
+		in   any
+		want string
+	}{
+		{json.Number("0"), "0 B"}, {"0", "NaN undefined"}, {nil, "NaN undefined"}, {jsvalue.Undefined, "NaN undefined"},
+		{-5.0, "NaN undefined"}, {0.5, "512 undefined"}, {math.NaN(), "NaN undefined"}, {"2048", "2 KB"},
+		{"abc", "NaN undefined"}, {1.5, "1.5 B"}, {true, "1 B"}, {[]any{json.Number("3000")}, "2.9 KB"},
+	} {
+		if got := FormatBytes(c.in); got != c.want {
+			t.Errorf("%#v: got %q want %q", c.in, got, c.want)
+		}
+	}
 }
 
 func TestStatusMessageUsesTheProductTextFor403And404(t *testing.T) {
@@ -753,7 +766,7 @@ func TestDriveFilesListFormatAndValidate(t *testing.T) {
 	if got := FormatDriveFiles(files, "Things", "No things found"); got != want {
 		t.Fatalf("%q", got)
 	}
-	if FormatDriveFiles([]DriveFile{}, "Things", "No things found") != "No things found" || FormatDriveFiles(nil, "Things", "none") != "none" {
+	if FormatDriveFiles([]any{}, "Things", "No things found") != "No things found" || FormatDriveFiles(nil, "Things", "none") != "none" {
 		t.Fatal("empty list")
 	}
 	v, err := ValidateDriveFiles("application/x-thing")(fake.ctx(), run)
@@ -769,6 +782,54 @@ func TestDriveFilesListFormatAndValidate(t *testing.T) {
 	}
 	if _, err := ListDriveFiles(fake.ctx(), svc, "application/x-thing", "", 10, ""); Code(err) != 400 {
 		t.Fatalf("list error %v", err)
+	}
+}
+
+// The Drive list and copy read the answer as Bun does: a missing id prints
+// "undefined" (in the link too), a null owner is skipped by `?.`, a null file
+// is Bun's TypeError. Expected text is the Bun CLI's for the same answers.
+func TestDriveListAndCopyReadMissingFieldsAsBun(t *testing.T) {
+	var body string
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"accessToken": "at"}), Fetch: plugins.Fetch}
+	svc, err := DriveService(fake.ctx(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = `{"files":[{"name":"","owners":[null,{"displayName":"x"}]},{"id":"b","owners":null,"modifiedTime":""}]}`
+	files, err := ListDriveFiles(fake.ctx(), svc, "m", "", 10, "https://docs.google.com/document/d/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Documents (2)\n\n[1] Untitled\n    ID: undefined\n    Link: https://docs.google.com/document/d/undefined\n\n[2] Untitled\n    ID: b\n    Link: https://docs.google.com/document/d/b\n"
+	if got := FormatDriveFiles(files, "Documents", "No documents found"); got != want {
+		t.Fatalf("%q", got)
+	}
+	body = `null`
+	if _, err := ListDriveFiles(fake.ctx(), svc, "m", "", 10, ""); err == nil || err.Error() != "null is not an object (evaluating '(await this.drive.files.list({\n        pageSize: Math.min(limit, 100),\n        q,\n        fields: \"files(id,name,owners,createdTime,modifiedTime,webViewLink)\",\n        orderBy: \"modifiedTime desc\"\n      })).data.files')" {
+		t.Fatalf("%v", err)
+	}
+	body = `{"files":[null]}`
+	if _, err := ListDriveFiles(fake.ctx(), svc, "m", "", 10, ""); err == nil || err.Error() != "null is not an object (evaluating 'file.id')" {
+		t.Fatalf("%v", err)
+	}
+	a := API{Ctx: fake.ctx(), RunContext: &plugins.RunContext{Credentials: run.Credentials, Fetch: plugins.Fetch,
+		Fail: func(code plugins.ErrorCode, message, _ string) error { return errors.New(code + ": " + message) }},
+		ErrorMessage: func(err error) string { return Message(err) }}
+	body = `{}`
+	c, err := a.CopyDriveFile(svc, "S1", "T", "", "copy spreadsheet", "https://docs.google.com/spreadsheets/d/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := FormatCreatedFile(c, "Spreadsheet created"); got != "Spreadsheet created\nID: undefined\nTitle: T\nURL: https://docs.google.com/spreadsheets/d/undefined" {
+		t.Fatalf("%q", got)
+	}
+	body = `null`
+	if _, err := a.CopyDriveFile(svc, "S1", "T", "", "copy spreadsheet", ""); err == nil || err.Error() != "API_ERROR: Failed to copy spreadsheet: null is not an object (evaluating 'response.data.id')" {
+		t.Fatalf("%v", err)
 	}
 }
 
@@ -832,5 +893,209 @@ func TestMaxResultsCapsLikeMathMin(t *testing.T) {
 		if got := fake.hits[len(fake.hits)-1].URL.Query().Get("maxResults"); got != c.want {
 			t.Errorf("%v: %q, want %q", c.limit, got, c.want)
 		}
+	}
+}
+
+// Answer keeps what the typed struct loses: a missing field is undefined, an
+// explicit null is null, and "" and 0 stay what was sent.
+func TestAnswerReadsTheAnswerAsJavaScriptDoes(t *testing.T) {
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"","summary":null,"primary":false,"items":[]}` + "\n"))
+	})
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"access_token": "a"}), Fetch: plugins.Fetch}
+	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, raw, err := Answer(fake.ctx(), svc.CalendarList.Get("primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Id != "" || entry.Summary != "" {
+		t.Fatalf("typed %#v", entry)
+	}
+	if got := string(jsvalue.Stringify(raw)); got != `{"id":"","summary":null,"primary":false,"items":[]}` {
+		t.Fatalf("raw %s", got)
+	}
+	if v := jsvalue.Member(raw, "description"); v != jsvalue.Undefined {
+		t.Fatalf("missing field %#v", v)
+	}
+	if v := jsvalue.Member(raw, "summary"); v != nil {
+		t.Fatalf("null field %#v", v)
+	}
+}
+
+// An answer the typed struct cannot hold is no error: Bun's gaxios parses the
+// body when it is JSON and keeps its text when it is not.
+func TestAnswerReadsWhatTheStructCannotHoldAsGaxiosDoes(t *testing.T) {
+	var body string
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"access_token": "a"}), Fetch: plugins.Fetch}
+	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ body, want string }{
+		{`{"id":5,"summary":"s"}`, `{"id":5,"summary":"s"}`},
+		{`{"summary":"s"}` + strings.Repeat(" ", 5000) + "\n", `{"summary":"s"}`},
+		{`null`, `null`},
+		{``, `""`},
+		{`not json`, `"not json"`},
+		{`{"summary":"s"} trailing`, `"{\"summary\":\"s\"} trailing"`},
+	} {
+		body = c.body
+		entry, raw, err := Answer(fake.ctx(), svc.CalendarList.Get("primary"))
+		if err != nil {
+			t.Fatalf("%q: %v", c.body, err)
+		}
+		if got := string(jsvalue.Stringify(raw)); got != c.want {
+			t.Fatalf("%q: raw %s", c.body, got)
+		}
+		if strings.HasPrefix(c.body, `{"id":5`) && entry != nil {
+			t.Fatalf("%q: typed %#v", c.body, entry)
+		}
+	}
+	// A failure status is still the SDK's error.
+	fake.handle = func(w http.ResponseWriter, r *http.Request, _ int) {
+		writeJSON(w, 404, map[string]any{"error": map[string]any{"code": 404, "message": "gone"}})
+	}
+	if _, raw, err := Answer(fake.ctx(), svc.CalendarList.Get("primary")); Message(err) != "gone" || raw != nil {
+		t.Fatalf("%v %v", err, raw)
+	}
+}
+
+// Only the answer the SDK decodes is kept: not a retried 5xx, not the 401
+// before a refresh, not a redirect.
+func TestAnswerKeepsOnlyTheFinalResponse(t *testing.T) {
+	noSleep(t)
+	cases := []struct {
+		name  string
+		creds map[string]any
+		api   []int
+	}{
+		{"retried 503", map[string]any{"access_token": "a"}, []int{503, 503, 200}},
+		{"refreshed after 401", map[string]any{"access_token": "old", "refresh_token": "rt"}, []int{401, 200}},
+		{"redirected", map[string]any{"access_token": "a"}, []int{302, 200}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := 0
+			fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+				if r.URL.Path == "/token" {
+					writeJSON(w, 200, map[string]any{"access_token": "at-new", "expires_in": 3600, "token_type": "Bearer"})
+					return
+				}
+				status := c.api[api]
+				api++
+				switch status {
+				case 200:
+					writeJSON(w, 200, map[string]any{"id": "final"})
+				case 302:
+					w.Header().Set("Location", r.URL.Path+"?"+r.URL.RawQuery+"&hop=1")
+					writeJSON(w, 302, map[string]any{"id": "redirect"})
+				default:
+					writeJSON(w, status, map[string]any{"id": "attempt", "error": map[string]any{"code": status, "message": "nope"}})
+				}
+			})
+			run := &plugins.RunContext{Credentials: testbox.Object(c.creds), Fetch: plugins.Fetch}
+			svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, raw, err := Answer(fake.ctx(), svc.CalendarList.Get("primary"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := string(jsvalue.Stringify(raw)); got != `{"id":"final"}` || api != len(c.api) {
+				t.Fatalf("raw %s after %d answers", got, api)
+			}
+		})
+	}
+}
+
+// Each Answer has its own recorder, even on contexts derived from one parent.
+func TestAnswerCallsInParallelDoNotCrossRecord(t *testing.T) {
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		time.Sleep(time.Millisecond)
+		writeJSON(w, 200, map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/api/users/me/calendarList/")})
+	})
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"access_token": "a"}), Fetch: plugins.Fetch}
+	parent := fake.ctx()
+	svc, err := NewService(parent, run, Snake, calendar.NewService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id := fmt.Sprint("cal", i)
+			entry, raw, err := Answer(parent, svc.CalendarList.Get(id))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if entry.Id != id || jsvalue.Member(raw, "id") != id {
+				t.Errorf("%s: typed %q raw %v", id, entry.Id, jsvalue.Member(raw, "id"))
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// A body cut short fails Answer exactly as it fails the plain call.
+func TestAnswerFailsACutBodyAsTheSDKDoes(t *testing.T) {
+	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "100")
+		_, _ = w.Write([]byte(`{"id":"cut`))
+		w.(http.Flusher).Flush()
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		_ = conn.Close()
+	})
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"access_token": "a"}), Fetch: plugins.Fetch}
+	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, plain := svc.CalendarList.Get("primary").Context(fake.ctx()).Do()
+	_, _, answered := Answer(fake.ctx(), svc.CalendarList.Get("primary"))
+	if plain == nil || answered == nil || plain.Error() != answered.Error() {
+		t.Fatalf("plain %v, Answer %v", plain, answered)
+	}
+}
+
+type fixedBody struct{ body io.ReadCloser }
+
+func (f fixedBody) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: 200, Body: f.body}, nil
+}
+
+// Outside Answer, and for a media download, the body is handed on untouched.
+func TestRecordTransportLeavesOtherResponsesAlone(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("bytes"))
+	tr := recordTransport{fixedBody{body}}
+	rec := &recorder{}
+	for _, c := range []struct {
+		ctx context.Context
+		url string
+	}{
+		{context.Background(), "https://example.invalid/x?alt=json"},
+		{context.WithValue(context.Background(), recorderKey{}, rec), "https://example.invalid/x?alt=media"},
+		{context.WithValue(context.Background(), recorderKey{}, rec), "https://example.invalid/x"},
+	} {
+		req, _ := http.NewRequestWithContext(c.ctx, "GET", c.url, nil)
+		resp, _ := tr.RoundTrip(req)
+		if resp.Body != body {
+			t.Fatalf("%s: body wrapped", c.url)
+		}
+	}
+	if status, got, _ := rec.answer(); status != 0 || got != nil {
+		t.Fatalf("recorded %d %q", status, got)
 	}
 }

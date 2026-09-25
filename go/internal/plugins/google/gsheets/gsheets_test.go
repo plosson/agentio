@@ -21,7 +21,6 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -460,7 +459,7 @@ func TestListSendsTheBunQueryAndFormats(t *testing.T) {
 	if got := product.Printed(t, "list", v, false); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "list", []google.DriveFile{}, false); got != "No spreadsheets found\n" {
+	if got := product.Printed(t, "list", []any{}, false); got != "No spreadsheets found\n" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -1057,3 +1056,93 @@ func TestExportWriteFailsLikeNode(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty, zero and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing id is "undefined", a value the answer sends prints as sent, and a
+// null answer or item fails with Bun's TypeError, whose text names the
+// expression Bun's transpiled client reads.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	get := func(body string) map[string]string { return map[string]string{"GET /values/": body} }
+	ss := map[string]any{"spreadsheet-id-or-url": "S", "range": "A1"}
+	vals := map[string]any{"spreadsheet-id-or-url": "S", "range": "A1", "values": []string{"x"}}
+	meta := map[string]any{"spreadsheet-id-or-url": "S"}
+	sheet := func(body string) map[string]string {
+		return map[string]string{"GET /spreadsheets/S": body, "POST :batchUpdate": `{}`}
+	}
+	bold := map[string]any{"bold": true}
+	batch := map[string]any{"requests-json": `[{"a":1}]`}
+	product.RunAnswered(t, storedCreds(freshExpiry), []googletest.Answered{
+		{Name: "get null answer", Path: "get", Args: ss, Answers: get(`null`),
+			Err: "API_ERROR: Failed to get values: null is not an object (evaluating 'response.data.range')"},
+		{Name: "get null range and odd cells", Path: "get", Args: ss, Answers: get(`{"range":null,"values":[[{"x":1},true,0,""],[]]}`),
+			Out: "Range: A1\n\n[object Object]\ttrue\t0\t\n\n"},
+		{Name: "get without values", Path: "get", Args: ss, Answers: get(`{"range":"R"}`), Out: "No data found\n"},
+		{Name: "get numbers", Path: "get", Args: ss, Answers: get(`{"range":5,"values":[[1.50,1e21,-0]]}`), Out: "Range: 5\n\n1.5\t1e+21\t0\n"},
+		{Name: "update empty", Path: "update", Args: vals, Answers: map[string]string{"PUT /values/": `{}`},
+			Out: "Updated 0 cells in A1\n  Rows: 0\n  Columns: 0\n"},
+		{Name: "update null", Path: "update", Args: vals, Answers: map[string]string{"PUT /values/": `null`},
+			Err: "API_ERROR: Failed to update values: null is not an object (evaluating 'response.data.updatedRange')"},
+		{Name: "update mistyped", Path: "update", Args: vals,
+			Answers: map[string]string{"PUT /values/": `{"updatedRange":"","updatedRows":"2","updatedColumns":null,"updatedCells":0}`},
+			Out:     "Updated 0 cells in A1\n  Rows: 2\n  Columns: 0\n"},
+		{Name: "append null updates", Path: "append", Args: vals, Answers: map[string]string{"POST :append": `{"updates":null}`},
+			Out: "Appended 0 cells to A1\n  Rows: 0\n  Columns: 0\n"},
+		{Name: "append null", Path: "append", Args: vals, Answers: map[string]string{"POST :append": `null`},
+			Err: "API_ERROR: Failed to append values: null is not an object (evaluating '(await this.sheets.spreadsheets.values.append({\n        spreadsheetId,\n        range: cleanedRange,\n        valueInputOption,\n        insertDataOption: options.insertDataOption,\n        requestBody: {\n          values\n        }\n      })).data.updates')"},
+		{Name: "clear number", Path: "clear", Args: ss, Answers: map[string]string{"POST :clear": `{"clearedRange":7}`}, Out: "Cleared 7\n"},
+		{Name: "clear null", Path: "clear", Args: ss, Answers: map[string]string{"POST :clear": `null`},
+			Err: "API_ERROR: Failed to clear values: null is not an object (evaluating '(await this.sheets.spreadsheets.values.clear({\n          spreadsheetId,\n          range: cleanedRange\n        })).data.clearedRange')"},
+		{Name: "metadata zeros and missing", Path: "metadata", Args: meta,
+			Answers: map[string]string{"GET /spreadsheets/S": `{"properties":{"locale":"","timeZone":null},"sheets":[{},{"properties":{"sheetId":0,"title":"","gridProperties":{"rowCount":0}}},{"properties":{"sheetId":7,"gridProperties":null}}]}`},
+			Out:     "ID: undefined\nTitle: Untitled\nURL: https://docs.google.com/spreadsheets/d/S\n\nSheets:\n  [0] Untitled (0 rows x 0 cols)\n  [0] Untitled (0 rows x 0 cols)\n  [7] Untitled (0 rows x 0 cols)\n"},
+		{Name: "metadata null properties", Path: "metadata", Args: meta, Answers: map[string]string{"GET /spreadsheets/S": `{"properties":null}`},
+			Err: "API_ERROR: Failed to get metadata: null is not an object (evaluating 'props.title')"},
+		{Name: "metadata null sheet", Path: "metadata", Args: meta, Answers: map[string]string{"GET /spreadsheets/S": `{"properties":{},"sheets":[null]}`},
+			Err: "API_ERROR: Failed to get metadata: null is not an object (evaluating 'sheet.properties')"},
+		{Name: "metadata null", Path: "metadata", Args: meta, Answers: map[string]string{"GET /spreadsheets/S": `null`},
+			Err: "API_ERROR: Failed to get metadata: null is not an object (evaluating 'response.data.properties')"},
+		{Name: "metadata mistyped", Path: "metadata", Args: meta,
+			Answers: map[string]string{"GET /spreadsheets/S": `{"properties":{"title":5,"locale":"fr"},"spreadsheetId":9,"spreadsheetUrl":"u","sheets":[{"properties":{"sheetId":"x","title":1,"gridProperties":{"rowCount":"3","columnCount":2}}}]}`},
+			Out:     "ID: 9\nTitle: 5\nLocale: fr\nURL: u\n\nSheets:\n  [x] 1 (3 rows x 2 cols)\n"},
+		{Name: "create empty", Path: "create", Args: map[string]any{"title": "T"}, Answers: map[string]string{"POST /spreadsheets": `{}`},
+			Out: "Spreadsheet created\nID: undefined\nTitle: T\nURL: https://docs.google.com/spreadsheets/d/undefined\n"},
+		{Name: "create null", Path: "create", Args: map[string]any{"title": "T"}, Answers: map[string]string{"POST /spreadsheets": `null`},
+			Err: "API_ERROR: Failed to create spreadsheet: null is not an object (evaluating 'response.data.spreadsheetId')"},
+		{Name: "format mistyped sheet", Path: "format", Args: ss, Set: bold, Answers: sheet(`{"sheets":[{"properties":{"sheetId":"9","title":3}}]}`),
+			Out: "Formatted A1\n  Sheet: 3\n  Applied: textFormat.bold\n"},
+		{Name: "format null sheetId", Path: "format", Args: ss, Set: bold, Answers: sheet(`{"sheets":[{"properties":{"sheetId":null}}]}`),
+			Out: "Formatted A1\n  Sheet: \n  Applied: textFormat.bold\n"},
+		{Name: "format null sheet", Path: "format", Args: map[string]any{"spreadsheet-id-or-url": "S", "range": "A!A1"}, Set: bold,
+			Answers: sheet(`{"sheets":[null,{"properties":{"title":"A"}}]}`),
+			Err:     "API_ERROR: Failed to format range: null is not an object (evaluating 's.properties')"},
+		{Name: "format sheet without properties", Path: "format", Args: ss, Set: bold, Answers: sheet(`{"sheets":[{}]}`),
+			Err: "NOT_FOUND: Sheet not found: (first sheet)"},
+		{Name: "resize null", Path: "resize", Args: map[string]any{"spreadsheet-id-or-url": "S", "range": "A:B"}, Set: map[string]any{"auto": true},
+			Answers: sheet(`null`),
+			Err:     "API_ERROR: Failed to resize dimension: null is not an object (evaluating '(await this.sheets.spreadsheets.get({ spreadsheetId })).data.sheets')"},
+		{Name: "resize sheetId 0", Path: "resize", Args: map[string]any{"spreadsheet-id-or-url": "S", "range": "A:B"}, Set: map[string]any{"size": "50"},
+			Answers: sheet(`{"sheets":[{"properties":{"sheetId":0}}]}`),
+			Out:     "Resized 2 column(s) in A:B\n  Sheet: \n  Size: 50px\n"},
+		{Name: "batch null", Path: "batch", Args: meta, Set: batch, Answers: map[string]string{"POST :batchUpdate": `null`},
+			Err: "API_ERROR: Failed to execute batch update: null is not an object (evaluating '(await this.sheets.spreadsheets.batchUpdate({\n          spreadsheetId,\n          requestBody: { requests }\n        })).data.replies')"},
+		{Name: "batch string replies", Path: "batch", Args: meta, Set: batch, Answers: map[string]string{"POST :batchUpdate": `{"replies":"abc"}`},
+			Out: "Batch update applied to S\n  Replies: 3\n"},
+	})
+}
+
+// printGSheetsValues prints the rows before a null one, then throws.
+func TestValuesStopAtANullRowAsBun(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(freshExpiry), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteRaw(w, 200, `{"values":[["a",null,1],null,["b"]]}`)
+	})
+	v, err := product.Exec(fake.Ctx(), t, reg, "get", product.Input(t, "get", map[string]any{"spreadsheet-id-or-url": "S", "range": "A1"}, nil))
+	if err == nil || err.Error() != "null is not an object (evaluating 'row.map')" {
+		t.Fatalf("error %v", err)
+	}
+	if got := product.Printed(t, "get", v, false); got != "Range: A1\n\na\t\t1\n" {
+		t.Fatalf("%q", got)
+	}
+}

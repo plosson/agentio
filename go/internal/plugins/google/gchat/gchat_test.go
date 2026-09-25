@@ -21,6 +21,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugincache"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
@@ -1024,7 +1025,7 @@ func TestListPagesToTheLimitAndNamesSenders(t *testing.T) {
 	if got := product.Spec(t, "list").Format(res); !strings.HasPrefix(got, "[\n  {\n    \"name\": \"spaces/S/messages/5\",\n    \"createTime\"") || !strings.HasSuffix(got, "  }\n]") {
 		t.Fatalf("%q", got)
 	}
-	if n := len(res.(shown[[]message]).Value); n != 4 {
+	if n := len(res.(shown[[]any]).Value); n != 4 {
 		t.Fatalf("NaN limit is 10: %d", n)
 	}
 }
@@ -1195,7 +1196,7 @@ func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
 	if got := product.Spec(t, "members").Format(res); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := googletest.JSONText(res.([]member)[3]); got != `{"name":"spaces/S/members/4","role":"ROLE_MEMBER","state":"JOINED","memberType":"HUMAN"}` {
+	if got := string(jsvalue.Stringify(res.([]any)[3])); got != `{"name":"spaces/S/members/4","role":"ROLE_MEMBER","state":"JOINED","memberType":"HUMAN"}` {
 		t.Fatalf("%s", got)
 	}
 	for _, h := range fake.Recorded() {
@@ -1333,35 +1334,44 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 	}
 }
 
+// parsed is JSON text as a Bun client object.
+func parsed(t *testing.T, raw string) any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func TestFormatMatchesBun(t *testing.T) {
 	long := strings.Repeat("x", 100) + "yz"
-	list := shown[[]message]{Value: []message{
-		{Name: "spaces/S/messages/1", CreateTime: "T1", Text: long, Sender: &sender{Name: "users/1", DisplayName: "Ann", Email: "a@example.com"}},
-		{Name: "spaces/S/messages/2", CreateTime: "T2", Sender: &sender{Name: "users/2"}},
-		{Name: "spaces/S/messages/3", CreateTime: "T3"},
-	}}
+	list := shown[[]any]{Value: parsed(t, `[
+		{"name":"spaces/S/messages/1","createTime":"T1","text":"`+long+`","sender":{"name":"users/1","displayName":"Ann","email":"a@example.com"}},
+		{"name":"spaces/S/messages/2","createTime":"T2","sender":{"name":"users/2","displayName":""}},
+		{"name":"spaces/S/messages/3","createTime":"T3"}]`).([]any)}
 	want := "Messages (3)\n\n[1] spaces/S/messages/1\n    From: Ann <a@example.com>\n    > " + strings.Repeat("x", 100) + "...\n    Date: T1\n\n" +
 		"[2] spaces/S/messages/2\n    From: Unknown\n    Date: T2\n\n[3] spaces/S/messages/3\n    Date: T3\n"
 	if got := formatMessageList(list); got != want {
 		t.Fatalf("%q", got)
 	}
-	if formatMessageList(shown[[]message]{Value: []message{}}) != "No messages found" || formatMessageList(shown[[]message]{Value: []message{}, JSON: true}) != "[]" {
+	if formatMessageList(shown[[]any]{Value: []any{}}) != "No messages found" || formatMessageList(shown[[]any]{Value: []any{}, JSON: true}) != "[]" {
 		t.Fatal("empty")
 	}
-	if got := formatMessage(shown[*message]{Value: &message{Name: "m", CreateTime: "T"}}); got != "ID: m\nDate: T" {
+	if got := formatMessage(shown[*jsvalue.Object]{Value: parsed(t, `{"name":"m","createTime":"T"}`).(*jsvalue.Object)}); got != "ID: m\nDate: T" {
 		t.Fatalf("%q", got)
 	}
 	if got := formatSendResult(&sendResult{MessageID: "unknown"}); got != "Message sent\nID: unknown" {
 		t.Fatalf("%q", got)
 	}
-	if formatMembers([]member{}) != "No members found" {
+	if formatMembers([]any{}) != "No members found" {
 		t.Fatal("members")
 	}
-	if got := formatUser(&user{Name: "users/1", Organizations: []organization{{}}}); got != "ID: users/1\nOrganizations:" {
+	if got := formatUser(parsed(t, `{"name":"users/1","organizations":[{}]}`)); got != "ID: users/1\nOrganizations:" {
 		t.Fatalf("%q", got)
 	}
 	// JSON output keeps <, > and & as Bun's JSON.stringify does.
-	if got := formatMessage(shown[*message]{Value: &message{Name: "a<b>&c", CreateTime: "T", UpdateTime: "U"}, JSON: true}); got != "{\n  \"name\": \"a<b>&c\",\n  \"createTime\": \"T\",\n  \"updateTime\": \"U\"\n}" {
+	if got := formatMessage(shown[*jsvalue.Object]{Value: parsed(t, `{"name":"a<b>&c","createTime":"T","updateTime":"U"}`).(*jsvalue.Object), JSON: true}); got != "{\n  \"name\": \"a<b>&c\",\n  \"createTime\": \"T\",\n  \"updateTime\": \"U\"\n}" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -1467,5 +1477,130 @@ func TestDirectoryKeepsTheUsersOrder(t *testing.T) {
 	raw, _ := os.ReadFile(path)
 	if string(raw) != `{"fetchedAt":"2999-01-01T00:00:00.000Z","users":{"users/1":{"displayName":"Uno"},"users/5":{"displayName":"Five"}}}` {
 		t.Fatalf("%s", raw)
+	}
+}
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing field keeps Bun's fallback, a value keeps its type, and a null
+// item or answer is Bun's TypeError.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	attachment := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(attachment, []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		space     = `{"name":"spaces/S"}`
+		directory = `{"people":[{"resourceName":"people/1","names":[{"displayName":"Dir One"}],"emailAddresses":[{"value":"one@x.test"}]}]}`
+	)
+	with := func(answers map[string]string) map[string]string {
+		out := map[string]string{"GET /v1/spaces/S": space, "GET /v1/people:listDirectoryPeople": directory}
+		for k, v := range answers {
+			out[k] = v
+		}
+		return out
+	}
+	onS := map[string]any{"space": "S"}
+	user := func(id string) map[string]any { return map[string]any{"user-id": id} }
+	product.RunAnswered(t, freshOAuth(), []googletest.Answered{
+		{Name: "spaces without names", Path: "spaces",
+			Answers: map[string]string{"GET /v1/spaces": `{"spaces":[{"name":"spaces/A"},{"displayName":null,"type":"DM","spaceDetails":{}},{"name":"spaces/C","displayName":"C","spaceType":"GROUP_CHAT","spaceDetails":{"description":"d"}},{}],"nextPageToken":""}`},
+			Out:     "Spaces (4)\n\n[ROOM] A  Unnamed\n[DM]   Unnamed\n[DM] C  C  - d\n[ROOM]   Unnamed\n"},
+		{Name: "spaces null item", Path: "spaces",
+			Answers: map[string]string{"GET /v1/spaces": `{"spaces":[{"name":"spaces/A"},null]}`},
+			Err:     "API_ERROR: Failed to list spaces: null is not an object (evaluating 'space.spaceType')"},
+		{Name: "spaces null answer", Path: "spaces",
+			Answers: map[string]string{"GET /v1/spaces": `null`},
+			Err:     "API_ERROR: Failed to list spaces: null is not an object (evaluating 'response.data.spaces')"},
+		{Name: "messages with missing fields", Path: "list", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages": `{"messages":[{"name":"spaces/S/messages/1","createTime":"2024-01-01T00:00:00Z","sender":{"name":"users/1"},"text":"hi","thread":{"name":null}},{"createTime":"2024-01-02T00:00:00Z","sender":{"displayName":"NoName"},"text":""},{"createTime":"2024-01-03T00:00:00Z","sender":{"name":"users/9","displayName":null},"thread":{}},{"createTime":"2024-01-04T00:00:00Z","sender":null,"thread":null}]}`}),
+			Out: "Messages (4)\n\n[1] spaces/S/messages/1\n    From: Dir One <one@x.test>\n    > hi\n    Date: 2024-01-01T00:00:00Z\n\n" +
+				"[2] \n    Date: 2024-01-02T00:00:00Z\n\n[3] \n    From: users/9\n    Date: 2024-01-03T00:00:00Z\n\n[4] \n    Date: 2024-01-04T00:00:00Z\n\n"},
+		{Name: "messages null item", Path: "list", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages": `{"messages":[null]}`}),
+			Err:     "API_ERROR: Failed to list messages: null is not an object (evaluating 'm.sender')"},
+		{Name: "messages null answer", Path: "list", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages": `null`}),
+			Err:     "API_ERROR: Failed to list messages: null is not an object (evaluating 'response.data.messages')"},
+		{Name: "messages mistyped", Path: "list", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages": `{"messages":[{"name":5,"createTime":7,"text":9,"sender":{"name":"users/1"}}]}`}),
+			Out:     "Messages (1)\n\n[1] 5\n    From: Dir One <one@x.test>\n    > 9\n    Date: 7\n\n"},
+		{Name: "messages as JSON keep the answer's types", Path: "list", Set: map[string]any{"space": "S", "format": "json"},
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages": `{"messages":[{"name":"n","createTime":"c","lastUpdateTime":"u","sender":{"name":3,"displayName":0},"thread":{"name":1}}]}`}),
+			Out:     "[\n  {\n    \"name\": \"n\",\n    \"createTime\": \"c\",\n    \"updateTime\": \"u\",\n    \"sender\": {\n      \"name\": 3,\n      \"displayName\": 3\n    },\n    \"thread\": {\n      \"name\": 1\n    }\n  }\n]\n"},
+		{Name: "get null", Path: "get", Args: map[string]any{"message-id": "M"}, Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages/M": `null`}),
+			Err:     "API_ERROR: Failed to get message: Message not found"},
+		{Name: "get empty body", Path: "get", Args: map[string]any{"message-id": "M"}, Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages/M": ``}),
+			Err:     "API_ERROR: Failed to get message: Message not found"},
+		{Name: "get as JSON", Path: "get", Args: map[string]any{"message-id": "M"}, Set: map[string]any{"space": "S", "format": "json"},
+			Answers: with(map[string]string{"GET /v1/spaces/S/messages/M": `{"name":"n","createTime":"c","lastUpdateTime":"u","thread":{"name":"t"},"sender":{"name":"users/1","displayName":"D"},"text":"t"}`}),
+			Out:     "{\n  \"name\": \"n\",\n  \"createTime\": \"c\",\n  \"updateTime\": \"u\",\n  \"text\": \"t\",\n  \"sender\": {\n    \"name\": \"users/1\",\n    \"displayName\": \"Dir One\",\n    \"email\": \"one@x.test\"\n  },\n  \"thread\": {\n    \"name\": \"t\"\n  }\n}\n"},
+		{Name: "space id answered null is looked up by name", Path: "get", Args: map[string]any{"message-id": "M"}, Set: map[string]any{"space": "s"},
+			Answers: map[string]string{"GET /v1/spaces/s": `null`, "GET /v1/spaces": `{"spaces":[{"name":"spaces/Q","displayName":"S"}]}`, "GET /v1/spaces/Q/messages/M": `{"name":"n","createTime":"c"}`},
+			Out:     "ID: n\nDate: c\n"},
+		{Name: "members with missing fields", Path: "members", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/members": `{"memberships":[{"name":"spaces/S/members/1","member":{"name":"users/1","type":"HUMAN"},"role":"ROLE_MANAGER","state":"JOINED"},{"member":{"name":"users/2","displayName":"Two","type":null}},{"member":{"name":"bots/3","type":"BOT"},"state":"INVITED"},{},{"member":null,"role":null}]}`}),
+			Out: "Members (5)\n\n[1] Dir One <one@x.test> [MANAGER]\n    User ID: users/1\n[2] Two [MEMBERSHIP_STATE_UNSPECIFIED]\n    User ID: users/2\n" +
+				"[3] bots/3 [BOT] [INVITED]\n    User ID: bots/3\n[4] (unknown) [MEMBERSHIP_STATE_UNSPECIFIED]\n[5] (unknown) [MEMBERSHIP_STATE_UNSPECIFIED]\n"},
+		{Name: "members null item", Path: "members", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/members": `{"memberships":[{"name":"m"},null]}`}),
+			Err:     "API_ERROR: Failed to list members: null is not an object (evaluating 'm.member')"},
+		{Name: "members null answer", Path: "members", Set: onS,
+			Answers: with(map[string]string{"GET /v1/spaces/S/members": `null`}),
+			Err:     "API_ERROR: Failed to list members: null is not an object (evaluating 'response.data.memberships')"},
+		{Name: "user with null and empty entries", Path: "user", Args: user("7"),
+			Answers: with(map[string]string{"GET /v1/people/7": `{"names":[{"displayName":"N"}],"emailAddresses":[{"value":"e"}],"phoneNumbers":[{"value":"1"},{"value":""},{},{"value":2}],"organizations":[{"title":"T","name":null},{},{"department":"D","name":0}],"photos":[{}],"locations":[]}`}),
+			Out:     "ID: users/7\nName: N\nEmail: e\nPhone: 1, 2\nOrganizations:\n  - T\n  - D\n"},
+		{Name: "user null phone", Path: "user", Args: user("7"),
+			Answers: with(map[string]string{"GET /v1/people/7": `{"names":[{"displayName":"N"}],"phoneNumbers":[null]}`}),
+			Err:     "NOT_FOUND: User not found: \"7\""},
+		{Name: "user null answer", Path: "user", Args: user("7"),
+			Answers: with(map[string]string{"GET /v1/people/7": `null`}),
+			Err:     "NOT_FOUND: User not found: \"7\""},
+		{Name: "user empty answer uses the directory", Path: "user", Args: user("1"),
+			Answers: with(map[string]string{"GET /v1/people/1": `{}`}),
+			Out:     "ID: users/1\nName: Dir One\nEmail: one@x.test\n"},
+		{Name: "user email only", Path: "user", Args: user("7"),
+			Answers: with(map[string]string{"GET /v1/people/7": `{"names":[],"emailAddresses":[{"value":"only@x"}],"photos":[{"url":"p"}],"locations":[{"value":"L"},{"value":"M"}]}`}),
+			Out:     "ID: users/7\nEmail: only@x\nLocation: L, M\nPhoto: p\n"},
+		{Name: "user mistyped name", Path: "user", Args: user("7"),
+			Answers: with(map[string]string{"GET /v1/people/7": `{"names":[{"displayName":5}],"emailAddresses":null}`}),
+			Out:     "ID: users/7\nName: 5\n"},
+		{Name: "send null answer", Path: "send", Args: map[string]any{"message": "hi"}, Set: onS,
+			Answers: with(map[string]string{"POST /v1/spaces/S/messages": `null`}),
+			Err: "API_ERROR: Failed to send message: null is not an object (evaluating '(await chat.spaces.messages.create({\n" +
+				"          parent: `spaces/${options.spaceId}`,\n          requestBody\n        })).data.name')"},
+		{Name: "send empty answer", Path: "send", Args: map[string]any{"message": "hi"}, Set: onS,
+			Answers: with(map[string]string{"POST /v1/spaces/S/messages": `{}`}),
+			Out:     "Message sent\nID: unknown\nSpace: S\n"},
+		{Name: "upload null answer", Path: "send", Args: map[string]any{"message": "hi"}, Set: map[string]any{"space": "S", "attachment": []string{attachment}},
+			Answers: with(map[string]string{"POST /upload/v1/spaces/S/attachments:upload": `null`}),
+			Err: "API_ERROR: Failed to upload attachment \"a.txt\": null is not an object (evaluating '(await chat.media.upload({\n" +
+				"        parent: `spaces/${spaceId}`,\n        requestBody: { filename },\n        media: { mimeType, body: createReadStream(filePath) }\n      })).data.attachmentDataRef')"},
+		{Name: "upload null ref", Path: "send", Args: map[string]any{"message": "hi"}, Set: map[string]any{"space": "S", "attachment": []string{attachment}},
+			Answers: with(map[string]string{"POST /upload/v1/spaces/S/attachments:upload": `{"attachmentDataRef":null}`}),
+			Err:     "API_ERROR: Upload of \"a.txt\" returned no attachmentDataRef"},
+	})
+}
+
+// A null person or page in the directory fails the refresh with Bun's plain
+// TypeError.
+func TestDirectoryNullPersonFailsAsBun(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", freshOAuth(), false)
+	var body string
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) { googletest.WriteRaw(w, 200, body) })
+	for raw, want := range map[string]string{
+		`{"people":[{"resourceName":"people/1"},null]}`: "null is not an object (evaluating 'person.resourceName')",
+		`null`: "null is not an object (evaluating 'data.people')",
+	} {
+		body = raw
+		_, err := product.Exec(fake.Ctx(), t, reg, "directory refresh", product.Input(t, "directory refresh", nil, nil))
+		var ce *clierr.Error
+		if err == nil || errors.As(err, &ce) || err.Error() != want {
+			t.Errorf("%s: %v", raw, err)
+		}
 	}
 }

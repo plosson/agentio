@@ -161,7 +161,11 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.OptionPtr("dimension"), in.OptionPtr("render")))
+			result, err := a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.OptionPtr("dimension"), in.OptionPtr("render"))
+			if err != nil {
+				return nil, err
+			}
+			return result, valuesError(result)
 		},
 		Format: formatValues,
 	}

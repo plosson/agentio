@@ -4,44 +4,67 @@ import (
 	"context"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	tasks "google.golang.org/api/tasks/v1"
 )
 
-// taskList is GTaskList.
-type taskList struct {
-	ID       string `json:"id,omitempty"`
-	Title    string `json:"title"`
-	Updated  string `json:"updated,omitempty"`
-	SelfLink string `json:"selfLink,omitempty"`
+// The models are the Bun client's objects (GTaskList, GTask and the list
+// results), built from the answer as JavaScript reads it (google.Answer): an
+// id the answer lacks is undefined, and a null item fails with Bun's
+// TypeError.
+
+// taskListOf is the GTaskList Bun builds from tl.
+func taskListOf(tl any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(tl) {
+		return nil, jsvalue.TypeError(tl, "tl.id")
+	}
+	get := func(k string) any { return jsvalue.Member(tl, k) }
+	return jsvalue.ObjectOf(
+		"id", get("id"),
+		"title", jsvalue.Or(get("title"), ""),
+		"updated", jsvalue.Or(get("updated"), jsvalue.Undefined),
+		"selfLink", jsvalue.Or(get("selfLink"), jsvalue.Undefined),
+	), nil
 }
 
-// task is GTask: Bun's parseTask drops every falsy optional field.
-type task struct {
-	ID          string `json:"id,omitempty"`
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes,omitempty"`
-	Due         string `json:"due,omitempty"`
-	Completed   string `json:"completed,omitempty"`
-	Parent      string `json:"parent,omitempty"`
-	Position    string `json:"position,omitempty"`
-	Updated     string `json:"updated,omitempty"`
-	SelfLink    string `json:"selfLink,omitempty"`
-	WebViewLink string `json:"webViewLink,omitempty"`
-	Hidden      bool   `json:"hidden,omitempty"`
-	Deleted     bool   `json:"deleted,omitempty"`
+// parseTask is Bun parseTask: every falsy optional field is undefined.
+func parseTask(t any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(t) {
+		return nil, jsvalue.TypeError(t, "task.id")
+	}
+	get := func(k string) any { return jsvalue.Member(t, k) }
+	opt := func(k string) any { return jsvalue.Or(get(k), jsvalue.Undefined) }
+	return jsvalue.ObjectOf(
+		"id", get("id"),
+		"title", jsvalue.Or(get("title"), ""),
+		"status", jsvalue.Or(get("status"), "needsAction"),
+		"notes", opt("notes"),
+		"due", opt("due"),
+		"completed", opt("completed"),
+		"parent", opt("parent"),
+		"position", opt("position"),
+		"updated", opt("updated"),
+		"selfLink", opt("selfLink"),
+		"webViewLink", opt("webViewLink"),
+		"hidden", opt("hidden"),
+		"deleted", opt("deleted"),
+	), nil
 }
 
-type taskListPage struct {
-	TaskLists     []taskList `json:"taskLists"`
-	NextPageToken string     `json:"nextPageToken,omitempty"`
-}
-
-type taskPage struct {
-	Tasks         []task `json:"tasks"`
-	NextPageToken string `json:"nextPageToken,omitempty"`
+// page is `{ <key>: (response.data.items || []).map(parse), nextPageToken:
+// response.data.nextPageToken || undefined }`.
+func page(raw any, key string, parse func(any) (*jsvalue.Object, error)) (*jsvalue.Object, error) {
+	items, err := google.AnswerItems(raw, "response.data", "items")
+	if err != nil {
+		return nil, err
+	}
+	out, err := jsvalue.Map(items, "", func(item any) (any, error) { return parse(item) })
+	if err != nil {
+		return nil, err
+	}
+	return jsvalue.ObjectOf(key, out, "nextPageToken", jsvalue.Or(jsvalue.Member(raw, "nextPageToken"), jsvalue.Undefined)), nil
 }
 
 type taskListRef struct {
@@ -70,26 +93,27 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	return &api{API: google.API{Ctx: ctx, RunContext: run}, svc: svc}, nil
 }
 
-func (a *api) listTaskLists(limit float64) (*taskListPage, error) {
-	resp, err := a.svc.Tasklists.List().Context(a.Ctx).Do(google.MaxResults(limit, 100))
-	if err != nil {
-		return nil, a.APIError("Tasks API error", err)
+func (a *api) listTaskLists(limit float64) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Tasklists.List(), google.MaxResults(limit, 100))
+	if err == nil {
+		var out *jsvalue.Object
+		if out, err = page(raw, "taskLists", taskListOf); err == nil {
+			return out, nil
+		}
 	}
-	out := &taskListPage{TaskLists: []taskList{}, NextPageToken: resp.NextPageToken}
-	for _, tl := range resp.Items {
-		out.TaskLists = append(out.TaskLists, parseTaskList(tl))
-	}
-	return out, nil
+	return nil, a.APIError("Tasks API error", err)
 }
 
-func (a *api) createTaskList(title string) (*taskList, error) {
+func (a *api) createTaskList(title string) (*jsvalue.Object, error) {
 	body := &tasks.TaskList{Title: title, ForceSendFields: []string{"Title"}}
-	tl, err := a.svc.Tasklists.Insert(body).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.svc.Tasklists.Insert(body))
+	if err == nil && jsvalue.Nullish(raw) {
+		err = jsvalue.TypeError(raw, "response.data.id")
+	}
 	if err != nil {
 		return nil, a.APIError("Failed to create task list", err)
 	}
-	parsed := parseTaskList(tl)
-	return &parsed, nil
+	return taskListOf(raw)
 }
 
 func (a *api) deleteTaskList(id string) error {
@@ -106,33 +130,43 @@ type listOptions struct {
 	dueMin, dueMax            string
 }
 
-func (a *api) listTasks(o listOptions) (*taskPage, error) {
+func (a *api) listTasks(o listOptions) (*jsvalue.Object, error) {
 	call := a.svc.Tasks.List(o.tasklistID).
-		ShowCompleted(o.showCompleted).ShowDeleted(false).ShowHidden(o.showHidden).Context(a.Ctx)
+		ShowCompleted(o.showCompleted).ShowDeleted(false).ShowHidden(o.showHidden)
 	if o.dueMin != "" {
 		call.DueMin(o.dueMin)
 	}
 	if o.dueMax != "" {
 		call.DueMax(o.dueMax)
 	}
-	resp, err := call.Do(google.MaxResults(o.limit, 100))
-	if err != nil {
-		return nil, a.NotFoundOr("Task list", o.tasklistID, "Tasks API error", err)
+	_, raw, err := google.Answer(a.Ctx, call, google.MaxResults(o.limit, 100))
+	if err == nil {
+		var out *jsvalue.Object
+		if out, err = page(raw, "tasks", parseTask); err == nil {
+			return out, nil
+		}
 	}
-	out := &taskPage{Tasks: []task{}, NextPageToken: resp.NextPageToken}
-	for _, t := range resp.Items {
-		out.Tasks = append(out.Tasks, parseTask(t))
-	}
-	return out, nil
+	return nil, a.NotFoundOr("Task list", o.tasklistID, "Tasks API error", err)
 }
 
-func (a *api) getTask(tasklistID, taskID string) (*task, error) {
-	t, err := a.svc.Tasks.Get(tasklistID, taskID).Context(a.Ctx).Do()
+// taskAnswer is `this.parseTask(response.data)` inside a client method's try:
+// a failure, the call's or parseTask's, goes to fail.
+func taskAnswer[C google.Call[C, *tasks.Task]](a *api, call C, fail func(error) error) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, call)
 	if err != nil {
-		return nil, a.NotFoundOr("Task", taskID, "Tasks API error", err)
+		return nil, fail(err)
 	}
-	parsed := parseTask(t)
-	return &parsed, nil
+	t, err := parseTask(raw)
+	if err != nil {
+		return nil, fail(err)
+	}
+	return t, nil
+}
+
+func (a *api) getTask(tasklistID, taskID string) (*jsvalue.Object, error) {
+	return taskAnswer(a, a.svc.Tasks.Get(tasklistID, taskID), func(err error) error {
+		return a.NotFoundOr("Task", taskID, "Tasks API error", err)
+	})
 }
 
 type createOptions struct {
@@ -141,7 +175,7 @@ type createOptions struct {
 	due, parent, previous    string
 }
 
-func (a *api) createTask(o createOptions) (*task, error) {
+func (a *api) createTask(o createOptions) (*jsvalue.Object, error) {
 	body := &tasks.Task{Title: o.title, ForceSendFields: []string{"Title"}}
 	if o.notesGiven {
 		body.Notes = o.notes
@@ -150,19 +184,16 @@ func (a *api) createTask(o createOptions) (*task, error) {
 	if o.due != "" {
 		body.Due = normalizeDue(o.due)
 	}
-	call := a.svc.Tasks.Insert(o.tasklistID, body).Context(a.Ctx)
+	call := a.svc.Tasks.Insert(o.tasklistID, body)
 	if o.parent != "" {
 		call.Parent(o.parent)
 	}
 	if o.previous != "" {
 		call.Previous(o.previous)
 	}
-	t, err := call.Do()
-	if err != nil {
-		return nil, a.NotFoundOr("Task list", o.tasklistID, "Failed to create task", err)
-	}
-	parsed := parseTask(t)
-	return &parsed, nil
+	return taskAnswer(a, call, func(err error) error {
+		return a.NotFoundOr("Task list", o.tasklistID, "Failed to create task", err)
+	})
 }
 
 // updateOptions keeps Bun's `!== undefined` checks: a given empty value is
@@ -179,7 +210,7 @@ type updateOptions struct {
 	statusGiven        bool
 }
 
-func (a *api) updateTask(o updateOptions) (*task, error) {
+func (a *api) updateTask(o updateOptions) (*jsvalue.Object, error) {
 	patch := &tasks.Task{}
 	if o.titleGiven {
 		patch.Title = o.title
@@ -200,12 +231,9 @@ func (a *api) updateTask(o updateOptions) (*task, error) {
 		patch.Status = o.status
 		patch.ForceSendFields = append(patch.ForceSendFields, "Status")
 	}
-	t, err := a.svc.Tasks.Patch(o.tasklistID, o.taskID, patch).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.NotFoundOr("Task", o.taskID, "Failed to update task", err)
-	}
-	parsed := parseTask(t)
-	return &parsed, nil
+	return taskAnswer(a, a.svc.Tasks.Patch(o.tasklistID, o.taskID, patch), func(err error) error {
+		return a.NotFoundOr("Task", o.taskID, "Failed to update task", err)
+	})
 }
 
 func (a *api) deleteTask(tasklistID, taskID string) error {
@@ -222,20 +250,17 @@ func (a *api) clearCompleted(tasklistID string) error {
 	return nil
 }
 
-func (a *api) moveTask(tasklistID, taskID, parent, previous string) (*task, error) {
-	call := a.svc.Tasks.Move(tasklistID, taskID).Context(a.Ctx)
+func (a *api) moveTask(tasklistID, taskID, parent, previous string) (*jsvalue.Object, error) {
+	call := a.svc.Tasks.Move(tasklistID, taskID)
 	if parent != "" {
 		call.Parent(parent)
 	}
 	if previous != "" {
 		call.Previous(previous)
 	}
-	t, err := call.Do()
-	if err != nil {
-		return nil, a.NotFoundOr("Task", taskID, "Failed to move task", err)
-	}
-	parsed := parseTask(t)
-	return &parsed, nil
+	return taskAnswer(a, call, func(err error) error {
+		return a.NotFoundOr("Task", taskID, "Failed to move task", err)
+	})
 }
 
 // normalizeDue is Bun normalizeDue: a date without "T" is midnight UTC.
@@ -244,23 +269,4 @@ func normalizeDue(due string) string {
 		return due
 	}
 	return due + "T00:00:00.000Z"
-}
-
-func parseTaskList(tl *tasks.TaskList) taskList {
-	return taskList{ID: tl.Id, Title: tl.Title, Updated: tl.Updated, SelfLink: tl.SelfLink}
-}
-
-func parseTask(t *tasks.Task) task {
-	out := task{
-		ID: t.Id, Title: t.Title, Status: t.Status, Notes: t.Notes, Due: t.Due,
-		Parent: t.Parent, Position: t.Position, Updated: t.Updated, SelfLink: t.SelfLink,
-		WebViewLink: t.WebViewLink, Hidden: t.Hidden, Deleted: t.Deleted,
-	}
-	if out.Status == "" {
-		out.Status = "needsAction"
-	}
-	if t.Completed != nil {
-		out.Completed = *t.Completed
-	}
-	return out
 }

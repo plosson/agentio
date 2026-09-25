@@ -165,7 +165,7 @@ func listCmd() plugins.CommandSpec {
 	}
 }
 
-// structureCmd has no Format: Bun prints JSON.stringify(structure, null, 2).
+// structureCmd prints what Bun prints: JSON.stringify(structure, null, 2).
 func structureCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "structure",
@@ -207,6 +207,7 @@ func structureCmd() plugins.CommandSpec {
 			}
 			return a.structure(in.Arg("doc-id-or-url"), in.Option("tab"), in.Flag("all-tabs"))
 		},
+		Format: formatStructure,
 	}
 }
 
@@ -277,14 +278,8 @@ func batchCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			run.Log(fmt.Sprintf("Batch update applied to %s (%d replies)", result.DocumentID, replyCount(result.Replies)))
+			run.Log(fmt.Sprintf("Batch update applied to %s (%s replies)", google.Field(result, "documentId"), jsvalue.String(jsvalue.Optional(result.Value("replies"), "length"))))
 			return result, nil
 		},
 	}
-}
-
-// replyCount is `result.replies.length`.
-func replyCount(replies any) int {
-	items, _ := replies.([]any)
-	return len(items)
 }

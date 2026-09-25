@@ -10,6 +10,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugincache"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 	"google.golang.org/api/googleapi"
 	people "google.golang.org/api/people/v1"
 )
@@ -206,23 +207,49 @@ func (d *directory) save() error {
 	return plugincache.Write("gchat", d.scope, "directory", d.data)
 }
 
-func (d *directory) page(syncToken, pageToken string) (*people.ListDirectoryPeopleResponse, error) {
+// page is one listDirectoryPeople page, read as JavaScript reads it.
+func (d *directory) page(syncToken, pageToken string) (any, error) {
 	call := d.people.People.ListDirectoryPeople().ReadMask(directoryReadMask).Sources(directorySource).
-		PageSize(1000).RequestSyncToken(true).Context(d.ctx)
+		PageSize(1000).RequestSyncToken(true)
 	if syncToken != "" {
 		call.SyncToken(syncToken)
 	}
 	if pageToken != "" {
 		call.PageToken(pageToken)
 	}
-	return call.Do()
+	_, data, err := google.Answer(d.ctx, call)
+	return data, err
+}
+
+// persons is `(data.people || [])` of a page, and the page's
+// nextPageToken and nextSyncToken.
+func persons(data any) (people []any, pageToken, syncToken string, err error) {
+	v, err := jsvalue.Path(data, "data", "people")
+	if err != nil {
+		return nil, "", "", err
+	}
+	if people, err = jsvalue.Items(jsvalue.Or(v, []any{}), "(data.people || [])"); err != nil {
+		return nil, "", "", err
+	}
+	for _, p := range people {
+		if jsvalue.Nullish(p) {
+			return nil, "", "", jsvalue.TypeError(p, "person.resourceName")
+		}
+	}
+	if next := jsvalue.Member(data, "nextPageToken"); jsvalue.Truthy(next) {
+		pageToken = jsvalue.String(next)
+	}
+	if next := jsvalue.Member(data, "nextSyncToken"); jsvalue.Truthy(next) {
+		syncToken = jsvalue.String(next)
+	}
+	return people, pageToken, syncToken, nil
 }
 
 func (d *directory) fetchFull() error {
 	users := newDirectoryUsers()
 	syncToken, pageToken := "", ""
 	for {
-		resp, err := d.page("", pageToken)
+		data, err := d.page("", pageToken)
 		if err != nil {
 			var ge *googleapi.Error
 			if errors.As(err, &ge) {
@@ -230,13 +257,17 @@ func (d *directory) fetchFull() error {
 			}
 			return err
 		}
-		for _, p := range resp.People {
+		people, next, sync, err := persons(data)
+		if err != nil {
+			return err
+		}
+		for _, p := range people {
 			ingest(users, p)
 		}
-		if resp.NextSyncToken != "" {
-			syncToken = resp.NextSyncToken
+		if sync != "" {
+			syncToken = sync
 		}
-		if pageToken = resp.NextPageToken; pageToken == "" {
+		if pageToken = next; pageToken == "" {
 			break
 		}
 	}
@@ -248,7 +279,7 @@ func (d *directory) fetchIncremental(syncToken string) error {
 	users := d.data.Users.clone()
 	next, pageToken := "", ""
 	for {
-		resp, err := d.page(syncToken, pageToken)
+		data, err := d.page(syncToken, pageToken)
 		if err != nil {
 			var ge *googleapi.Error
 			if errors.As(err, &ge) {
@@ -256,21 +287,25 @@ func (d *directory) fetchIncremental(syncToken string) error {
 			}
 			return err
 		}
-		for _, p := range resp.People {
-			id := personToUserID(p.ResourceName)
+		people, nextPage, sync, err := persons(data)
+		if err != nil {
+			return err
+		}
+		for _, p := range people {
+			id := personToUserID(jsvalue.Member(p, "resourceName"))
 			if id == "" {
 				continue
 			}
-			if p.Metadata != nil && p.Metadata.Deleted {
+			if jsvalue.Truthy(jsvalue.Optional(jsvalue.Member(p, "metadata"), "deleted")) {
 				users.remove(id)
 			} else {
 				ingest(users, p)
 			}
 		}
-		if resp.NextSyncToken != "" {
-			next = resp.NextSyncToken
+		if sync != "" {
+			next = sync
 		}
-		if pageToken = resp.NextPageToken; pageToken == "" {
+		if pageToken = nextPage; pageToken == "" {
 			break
 		}
 	}
@@ -281,26 +316,30 @@ func (d *directory) fetchIncremental(syncToken string) error {
 	return d.save()
 }
 
-func personToUserID(resourceName string) string {
-	id := strings.TrimPrefix(resourceName, "people/")
+func personToUserID(resourceName any) string {
+	if !jsvalue.Truthy(resourceName) {
+		return ""
+	}
+	id := strings.TrimPrefix(jsvalue.String(resourceName), "people/")
 	if id == "" {
 		return ""
 	}
 	return "users/" + id
 }
 
-func ingest(users *directoryUsers, p *people.Person) {
-	id := personToUserID(p.ResourceName)
+// ingest is Bun ingest: a person with neither a name nor an email is left out.
+func ingest(users *directoryUsers, p any) {
+	id := personToUserID(jsvalue.Member(p, "resourceName"))
 	if id == "" {
 		return
 	}
-	name, email := personName(p), personEmail(p)
-	if name == "" && email == "" {
+	name, email := first(p, "names", "displayName"), first(p, "emailAddresses", "value")
+	if !jsvalue.Truthy(name) && !jsvalue.Truthy(email) {
 		return
 	}
-	display := name
-	if display == "" {
-		display = email
+	entry := directoryEntry{DisplayName: jsvalue.String(jsvalue.Or(jsvalue.Or(name, email), id))}
+	if jsvalue.Truthy(email) {
+		entry.Email = jsvalue.String(email)
 	}
-	users.set(id, directoryEntry{DisplayName: display, Email: email})
+	users.set(id, entry)
 }

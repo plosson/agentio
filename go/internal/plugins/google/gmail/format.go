@@ -1,7 +1,6 @@
 package gmail
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -15,8 +14,7 @@ type (
 	idList         []string
 	draftsDeleted  []string
 	filtersDeleted []string
-	labelList      []label
-	labelCreated   label
+	labelList      []*jsvalue.Object
 	markedList     []marked
 	noMessages     struct{}
 	noAttachments  struct{}
@@ -32,8 +30,8 @@ type archived struct {
 }
 
 type labelRenamed struct {
-	Old   string `json:"old"`
-	Label label  `json:"label"`
+	Old   string          `json:"old"`
+	Label *jsvalue.Object `json:"label"`
 }
 
 type labelModified struct {
@@ -70,25 +68,25 @@ type exported struct {
 // filterListing, filterView and filterCreated carry the label names Bun
 // resolves the filter actions with; their JSON is the filters alone.
 type filterListing struct {
-	filters []filter
-	names   map[string]string
+	filters []*jsvalue.Object
+	names   map[string]any
 }
 
-func (f *filterListing) MarshalJSON() ([]byte, error) { return json.Marshal(f.filters) }
+func (f *filterListing) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(f.filters), nil }
 
 type filterView struct {
-	filter filter
-	names  map[string]string
+	filter *jsvalue.Object
+	names  map[string]any
 }
 
-func (f *filterView) MarshalJSON() ([]byte, error) { return json.Marshal(f.filter) }
+func (f *filterView) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(f.filter), nil }
 
 type filterCreated struct {
-	filter filter
-	names  map[string]string
+	filter *jsvalue.Object
+	names  map[string]any
 }
 
-func (f *filterCreated) MarshalJSON() ([]byte, error) { return json.Marshal(f.filter) }
+func (f *filterCreated) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(f.filter), nil }
 
 // render is the Format of every gmail command.
 func render(v any) string {
@@ -102,13 +100,13 @@ func render(v any) string {
 	case idList:
 		return strings.Join(r, "\n")
 	case *sendResult:
-		return "Message sent\nID: " + r.ID + "\nThread: " + r.ThreadID
+		return "Message sent\nID: " + google.Field(r.Object, "id") + "\nThread: " + google.Field(r.Object, "threadId")
 	case *draftResult:
 		verb := "Draft created"
 		if r.updated {
 			verb = "Draft updated"
 		}
-		return verb + "\nDraft ID: " + r.ID + "\nMessage ID: " + r.MessageID
+		return verb + "\nDraft ID: " + google.Field(r.Object, "id") + "\nMessage ID: " + google.Field(r.Object, "messageId")
 	case draftsDeleted:
 		return prefixed("Deleted draft: ", r)
 	case filtersDeleted:
@@ -132,21 +130,24 @@ func render(v any) string {
 	case labelList:
 		return formatLabelList(r)
 	case *labelCreated:
-		return "Created label: " + r.Name + "\nID: " + r.ID
+		return "Created label: " + google.Field(r.Object, "name") + "\nID: " + google.Field(r.Object, "id")
 	case *labelDeleted:
-		return fmt.Sprintf("Deleted label: %s (%s)", r.Name, r.ID)
+		return fmt.Sprintf("Deleted label: %s (%s)", google.Field(r.Object, "name"), google.Field(r.Object, "id"))
 	case *labelRenamed:
-		return "Renamed label: " + r.Old + " -> " + r.Label.Name + "\nID: " + r.Label.ID
+		return "Renamed label: " + r.Old + " -> " + google.Field(r.Label, "name") + "\nID: " + google.Field(r.Label, "id")
 	case *labelModified:
 		return formatLabelModified(r)
 	case noMessages:
 		return "label: 0 message(s) to modify"
 	case *filterListing:
-		return formatFilterList(r.filters, r.names)
+		text, _ := formatFilterList(r.filters, r.names)
+		return text
 	case *filterView:
-		return formatFilter(r.filter, r.names)
+		text, _ := formatFilter(r.filter, r.names)
+		return text
 	case *filterCreated:
-		return "Created filter: " + r.filter.ID + "\n  " + summarizeCriteria(r.filter.Criteria) + "  ->  " + summarizeAction(r.filter.Action, r.names)
+		text, _ := formatFilterCreated(r.filter, r.names)
+		return text
 	case noAttachments:
 		return "No attachments found"
 	case *downloads:
@@ -165,28 +166,39 @@ func prefixed(prefix string, ids []string) string {
 	return strings.Join(lines, "\n")
 }
 
+// join is Array.prototype.join on an answer's array: null and undefined
+// elements are empty.
+func join(v any, sep string) string {
+	list, ok := v.([]any)
+	if !ok {
+		return jsvalue.String(v)
+	}
+	return jsvalue.Join(list, sep)
+}
+
 // formatMessageList is printMessageList.
 func formatMessageList(l *messageList) string {
-	lines := []string{fmt.Sprintf("Messages (%d of ~%d)", len(l.Messages), l.Total), ""}
-	for i, m := range l.Messages {
-		lines = append(lines, fmt.Sprintf("[%d] %s | thread:%s", i+1, m.ID, m.ThreadID))
-		if m.From != "" {
-			lines = append(lines, "    From: "+m.From)
+	messages := items(member(l.Object, "messages"))
+	lines := []string{fmt.Sprintf("Messages (%d of ~%s)", len(messages), google.Field(l.Object, "total")), ""}
+	for i, m := range messages {
+		lines = append(lines, fmt.Sprintf("[%d] %s | thread:%s", i+1, google.Field(m, "id"), google.Field(m, "threadId")))
+		if google.Truthy(m, "from") {
+			lines = append(lines, "    From: "+google.Field(m, "from"))
 		}
-		if len(m.To) > 0 {
-			lines = append(lines, "    To: "+strings.Join(m.To, ", "))
+		if google.Truthy(member(m, "to"), "length") {
+			lines = append(lines, "    To: "+join(member(m, "to"), ", "))
 		}
-		if m.Date != "" {
-			lines = append(lines, "    Date: "+m.Date)
+		if google.Truthy(m, "date") {
+			lines = append(lines, "    Date: "+google.Field(m, "date"))
 		}
-		if m.Subject != "" {
-			lines = append(lines, "    Subject: "+m.Subject)
+		if google.Truthy(m, "subject") {
+			lines = append(lines, "    Subject: "+google.Field(m, "subject"))
 		}
-		if len(m.Labels) > 0 {
-			lines = append(lines, "    Labels: "+strings.Join(m.Labels, ", "))
+		if google.Truthy(member(m, "labels"), "length") {
+			lines = append(lines, "    Labels: "+join(member(m, "labels"), ", "))
 		}
-		if m.Snippet != "" {
-			lines = append(lines, "    > "+m.Snippet)
+		if google.Truthy(m, "snippet") {
+			lines = append(lines, "    > "+google.Field(m, "snippet"))
 		}
 		lines = append(lines, "")
 	}
@@ -194,29 +206,26 @@ func formatMessageList(l *messageList) string {
 }
 
 // formatMessage is printMessage.
-func formatMessage(m *message) string {
-	lines := []string{"ID: " + m.ID, "Thread: " + m.ThreadID, "From: " + m.From}
-	if len(m.To) > 0 {
-		lines = append(lines, "To: "+strings.Join(m.To, ", "))
+func formatMessage(r *message) string {
+	m := r.Object
+	lines := []string{"ID: " + google.Field(m, "id"), "Thread: " + google.Field(m, "threadId"), "From: " + google.Field(m, "from")}
+	if google.Truthy(member(m, "to"), "length") {
+		lines = append(lines, "To: "+join(member(m, "to"), ", "))
 	}
-	if len(m.Cc) > 0 {
-		lines = append(lines, "CC: "+strings.Join(m.Cc, ", "))
+	if google.Truthy(member(m, "cc"), "length") {
+		lines = append(lines, "CC: "+join(member(m, "cc"), ", "))
 	}
-	lines = append(lines, "Date: "+m.Date, "Subject: "+m.Subject)
-	if len(m.Labels) > 0 {
-		lines = append(lines, "Labels: "+strings.Join(m.Labels, ", "))
+	lines = append(lines, "Date: "+google.Field(m, "date"), "Subject: "+google.Field(m, "subject"))
+	if google.Truthy(member(m, "labels"), "length") {
+		lines = append(lines, "Labels: "+join(member(m, "labels"), ", "))
 	}
-	if m.Attachments != nil && len(*m.Attachments) > 0 {
-		lines = append(lines, fmt.Sprintf("Attachments: %d", len(*m.Attachments)))
-		for _, att := range *m.Attachments {
-			lines = append(lines, fmt.Sprintf("  - %s (%s) [%s]", att.Filename, google.FormatBytes(att.Size), att.ID))
+	if atts := items(member(m, "attachments")); len(atts) > 0 {
+		lines = append(lines, fmt.Sprintf("Attachments: %d", len(atts)))
+		for _, att := range atts {
+			lines = append(lines, fmt.Sprintf("  - %s (%s) [%s]", google.Field(att, "filename"), google.FormatBytes(member(att, "size")), google.Field(att, "id")))
 		}
 	}
-	body := ""
-	if m.Body != nil {
-		body = *m.Body
-	}
-	lines = append(lines, "---", body)
+	lines = append(lines, "---", google.Field(m, "body"))
 	return strings.Join(lines, "\n")
 }
 
@@ -260,13 +269,24 @@ func formatLabelList(labels labelList) string {
 	}
 	nameWidth := 4
 	for _, l := range labels {
-		nameWidth = max(nameWidth, jsvalue.Length(l.Name))
+		nameWidth = max(nameWidth, jsvalue.Length(google.Field(l, "name")))
 	}
 	lines := []string{jsvalue.PadEnd("NAME", nameWidth) + "  " + jsvalue.PadEnd("TYPE", 6) + "  ID"}
 	for _, l := range labels {
-		lines = append(lines, jsvalue.PadEnd(l.Name, nameWidth)+"  "+jsvalue.PadEnd(l.Type, 6)+"  "+l.ID)
+		lines = append(lines, jsvalue.PadEnd(google.Field(l, "name"), nameWidth)+"  "+jsvalue.PadEnd(google.Field(l, "type"), 6)+"  "+google.Field(l, "id"))
 	}
 	return strings.Join(append(lines, "", fmt.Sprintf("%d label(s)", len(labels))), "\n")
+}
+
+// labelNamesReadable is printLabelList's `l.name.length` over every label:
+// a label without a name throws before anything is printed.
+func labelNamesReadable(labels []*jsvalue.Object) error {
+	for _, l := range labels {
+		if name := member(l, "name"); jsvalue.Nullish(name) {
+			return jsvalue.TypeError(name, "l.name.length")
+		}
+	}
+	return nil
 }
 
 // formatLabelModified is printLabelModified on a message.
@@ -281,34 +301,46 @@ func formatLabelModified(m *labelModified) string {
 	return "message " + m.ID + ": " + strings.Join(parts, "; ")
 }
 
-func labelNames(ids []string, names map[string]string) []string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = id
-		if name, ok := names[id]; ok {
-			out[i] = name
-		}
+// labelNames is resolveLabelNames: each id's label name, else the id.
+func labelNames(ids any, names map[string]any) ([]string, error) {
+	if !google.Truthy(ids, "length") {
+		return nil, nil
 	}
-	return out
+	list, ok := ids.([]any)
+	if !ok {
+		return nil, notAFunction("ids.map", "ids.map((id) => labelNamesById.get(id) ?? id)")
+	}
+	var out []string
+	for _, id := range list {
+		name := id
+		if s, ok := id.(string); ok {
+			if n, ok := names[s]; ok && !jsvalue.Nullish(n) {
+				name = n
+			}
+		}
+		out = append(out, jsvalue.String(name))
+	}
+	return out, nil
 }
 
 // summarizeCriteria is summarizeFilterCriteria.
-func summarizeCriteria(c filterCriteria) string {
+func summarizeCriteria(c any) string {
 	var parts []string
-	add := func(cond bool, s string) {
-		if cond {
-			parts = append(parts, s)
+	for _, f := range []struct{ key, prefix string }{
+		{"from", "from:"}, {"to", "to:"}, {"subject", "subject:"}, {"query", "query:"}, {"negatedQuery", "-query:"},
+	} {
+		if google.Truthy(c, f.key) {
+			parts = append(parts, f.prefix+google.Field(c, f.key))
 		}
 	}
-	add(c.From != "", "from:"+c.From)
-	add(c.To != "", "to:"+c.To)
-	add(c.Subject != "", "subject:"+c.Subject)
-	add(c.Query != "", "query:"+c.Query)
-	add(c.NegatedQuery != "", "-query:"+c.NegatedQuery)
-	add(c.HasAttachment, "has:attachment")
-	add(c.ExcludeChats, "exclude:chats")
-	if c.Size != nil && c.SizeComparison != "" {
-		parts = append(parts, fmt.Sprintf("size:%s:%d", c.SizeComparison, *c.Size))
+	if google.Truthy(c, "hasAttachment") {
+		parts = append(parts, "has:attachment")
+	}
+	if google.Truthy(c, "excludeChats") {
+		parts = append(parts, "exclude:chats")
+	}
+	if isNumber(member(c, "size")) && google.Truthy(c, "sizeComparison") {
+		parts = append(parts, "size:"+google.Field(c, "sizeComparison")+":"+google.Field(c, "size"))
 	}
 	if len(parts) == 0 {
 		return "(no criteria)"
@@ -317,71 +349,134 @@ func summarizeCriteria(c filterCriteria) string {
 }
 
 // summarizeAction is summarizeFilterAction.
-func summarizeAction(a filterAction, names map[string]string) string {
+func summarizeAction(a any, names map[string]any) (string, error) {
 	var parts []string
-	for _, n := range labelNames(a.AddLabelIDs, names) {
+	add, err := labelNames(member(a, "addLabelIds"), names)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range add {
 		parts = append(parts, "+"+n)
 	}
-	for _, n := range labelNames(a.RemoveLabelIDs, names) {
+	remove, err := labelNames(member(a, "removeLabelIds"), names)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range remove {
 		parts = append(parts, "-"+n)
 	}
-	if a.Forward != "" {
-		parts = append(parts, "forward:"+a.Forward)
+	if google.Truthy(a, "forward") {
+		parts = append(parts, "forward:"+google.Field(a, "forward"))
 	}
 	if len(parts) == 0 {
-		return "(no action)"
+		return "(no action)", nil
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, " "), nil
 }
 
+// filterIDsReadable is printFilterList's `f.id.length` over every filter:
+// a filter without an id throws before anything is printed.
+func filterIDsReadable(filters []*jsvalue.Object) error {
+	for _, f := range filters {
+		if id := member(f, "id"); jsvalue.Nullish(id) {
+			return jsvalue.TypeError(id, "f.id.length")
+		}
+	}
+	return nil
+}
+
+// The filter printers stop, as Bun's console.log lines do, at the first
+// action they cannot read: the text is what was printed before the error.
+
 // formatFilterList is printFilterList.
-func formatFilterList(filters []filter, names map[string]string) string {
+func formatFilterList(filters []*jsvalue.Object, names map[string]any) (string, error) {
 	if len(filters) == 0 {
-		return "No filters found"
+		return "No filters found", nil
 	}
 	idWidth := 2
 	for _, f := range filters {
-		idWidth = max(idWidth, jsvalue.Length(f.ID))
+		idWidth = max(idWidth, jsvalue.Length(google.Field(f, "id")))
 	}
 	var lines []string
 	for _, f := range filters {
-		lines = append(lines, jsvalue.PadEnd(f.ID, idWidth)+"  "+summarizeCriteria(f.Criteria)+"  ->  "+summarizeAction(f.Action, names))
+		criteria := summarizeCriteria(member(f, "criteria"))
+		action, err := summarizeAction(member(f, "action"), names)
+		if err != nil {
+			return strings.Join(lines, "\n"), err
+		}
+		lines = append(lines, jsvalue.PadEnd(google.Field(f, "id"), idWidth)+"  "+criteria+"  ->  "+action)
 	}
-	return strings.Join(append(lines, "", fmt.Sprintf("%d filter(s)", len(filters))), "\n")
+	return strings.Join(append(lines, "", fmt.Sprintf("%d filter(s)", len(filters))), "\n"), nil
+}
+
+// formatFilterCreated is printFilterCreated.
+func formatFilterCreated(f *jsvalue.Object, names map[string]any) (string, error) {
+	head := "Created filter: " + google.Field(f, "id")
+	criteria := summarizeCriteria(member(f, "criteria"))
+	action, err := summarizeAction(member(f, "action"), names)
+	if err != nil {
+		return head, err
+	}
+	return head + "\n  " + criteria + "  ->  " + action, nil
 }
 
 // formatFilter is printFilter.
-func formatFilter(f filter, names map[string]string) string {
-	lines := []string{"ID:       " + f.ID}
-	c := f.Criteria
+func formatFilter(f *jsvalue.Object, names map[string]any) (string, error) {
+	lines := []string{"ID:       " + google.Field(f, "id")}
+	c := member(f, "criteria")
 	var criteria []string
-	add := func(dst *[]string, cond bool, s string) {
-		if cond {
-			*dst = append(*dst, s)
+	for _, row := range []struct{ key, label string }{
+		{"from", "  From:           "}, {"to", "  To:             "}, {"subject", "  Subject:        "},
+		{"query", "  Query:          "}, {"negatedQuery", "  Negated query:  "},
+	} {
+		if google.Truthy(c, row.key) {
+			criteria = append(criteria, row.label+google.Field(c, row.key))
 		}
 	}
-	add(&criteria, c.From != "", "  From:           "+c.From)
-	add(&criteria, c.To != "", "  To:             "+c.To)
-	add(&criteria, c.Subject != "", "  Subject:        "+c.Subject)
-	add(&criteria, c.Query != "", "  Query:          "+c.Query)
-	add(&criteria, c.NegatedQuery != "", "  Negated query:  "+c.NegatedQuery)
-	add(&criteria, c.HasAttachment, "  Has attachment: yes")
-	add(&criteria, c.ExcludeChats, "  Exclude chats:  yes")
-	if c.Size != nil && c.SizeComparison != "" {
-		criteria = append(criteria, fmt.Sprintf("  Size:           %s %d bytes", c.SizeComparison, *c.Size))
+	if google.Truthy(c, "hasAttachment") {
+		criteria = append(criteria, "  Has attachment: yes")
+	}
+	if google.Truthy(c, "excludeChats") {
+		criteria = append(criteria, "  Exclude chats:  yes")
+	}
+	if isNumber(member(c, "size")) && google.Truthy(c, "sizeComparison") {
+		criteria = append(criteria, "  Size:           "+google.Field(c, "sizeComparison")+" "+google.Field(c, "size")+" bytes")
 	}
 	if len(criteria) > 0 {
 		lines = append(append(lines, "Criteria:"), criteria...)
 	}
+	a := member(f, "action")
 	var action []string
-	apply, remove := labelNames(f.Action.AddLabelIDs, names), labelNames(f.Action.RemoveLabelIDs, names)
-	add(&action, len(apply) > 0, "  Apply labels:   "+strings.Join(apply, ", "))
-	add(&action, len(remove) > 0, "  Remove labels:  "+strings.Join(remove, ", "))
-	add(&action, f.Action.Forward != "", "  Forward:        "+f.Action.Forward)
+	apply, err := labelNames(member(a, "addLabelIds"), names)
+	if err != nil {
+		return strings.Join(lines, "\n"), err
+	}
+	remove, err := labelNames(member(a, "removeLabelIds"), names)
+	if err != nil {
+		return strings.Join(lines, "\n"), err
+	}
+	if len(apply) > 0 {
+		action = append(action, "  Apply labels:   "+strings.Join(apply, ", "))
+	}
+	if len(remove) > 0 {
+		action = append(action, "  Remove labels:  "+strings.Join(remove, ", "))
+	}
+	if google.Truthy(a, "forward") {
+		action = append(action, "  Forward:        "+google.Field(a, "forward"))
+	}
 	if len(action) > 0 {
 		lines = append(append(lines, "Action:"), action...)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), nil
+}
+
+// printedBefore is what a printer wrote before it threw: the command's
+// result beside the error, or nothing.
+func printedBefore(text string, err error) (any, error) {
+	if text == "" {
+		return nil, err
+	}
+	return text, err
 }
 
 // formatDownloads is the attachment command's output: a count line when there
@@ -392,7 +487,7 @@ func formatDownloads(d *downloads) string {
 		lines = append(lines, fmt.Sprintf("Downloading %d attachment(s)...", d.Count), "")
 	}
 	for _, f := range d.Files {
-		lines = append(lines, "Downloaded: "+f.Filename, "  Path: "+f.Path, "  Size: "+google.FormatBytes(int64(f.Size)))
+		lines = append(lines, "Downloaded: "+f.Filename, "  Path: "+f.Path, "  Size: "+google.FormatBytes(f.Size))
 		if d.Count > 1 {
 			lines = append(lines, "")
 		}

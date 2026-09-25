@@ -120,7 +120,7 @@ func setupOAuth(ctx context.Context, setup *plugins.SetupContext) (*plugins.Setu
 	// The token must work with the Chat API, which needs a Workspace account.
 	svc, err := chatService(ctx, &plugins.RunContext{Credentials: creds, Fetch: setup.Fetch})
 	if err == nil {
-		_, err = svc.Spaces.List().PageSize(1).Context(ctx).Do()
+		_, _, err = google.Answer(ctx, svc.Spaces.List().PageSize(1))
 	}
 	if err != nil {
 		return nil, setup.Fail("AUTH_FAILED", "Failed to validate Google Chat access: "+google.Message(err),
@@ -154,7 +154,7 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	}
 	svc, err := chatService(ctx, run)
 	if err == nil {
-		_, err = svc.Spaces.List().PageSize(1).Context(ctx).Do()
+		_, _, err = google.Answer(ctx, svc.Spaces.List().PageSize(1))
 	}
 	if err != nil {
 		return google.ValidationFailure(err), nil
@@ -307,12 +307,12 @@ func listCmd() plugins.CommandSpec {
 			if truncated {
 				oldest := "undefined"
 				if len(messages) > 0 {
-					oldest = messages[len(messages)-1].CreateTime
+					oldest = google.Field(messages[len(messages)-1], "createTime")
 				}
 				run.Log(fmt.Sprintf("Warning: reached --limit %s; more messages exist before %s. Raise --limit or narrow the window with --since/--until.",
 					jsvalue.NumberString(limit), oldest))
 			}
-			return shown[[]message]{Value: messages, JSON: asJSON}, nil
+			return shown[[]any]{Value: messages, JSON: asJSON}, nil
 		},
 		Format: formatMessageList,
 	}
@@ -346,7 +346,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return shown[*message]{Value: msg, JSON: asJSON}, nil
+			return shown[*jsvalue.Object]{Value: msg, JSON: asJSON}, nil
 		},
 		Format: formatMessage,
 	}
@@ -379,16 +379,16 @@ func spacesCmd() plugins.CommandSpec {
 				if err != nil {
 					return nil, err
 				}
-				return []space{*dm}, nil
+				return []any{dm}, nil
 			}
 			spaces, err := a.listSpaces()
 			if err != nil {
 				return nil, err
 			}
 			if filter := strings.ToLower(in.Option("filter")); filter != "" {
-				kept := []space{}
+				kept := []any{}
 				for _, s := range spaces {
-					if strings.Contains(strings.ToLower(s.DisplayName), filter) {
+					if strings.Contains(strings.ToLower(google.Field(s, "displayName")), filter) {
 						kept = append(kept, s)
 					}
 				}

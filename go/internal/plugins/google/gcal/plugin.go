@@ -456,7 +456,7 @@ func respondCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return responded{Status: status, Event: *ev}, nil
+			return responded{Status: status, Event: ev}, nil
 		},
 		Format: formatResponded,
 	}

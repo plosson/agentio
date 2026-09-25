@@ -3,45 +3,44 @@ package gscript
 import (
 	"fmt"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
-// formatProject is printGScriptProject (create and metadata).
-func formatProject(v any) string {
-	p, _ := v.(*project)
-	if p == nil {
-		return ""
-	}
-	lines := []string{"Script ID: " + p.ScriptID, "Title: " + p.Title}
-	for _, field := range []struct{ label, value string }{
-		{"Bound to", p.ParentID},
-		{"Created", p.CreateTime},
-		{"Updated", p.UpdateTime},
-		{"Creator", p.Creator},
-		{"Last modified by", p.LastModifyUser},
+// formatProject is printGScriptProject (create and metadata), over the Bun
+// object toProject builds: a missing scriptId prints "undefined".
+func formatProject(p any) string {
+	lines := []string{"Script ID: " + google.Field(p, "scriptId"), "Title: " + google.Field(p, "title")}
+	for _, f := range []struct{ label, key string }{
+		{"Bound to", "parentId"},
+		{"Created", "createTime"},
+		{"Updated", "updateTime"},
+		{"Creator", "creator"},
+		{"Last modified by", "lastModifyUser"},
 	} {
-		if field.value != "" {
-			lines = append(lines, field.label+": "+field.value)
+		if google.Truthy(p, f.key) {
+			lines = append(lines, f.label+": "+google.Field(p, f.key))
 		}
 	}
-	lines = append(lines, "URL: "+p.URL)
+	lines = append(lines, "URL: "+google.Field(p, "url"))
 	return strings.Join(lines, "\n")
 }
 
 // formatList is printGScriptList.
 func formatList(v any) string {
-	items, _ := v.([]listItem)
+	items, _ := v.([]any)
 	if len(items) == 0 {
 		return "No script projects found"
 	}
 	lines := []string{fmt.Sprintf("Script projects (%d)", len(items)), ""}
 	for i, item := range items {
 		bound := ""
-		if item.ParentID != "" {
-			bound = "  [bound to " + item.ParentID + "]"
+		if google.Truthy(item, "parentId") {
+			bound = "  [bound to " + google.Field(item, "parentId") + "]"
 		}
-		lines = append(lines, fmt.Sprintf("[%d] %s%s", i+1, item.Title, bound), "    ID: "+item.ScriptID)
-		if item.ModifiedTime != "" {
-			lines = append(lines, "    Modified: "+item.ModifiedTime)
+		lines = append(lines, fmt.Sprintf("[%d] %s%s", i+1, google.Field(item, "title"), bound), "    ID: "+google.Field(item, "scriptId"))
+		if google.Truthy(item, "modifiedTime") {
+			lines = append(lines, "    Modified: "+google.Field(item, "modifiedTime"))
 		}
 		lines = append(lines, "")
 	}

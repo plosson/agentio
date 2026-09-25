@@ -1,6 +1,7 @@
 package jsvalue
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -135,5 +136,32 @@ func TestInsertionOrderObjectKeepsIntegerKeysInPlace(t *testing.T) {
 	}
 	if got := string(Stringify(o)); got != `{"8":1,"2":1,"b":1,"3":1,"":1}` {
 		t.Fatal(got)
+	}
+}
+
+// [1, null, undefined, "a", [2, 3]].join("-") and String of it are
+// JavaScript's; map stops at the first error its callback raises.
+func TestJoinAndMapAreJavaScripts(t *testing.T) {
+	items := []any{json.Number("1"), nil, Undefined, "a", []any{json.Number("2"), json.Number("3")}}
+	if got := Join(items, "-"); got != "1---a-2,3" {
+		t.Fatalf("%q", got)
+	}
+	if got := String(items); got != "1,,,a,2,3" {
+		t.Fatalf("%q", got)
+	}
+	out, err := Map(items[:2], "list", func(v any) (any, error) {
+		if Nullish(v) {
+			return nil, TypeError(v, "x.id")
+		}
+		return String(v) + "!", nil
+	})
+	if err == nil || err.Error() != "null is not an object (evaluating 'x.id')" || out != nil {
+		t.Fatalf("%v %v", out, err)
+	}
+	if _, err := Map(nil, "list", nil); err == nil || err.Error() != "null is not an object (evaluating 'list.map')" {
+		t.Fatalf("%v", err)
+	}
+	if out, err := Map([]any{}, "list", nil); err != nil || out == nil || len(out) != 0 {
+		t.Fatalf("%#v %v", out, err)
 	}
 }

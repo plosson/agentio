@@ -112,6 +112,24 @@ func Items(v any, text string) ([]any, error) {
 	return items, nil
 }
 
+// Map is `text.map(f)`: Items, then f on each element in order; the first
+// error (a TypeError f raises) stops it.
+func Map(v any, text string, f func(any) (any, error)) ([]any, error) {
+	items, err := Items(v, text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		mapped, err := f(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, mapped)
+	}
+	return out, nil
+}
+
 // StrictEqual is a === b for Parse values and Go scalars: numbers by value,
 // objects and arrays by identity.
 func StrictEqual(a, b any) bool {

@@ -5,40 +5,47 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
-func when(d eventDateTime) string {
-	if d.DateTime != "" {
-		return d.DateTime
-	}
-	return d.Date
+// The printers read the Bun objects the client builds (see parseEvent), as
+// Bun's template strings do: a missing field prints "undefined".
+
+// when is getEventDateTime: dt.dateTime, else dt.date, else "".
+func when(dt any) string {
+	return jsvalue.String(jsvalue.Or(jsvalue.Or(jsvalue.Member(dt, "dateTime"), jsvalue.Member(dt, "date")), ""))
 }
 
-func title(e event) string {
-	if e.Summary == "" {
-		return "(no title)"
-	}
-	return e.Summary
+// title is `event.summary || '(no title)'`.
+func title(e any) string {
+	return jsvalue.String(jsvalue.Or(jsvalue.Member(e, "summary"), "(no title)"))
+}
+
+// length is `v?.length` read for a truthiness test and a count.
+func length(v any) int {
+	n, _ := jsvalue.Optional(v, "length").(float64)
+	return int(n)
 }
 
 // formatCalendars is printGCalCalendarList.
 func formatCalendars(v any) string {
-	calendars, _ := v.([]calendarEntry)
+	calendars, _ := v.([]any)
 	if len(calendars) == 0 {
 		return "No calendars found"
 	}
 	lines := []string{fmt.Sprintf("Calendars (%d)", len(calendars)), ""}
 	for i, c := range calendars {
 		badge := ""
-		if c.Primary {
+		if google.Truthy(c, "primary") {
 			badge = " [primary]"
 		}
-		lines = append(lines, fmt.Sprintf("[%d] %s%s", i+1, c.Summary, badge), "    ID: "+c.ID, "    Role: "+c.AccessRole)
-		if c.TimeZone != "" {
-			lines = append(lines, "    Timezone: "+c.TimeZone)
+		lines = append(lines, fmt.Sprintf("[%d] %s%s", i+1, google.Field(c, "summary"), badge),
+			"    ID: "+google.Field(c, "id"), "    Role: "+google.Field(c, "accessRole"))
+		if google.Truthy(c, "timeZone") {
+			lines = append(lines, "    Timezone: "+google.Field(c, "timeZone"))
 		}
-		if c.Description != "" {
-			lines = append(lines, "    > "+jsvalue.Truncate(c.Description, 80))
+		if google.Truthy(c, "description") {
+			lines = append(lines, "    > "+jsvalue.Truncate(google.Field(c, "description"), 80))
 		}
 		lines = append(lines, "")
 	}
@@ -47,130 +54,117 @@ func formatCalendars(v any) string {
 
 // formatEventList is printGCalEventList.
 func formatEventList(v any) string {
-	list, _ := v.(*eventList)
-	if list == nil || len(list.Events) == 0 {
+	events, _ := jsvalue.Member(v, "events").([]any)
+	if len(events) == 0 {
 		return "No events found"
 	}
-	lines := []string{fmt.Sprintf("Events (%d)", len(list.Events)), ""}
-	for i, e := range list.Events {
+	lines := []string{fmt.Sprintf("Events (%d)", len(events)), ""}
+	for i, e := range events {
 		lines = append(lines,
-			fmt.Sprintf("[%d] %s", i+1, e.ID),
+			fmt.Sprintf("[%d] %s", i+1, google.Field(e, "id")),
 			"    "+title(e),
-			"    Start: "+when(e.Start),
-			"    End: "+when(e.End),
+			"    Start: "+when(jsvalue.Member(e, "start")),
+			"    End: "+when(jsvalue.Member(e, "end")),
 		)
-		if e.Location != "" {
-			lines = append(lines, "    Location: "+e.Location)
+		if google.Truthy(e, "location") {
+			lines = append(lines, "    Location: "+google.Field(e, "location"))
 		}
-		if e.Attendees != nil && len(*e.Attendees) > 0 {
-			lines = append(lines, fmt.Sprintf("    Attendees: %d", len(*e.Attendees)))
+		if n := length(jsvalue.Member(e, "attendees")); n > 0 {
+			lines = append(lines, fmt.Sprintf("    Attendees: %d", n))
 		}
-		if e.HangoutLink != "" {
-			lines = append(lines, "    Meet: "+e.HangoutLink)
+		if google.Truthy(e, "hangoutLink") {
+			lines = append(lines, "    Meet: "+google.Field(e, "hangoutLink"))
 		}
 		lines = append(lines, "")
 	}
-	if list.NextPageToken != "" {
-		lines = append(lines, fmt.Sprintf("(more results available, use --page %s)", list.NextPageToken))
+	if google.Truthy(v, "nextPageToken") {
+		lines = append(lines, fmt.Sprintf("(more results available, use --page %s)", google.Field(v, "nextPageToken")))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatEvent is printGCalEvent.
 func formatEvent(v any) string {
-	e, _ := v.(*event)
-	if e == nil {
-		return ""
-	}
-	return strings.Join(eventLines(*e), "\n")
+	return strings.Join(eventLines(v), "\n")
 }
 
-func eventLines(e event) []string {
-	lines := []string{"ID: " + e.ID, "Summary: " + title(e)}
-	if e.EventType != "" && e.EventType != "default" {
-		lines = append(lines, "Type: "+e.EventType)
+func eventLines(e any) []string {
+	get := func(k string) any { return jsvalue.Member(e, k) }
+	lines := []string{"ID: " + google.Field(e, "id"), "Summary: " + title(e)}
+	if google.Truthy(e, "eventType") && !jsvalue.StrictEqual(get("eventType"), "default") {
+		lines = append(lines, "Type: "+google.Field(e, "eventType"))
 	}
-	lines = append(lines, "Start: "+when(e.Start), "End: "+when(e.End))
-	if e.Start.TimeZone != "" {
-		lines = append(lines, "Timezone: "+e.Start.TimeZone)
+	lines = append(lines, "Start: "+when(get("start")), "End: "+when(get("end")))
+	if google.Truthy(get("start"), "timeZone") {
+		lines = append(lines, "Timezone: "+google.Field(get("start"), "timeZone"))
 	}
-	if e.Location != "" {
-		lines = append(lines, "Location: "+e.Location)
+	for _, f := range []struct{ label, key string }{{"Location", "location"}, {"Description", "description"}, {"Color", "colorId"}} {
+		if google.Truthy(e, f.key) {
+			lines = append(lines, f.label+": "+google.Field(e, f.key))
+		}
 	}
-	if e.Description != "" {
-		lines = append(lines, "Description: "+e.Description)
+	if google.Truthy(e, "visibility") && !jsvalue.StrictEqual(get("visibility"), "default") {
+		lines = append(lines, "Visibility: "+google.Field(e, "visibility"))
 	}
-	if e.ColorID != "" {
-		lines = append(lines, "Color: "+e.ColorID)
-	}
-	if e.Visibility != "" && e.Visibility != "default" {
-		lines = append(lines, "Visibility: "+e.Visibility)
-	}
-	if e.Transparency == "transparent" {
+	if jsvalue.StrictEqual(get("transparency"), "transparent") {
 		lines = append(lines, "Show as: free")
 	}
-	if e.Attendees != nil && len(*e.Attendees) > 0 {
-		lines = append(lines, "", fmt.Sprintf("Attendees (%d):", len(*e.Attendees)))
-		for _, a := range *e.Attendees {
-			status := a.ResponseStatus
-			if status == "" {
-				status = "unknown"
-			}
+	if attendees, _ := get("attendees").([]any); len(attendees) > 0 {
+		lines = append(lines, "", fmt.Sprintf("Attendees (%d):", len(attendees)))
+		for _, a := range attendees {
+			status := jsvalue.String(jsvalue.Or(jsvalue.Member(a, "responseStatus"), "unknown"))
 			var tags string
-			if a.Optional {
+			if google.Truthy(a, "optional") {
 				tags += " (optional)"
 			}
-			if a.Organizer {
+			if google.Truthy(a, "organizer") {
 				tags += " [organizer]"
 			}
-			if a.Self {
+			if google.Truthy(a, "self") {
 				tags += " [you]"
 			}
-			lines = append(lines, fmt.Sprintf("  %s - %s%s", a.Email, status, tags))
+			lines = append(lines, fmt.Sprintf("  %s - %s%s", google.Field(a, "email"), status, tags))
 		}
 	}
-	if e.Recurrence != nil && len(*e.Recurrence) > 0 {
-		lines = append(lines, "Recurrence: "+strings.Join(*e.Recurrence, "; "))
+	if recurrence, _ := get("recurrence").([]any); len(recurrence) > 0 {
+		lines = append(lines, "Recurrence: "+jsvalue.Join(recurrence, "; "))
 	}
-	if e.Reminders != nil {
-		if e.Reminders.UseDefault {
+	if r := get("reminders"); jsvalue.Truthy(r) {
+		if google.Truthy(r, "useDefault") {
 			lines = append(lines, "Reminders: (calendar default)")
-		} else if e.Reminders.Overrides != nil && len(*e.Reminders.Overrides) > 0 {
-			var parts []string
-			for _, r := range *e.Reminders.Overrides {
-				parts = append(parts, fmt.Sprintf("%s:%dm", r.Method, r.Minutes))
+		} else if overrides, _ := jsvalue.Member(r, "overrides").([]any); len(overrides) > 0 {
+			var parts []any
+			for _, o := range overrides {
+				parts = append(parts, google.Field(o, "method")+":"+google.Field(o, "minutes")+"m")
 			}
-			lines = append(lines, "Reminders: "+strings.Join(parts, ", "))
+			lines = append(lines, "Reminders: "+jsvalue.Join(parts, ", "))
 		}
 	}
-	if e.HangoutLink != "" {
-		lines = append(lines, "Meet: "+e.HangoutLink)
+	if google.Truthy(e, "hangoutLink") {
+		lines = append(lines, "Meet: "+google.Field(e, "hangoutLink"))
 	}
-	if e.ConferenceData != nil && e.ConferenceData.EntryPoints != nil {
-		for _, ep := range *e.ConferenceData.EntryPoints {
-			if ep.EntryPointType == "video" {
-				lines = append(lines, "Video: "+ep.URI)
+	if entryPoints, _ := jsvalue.Optional(get("conferenceData"), "entryPoints").([]any); len(entryPoints) > 0 {
+		for _, ep := range entryPoints {
+			if jsvalue.StrictEqual(jsvalue.Member(ep, "entryPointType"), "video") {
+				lines = append(lines, "Video: "+google.Field(ep, "uri"))
 			}
 		}
 	}
-	if e.HTMLLink != "" {
-		lines = append(lines, "Link: "+e.HTMLLink)
+	if google.Truthy(e, "htmlLink") {
+		lines = append(lines, "Link: "+google.Field(e, "htmlLink"))
 	}
 	return lines
 }
 
 // formatEventCreated is printGCalEventCreated.
-func formatEventCreated(v any) string {
-	e, _ := v.(*event)
-	if e == nil {
-		return ""
+func formatEventCreated(e any) string {
+	lines := []string{"Event created", "ID: " + google.Field(e, "id"), "Summary: " + title(e),
+		"Start: " + when(jsvalue.Member(e, "start")), "End: " + when(jsvalue.Member(e, "end"))}
+	if google.Truthy(e, "hangoutLink") {
+		lines = append(lines, "Meet: "+google.Field(e, "hangoutLink"))
 	}
-	lines := []string{"Event created", "ID: " + e.ID, "Summary: " + title(*e), "Start: " + when(e.Start), "End: " + when(e.End)}
-	if e.HangoutLink != "" {
-		lines = append(lines, "Meet: "+e.HangoutLink)
-	}
-	if e.HTMLLink != "" {
-		lines = append(lines, "Link: "+e.HTMLLink)
+	if google.Truthy(e, "htmlLink") {
+		lines = append(lines, "Link: "+google.Field(e, "htmlLink"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -185,31 +179,33 @@ func formatDeleted(v any) string {
 func formatResponded(v any) string {
 	r, _ := v.(responded)
 	lines := []string{"Response updated: " + r.Status, "Event: " + title(r.Event)}
-	if r.Event.HTMLLink != "" {
-		lines = append(lines, "Link: "+r.Event.HTMLLink)
+	if google.Truthy(r.Event, "htmlLink") {
+		lines = append(lines, "Link: "+google.Field(r.Event, "htmlLink"))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatFreeBusy is printGCalFreeBusy.
 func formatFreeBusy(v any) string {
-	fb, _ := v.(*freeBusy)
-	if fb == nil || len(fb.Calendars) == 0 {
+	calendars, _ := jsvalue.Member(v, "calendars").(*jsvalue.Object)
+	if calendars.Len() == 0 {
 		return "No free/busy data"
 	}
 	lines := []string{"Free/Busy Information", ""}
-	for _, c := range fb.Calendars {
-		lines = append(lines, "Calendar: "+c.ID)
-		if c.Errors != nil {
-			for _, e := range *c.Errors {
-				lines = append(lines, "  Error: "+e.Reason)
+	for _, id := range calendars.Keys() {
+		data := calendars.Value(id)
+		lines = append(lines, "Calendar: "+id)
+		if errs, _ := jsvalue.Member(data, "errors").([]any); len(errs) > 0 {
+			for _, e := range errs {
+				lines = append(lines, "  Error: "+google.Field(e, "reason"))
 			}
 		}
-		if len(c.Busy) == 0 {
+		busy, _ := jsvalue.Member(data, "busy").([]any)
+		if len(busy) == 0 {
 			lines = append(lines, "  (no busy periods)")
 		}
-		for _, b := range c.Busy {
-			lines = append(lines, fmt.Sprintf("  Busy: %s - %s", b.Start, b.End))
+		for _, b := range busy {
+			lines = append(lines, fmt.Sprintf("  Busy: %s - %s", google.Field(b, "start"), google.Field(b, "end")))
 		}
 		lines = append(lines, "")
 	}

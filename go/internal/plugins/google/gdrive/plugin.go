@@ -355,12 +355,17 @@ func putCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			if in.Flag("public") {
-				share, err := a.share(result.ID, result.ID, shareOptions{kind: "anyone", role: "reader"})
+				// Bun printed the upload before the share (extractFileId
+				// reads result.id, outside the share's try) failed.
+				id := result.Value("id")
+				if jsvalue.Nullish(id) {
+					return result, jsvalue.TypeError(id, "fileIdOrUrl.match")
+				}
+				share, err := a.share(jsvalue.String(id), jsvalue.String(id), shareOptions{kind: "anyone", role: "reader"})
 				if err != nil {
-					// Bun printed the upload before the share failed.
 					return result, err
 				}
-				result.Share = share
+				result.Set("share", share.Result)
 			}
 			return result, nil
 		},
@@ -539,7 +544,11 @@ func permissionsCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.permissions(in.Arg("file-id-or-url")))
+			perms, err := a.permissions(in.Arg("file-id-or-url"))
+			if err != nil {
+				return nil, err
+			}
+			return perms, permissionsError(perms)
 		},
 		Format: formatPermissions,
 	}
@@ -688,7 +697,7 @@ func unshareCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			fileIDOrURL := in.Arg("file-id-or-url")
-			permissionID := in.Option("permission-id")
+			var permissionID any = in.Option("permission-id")
 			if in.Flag("anyone") {
 				perms, err := a.permissions(fileIDOrURL)
 				if err != nil {
@@ -696,8 +705,8 @@ func unshareCmd() plugins.CommandSpec {
 				}
 				found := false
 				for _, p := range perms {
-					if p.Type == "anyone" {
-						permissionID, found = p.ID, true
+					if jsvalue.StrictEqual(jsvalue.Member(p, "type"), "anyone") {
+						permissionID, found = jsvalue.Member(p, "id"), true
 						break
 					}
 				}
@@ -708,7 +717,7 @@ func unshareCmd() plugins.CommandSpec {
 			if err := a.unshare(fileIDOrURL, permissionID); err != nil {
 				return nil, err
 			}
-			return unshared{FileID: extractFileID(fileIDOrURL), PermissionID: permissionID}, nil
+			return unshared{FileID: extractFileID(fileIDOrURL), PermissionID: jsvalue.String(permissionID)}, nil
 		},
 		Format: formatUnshared,
 	}

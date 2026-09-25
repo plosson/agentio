@@ -82,7 +82,7 @@ func HTTPClient(ctx context.Context, run *plugins.RunContext, keys Keys) *http.C
 	if fetch == nil {
 		fetch = plugins.Fetch
 	}
-	return &http.Client{Transport: newAuthTransport(ctx, run, keys, fetch)}
+	return &http.Client{Transport: recordTransport{newAuthTransport(ctx, run, keys, fetch)}}
 }
 
 func newAuthTransport(ctx context.Context, run *plugins.RunContext, keys Keys, fetch fetchFunc) *authTransport {

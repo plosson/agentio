@@ -16,6 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/testbox"
@@ -624,39 +625,60 @@ func TestInputAndAPIErrorsMatchBun(t *testing.T) {
 	}
 }
 
+// parsed is the Bun object the client builds from an answer's JSON.
+func parsed(t *testing.T, parse func(any) (*jsvalue.Object, error), raw string) *jsvalue.Object {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := parse(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
+// pageOf is a list command's result for an answer's JSON.
+func pageOf(t *testing.T, key string, parse func(any) (*jsvalue.Object, error), raw string) *jsvalue.Object {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := page(v, key, parse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
 func TestFormatMatchesBun(t *testing.T) {
-	lists := &taskListPage{TaskLists: []taskList{
-		{ID: "L1", Title: "My Tasks", Updated: "2024-04-15T10:00:00.000Z"},
-		{ID: "L2"},
-	}, NextPageToken: "more"}
+	lists := pageOf(t, "taskLists", taskListOf, `{"items":[{"id":"L1","title":"My Tasks","updated":"2024-04-15T10:00:00.000Z"},{"id":"L2"}],"nextPageToken":"more"}`)
 	if got := formatTaskLists(lists); got != "Task Lists (2)\n\n[1] My Tasks\n    ID: L1\n    Updated: 2024-04-15T10:00:00.000Z\n\n[2] \n    ID: L2\n\n(more results available)" {
 		t.Fatalf("%q", got)
 	}
-	if formatTaskLists(&taskListPage{TaskLists: []taskList{}}) != "No task lists found" || formatTasks(&taskPage{Tasks: []task{}}) != "No tasks found" {
+	if formatTaskLists(pageOf(t, "taskLists", taskListOf, `{}`)) != "No task lists found" || formatTasks(pageOf(t, "tasks", parseTask, `{"items":[]}`)) != "No tasks found" {
 		t.Fatal("empty")
 	}
 	// The notes preview is 60 UTF-16 units: a split surrogate pair is U+FFFD, as Bun prints it.
-	page := &taskPage{Tasks: []task{
-		{ID: "T1", Title: "Buy milk", Status: "needsAction", Due: "2024-04-20T00:00:00.000Z", Notes: strings.Repeat("x", 59) + "😀tail"},
-		{ID: "T2", Status: "completed", Notes: strings.Repeat("y", 60)},
-	}}
+	tasks := pageOf(t, "tasks", parseTask, `{"items":[{"id":"T1","title":"Buy milk","status":"needsAction","due":"2024-04-20T00:00:00.000Z","notes":"`+strings.Repeat("x", 59)+`😀tail"},{"id":"T2","status":"completed","notes":"`+strings.Repeat("y", 60)+`"}]}`)
 	want := "Tasks (2)\n\n[1] [ ] Buy milk (due: 2024-04-20)\n    ID: T1\n    Status: needsAction\n    > " + strings.Repeat("x", 59) + "\uFFFD...\n\n" +
 		"[2] [x] \n    ID: T2\n    Status: completed\n    > " + strings.Repeat("y", 60) + "\n"
-	if got := formatTasks(page); got != want {
+	if got := formatTasks(tasks); got != want {
 		t.Fatalf("%q", got)
 	}
-	full := &task{ID: "T1", Title: "Buy milk", Status: "completed", Due: "2024-04-20T00:00:00.000Z", Completed: "2024-04-19T00:00:00.000Z",
-		Updated: "2024-04-15T10:00:00.000Z", Parent: "P1", WebViewLink: "https://tasks.example.com/T1", Notes: "line1\nline2"}
+	full := parsed(t, parseTask, `{"id":"T1","title":"Buy milk","status":"completed","due":"2024-04-20T00:00:00.000Z","completed":"2024-04-19T00:00:00.000Z","updated":"2024-04-15T10:00:00.000Z","parent":"P1","webViewLink":"https://tasks.example.com/T1","notes":"line1\nline2"}`)
 	if got := formatTask(full); got != "ID: T1\nTitle: Buy milk\nStatus: completed\nDue: 2024-04-20T00:00:00.000Z\nCompleted: 2024-04-19T00:00:00.000Z\nUpdated: 2024-04-15T10:00:00.000Z\nParent: P1\nLink: https://tasks.example.com/T1\n---\nline1\nline2" {
 		t.Fatalf("%q", got)
 	}
-	if got := formatTask(&task{ID: "T2", Status: "needsAction"}); got != "ID: T2\nTitle: \nStatus: needsAction" {
+	if got := formatTask(parsed(t, parseTask, `{"id":"T2","status":"needsAction"}`)); got != "ID: T2\nTitle: \nStatus: needsAction" {
 		t.Fatalf("%q", got)
 	}
 	if got := formatTaskCreated(full); got != "Task created\nID: T1\nTitle: Buy milk\nStatus: completed\nDue: 2024-04-20T00:00:00.000Z\nLink: https://tasks.example.com/T1" {
 		t.Fatalf("%q", got)
 	}
-	if got := formatTaskListCreated(&taskList{ID: "L1", Title: "Groceries"}); got != "Task list created\nID: L1\nTitle: Groceries" {
+	if got := formatTaskListCreated(parsed(t, taskListOf, `{"id":"L1","title":"Groceries"}`)); got != "Task list created\nID: L1\nTitle: Groceries" {
 		t.Fatalf("%q", got)
 	}
 	if got := formatTaskListDeleted(taskListRef{TasklistID: "L1"}); got != "Task list deleted\nID: L1" {
@@ -671,13 +693,13 @@ func TestFormatMatchesBun(t *testing.T) {
 	if got := formatStatusChange("completed")(full); got != "Task completed: Buy milk\nID: T1\nStatus: completed" {
 		t.Fatalf("%q", got)
 	}
-	if got := formatStatusChange("uncompleted")(&task{ID: "T3", Title: "x", Status: "needsAction"}); got != "Task uncompleted: x\nID: T3\nStatus: needsAction" {
+	if got := formatStatusChange("uncompleted")(parsed(t, parseTask, `{"id":"T3","title":"x","status":"needsAction"}`)); got != "Task uncompleted: x\nID: T3\nStatus: needsAction" {
 		t.Fatalf("%q", got)
 	}
 	if got := formatMoved(full); got != "Task moved: Buy milk\nID: T1\nParent: P1" {
 		t.Fatalf("%q", got)
 	}
-	if got := formatMoved(&task{ID: "T4", Title: "top"}); got != "Task moved: top\nID: T4" {
+	if got := formatMoved(parsed(t, parseTask, `{"id":"T4","title":"top"}`)); got != "Task moved: top\nID: T4" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -717,3 +739,58 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing id is "undefined", a null item or answer is Bun's TypeError, and a
+// body that is not JSON is its text.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	ids := map[string]any{"tasklist-id": "L", "task-id": "T"}
+	product.RunAnswered(t, storedCreds(freshExpiry), []googletest.Answered{
+		{Name: "lists without ids", Path: "lists list",
+			Answers: map[string]string{"GET /lists": `{"items":[{"title":"A"},{"id":"l2","title":null,"updated":""},{}],"nextPageToken":""}`},
+			Out:     "Task Lists (3)\n\n[1] A\n    ID: undefined\n\n[2] \n    ID: l2\n\n[3] \n    ID: undefined\n\n"},
+		{Name: "lists null item", Path: "lists list",
+			Answers: map[string]string{"GET /lists": `{"items":[{"id":"a","title":"A"},null]}`},
+			Err:     "API_ERROR: Tasks API error: null is not an object (evaluating 'tl.id')"},
+		{Name: "lists null answer", Path: "lists list",
+			Answers: map[string]string{"GET /lists": `null`},
+			Err:     "API_ERROR: Tasks API error: null is not an object (evaluating 'response.data.items')"},
+		{Name: "lists text answer", Path: "lists list",
+			Answers: map[string]string{"GET /lists": `oops`},
+			Out:     "No task lists found\n"},
+		{Name: "tasks with null fields", Path: "list", Args: ids,
+			Answers: map[string]string{"GET /tasks": `{"items":[{"title":"t","status":null,"due":null,"notes":""},{},{"id":"T","status":"completed","due":"","hidden":false}],"nextPageToken":null}`},
+			Out:     "Tasks (3)\n\n[1] [ ] t\n    ID: undefined\n    Status: needsAction\n\n[2] [ ] \n    ID: undefined\n    Status: needsAction\n\n[3] [x] \n    ID: T\n    Status: completed\n\n"},
+		{Name: "get empty", Path: "get", Args: ids,
+			Answers: map[string]string{"GET /tasks/T": `{}`},
+			Out:     "ID: undefined\nTitle: \nStatus: needsAction\n"},
+		{Name: "get null", Path: "get", Args: ids,
+			Answers: map[string]string{"GET /tasks/T": `null`},
+			Err:     "API_ERROR: Tasks API error: null is not an object (evaluating 'task.id')"},
+		{Name: "add mistyped", Path: "add", Args: ids, Set: map[string]any{"title": "x"},
+			Answers: map[string]string{"POST /tasks": `{"id":7,"title":5,"due":true,"notes":"n"}`},
+			Out:     "Task created\nID: 7\nTitle: 5\nStatus: needsAction\nDue: true\n"},
+		{Name: "add zero due", Path: "add", Args: ids, Set: map[string]any{"title": "x"},
+			Answers: map[string]string{"POST /tasks": `{"due":0}`},
+			Out:     "Task created\nID: undefined\nTitle: \nStatus: needsAction\n"},
+		{Name: "update null", Path: "update", Args: ids, Set: map[string]any{"title": "y"},
+			Answers: map[string]string{"PATCH /tasks/T": `null`},
+			Err:     "API_ERROR: Failed to update task: null is not an object (evaluating 'task.id')"},
+		{Name: "done empty", Path: "done", Args: ids,
+			Answers: map[string]string{"PATCH /tasks/T": `{}`},
+			Out:     "Task completed: \nID: undefined\nStatus: needsAction\n"},
+		{Name: "move null parent", Path: "move", Args: ids, Set: map[string]any{"parent": "P"},
+			Answers: map[string]string{"POST /move": `{"title":"m","parent":null}`},
+			Out:     "Task moved: m\nID: undefined\n"},
+		{Name: "lists create empty", Path: "lists create", Args: map[string]any{"title": "x"},
+			Answers: map[string]string{"POST /lists": `{}`},
+			Out:     "Task list created\nID: undefined\nTitle: \n"},
+		{Name: "lists create empty body", Path: "lists create", Args: map[string]any{"title": "x"},
+			Answers: map[string]string{"POST /lists": ``},
+			Out:     "Task list created\nID: undefined\nTitle: \n"},
+		{Name: "lists create null", Path: "lists create", Args: map[string]any{"title": "x"},
+			Answers: map[string]string{"POST /lists": `null`},
+			Err:     "API_ERROR: Failed to create task list: null is not an object (evaluating 'response.data.id')"},
+	})
+}

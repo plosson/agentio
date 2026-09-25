@@ -16,6 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
@@ -647,7 +648,7 @@ func TestFreeBusyKeepsTheResponseOrder(t *testing.T) {
 	if string(raw) != `{"calendars":{"amy@example.com":{"busy":[],"errors":[{"domain":"global","reason":"notFound"}]},"zed@example.com":{"busy":[{"start":"2024-04-15T16:00:00Z","end":"2024-04-15T17:00:00Z"}]},"bob@example.com":{"busy":[]}}}` {
 		t.Fatalf("%s", raw)
 	}
-	if formatFreeBusy(&freeBusy{}) != "No free/busy data" {
+	if formatFreeBusy(jsvalue.ObjectOf("calendars", jsvalue.NewObject())) != "No free/busy data" {
 		t.Fatal("empty")
 	}
 }
@@ -746,42 +747,60 @@ func TestInputAndAPIErrorsMatchBun(t *testing.T) {
 	}
 }
 
+// answer is an answer's JSON as google.Answer reads it.
+func answer(t *testing.T, raw string) any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// eventOf is the Bun event the client builds from an answer's JSON.
+func eventOf(t *testing.T, raw string) *jsvalue.Object {
+	t.Helper()
+	e, err := parseEvent(answer(t, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.(*jsvalue.Object)
+}
+
 func TestFormatMatchesBun(t *testing.T) {
-	cals := []calendarEntry{
-		{ID: "me@example.com", Summary: "Me", AccessRole: "owner", Primary: true, TimeZone: "Europe/Paris", Description: strings.Repeat("é", 79) + "😀x"},
-		{ID: "team@example.com", Summary: "Team", AccessRole: "reader"},
+	cals, err := items(answer(t, `{"items":[
+		{"id":"me@example.com","summary":"Me","accessRole":"owner","primary":true,"timeZone":"Europe/Paris","description":"`+strings.Repeat("é", 79)+`😀x"},
+		{"id":"team@example.com","summary":"Team","accessRole":"reader"}]}`), "response.data", calendarOf)
+	if err != nil {
+		t.Fatal(err)
 	}
 	want := "Calendars (2)\n\n[1] Me [primary]\n    ID: me@example.com\n    Role: owner\n    Timezone: Europe/Paris\n    > " + strings.Repeat("é", 79) + "\uFFFD...\n\n[2] Team\n    ID: team@example.com\n    Role: reader\n"
 	if got := formatCalendars(cals); got != want {
 		t.Fatalf("%q", got)
 	}
-	if formatCalendars([]calendarEntry{}) != "No calendars found" || formatEventList(&eventList{Events: []event{}}) != "No events found" {
+	if formatCalendars([]any{}) != "No calendars found" || formatEventList(jsvalue.ObjectOf("events", []any{})) != "No events found" {
 		t.Fatal("empty")
 	}
-	attendees := []attendee{{Email: "a@example.com", ResponseStatus: "accepted", Organizer: true}, {Email: "me@example.com", Optional: true, Self: true}}
-	overrides := []reminder{{Method: "popup", Minutes: 10}, {Method: "email", Minutes: 0}}
-	points := []entryPoint{{EntryPointType: "video", URI: "https://meet.google.com/abc"}, {EntryPointType: "phone", URI: "tel:+1"}}
-	rec := []string{"RRULE:FREQ=WEEKLY", "EXDATE:20240422"}
-	e := event{
-		ID: "e1", Summary: "Sync", EventType: "focusTime", Start: eventDateTime{DateTime: "2024-04-15T14:00:00-07:00", TimeZone: "America/Los_Angeles"},
-		End: eventDateTime{Date: "2024-04-16"}, Location: "Room 1", Description: "line1\nline2", ColorID: "5", Visibility: "private",
-		Transparency: "transparent", Attendees: &attendees, Recurrence: &rec, Reminders: &reminders{Overrides: &overrides},
-		HangoutLink: "https://meet.google.com/abc", ConferenceData: &conferenceData{EntryPoints: &points}, HTMLLink: "https://calendar.example.com/e1",
-	}
+	e := eventOf(t, `{"id":"e1","summary":"Sync","eventType":"focusTime","start":{"dateTime":"2024-04-15T14:00:00-07:00","timeZone":"America/Los_Angeles"},
+		"end":{"date":"2024-04-16"},"location":"Room 1","description":"line1\nline2","colorId":"5","visibility":"private","transparency":"transparent",
+		"attendees":[{"email":"a@example.com","responseStatus":"accepted","organizer":true},{"email":"me@example.com","optional":true,"self":true}],
+		"recurrence":["RRULE:FREQ=WEEKLY","EXDATE:20240422"],"reminders":{"overrides":[{"method":"popup","minutes":10},{"method":"email","minutes":0}]},
+		"hangoutLink":"https://meet.google.com/abc","conferenceData":{"entryPoints":[{"entryPointType":"video","uri":"https://meet.google.com/abc"},{"entryPointType":"phone","uri":"tel:+1"}]},
+		"htmlLink":"https://calendar.example.com/e1"}`)
 	want = "ID: e1\nSummary: Sync\nType: focusTime\nStart: 2024-04-15T14:00:00-07:00\nEnd: 2024-04-16\nTimezone: America/Los_Angeles\nLocation: Room 1\nDescription: line1\nline2\nColor: 5\nVisibility: private\nShow as: free\n\nAttendees (2):\n  a@example.com - accepted [organizer]\n  me@example.com - unknown (optional) [you]\nRecurrence: RRULE:FREQ=WEEKLY; EXDATE:20240422\nReminders: popup:10m, email:0m\nMeet: https://meet.google.com/abc\nVideo: https://meet.google.com/abc\nLink: https://calendar.example.com/e1"
-	if got := formatEvent(&e); got != want {
+	if got := formatEvent(e); got != want {
 		t.Fatalf("%q", got)
 	}
-	bare := event{ID: "e2", EventType: "default", Visibility: "default", Reminders: &reminders{UseDefault: true}}
-	if got := formatEvent(&bare); got != "ID: e2\nSummary: (no title)\nStart: \nEnd: \nReminders: (calendar default)" {
+	bare := eventOf(t, `{"id":"e2","eventType":"default","visibility":"default","reminders":{"useDefault":true}}`)
+	if got := formatEvent(bare); got != "ID: e2\nSummary: (no title)\nStart: \nEnd: \nReminders: (calendar default)" {
 		t.Fatalf("%q", got)
 	}
-	list := &eventList{Events: []event{e, bare}, NextPageToken: "tok"}
+	list := jsvalue.ObjectOf("events", []any{e, bare}, "nextPageToken", "tok")
 	want = "Events (2)\n\n[1] e1\n    Sync\n    Start: 2024-04-15T14:00:00-07:00\n    End: 2024-04-16\n    Location: Room 1\n    Attendees: 2\n    Meet: https://meet.google.com/abc\n\n[2] e2\n    (no title)\n    Start: \n    End: \n\n(more results available, use --page tok)"
 	if got := formatEventList(list); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := formatEventCreated(&e); got != "Event created\nID: e1\nSummary: Sync\nStart: 2024-04-15T14:00:00-07:00\nEnd: 2024-04-16\nMeet: https://meet.google.com/abc\nLink: https://calendar.example.com/e1" {
+	if got := formatEventCreated(e); got != "Event created\nID: e1\nSummary: Sync\nStart: 2024-04-15T14:00:00-07:00\nEnd: 2024-04-16\nMeet: https://meet.google.com/abc\nLink: https://calendar.example.com/e1" {
 		t.Fatalf("%q", got)
 	}
 	if got := formatResponded(responded{Status: "accepted", Event: e}); got != "Response updated: accepted\nEvent: Sync\nLink: https://calendar.example.com/e1" {
@@ -936,3 +955,111 @@ func TestEmptyRequiredOptionsReachTheCommand(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty, nested-missing and mistyped fields print
+// what Bun prints for them (captured from the Bun CLI against the same
+// answers): a missing field is "undefined", a null item or answer is Bun's
+// TypeError under the command's own prefix, and a text answer reads as "".
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	ev := map[string]any{"calendar-id": "primary", "event-id": "E"}
+	span := map[string]any{"from": "x", "to": "y"}
+	full := `{"id":"E","eventType":"focusTime","start":{"dateTime":"s","timeZone":"Z"},"end":{"date":"d"},"visibility":"private","transparency":"transparent",` +
+		`"attendees":[{},{"email":"a@x","responseStatus":null,"optional":true,"organizer":false,"self":1}],"recurrence":["R1",null,"R2"],` +
+		`"reminders":{"useDefault":false,"overrides":[{"method":"popup"},{}]},"conferenceData":{"entryPoints":[{"entryPointType":"video"},{"entryPointType":"phone","uri":"tel"}]},"colorId":0,"htmlLink":"L"}`
+	product.RunAnswered(t, storedCreds(freshExpiry), []googletest.Answered{
+		{Name: "calendars without ids", Path: "calendars",
+			Answers: map[string]string{"GET /calendarList": `{"items":[{"summary":"S"},{"id":"c2","primary":false,"accessRole":null,"timeZone":"","description":null},{}]}`},
+			Out:     "Calendars (3)\n\n[1] S\n    ID: undefined\n    Role: \n\n[2] \n    ID: c2\n    Role: \n\n[3] \n    ID: undefined\n    Role: \n\n"},
+		{Name: "calendars null item", Path: "calendars",
+			Answers: map[string]string{"GET /calendarList": `{"items":[null]}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'cal.id')"},
+		{Name: "calendars null answer", Path: "calendars",
+			Answers: map[string]string{"GET /calendarList": `null`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating '(await this.calendar.calendarList.list({\n        maxResults: Math.min(limit, 250)\n      })).data.items')"},
+		{Name: "events with missing parts", Path: "events",
+			Answers: map[string]string{"GET /events": `{"items":[{},{"id":"e2","start":null,"end":{},"attendees":[],"location":""},{"id":"e3","start":{"date":"2024-01-01"},"attendees":[{}],"hangoutLink":null}],"nextPageToken":null}`},
+			Out:     "Events (3)\n\n[1] undefined\n    (no title)\n    Start: \n    End: \n\n[2] e2\n    (no title)\n    Start: \n    End: \n\n[3] e3\n    (no title)\n    Start: 2024-01-01\n    End: \n    Attendees: 1\n\n"},
+		{Name: "events null item", Path: "events",
+			Answers: map[string]string{"GET /events": `{"items":[null]}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'event.id')"},
+		{Name: "events null answer", Path: "events",
+			Answers: map[string]string{"GET /events": `null`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'response.data.items')"},
+		{Name: "get with missing nested fields", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": full},
+			Out: "ID: E\nSummary: (no title)\nType: focusTime\nStart: s\nEnd: d\nTimezone: Z\nVisibility: private\nShow as: free\n\nAttendees (2):\n" +
+				"  undefined - unknown\n  a@x - unknown (optional) [you]\nRecurrence: R1; ; R2\nReminders: popup:undefinedm, undefined:undefinedm\nVideo: undefined\nLink: L\n"},
+		{Name: "get empty", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{}`},
+			Out:     "ID: undefined\nSummary: (no title)\nStart: \nEnd: \n"},
+		{Name: "get null", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `null`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'event.id')"},
+		{Name: "get null and empty nested objects", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{"id":"E","reminders":{"useDefault":true},"conferenceData":{},"creator":null,"organizer":{}}`},
+			Out:     "ID: E\nSummary: (no title)\nStart: \nEnd: \nReminders: (calendar default)\n"},
+		{Name: "get null attendee", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{"attendees":[null]}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'a.email')"},
+		{Name: "get null override", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{"reminders":{"overrides":[null]}}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'r.method')"},
+		{Name: "get null entry point", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{"conferenceData":{"entryPoints":[null]}}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'ep.entryPointType')"},
+		{Name: "get text answer", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `oops`},
+			Out:     "ID: undefined\nSummary: (no title)\nStart: \nEnd: \n"},
+		{Name: "get mistyped", Path: "get", Args: ev,
+			Answers: map[string]string{"GET /events/E": `{"id":5,"summary":7,"start":{"dateTime":8},"reminders":{"overrides":[{"method":1,"minutes":"x"}]}}`},
+			Out:     "ID: 5\nSummary: 7\nStart: 8\nEnd: \nReminders: 1:xm\n"},
+		{Name: "create empty", Path: "create", Set: map[string]any{"summary": "x", "from": "2024-01-01", "to": "2024-01-02"},
+			Answers: map[string]string{"POST /events": `{}`},
+			Out:     "Event created\nID: undefined\nSummary: (no title)\nStart: \nEnd: \n"},
+		{Name: "create null", Path: "create", Set: map[string]any{"summary": "x", "from": "2024-01-01", "to": "2024-01-02"},
+			Answers: map[string]string{"POST /events": `null`},
+			Err:     "API_ERROR: Failed to create event: null is not an object (evaluating 'event.id')"},
+		{Name: "update empty start", Path: "update", Args: ev, Set: map[string]any{"summary": "y"},
+			Answers: map[string]string{"PATCH /events/E": `{"start":{}}`},
+			Out:     "ID: undefined\nSummary: (no title)\nStart: \nEnd: \n"},
+		{Name: "update add to null event", Path: "update", Args: ev, Set: map[string]any{"add-attendee": []string{"b@x"}},
+			Answers: map[string]string{"GET /events/E": `null`},
+			Err:     "API_ERROR: Failed to update event: null is not an object (evaluating '(await this.calendar.events.get({ calendarId, eventId })).data.attendees')"},
+		{Name: "update add to null attendee", Path: "update", Args: ev, Set: map[string]any{"add-attendee": []string{"b@x"}},
+			Answers: map[string]string{"GET /events/E": `{"attendees":[null]}`},
+			Err:     "API_ERROR: Failed to update event: null is not an object (evaluating 'a.email')"},
+		{Name: "update add beside an attendee without email", Path: "update", Args: ev, Set: map[string]any{"add-attendee": []string{"b@x"}},
+			Answers: map[string]string{"GET /events/E": `{"attendees":[{"displayName":"n"}]}`, "PATCH /events/E": `{"id":"E","attendees":[{"displayName":"n"},{"email":"b@x"}]}`},
+			Out:     "ID: E\nSummary: (no title)\nStart: \nEnd: \n\nAttendees (2):\n  undefined - unknown\n  b@x - unknown\n"},
+		{Name: "respond null event", Path: "respond", Args: ev, Set: map[string]any{"status": "accepted"},
+			Answers: map[string]string{"GET /events/E": `null`},
+			Err:     "API_ERROR: Failed to respond to event: null is not an object (evaluating 'event.data.attendees')"},
+		{Name: "respond null attendee", Path: "respond", Args: ev, Set: map[string]any{"status": "accepted"},
+			Answers: map[string]string{"GET /events/E": `{"attendees":[null]}`},
+			Err:     "API_ERROR: Failed to respond to event: null is not an object (evaluating 'a.self')"},
+		{Name: "respond empty answer", Path: "respond", Args: ev, Set: map[string]any{"status": "accepted"},
+			Answers: map[string]string{"GET /events/E": `{"attendees":[{"self":true}]}`, "PATCH /events/E": `{}`},
+			Out:     "Response updated: accepted\nEvent: (no title)\n"},
+		{Name: "respond null answer", Path: "respond", Args: ev, Set: map[string]any{"status": "accepted"},
+			Answers: map[string]string{"GET /events/E": `{"attendees":[{"self":true}]}`, "PATCH /events/E": `null`},
+			Err:     "API_ERROR: Failed to respond to event: null is not an object (evaluating 'event.id')"},
+		{Name: "freebusy missing parts", Path: "freebusy", Args: map[string]any{"calendar-ids": "a,b"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `{"calendars":{"b":{"busy":[{}],"errors":[{}]},"1":{},"a":{"busy":null,"errors":null}}}`},
+			Out:     "Free/Busy Information\n\nCalendar: 1\n  (no busy periods)\n\nCalendar: b\n  Error: \n  Busy: undefined - undefined\n\nCalendar: a\n  (no busy periods)\n\n"},
+		{Name: "freebusy null calendar", Path: "freebusy", Args: map[string]any{"calendar-ids": "a"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `{"calendars":{"a":null}}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'data.busy')"},
+		{Name: "freebusy null busy period", Path: "freebusy", Args: map[string]any{"calendar-ids": "a"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `{"calendars":{"a":{"busy":[null]}}}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'b.start')"},
+		{Name: "freebusy null error", Path: "freebusy", Args: map[string]any{"calendar-ids": "a"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `{"calendars":{"a":{"errors":[null]}}}`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'e.domain')"},
+		{Name: "freebusy null answer", Path: "freebusy", Args: map[string]any{"calendar-ids": "a"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `null`},
+			Err:     "API_ERROR: Calendar API error: null is not an object (evaluating 'response.data.calendars')"},
+		{Name: "freebusy null calendars", Path: "freebusy", Args: map[string]any{"calendar-ids": "a"}, Set: span,
+			Answers: map[string]string{"POST /freeBusy": `{"calendars":null}`},
+			Out:     "No free/busy data\n"},
+	})
+}

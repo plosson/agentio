@@ -148,7 +148,7 @@ func deleteCmd() plugins.CommandSpec {
 				if err != nil {
 					return nil, err
 				}
-				run.Log(fmt.Sprintf("About to delete script project: %s (%s)", p.Title, p.ScriptID))
+				run.Log(fmt.Sprintf("About to delete script project: %s (%s)", google.Field(p, "title"), google.Field(p, "scriptId")))
 				run.Log("Pass --force to confirm.")
 				return nil, nil
 			}

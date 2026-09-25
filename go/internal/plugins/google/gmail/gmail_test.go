@@ -19,6 +19,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
@@ -1413,9 +1414,8 @@ func TestFiltersCommands(t *testing.T) {
 }
 
 func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
-	m := &message{Subject: `A <b> & "q"`, From: "x@example.com", To: []string{"a@example.com", "b@example.com"}, Date: "today"}
 	body := "<p>fragment</p>"
-	m.Body = &body
+	m := &message{jsvalue.ObjectOf("subject", `A <b> & "q"`, "from", "x@example.com", "to", []any{"a@example.com", "b@example.com"}, "date", "today", "body", body)}
 	header := "\n<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px 20px; margin-bottom: 16px; border-bottom: 1px solid #ddd; background: #f9f9f9;\">\n" +
 		"  <div style=\"font-size: 1.3em; font-weight: 600; margin-bottom: 12px;\">A &lt;b&gt; &amp; &quot;q&quot;</div>\n" +
 		"  <div style=\"margin: 4px 0; font-size: 0.9em;\"><strong>From:</strong> x@example.com</div>\n" +
@@ -1425,10 +1425,12 @@ func TestExportBuildsBunsHTMLAndRunsChrome(t *testing.T) {
 		t.Fatalf("fragment %q", got)
 	}
 	body = "  <!DOCTYPE html><html><BODY class=\"x\">content<body>again</body></html>"
+	m.Set("body", body)
 	if got := exportHTML(m); got != "  <!DOCTYPE html><html><BODY class=\"x\">"+header+"content<body>again</body></html>" {
 		t.Fatalf("document %q", got)
 	}
 	body = "<html>no body tag</html>"
+	m.Set("body", body)
 	if got := exportHTML(m); got != body {
 		t.Fatalf("no body %q", got)
 	}
@@ -1511,6 +1513,178 @@ func TestParallelLookupsReportTheFirstFailure(t *testing.T) {
 		_, err, _ := runDirect(t, fake.Ctx(), c.path, product.Input(t, c.path, c.args, nil))
 		if ce := googletest.CliErr(t, err); !strings.Contains(ce.Message, "labels failed") {
 			t.Errorf("%s: %q", c.path, ce.Message)
+		}
+	}
+}
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing id is "undefined", a null item or answer is Bun's TypeError, and a
+// value of another type prints as JavaScript prints it.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	labels := `{"labels":[{"id":"L1","name":"Auto","type":"user"},{"id":"L3","name":null,"type":"system"}]}`
+	profile := `{"emailAddress":"me@x"}`
+	send := map[string]any{"to": []string{"a@x"}, "subject": "s", "body": "b"}
+	product.RunAnswered(t, storedCreds(time.Now().Add(time.Hour).UnixMilli()), []googletest.Answered{
+		{Name: "list without ids", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"},{"id":"m2","threadId":"t2"},{"id":"m3","threadId":"t3"}],"resultSizeEstimate":0}`,
+				"GET /users/me/messages/m1": `{}`,
+				"GET /users/me/messages/m2": `{"id":"m2","payload":{"headers":[{"name":"From","value":""},{"name":"To","value":"a@x, b@y"},{"name":"Subject","value":null}]},"labelIds":null,"snippet":null}`,
+				"GET /users/me/messages/m3": `{"id":"m3","threadId":"t3","payload":null,"labelIds":[],"snippet":""}`,
+			},
+			Out: "Messages (3 of ~3)\n\n[1] undefined | thread:undefined\n    Subject: (no subject)\n\n[2] m2 | thread:undefined\n    To: a@x, b@y\n    Subject: (no subject)\n\n[3] m3 | thread:t3\n    Subject: (no subject)\n\n"},
+		{Name: "list mistyped", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"}],"resultSizeEstimate":"12"}`,
+				"GET /users/me/messages/m1": `{"id":5,"threadId":true,"labelIds":["A",null,"B"],"snippet":0,"payload":{"headers":[{"name":"Subject","value":42},{"name":"Date","value":"d"}]}}`,
+			},
+			Out: "Messages (1 of ~12)\n\n[1] 5 | thread:true\n    Date: d\n    Subject: 42\n    Labels: A, , B\n\n"},
+		{Name: "list ids without thread", Path: "list", Set: map[string]any{"limit": "300"},
+			Answers: map[string]string{"GET /users/me/messages": `{"messages":[{"id":"m1"},{"id":"m2","threadId":"t"}],"resultSizeEstimate":7}`},
+			Out:     "Messages (1 of ~7)\n\n[1] m2 | thread:t\n\n"},
+		{Name: "list null header", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"}]}`,
+				"GET /users/me/messages/m1": `{"id":"m1","payload":{"headers":[null]}}`,
+			},
+			Err: "API_ERROR: Gmail API error: null is not an object (evaluating 'header.name')"},
+		{Name: "list header name not a string", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"}]}`,
+				"GET /users/me/messages/m1": `{"id":"m1","payload":{"headers":[{"name":5,"value":"x"}]}}`,
+			},
+			Err: "API_ERROR: Gmail API error: header.name.toLowerCase is not a function. (In 'header.name.toLowerCase()', 'header.name.toLowerCase' is undefined)"},
+		{Name: "list To not a string", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"}]}`,
+				"GET /users/me/messages/m1": `{"id":"m1","payload":{"headers":[{"name":"To","value":7}]}}`,
+			},
+			Err: `API_ERROR: Gmail API error: value.split is not a function. (In 'value.split(",")', 'value.split' is undefined)`},
+		{Name: "list null message", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{
+				"GET /users/me/messages":    `{"messages":[{"id":"m1","threadId":"t1"}]}`,
+				"GET /users/me/messages/m1": `null`,
+			},
+			Err: "API_ERROR: Gmail API error: null is not an object (evaluating 'message.payload')"},
+		{Name: "list null item", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{"GET /users/me/messages": `{"messages":[null]}`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'm.id')"},
+		{Name: "list null answer", Path: "list", Set: map[string]any{"limit": "3"},
+			Answers: map[string]string{"GET /users/me/messages": `null`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'response.data.resultSizeEstimate')"},
+		{Name: "get empty", Path: "get", Args: map[string]any{"message-id": "m1"},
+			Answers: map[string]string{"GET /messages/m1": `{}`},
+			Out:     "ID: undefined\nThread: undefined\nFrom: \nDate: \nSubject: (no subject)\n---\n\n"},
+		{Name: "get parts", Path: "get", Args: map[string]any{"message-id": "m1"},
+			Answers: map[string]string{"GET /messages/m1": `{"id":"m1","threadId":"t","payload":{"mimeType":"multipart/mixed","headers":[{"name":"Cc","value":"c@x"}],"parts":[{"mimeType":"text/plain","body":{"data":"aGVsbG8="}},{"filename":"a.pdf","body":{"attachmentId":"A1"}},{"filename":"b.bin","mimeType":null,"body":{"attachmentId":"A2","size":2048}},{"filename":"","body":{"attachmentId":"A3"}},{"filename":"c","body":null},{"parts":null,"body":{}}]}}`},
+			Out:     "ID: m1\nThread: t\nFrom: \nCC: c@x\nDate: \nSubject: (no subject)\nAttachments: 2\n  - a.pdf (0 B) [A1]\n  - b.bin (2 KB) [A2]\n---\nhello\n"},
+		{Name: "get null part", Path: "get", Args: map[string]any{"message-id": "m1"},
+			Answers: map[string]string{"GET /messages/m1": `{"id":"m1","payload":{"mimeType":"multipart/mixed","parts":[{"mimeType":"text/plain","body":{"data":"aGVsbG8="}},null]}}`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'part.filename')"},
+		{Name: "get null", Path: "get", Args: map[string]any{"message-id": "m1"},
+			Answers: map[string]string{"GET /messages/m1": `null`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'message.payload')"},
+		{Name: "labels missing fields", Path: "labels list",
+			Answers: map[string]string{"GET /labels": `{"labels":[{"name":"B","type":"user"},{"id":"INBOX","name":"INBOX","type":"system","messageListVisibility":""},{"id":"L2","name":"a","type":null}]}`},
+			Out:     "NAME   TYPE    ID\nINBOX  system  INBOX\na      user    L2\nB      user    undefined\n\n3 label(s)\n"},
+		{Name: "labels null item", Path: "labels list",
+			Answers: map[string]string{"GET /labels": `{"labels":[null]}`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'label.id')"},
+		{Name: "labels null answer", Path: "labels list",
+			Answers: map[string]string{"GET /labels": `null`},
+			Err:     `API_ERROR: Gmail API error: null is not an object (evaluating '(await this.gmail.users.labels.list({ userId: "me" })).data.labels')`},
+		{Name: "label created empty", Path: "labels create", Args: map[string]any{"name": "x"},
+			Answers: map[string]string{"POST /labels": `{}`},
+			Out:     "Created label: undefined\nID: undefined\n"},
+		{Name: "filters missing and mistyped", Path: "filters list",
+			Answers: map[string]string{
+				"GET /labels":           labels,
+				"GET /settings/filters": `{"filter":[{"id":"f1","criteria":null,"action":{"addLabelIds":["L1","L3",null],"removeLabelIds":[],"forward":""}},{"id":"f2","criteria":{"from":5,"size":1.5,"sizeComparison":"larger","hasAttachment":"yes"},"action":null}]}`,
+			},
+			Out: "f1  (no criteria)  ->  +Auto +L3 +null\nf2  from:5 has:attachment size:larger:1.5  ->  (no action)\n\n2 filter(s)\n"},
+		{Name: "filters null item", Path: "filters list",
+			Answers: map[string]string{"GET /labels": labels, "GET /settings/filters": `{"filter":[null]}`},
+			Err:     "API_ERROR: Gmail API error: null is not an object (evaluating 'filter.criteria')"},
+		{Name: "filters null answer", Path: "filters list",
+			Answers: map[string]string{"GET /labels": labels, "GET /settings/filters": `null`},
+			Err:     `API_ERROR: Gmail API error: null is not an object (evaluating '(await this.gmail.users.settings.filters.list({ userId: "me" })).data.filter')`},
+		{Name: "filter without id and zero size", Path: "filters get", Args: map[string]any{"id": "f1"},
+			Answers: map[string]string{"GET /labels": labels, "GET /settings/filters/f1": `{"criteria":{"size":0,"sizeComparison":"smaller","to":null},"action":{"addLabelIds":["L2","L3","L1"],"removeLabelIds":null}}`},
+			Out:     "ID:       undefined\nCriteria:\n  Size:           smaller 0 bytes\nAction:\n  Apply labels:   L2, L3, Auto\n"},
+		{Name: "send without ids", Path: "send", Set: send,
+			Answers: map[string]string{"GET /profile": profile, "POST /messages/send": `{"id":0,"threadId":null}`},
+			Out:     "Message sent\nID: 0\nThread: null\n"},
+		{Name: "send null", Path: "send", Set: send,
+			Answers: map[string]string{"GET /profile": profile, "POST /messages/send": `null`},
+			Err:     "API_ERROR: Failed to send email: null is not an object (evaluating 'response.data.id')"},
+		{Name: "draft null message", Path: "draft", Set: send,
+			Answers: map[string]string{"GET /profile": profile, "POST /drafts": `{"id":"d","message":null}`},
+			Out:     "Draft created\nDraft ID: d\nMessage ID: \n"},
+		{Name: "draft empty", Path: "draft", Set: send,
+			Answers: map[string]string{"GET /profile": profile, "POST /drafts": `{}`},
+			Out:     "Draft created\nDraft ID: undefined\nMessage ID: \n"},
+	})
+}
+
+// Some of Bun's TypeErrors escape its client's try: the CLI prints them
+// without a code, after whatever the printer wrote before throwing.
+func TestUncaughtTypeErrorsAreBuns(t *testing.T) {
+	var mu sync.Mutex
+	var answers map[string]string
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		mu.Lock()
+		defer mu.Unlock()
+		for key, body := range answers {
+			if method, path, _ := strings.Cut(key, " "); method == h.Method && h.Path == path {
+				googletest.WriteRaw(w, 200, body)
+				return
+			}
+		}
+		googletest.WriteAPIError(w, 404, "no answer")
+	})
+	labels := `{"labels":[{"id":"L1","name":"Auto","type":"user"},{"id":"L3","name":null,"type":"system"}]}`
+	for _, c := range []struct {
+		name, path string
+		args, set  map[string]any
+		answers    map[string]string
+		out, err   string
+	}{
+		{"label without a name", "labels list", nil, nil,
+			map[string]string{"GET /gmail/v1/users/me/labels": `{"labels":[{"id":"L1","type":"user"}]}`},
+			"", "undefined is not an object (evaluating 'l.name.length')"},
+		{"filter without an id", "filters list", nil, nil,
+			map[string]string{"GET /gmail/v1/users/me/labels": labels, "GET /gmail/v1/users/me/settings/filters": `{"filter":[{"id":"a"},{"criteria":{}}]}`},
+			"", "undefined is not an object (evaluating 'f.id.length')"},
+		{"filter action not an array", "filters list", nil, nil,
+			map[string]string{"GET /gmail/v1/users/me/labels": labels, "GET /gmail/v1/users/me/settings/filters": `{"filter":[{"id":"a","action":{"addLabelIds":["L1"]}},{"id":"b","criteria":{"to":"t"},"action":{"removeLabelIds":"x"}}]}`},
+			"a   (no criteria)  ->  +Auto\n", "ids.map is not a function. (In 'ids.map((id) => labelNamesById.get(id) ?? id)', 'ids.map' is undefined)"},
+		{"created filter action not an array", "filters create", nil, map[string]any{"from": "a@x", "apply": []string{"Auto"}},
+			map[string]string{"GET /gmail/v1/users/me/labels": `{"labels":[{"id":"L1","name":"Auto","type":"user"}]}`, "POST /gmail/v1/users/me/settings/filters": `{"criteria":{"size":0,"sizeComparison":"smaller"},"action":{"addLabelIds":"L1"}}`},
+			"Created filter: undefined\n", "ids.map is not a function. (In 'ids.map((id) => labelNamesById.get(id) ?? id)', 'ids.map' is undefined)"},
+		{"label index without a name", "filters create", nil, map[string]any{"from": "a@x", "apply": []string{"Auto"}},
+			map[string]string{"GET /gmail/v1/users/me/labels": labels},
+			"", "null is not an object (evaluating 'l.name.toLowerCase')"},
+		{"reply to a null thread", "send", nil, map[string]any{"reply-to": "T", "body": "b"},
+			map[string]string{"GET /gmail/v1/users/me/profile": `{"emailAddress":"me@x"}`, "GET /gmail/v1/users/me/threads/T": `null`},
+			"", "null is not an object (evaluating '(await this.gmail.users.threads.get({\n      userId: \"me\",\n      id: threadId\n    })).data.messages')"},
+		{"reply to a null message", "send", nil, map[string]any{"reply-to": "T", "body": "b"},
+			map[string]string{"GET /gmail/v1/users/me/profile": `{"emailAddress":"me@x"}`, "GET /gmail/v1/users/me/threads/T": `{"messages":[null]}`},
+			"", "null is not an object (evaluating 'lastMessage.payload')"},
+		{"null profile", "send", nil, map[string]any{"to": []string{"a@x"}, "subject": "s", "body": "b"},
+			map[string]string{"GET /gmail/v1/users/me/profile": `null`},
+			"", "null is not an object (evaluating 'profile.data.emailAddress')"},
+	} {
+		mu.Lock()
+		answers = c.answers
+		mu.Unlock()
+		v, err, _ := runDirect(t, fake.Ctx(), c.path, product.Input(t, c.path, c.args, c.set))
+		if _, isCLI := err.(*clierr.Error); err == nil || isCLI || err.Error() != c.err {
+			t.Errorf("%s: error %#v, Bun %q", c.name, err, c.err)
+			continue
+		}
+		if out := product.Printed(t, c.path, v, false); out != c.out {
+			t.Errorf("%s: printed %q before the error, Bun %q", c.name, out, c.out)
 		}
 	}
 }

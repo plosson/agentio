@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,42 +43,14 @@ var (
 	retrySleep = time.Sleep
 )
 
-type attachmentInfo struct {
-	ID       string `json:"id"`
-	Filename string `json:"filename"`
-	MimeType string `json:"mimeType"`
-	Size     int64  `json:"size"`
-}
+// The models are the Bun client's objects (GmailMessage, GmailAttachmentInfo,
+// GmailLabel, GmailFilter and the send and draft results), built from the
+// answer as JavaScript reads it (google.Answer): a field the answer lacks is
+// undefined, a null item fails with Bun's TypeError, and a value of another
+// type is kept as it came.
 
-// message is GmailMessage. get adds the attachments (when there are any) and
-// the body, in that order, as Bun's `{ ...message, body }` does.
-type message struct {
-	ID          string            `json:"id"`
-	ThreadID    string            `json:"threadId"`
-	Subject     string            `json:"subject"`
-	From        string            `json:"from"`
-	To          []string          `json:"to"`
-	Cc          []string          `json:"cc"`
-	Date        string            `json:"date"`
-	Snippet     string            `json:"snippet"`
-	Labels      []string          `json:"labels"`
-	Attachments *[]attachmentInfo `json:"attachments,omitempty"`
-	Body        *string           `json:"body,omitempty"`
-}
-
-type messageList struct {
-	Messages []message `json:"messages"`
-	Total    int64     `json:"total"`
-}
-
-type label struct {
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	Type                  string `json:"type"`
-	MessageListVisibility string `json:"messageListVisibility,omitempty"`
-	LabelListVisibility   string `json:"labelListVisibility,omitempty"`
-}
-
+// filterCriteria and filterAction are the filter create request, built from
+// the options as Bun's parseFilterCriteriaFromOptions builds it.
 type filterCriteria struct {
 	From           string `json:"from,omitempty"`
 	To             string `json:"to,omitempty"`
@@ -96,12 +67,6 @@ type filterAction struct {
 	AddLabelIDs    []string `json:"addLabelIds,omitempty"`
 	RemoveLabelIDs []string `json:"removeLabelIds,omitempty"`
 	Forward        string   `json:"forward,omitempty"`
-}
-
-type filter struct {
-	ID       string         `json:"id"`
-	Criteria filterCriteria `json:"criteria"`
-	Action   filterAction   `json:"action"`
 }
 
 type failedChunk struct {
@@ -137,10 +102,25 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	return &api{API: google.API{Ctx: ctx, RunContext: run}, svc: svc}, nil
 }
 
-// thrown is a googleapis error Bun does not catch: handleError prints its
-// message without a code.
+// thrown is an error Bun does not catch: handleError prints its message
+// without a code.
 func thrown(err error) error {
 	return errors.New(google.Message(err))
+}
+
+// member is `v.key` on a value read from an answer.
+func member(v any, key string) any { return jsvalue.Member(v, key) }
+
+// items is `for (const x of v || [])` over an answer's array.
+func items(v any) []any {
+	list, _ := jsvalue.Or(v, []any{}).([]any)
+	return list
+}
+
+// notAFunction is JavaScriptCore's TypeError for calling callee, a member
+// that is not a function, in the call expression call.
+func notAFunction(callee, call string) error {
+	return fmt.Errorf("%s is not a function. (In '%s', '%s' is undefined)", callee, call, callee)
 }
 
 // getUserEmail is GmailClient.getUserEmail: the profile address, else "me".
@@ -148,129 +128,187 @@ func (a *api) getUserEmail() (string, error) {
 	if a.userEmail != "" {
 		return a.userEmail, nil
 	}
-	p, err := a.svc.Users.GetProfile("me").Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.GetProfile("me"))
 	if err != nil {
 		return "", err
 	}
-	a.userEmail = p.EmailAddress
-	if a.userEmail == "" {
-		a.userEmail = "me"
+	email, err := jsvalue.Path(raw, "profile.data", "emailAddress")
+	if err != nil {
+		return "", err
 	}
+	a.userEmail = jsvalue.String(jsvalue.Or(email, "me"))
 	return a.userEmail, nil
 }
 
-// parseHeaders lower-cases header names; a later header wins, an empty one is skipped.
-func parseHeaders(headers []*gmail.MessagePartHeader) map[string]string {
-	out := map[string]string{}
-	for _, h := range headers {
-		if h != nil && h.Name != "" && h.Value != "" {
-			out[strings.ToLower(h.Name)] = h.Value
+// parseHeaders is GmailClient.parseHeaders: header names lower-cased, a
+// later header wins, one without a name or a value skipped.
+func parseHeaders(headers any) (map[string]any, error) {
+	out := map[string]any{}
+	for _, h := range items(headers) {
+		if jsvalue.Nullish(h) {
+			return nil, jsvalue.TypeError(h, "header.name")
 		}
+		name, value := member(h, "name"), member(h, "value")
+		if !jsvalue.Truthy(name) || !jsvalue.Truthy(value) {
+			continue
+		}
+		s, ok := name.(string)
+		if !ok {
+			return nil, notAFunction("header.name.toLowerCase", "header.name.toLowerCase()")
+		}
+		out[strings.ToLower(s)] = value
 	}
-	return out
+	return out, nil
 }
 
-func extractAttachments(payload *gmail.MessagePart) []attachmentInfo {
-	out := []attachmentInfo{}
-	var walk func(p *gmail.MessagePart)
-	walk = func(p *gmail.MessagePart) {
-		if p.Filename != "" && p.Body != nil && p.Body.AttachmentId != "" {
-			mime := p.MimeType
-			if mime == "" {
-				mime = "application/octet-stream"
+// header is `headers[name]`.
+func header(headers map[string]any, name string) any {
+	if v, ok := headers[name]; ok {
+		return v
+	}
+	return jsvalue.Undefined
+}
+
+// addresses is parseMessage's parseAddresses.
+func addresses(value any) ([]any, error) {
+	if !jsvalue.Truthy(value) {
+		return []any{}, nil
+	}
+	s, ok := value.(string)
+	if !ok {
+		return nil, notAFunction("value.split", `value.split(",")`)
+	}
+	out := []any{}
+	for _, p := range strings.Split(s, ",") {
+		out = append(out, jsvalue.Trim(p))
+	}
+	return out, nil
+}
+
+// extractAttachments is GmailClient.extractAttachments: every part with a
+// file name and an attachment id, depth first.
+func extractAttachments(payload any) ([]any, error) {
+	out := []any{}
+	var walk func(part any) error
+	walk = func(part any) error {
+		if jsvalue.Nullish(part) {
+			return jsvalue.TypeError(part, "part.filename")
+		}
+		filename, body := member(part, "filename"), member(part, "body")
+		if n, _ := member(filename, "length").(float64); jsvalue.Truthy(filename) && n > 0 && jsvalue.Truthy(jsvalue.Optional(body, "attachmentId")) {
+			out = append(out, jsvalue.ObjectOf(
+				"id", member(body, "attachmentId"),
+				"filename", filename,
+				"mimeType", jsvalue.Or(member(part, "mimeType"), "application/octet-stream"),
+				"size", jsvalue.Or(member(body, "size"), 0),
+			))
+		}
+		for _, child := range items(member(part, "parts")) {
+			if err := walk(child); err != nil {
+				return err
 			}
-			out = append(out, attachmentInfo{ID: p.Body.AttachmentId, Filename: p.Filename, MimeType: mime, Size: p.Body.Size})
 		}
-		for _, child := range p.Parts {
-			if child != nil {
-				walk(child)
-			}
+		return nil
+	}
+	if jsvalue.Truthy(payload) {
+		if err := walk(payload); err != nil {
+			return nil, err
 		}
 	}
-	if payload != nil {
-		walk(payload)
-	}
-	return out
+	return out, nil
 }
 
-func addresses(value string) []string {
-	if value == "" {
-		return []string{}
+// parseMessage is GmailClient.parseMessage.
+func parseMessage(m any, withAttachments bool) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(m) {
+		return nil, jsvalue.TypeError(m, "message.payload")
 	}
-	parts := strings.Split(value, ",")
-	for i, p := range parts {
-		parts[i] = jsvalue.Trim(p)
+	payload := member(m, "payload")
+	headers, err := parseHeaders(jsvalue.Optional(payload, "headers"))
+	if err != nil {
+		return nil, err
 	}
-	return parts
-}
-
-func parseMessage(m *gmail.Message, withAttachments bool) message {
-	var headers map[string]string
-	if m.Payload != nil {
-		headers = parseHeaders(m.Payload.Headers)
+	to, err := addresses(header(headers, "to"))
+	if err != nil {
+		return nil, err
 	}
-	labels := m.LabelIds
-	if labels == nil {
-		labels = []string{}
+	cc, err := addresses(header(headers, "cc"))
+	if err != nil {
+		return nil, err
 	}
-	out := message{
-		ID:       m.Id,
-		ThreadID: m.ThreadId,
-		Subject:  cmp.Or(headers["subject"], "(no subject)"),
-		From:     headers["from"],
-		To:       addresses(headers["to"]),
-		Cc:       addresses(headers["cc"]),
-		Date:     headers["date"],
-		Snippet:  m.Snippet,
-		Labels:   labels,
-	}
+	out := jsvalue.ObjectOf(
+		"id", member(m, "id"),
+		"threadId", member(m, "threadId"),
+		"subject", jsvalue.Or(header(headers, "subject"), "(no subject)"),
+		"from", jsvalue.Or(header(headers, "from"), ""),
+		"to", to,
+		"cc", cc,
+		"date", jsvalue.Or(header(headers, "date"), ""),
+		"snippet", jsvalue.Or(member(m, "snippet"), ""),
+		"labels", jsvalue.Or(member(m, "labelIds"), []any{}),
+	)
 	if withAttachments {
-		if atts := extractAttachments(m.Payload); len(atts) > 0 {
-			out.Attachments = &atts
+		atts, err := extractAttachments(payload)
+		if err != nil {
+			return nil, err
+		}
+		if len(atts) > 0 {
+			out.Set("attachments", atts)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // decodeBody is Buffer.from(data, 'base64').toString('utf-8').
-func decodeBody(data string) string {
-	return jsvalue.BufferString(jsvalue.DecodeBase64(data))
+func decodeBody(data any) string {
+	return jsvalue.BufferString(jsvalue.DecodeBase64(jsvalue.String(data)))
 }
 
 // bodyOf is GmailClient.getBody: the first part of the preferred type, else
 // of the other one. An empty decode counts as not found, as in Bun.
-func bodyOf(payload *gmail.MessagePart, preferHTML bool) string {
-	if payload == nil {
-		return ""
+func bodyOf(payload any, preferHTML bool) (string, error) {
+	if !jsvalue.Truthy(payload) {
+		return "", nil
 	}
-	var find func(p *gmail.MessagePart, mime string) string
-	find = func(p *gmail.MessagePart, mime string) string {
-		if p.MimeType == mime && p.Body != nil && p.Body.Data != "" {
-			return decodeBody(p.Body.Data)
+	var find func(part any, mime string) (string, error)
+	find = func(part any, mime string) (string, error) {
+		if jsvalue.Nullish(part) {
+			return "", jsvalue.TypeError(part, "part.mimeType")
 		}
-		for _, child := range p.Parts {
-			if child == nil {
-				continue
-			}
-			if r := find(child, mime); r != "" {
-				return r
+		if data := jsvalue.Optional(member(part, "body"), "data"); jsvalue.StrictEqual(member(part, "mimeType"), mime) && jsvalue.Truthy(data) {
+			return decodeBody(data), nil
+		}
+		for _, child := range items(member(part, "parts")) {
+			if r, err := find(child, mime); err != nil || r != "" {
+				return r, err
 			}
 		}
-		return ""
+		return "", nil
 	}
 	target, fallback := "text/plain", "text/html"
 	if preferHTML {
 		target, fallback = fallback, target
 	}
-	if r := find(payload, target); r != "" {
-		return r
+	if r, err := find(payload, target); err != nil || r != "" {
+		return r, err
 	}
 	return find(payload, fallback)
 }
 
+// messageList is list's { messages, total }.
+type messageList struct{ *jsvalue.Object }
+
 // list is GmailClient.list: ids page by page up to the capped limit, then
 // metadata for each when the limit is 100 or less.
 func (a *api) list(limit float64, query string, labels []string) (*messageList, error) {
+	out, err := a.listMessages(limit, query, labels)
+	if err != nil {
+		return nil, a.APIError("Gmail API error", err)
+	}
+	return &messageList{out}, nil
+}
+
+func (a *api) listMessages(limit float64, query string, labels []string) (*jsvalue.Object, error) {
 	capped := math.Min(math.Max(limit, 0), listHardCap)
 	withMetadata := capped <= 100
 	q := query
@@ -283,59 +321,75 @@ func (a *api) list(limit float64, query string, labels []string) (*messageList, 
 	}
 	q = jsvalue.Trim(q)
 
-	type ref struct{ id, threadID string }
+	type ref struct{ id, threadID any }
 	var ids []ref
-	var total int64
+	var total any = 0
 	pageToken := ""
 	for float64(len(ids)) < capped {
 		remaining := capped - float64(len(ids))
-		call := a.svc.Users.Messages.List("me").MaxResults(int64(math.Min(remaining, 500))).Context(a.Ctx)
+		call := a.svc.Users.Messages.List("me").MaxResults(int64(math.Min(remaining, 500)))
 		if q != "" {
 			call.Q(q)
 		}
 		if pageToken != "" {
 			call.PageToken(pageToken)
 		}
-		resp, err := call.Do()
+		_, raw, err := google.Answer(a.Ctx, call)
 		if err != nil {
-			return nil, a.APIError("Gmail API error", err)
+			return nil, err
 		}
-		if total == 0 {
-			total = resp.ResultSizeEstimate
+		if !jsvalue.Truthy(total) {
+			estimate, err := jsvalue.Path(raw, "response.data", "resultSizeEstimate")
+			if err != nil {
+				return nil, err
+			}
+			total = jsvalue.Or(estimate, 0)
 		}
-		for _, m := range resp.Messages {
-			if m != nil && m.Id != "" && m.ThreadId != "" {
-				ids = append(ids, ref{m.Id, m.ThreadId})
+		messages, err := jsvalue.Path(raw, "response.data", "messages")
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range items(messages) {
+			if jsvalue.Nullish(m) {
+				return nil, jsvalue.TypeError(m, "m.id")
+			}
+			if id, threadID := member(m, "id"), member(m, "threadId"); jsvalue.Truthy(id) && jsvalue.Truthy(threadID) {
+				ids = append(ids, ref{id, threadID})
 				if float64(len(ids)) >= capped {
 					break
 				}
 			}
 		}
-		pageToken = resp.NextPageToken
-		if pageToken == "" {
+		next := member(raw, "nextPageToken")
+		if !jsvalue.Truthy(next) {
 			break
 		}
+		pageToken = jsvalue.String(next)
 	}
 
-	out := &messageList{Messages: []message{}}
+	messages := []any{}
 	for _, r := range ids {
 		if !withMetadata {
-			out.Messages = append(out.Messages, message{ID: r.id, ThreadID: r.threadID, To: []string{}, Cc: []string{}, Labels: []string{}})
+			messages = append(messages, jsvalue.ObjectOf("id", r.id, "threadId", r.threadID, "subject", "", "from", "",
+				"to", []any{}, "cc", []any{}, "date", "", "snippet", "", "labels", []any{}))
 			continue
 		}
-		m, err := a.svc.Users.Messages.Get("me", r.id).Format("metadata").
-			MetadataHeaders("From", "To", "Cc", "Subject", "Date").Context(a.Ctx).Do()
+		_, raw, err := google.Answer(a.Ctx, a.svc.Users.Messages.Get("me", jsvalue.String(r.id)).Format("metadata").
+			MetadataHeaders("From", "To", "Cc", "Subject", "Date"))
 		if err != nil {
-			return nil, a.APIError("Gmail API error", err)
+			return nil, err
 		}
-		out.Messages = append(out.Messages, parseMessage(m, false))
+		m, err := parseMessage(raw, false)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
 	}
-	out.Total = total
-	if out.Total == 0 {
-		out.Total = int64(len(out.Messages))
-	}
-	return out, nil
+	return jsvalue.ObjectOf("messages", messages, "total", jsvalue.Or(total, float64(len(messages)))), nil
 }
+
+// message is get's `{ ...message, body }`.
+type message struct{ *jsvalue.Object }
 
 // get is GmailClient.get. format is Bun's text, html or raw; anything else
 // reads like text.
@@ -344,42 +398,74 @@ func (a *api) get(id, format string) (*message, error) {
 	if format == "raw" {
 		apiFormat = "raw"
 	}
-	m, err := a.svc.Users.Messages.Get("me", id).Format(apiFormat).Context(a.Ctx).Do()
+	out, err := a.readMessage(id, apiFormat, format)
 	if err != nil {
 		return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
 	}
-	out := parseMessage(m, true)
-	var body string
-	if format == "raw" {
-		if m.Raw != "" {
-			body = decodeBody(m.Raw)
-		}
-	} else {
-		body = bodyOf(m.Payload, format == "html")
+	return &message{out}, nil
+}
+
+func (a *api) readMessage(id, apiFormat, format string) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Messages.Get("me", id).Format(apiFormat))
+	if err != nil {
+		return nil, err
 	}
-	out.Body = &body
-	return &out, nil
+	m, err := parseMessage(raw, true)
+	if err != nil {
+		return nil, err
+	}
+	body := ""
+	if format == "raw" {
+		if data := member(raw, "raw"); jsvalue.Truthy(data) {
+			body = decodeBody(data)
+		}
+	} else if body, err = bodyOf(member(raw, "payload"), format == "html"); err != nil {
+		return nil, err
+	}
+	out := jsvalue.Spread(m)
+	out.Set("body", body)
+	return out, nil
 }
 
 type downloaded struct {
 	data       []byte
-	attachment attachmentInfo
+	attachment *jsvalue.Object
 }
 
 // allAttachments is GmailClient.getAllAttachments.
 func (a *api) allAttachments(id string) ([]downloaded, error) {
-	m, err := a.svc.Users.Messages.Get("me", id).Format("full").Context(a.Ctx).Do()
+	out, err := a.readAttachments(id)
 	if err != nil {
 		return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
 	}
+	return out, nil
+}
+
+func (a *api) readAttachments(id string) ([]downloaded, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Messages.Get("me", id).Format("full"))
+	if err != nil {
+		return nil, err
+	}
+	payload, err := jsvalue.Path(raw, "message.data", "payload")
+	if err != nil {
+		return nil, err
+	}
+	atts, err := extractAttachments(payload)
+	if err != nil {
+		return nil, err
+	}
 	out := []downloaded{}
-	for _, att := range extractAttachments(m.Payload) {
-		body, err := a.svc.Users.Messages.Attachments.Get("me", id, att.ID).Context(a.Ctx).Do()
+	for _, att := range atts {
+		_, body, err := google.Answer(a.Ctx, a.svc.Users.Messages.Attachments.Get("me", id, jsvalue.String(member(att, "id"))))
 		if err != nil {
-			return nil, a.NotFoundOr("Message", id, "Gmail API error", err)
+			return nil, err
 		}
-		if body.Data != "" {
-			out = append(out, downloaded{data: jsvalue.DecodeBase64(body.Data), attachment: att})
+		data, err := jsvalue.Path(body, "response.data", "data")
+		if err != nil {
+			return nil, err
+		}
+		if jsvalue.Truthy(data) {
+			out = append(out, downloaded{data: jsvalue.DecodeBase64(jsvalue.String(data)), attachment: att.(*jsvalue.Object)})
 		}
 	}
 	return out, nil
@@ -388,25 +474,35 @@ func (a *api) allAttachments(id string) ([]downloaded, error) {
 // replyContext is GmailClient.resolveReplyContext: the last message of the
 // thread gives the recipient, the subject and the threading headers.
 func (a *api) replyContext(threadID string) (to []string, subject string, extra []string, err error) {
-	thread, err := a.svc.Users.Threads.Get("me", threadID).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Threads.Get("me", threadID))
 	if err != nil {
 		return nil, "", nil, thrown(err)
 	}
-	if len(thread.Messages) == 0 {
+	// Bun's transpiler inlines the one-use thread in the expression it reports.
+	messages, err := jsvalue.Path(raw, "(await this.gmail.users.threads.get({\n      userId: \"me\",\n      id: threadId\n    })).data", "messages")
+	if err != nil {
+		return nil, "", nil, err
+	}
+	list := items(messages)
+	if len(list) == 0 {
 		return nil, "", nil, a.Fail("NOT_FOUND", "Thread not found: "+threadID, "")
 	}
-	last := thread.Messages[len(thread.Messages)-1]
-	var headers map[string]string
-	if last.Payload != nil {
-		headers = parseHeaders(last.Payload.Headers)
+	last := list[len(list)-1]
+	if jsvalue.Nullish(last) {
+		return nil, "", nil, jsvalue.TypeError(last, "lastMessage.payload")
 	}
-	to = []string{cmp.Or(headers["reply-to"], headers["from"])}
-	subject = headers["subject"]
-	if !strings.HasPrefix(subject, "Re:") {
-		subject = "Re: " + cmp.Or(subject, "(no subject)")
+	headers, err := parseHeaders(jsvalue.Optional(member(last, "payload"), "headers"))
+	if err != nil {
+		return nil, "", nil, err
 	}
-	if id := headers["message-id"]; id != "" {
-		extra = []string{"In-Reply-To: " + id, "References: " + id}
+	to = []string{jsvalue.String(jsvalue.Or(jsvalue.Or(header(headers, "reply-to"), header(headers, "from")), ""))}
+	if s, ok := header(headers, "subject").(string); ok && strings.HasPrefix(s, "Re:") {
+		subject = s
+	} else {
+		subject = "Re: " + jsvalue.String(jsvalue.Or(header(headers, "subject"), "(no subject)"))
+	}
+	if id := header(headers, "message-id"); jsvalue.Truthy(id) {
+		extra = []string{"In-Reply-To: " + jsvalue.String(id), "References: " + jsvalue.String(id)}
 	}
 	return to, subject, extra, nil
 }
@@ -589,32 +685,32 @@ func (a *api) multipartLines(o *sendOptions) ([]string, error) {
 	return lines, nil
 }
 
-type sendResult struct {
-	ID       string   `json:"id"`
-	ThreadID string   `json:"threadId"`
-	LabelIDs []string `json:"labelIds"`
-}
+// sendResult is send's { id, threadId, labelIds }.
+type sendResult struct{ *jsvalue.Object }
 
 func (a *api) send(o *sendOptions) (*sendResult, error) {
 	raw, err := a.buildEncodedMessage(o)
 	if err != nil {
 		return nil, err
 	}
-	m, err := a.svc.Users.Messages.Send("me", &gmail.Message{Raw: raw, ThreadId: o.replyTo}).Context(a.Ctx).Do()
+	_, answer, err := google.Answer(a.Ctx, a.svc.Users.Messages.Send("me", &gmail.Message{Raw: raw, ThreadId: o.replyTo}))
+	if err == nil && jsvalue.Nullish(answer) {
+		err = jsvalue.TypeError(answer, "response.data.id")
+	}
 	if err != nil {
 		return nil, a.APIError("Failed to send email", err)
 	}
-	labels := m.LabelIds
-	if labels == nil {
-		labels = []string{"SENT"}
-	}
-	return &sendResult{ID: m.Id, ThreadID: m.ThreadId, LabelIDs: labels}, nil
+	return &sendResult{jsvalue.ObjectOf(
+		"id", member(answer, "id"),
+		"threadId", member(answer, "threadId"),
+		"labelIds", jsvalue.Or(member(answer, "labelIds"), []any{"SENT"}),
+	)}, nil
 }
 
+// draftResult is draft's and updateDraft's { id, messageId }.
 type draftResult struct {
-	ID        string `json:"id"`
-	MessageID string `json:"messageId"`
-	updated   bool
+	*jsvalue.Object
+	updated bool
 }
 
 // draftMissing is Bun's draft 404 test, on the message text.
@@ -634,26 +730,27 @@ func (a *api) saveDraft(id string, o *sendOptions) (*draftResult, error) {
 		return nil, err
 	}
 	draft := &gmail.Draft{Message: &gmail.Message{Raw: raw, ThreadId: o.replyTo}}
-	var d *gmail.Draft
+	var answer any
 	if id == "" {
-		d, err = a.svc.Users.Drafts.Create("me", draft).Context(a.Ctx).Do()
-		if err != nil {
-			return nil, a.APIError("Failed to create draft", err)
-		}
+		_, answer, err = google.Answer(a.Ctx, a.svc.Users.Drafts.Create("me", draft))
 	} else {
-		d, err = a.svc.Users.Drafts.Update("me", id, draft).Context(a.Ctx).Do()
-		if err != nil {
-			if draftMissing(err) {
-				return nil, a.draftNotFound(id)
-			}
-			return nil, a.APIError("Failed to update draft", err)
-		}
+		_, answer, err = google.Answer(a.Ctx, a.svc.Users.Drafts.Update("me", id, draft))
 	}
-	out := &draftResult{ID: d.Id, updated: id != ""}
-	if d.Message != nil {
-		out.MessageID = d.Message.Id
+	if err == nil && jsvalue.Nullish(answer) {
+		err = jsvalue.TypeError(answer, "response.data.id")
 	}
-	return out, nil
+	switch {
+	case err != nil && id == "":
+		return nil, a.APIError("Failed to create draft", err)
+	case err != nil && draftMissing(err):
+		return nil, a.draftNotFound(id)
+	case err != nil:
+		return nil, a.APIError("Failed to update draft", err)
+	}
+	return &draftResult{jsvalue.ObjectOf(
+		"id", member(answer, "id"),
+		"messageId", jsvalue.Or(jsvalue.Optional(member(answer, "message"), "id"), ""),
+	), id != ""}, nil
 }
 
 func (a *api) deleteDraft(id string) error {
@@ -685,97 +782,160 @@ func (a *api) mark(id string, read bool) error {
 	return nil
 }
 
-func mapLabel(l *gmail.Label) label {
+// mapLabel is GmailClient.mapLabel.
+func mapLabel(l any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(l) {
+		return nil, jsvalue.TypeError(l, "label.id")
+	}
 	kind := "user"
-	if l.Type == "system" {
+	if jsvalue.StrictEqual(member(l, "type"), "system") {
 		kind = "system"
 	}
-	return label{ID: l.Id, Name: l.Name, Type: kind, MessageListVisibility: l.MessageListVisibility, LabelListVisibility: l.LabelListVisibility}
+	out := jsvalue.ObjectOf("id", member(l, "id"), "name", member(l, "name"), "type", kind)
+	for _, k := range []string{"messageListVisibility", "labelListVisibility"} {
+		if v := member(l, k); jsvalue.Truthy(v) {
+			out.Set(k, v)
+		}
+	}
+	return out, nil
 }
 
 // listLabels is GmailClient.listLabels: system labels first, then by
 // localeCompare on the name.
-func (a *api) listLabels() ([]label, error) {
-	resp, err := a.svc.Users.Labels.List("me").Context(a.Ctx).Do()
+func (a *api) listLabels() ([]*jsvalue.Object, error) {
+	out, err := a.readLabels()
 	if err != nil {
 		return nil, a.APIError("Gmail API error", err)
 	}
-	out := []label{}
-	for _, l := range resp.Labels {
-		if l != nil {
-			out = append(out, mapLabel(l))
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Type != out[j].Type {
-			return out[i].Type == "system"
-		}
-		return jsvalue.LocaleCompare(out[i].Name, out[j].Name) < 0
-	})
 	return out, nil
 }
 
-func (a *api) createLabel(name string) (*label, error) {
-	l, err := a.svc.Users.Labels.Create("me", &gmail.Label{Name: name, MessageListVisibility: "show", LabelListVisibility: "labelShow"}).Context(a.Ctx).Do()
+func (a *api) readLabels() ([]*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Labels.List("me"))
+	if err != nil {
+		return nil, err
+	}
+	// Bun's transpiler inlines the one-use response in the expression it reports.
+	labels, err := jsvalue.Path(raw, `(await this.gmail.users.labels.list({ userId: "me" })).data`, "labels")
+	if err != nil {
+		return nil, err
+	}
+	list, err := jsvalue.Items(jsvalue.Or(labels, []any{}), "(response.data.labels || [])")
+	if err != nil {
+		return nil, err
+	}
+	out := []*jsvalue.Object{}
+	for _, l := range list {
+		m, err := mapLabel(l)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	// `a.name.localeCompare(b.name)` throws when a has no name; which pairs
+	// JavaScriptCore compares is its own, so only the message is Bun's.
+	var sortErr error
+	sort.SliceStable(out, func(i, j int) bool {
+		ti, tj := member(out[i], "type"), member(out[j], "type")
+		if ti != tj {
+			return ti == "system"
+		}
+		name := member(out[i], "name")
+		if jsvalue.Nullish(name) {
+			if sortErr == nil {
+				sortErr = jsvalue.TypeError(name, "a.name.localeCompare")
+			}
+			return false
+		}
+		return jsvalue.LocaleCompare(jsvalue.String(name), jsvalue.String(member(out[j], "name"))) < 0
+	})
+	if sortErr != nil {
+		return nil, sortErr
+	}
+	return out, nil
+}
+
+// labelCreated is createLabel's GmailLabel.
+type labelCreated struct{ *jsvalue.Object }
+
+func (a *api) createLabel(name string) (*labelCreated, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Labels.Create("me", &gmail.Label{Name: name, MessageListVisibility: "show", LabelListVisibility: "labelShow"}))
+	var l *jsvalue.Object
+	if err == nil {
+		l, err = mapLabel(raw)
+	}
 	if err != nil {
 		return nil, a.APIError("Failed to create label", err)
 	}
-	out := mapLabel(l)
-	return &out, nil
+	return &labelCreated{l}, nil
+}
+
+// lowerName is `l.name.toLowerCase()`.
+func lowerName(l *jsvalue.Object) (string, error) {
+	name := member(l, "name")
+	if jsvalue.Nullish(name) {
+		return "", jsvalue.TypeError(name, "l.name.toLowerCase")
+	}
+	return strings.ToLower(jsvalue.String(name)), nil
 }
 
 // resolveLabel finds a label by id, else by name without regard to case.
-func (a *api) resolveLabel(nameOrID string) (*label, error) {
+func (a *api) resolveLabel(nameOrID string) (*jsvalue.Object, error) {
 	labels, err := a.listLabels()
 	if err != nil {
 		return nil, err
 	}
-	for i := range labels {
-		if labels[i].ID == nameOrID {
-			return &labels[i], nil
+	for _, l := range labels {
+		if jsvalue.StrictEqual(member(l, "id"), nameOrID) {
+			return l, nil
 		}
 	}
-	for i := range labels {
-		if strings.ToLower(labels[i].Name) == strings.ToLower(nameOrID) {
-			return &labels[i], nil
+	for _, l := range labels {
+		name, err := lowerName(l)
+		if err != nil {
+			return nil, err
+		}
+		if name == strings.ToLower(nameOrID) {
+			return l, nil
 		}
 	}
 	return nil, a.Fail("NOT_FOUND", "Label not found: "+nameOrID, "")
 }
 
-type labelDeleted struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
+// labelDeleted is deleteLabel's { id, name }.
+type labelDeleted struct{ *jsvalue.Object }
 
 func (a *api) deleteLabel(nameOrID string) (*labelDeleted, error) {
 	l, err := a.resolveLabel(nameOrID)
 	if err != nil {
 		return nil, err
 	}
-	if l.Type == "system" {
-		return nil, a.Fail("INVALID_PARAMS", "Cannot delete system label: "+l.Name, "")
+	if member(l, "type") == "system" {
+		return nil, a.Fail("INVALID_PARAMS", "Cannot delete system label: "+google.Field(l, "name"), "")
 	}
-	if err := a.svc.Users.Labels.Delete("me", l.ID).Context(a.Ctx).Do(); err != nil {
+	if err := a.svc.Users.Labels.Delete("me", google.Field(l, "id")).Context(a.Ctx).Do(); err != nil {
 		return nil, a.APIError("Failed to delete label", err)
 	}
-	return &labelDeleted{ID: l.ID, Name: l.Name}, nil
+	return &labelDeleted{jsvalue.ObjectOf("id", member(l, "id"), "name", member(l, "name"))}, nil
 }
 
-func (a *api) renameLabel(oldNameOrID, newName string) (*label, error) {
+func (a *api) renameLabel(oldNameOrID, newName string) (*jsvalue.Object, error) {
 	l, err := a.resolveLabel(oldNameOrID)
 	if err != nil {
 		return nil, err
 	}
-	if l.Type == "system" {
-		return nil, a.Fail("INVALID_PARAMS", "Cannot rename system label: "+l.Name, "")
+	if member(l, "type") == "system" {
+		return nil, a.Fail("INVALID_PARAMS", "Cannot rename system label: "+google.Field(l, "name"), "")
 	}
-	patched, err := a.svc.Users.Labels.Patch("me", l.ID, &gmail.Label{Name: newName}).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Labels.Patch("me", google.Field(l, "id"), &gmail.Label{Name: newName}))
+	var patched *jsvalue.Object
+	if err == nil {
+		patched, err = mapLabel(raw)
+	}
 	if err != nil {
 		return nil, a.APIError("Failed to rename label", err)
 	}
-	out := mapLabel(patched)
-	return &out, nil
+	return patched, nil
 }
 
 // resolveLabelIDs is GmailClient.resolveLabelIds. Its name index is a Map
@@ -788,18 +948,26 @@ func (a *api) resolveLabelIDs(namesOrIDs []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	byID := map[string]string{}
-	byName := map[string]string{}
+	byID := map[string]*jsvalue.Object{}
 	for _, l := range labels {
-		byID[l.ID] = l.ID
-		byName[strings.ToLower(l.Name)] = l.ID
+		if id, ok := member(l, "id").(string); ok {
+			byID[id] = l
+		}
+	}
+	byName := map[string]*jsvalue.Object{}
+	for _, l := range labels {
+		name, err := lowerName(l)
+		if err != nil {
+			return nil, err
+		}
+		byName[name] = l
 	}
 	out := make([]string, len(namesOrIDs))
 	for i, input := range namesOrIDs {
-		if id, ok := byID[input]; ok {
-			out[i] = id
-		} else if id, ok := byName[strings.ToLower(input)]; ok {
-			out[i] = id
+		if l, ok := byID[input]; ok {
+			out[i] = google.Field(l, "id")
+		} else if l, ok := byName[strings.ToLower(input)]; ok {
+			out[i] = google.Field(l, "id")
 		} else {
 			return nil, a.Fail("NOT_FOUND", "Label not found: "+input, "")
 		}
@@ -843,6 +1011,13 @@ func (a *api) expandThreads(threadIDs []string, maxRetries int) ([]string, error
 		next     int
 		wg       sync.WaitGroup
 	)
+	fail := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
 	worker := func() {
 		defer wg.Done()
 		for {
@@ -855,26 +1030,31 @@ func (a *api) expandThreads(threadIDs []string, maxRetries int) ([]string, error
 			next++
 			mu.Unlock()
 			id := threadIDs[idx]
-			var thread *gmail.Thread
+			var raw any
 			err := withRetry(maxRetries, func() error {
 				var err error
-				thread, err = a.svc.Users.Threads.Get("me", id).Format("minimal").Context(a.Ctx).Do()
+				_, raw, err = google.Answer(a.Ctx, a.svc.Users.Threads.Get("me", id).Format("minimal"))
 				return err
 			})
 			if err != nil {
 				if google.IsNotFound(err) {
 					continue
 				}
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = a.APIError("Failed to expand thread "+id, err)
-				}
-				mu.Unlock()
+				fail(a.APIError("Failed to expand thread "+id, err))
 				return
 			}
-			for _, m := range thread.Messages {
-				if m != nil && m.Id != "" {
-					perThread[idx] = append(perThread[idx], m.Id)
+			messages, err := jsvalue.Path(raw, "response.data", "messages")
+			if err != nil {
+				fail(a.APIError("Failed to expand thread "+id, err))
+				return
+			}
+			for _, m := range items(messages) {
+				if jsvalue.Nullish(m) {
+					fail(a.APIError("Failed to expand thread "+id, jsvalue.TypeError(m, "m.id")))
+					return
+				}
+				if mid := member(m, "id"); jsvalue.Truthy(mid) {
+					perThread[idx] = append(perThread[idx], jsvalue.String(mid))
 				}
 			}
 		}
@@ -927,94 +1107,114 @@ func (a *api) batchModify(action string, ids, add, remove []string, chunkSize, m
 	return out
 }
 
-// mapFilter is GmailClient.mapFilter on the API's own JSON: the typed
-// gmail.Filter cannot tell a size of 0 from no size, and Bun keeps any number.
-func mapFilter(raw any) filter {
-	o, _ := raw.(*jsvalue.Object)
-	id, _ := o.Str("id")
-	out := filter{ID: id}
-	c, _ := field(o, "criteria").(*jsvalue.Object)
-	out.Criteria = filterCriteria{
-		From: str(c, "from"), To: str(c, "to"), Subject: str(c, "subject"), Query: str(c, "query"), NegatedQuery: str(c, "negatedQuery"),
-		HasAttachment: jsvalue.Truthy(field(c, "hasAttachment")), ExcludeChats: jsvalue.Truthy(field(c, "excludeChats")),
+// mapFilter is GmailClient.mapFilter.
+func mapFilter(f any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(f) {
+		return nil, jsvalue.TypeError(f, "filter.criteria")
 	}
-	if n, ok := field(c, "size").(json.Number); ok {
-		size, _ := n.Float64()
-		v := int64(size)
-		out.Criteria.Size = &v
+	rc := jsvalue.Or(member(f, "criteria"), jsvalue.NewObject())
+	criteria := jsvalue.NewObject()
+	for _, k := range []string{"from", "to", "subject", "query", "negatedQuery"} {
+		if v := member(rc, k); jsvalue.Truthy(v) {
+			criteria.Set(k, v)
+		}
 	}
-	if cmp, _ := c.Str("sizeComparison"); cmp == "larger" || cmp == "smaller" {
-		out.Criteria.SizeComparison = cmp
+	for _, k := range []string{"hasAttachment", "excludeChats"} {
+		if jsvalue.Truthy(member(rc, k)) {
+			criteria.Set(k, true)
+		}
 	}
-	act, _ := field(o, "action").(*jsvalue.Object)
-	out.Action = filterAction{AddLabelIDs: labelIDs(field(act, "addLabelIds")), RemoveLabelIDs: labelIDs(field(act, "removeLabelIds")), Forward: str(act, "forward")}
-	return out
-}
-
-func field(o *jsvalue.Object, key string) any {
-	v, _ := o.Get(key)
-	return v
-}
-
-func str(o *jsvalue.Object, key string) string {
-	s, _ := o.Str(key)
-	return s
-}
-
-// labelIDs is a non-empty array of label ids, else nil (Bun's `?.length`).
-func labelIDs(v any) []string {
-	items, _ := v.([]any)
-	var out []string
-	for _, item := range items {
-		s, _ := item.(string)
-		out = append(out, s)
+	if size := member(rc, "size"); isNumber(size) {
+		criteria.Set("size", size)
 	}
-	return out
+	if c := member(rc, "sizeComparison"); c == "larger" || c == "smaller" {
+		criteria.Set("sizeComparison", c)
+	}
+	ra := jsvalue.Or(member(f, "action"), jsvalue.NewObject())
+	action := jsvalue.NewObject()
+	for _, k := range []string{"addLabelIds", "removeLabelIds"} {
+		if v := member(ra, k); jsvalue.Truthy(jsvalue.Optional(v, "length")) {
+			action.Set(k, v)
+		}
+	}
+	if v := member(ra, "forward"); jsvalue.Truthy(v) {
+		action.Set("forward", v)
+	}
+	return jsvalue.ObjectOf("id", member(f, "id"), "criteria", criteria, "action", action), nil
 }
 
-// filtersCall is users.settings.filters under the client's base path, so
-// test endpoints apply.
-func (a *api) filtersCall(method, suffix string, body []byte) (any, error) {
-	return google.CallJSON(a.Ctx, a.RunContext, google.Snake, method, a.svc.BasePath, "gmail/v1/users/me/settings/filters"+suffix, body)
+// isNumber is `typeof v === 'number'` for a value read from an answer.
+func isNumber(v any) bool {
+	switch v.(type) {
+	case json.Number, float64, int, int64:
+		return true
+	}
+	return false
 }
 
-func (a *api) listFilters() ([]filter, error) {
-	resp, err := a.filtersCall("GET", "", nil)
+func (a *api) listFilters() ([]*jsvalue.Object, error) {
+	out, err := a.readFilters()
 	if err != nil {
 		return nil, a.APIError("Gmail API error", err)
-	}
-	o, _ := resp.(*jsvalue.Object)
-	out := []filter{}
-	items, _ := field(o, "filter").([]any)
-	for _, f := range items {
-		out = append(out, mapFilter(f))
 	}
 	return out, nil
 }
 
-func (a *api) getFilter(id string) (*filter, error) {
-	resp, err := a.filtersCall("GET", "/"+url.PathEscape(id), nil)
-	if err != nil {
-		return nil, a.NotFoundOr("Filter", id, "Gmail API error", err)
-	}
-	out := mapFilter(resp)
-	return &out, nil
-}
-
-func (a *api) createFilter(c filterCriteria, act filterAction) (*filter, error) {
-	body, err := json.Marshal(struct {
-		Criteria filterCriteria `json:"criteria"`
-		Action   filterAction   `json:"action"`
-	}{c, act})
+func (a *api) readFilters() ([]*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Settings.Filters.List("me"))
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.filtersCall("POST", "", body)
+	filters, err := jsvalue.Path(raw, `(await this.gmail.users.settings.filters.list({ userId: "me" })).data`, "filter")
+	if err != nil {
+		return nil, err
+	}
+	list, err := jsvalue.Items(jsvalue.Or(filters, []any{}), "(response.data.filter || [])")
+	if err != nil {
+		return nil, err
+	}
+	out := []*jsvalue.Object{}
+	for _, f := range list {
+		m, err := mapFilter(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func (a *api) getFilter(id string) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Settings.Filters.Get("me", id))
+	var out *jsvalue.Object
+	if err == nil {
+		out, err = mapFilter(raw)
+	}
+	if err != nil {
+		return nil, a.NotFoundOr("Filter", id, "Gmail API error", err)
+	}
+	return out, nil
+}
+
+func (a *api) createFilter(c filterCriteria, act filterAction) (*jsvalue.Object, error) {
+	criteria := &gmail.FilterCriteria{
+		From: c.From, To: c.To, Subject: c.Subject, Query: c.Query, NegatedQuery: c.NegatedQuery,
+		HasAttachment: c.HasAttachment, ExcludeChats: c.ExcludeChats, SizeComparison: c.SizeComparison,
+	}
+	if c.Size != nil {
+		criteria.Size = *c.Size
+		criteria.ForceSendFields = []string{"Size"}
+	}
+	body := &gmail.Filter{Criteria: criteria, Action: &gmail.FilterAction{AddLabelIds: act.AddLabelIDs, RemoveLabelIds: act.RemoveLabelIDs, Forward: act.Forward}}
+	_, raw, err := google.Answer(a.Ctx, a.svc.Users.Settings.Filters.Create("me", body))
+	var out *jsvalue.Object
+	if err == nil {
+		out, err = mapFilter(raw)
+	}
 	if err != nil {
 		return nil, a.APIError("Failed to create filter", err)
 	}
-	out := mapFilter(resp)
-	return &out, nil
+	return out, nil
 }
 
 func (a *api) deleteFilter(id string) error {
@@ -1024,15 +1224,19 @@ func (a *api) deleteFilter(id string) error {
 	return nil
 }
 
-// labelNamesByID is Bun buildLabelNamesById.
-func (a *api) labelNamesByID() (map[string]string, error) {
+// labelNamesByID is Bun buildLabelNamesById: label id to name, the name as
+// the label has it (resolveLabelNames falls back to the id when it is null
+// or undefined).
+func (a *api) labelNamesByID() (map[string]any, error) {
 	labels, err := a.listLabels()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]string, len(labels))
+	out := make(map[string]any, len(labels))
 	for _, l := range labels {
-		out[l.ID] = l.Name
+		if id, ok := member(l, "id").(string); ok {
+			out[id] = member(l, "name")
+		}
 	}
 	return out, nil
 }

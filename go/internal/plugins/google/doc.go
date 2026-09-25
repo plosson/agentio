@@ -10,7 +10,10 @@
 //   - Client: the product's api struct embeds API (context, RunContext and the
 //     Bun clients' error shapes: APIError, NotFoundOr, StatusError, Failed)
 //     beside the google.golang.org/api services it builds with NewService or
-//     DriveService. CallJSON serves the calls those services cannot make.
+//     DriveService. Answer runs one of their calls and also returns the answer
+//     as JavaScript reads it (undefined versus null versus ""), for the Bun
+//     client objects and printers built from it. CallJSON serves only the
+//     calls those services cannot make as Bun does (a body sent verbatim).
 //   - Commands: the generic input helpers (Stdin, OptionOrStdin, Result,
 //     and the Prepare adapters Parse and Check) live in package plugins; a
 //     required option is OptionSpec.Required. BatchRequests (a batch command's

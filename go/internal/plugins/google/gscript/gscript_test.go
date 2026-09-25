@@ -495,7 +495,7 @@ func TestListSendsTheBunQueryAndFormats(t *testing.T) {
 	if got := googletest.JSONText(v); got != `[{"scriptId":"s1","title":"Helper","parentId":"sheet9","modifiedTime":"2024-02-01T00:00:00.000Z"},{"scriptId":"s2","title":"Untitled"}]` {
 		t.Fatal(got)
 	}
-	if got := product.Printed(t, "list", []listItem{}, false); got != "No script projects found\n" {
+	if got := product.Printed(t, "list", []any{}, false); got != "No script projects found\n" {
 		t.Fatalf("%q", got)
 	}
 	// The default is 25; parseInt("abc") is NaN, which gaxios sends as is.
@@ -948,3 +948,73 @@ func TestAPIErrorsMatchBun(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing scriptId or file id is "undefined", a null item or answer is Bun's
+// TypeError (with the expression Bun's transpiler reports), and a missing
+// file name, type or source falls back as the Bun client does.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	id := map[string]any{"id": "S"}
+	getCode := map[string]any{"id": "S", "file": "Code"}
+	const project, content = "GET /v1/projects/S", "GET /v1/projects/S/content"
+	product.RunAnswered(t, storedCreds(freshExpiry), []googletest.Answered{
+		{Name: "metadata nulls", Path: "metadata", Args: id,
+			Answers: map[string]string{project: `{"title":"","creator":null,"lastModifyUser":{},"parentId":null}`},
+			Out:     "Script ID: undefined\nTitle: Untitled\nURL: https://script.google.com/d/undefined/edit\n"},
+		{Name: "metadata null answer", Path: "metadata", Args: id,
+			Answers: map[string]string{project: `null`},
+			Err:     "API_ERROR: Failed to get script project metadata: null is not an object (evaluating 'data.scriptId')"},
+		{Name: "metadata empty body", Path: "metadata", Args: id,
+			Answers: map[string]string{project: ``},
+			Out:     "Script ID: undefined\nTitle: Untitled\nURL: https://script.google.com/d/undefined/edit\n"},
+		{Name: "metadata mistyped", Path: "metadata", Args: id,
+			Answers: map[string]string{project: `{"scriptId":5,"title":7,"creator":"x","createTime":0,"updateTime":false,"lastModifyUser":{"email":"e"},"parentId":"P"}`},
+			Out:     "Script ID: 5\nTitle: 7\nBound to: P\nLast modified by: e\nURL: https://script.google.com/d/5/edit\n"},
+		{Name: "create null answer", Path: "create", Set: map[string]any{"title": "t"},
+			Answers: map[string]string{"POST /v1/projects": `null`},
+			Err:     "API_ERROR: Failed to create script project: null is not an object (evaluating 'data.scriptId')"},
+		{Name: "list missing and null fields", Path: "list",
+			Answers: map[string]string{"GET /files": `{"files":[{"name":"A","parents":[]},{"id":"i2","name":null,"parents":null,"modifiedTime":""},{"parents":[null,"x"]},{"id":"i4","parents":[""]},{"id":"i5","parents":["P"],"modifiedTime":"m"}]}`},
+			Out:     "Script projects (5)\n\n[1] A\n    ID: undefined\n\n[2] Untitled\n    ID: i2\n\n[3] Untitled\n    ID: undefined\n\n[4] Untitled\n    ID: i4\n\n[5] Untitled  [bound to P]\n    ID: i5\n    Modified: m\n\n"},
+		{Name: "list mistyped", Path: "list",
+			Answers: map[string]string{"GET /files": `{"files":[{"id":3,"name":0,"parents":{"0":"q"}}]}`},
+			Out:     "Script projects (1)\n\n[1] Untitled  [bound to q]\n    ID: 3\n\n"},
+		{Name: "list null item", Path: "list",
+			Answers: map[string]string{"GET /files": `{"files":[null]}`},
+			Err:     "API_ERROR: Failed to list script projects: null is not an object (evaluating 'file.id')"},
+		{Name: "list null files", Path: "list",
+			Answers: map[string]string{"GET /files": `{"files":null}`},
+			Out:     "No script projects found\n"},
+		{Name: "list null answer", Path: "list",
+			Answers: map[string]string{"GET /files": `null`},
+			Err: "API_ERROR: Failed to list script projects: null is not an object (evaluating '(await this.drive.files.list({\n" +
+				"        pageSize: Math.min(limit, 100),\n        q,\n        fields: \"files(id,name,parents,modifiedTime)\",\n" +
+				"        orderBy: \"modifiedTime desc\"\n      })).data.files')"},
+		{Name: "get null answer", Path: "get", Args: getCode,
+			Answers: map[string]string{content: `null`},
+			Err:     "API_ERROR: Failed to get script content: null is not an object (evaluating '(await this.script.projects.getContent({ scriptId })).data.files')"},
+		{Name: "get null file", Path: "get", Args: getCode,
+			Answers: map[string]string{content: `{"files":[{"name":"Code"},null]}`},
+			Err:     "API_ERROR: Failed to get script content: null is not an object (evaluating 'f.name')"},
+		{Name: "get null fields", Path: "get", Args: map[string]any{"id": "S", "file": "Nope"},
+			Answers: map[string]string{content: `{"files":[{"name":null,"type":null,"source":null},{},{"name":"Code","source":null}]}`},
+			Err:     `NOT_FOUND: No file named "Nope" in script S`},
+		{Name: "get null source", Path: "get", Args: getCode,
+			Answers: map[string]string{content: `{"files":[{"name":"Code","source":null}]}`}},
+		{Name: "get no files", Path: "get", Args: getCode,
+			Answers: map[string]string{content: `{}`},
+			Err:     `NOT_FOUND: No file named "Code" in script S`},
+		{Name: "put answer with missing fields", Path: "put", Args: getCode, Set: map[string]any{"source": "x"},
+			Answers: map[string]string{content: `{"files":[]}`, "PUT /v1/projects/S/content": `{"files":[{"name":"a","type":null},{},{"type":"HTML","name":7}]}`},
+			Out:     "Pushed 3 file(s) to S\n  a (SERVER_JS)\n   (SERVER_JS)\n  7 (HTML)\n"},
+		{Name: "put null file", Path: "put", Args: getCode, Set: map[string]any{"source": "x"},
+			Answers: map[string]string{content: `{"files":[{"name":"Code","type":null,"source":"old"}]}`, "PUT /v1/projects/S/content": `{"files":[null]}`},
+			Err:     "API_ERROR: Failed to update script content: null is not an object (evaluating 'f.name')"},
+		{Name: "put null answer", Path: "put", Args: getCode, Set: map[string]any{"source": "x"},
+			Answers: map[string]string{content: `{"files":[]}`, "PUT /v1/projects/S/content": `null`},
+			Err: "API_ERROR: Failed to update script content: null is not an object (evaluating '(await this.script.projects.updateContent({\n" +
+				"        scriptId,\n        requestBody: {\n          files: files.map((f) => ({ name: f.name, type: f.type, source: f.source }))\n" +
+				"        }\n      })).data.files')"},
+	})
+}

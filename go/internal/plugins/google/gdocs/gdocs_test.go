@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -55,7 +56,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"get":       {"<doc-id-or-url>", "--format <format>=markdown --output <file>", "read", "", "", false},
 		"create":    {"", "--title <title>! --content <text> --folder <folder-id>", "write", "create document", "text", true},
 		"list":      {"", "--limit <n>=10 --query <query>", "read", "", "", true},
-		"structure": {"<doc-id-or-url>", "--tab <tab-id> --all-tabs", "read", "", "", false},
+		"structure": {"<doc-id-or-url>", "--tab <tab-id> --all-tabs", "read", "", "", true},
 		"tabs":      {"<doc-id-or-url>", "", "read", "", "", true},
 		"batch":     {"<doc-id-or-url>", "--requests-json <json> --file <path>", "write", "execute batch update", "", false},
 	}
@@ -474,7 +475,7 @@ func TestListSendsTheBunQueryAndFillsFallbacks(t *testing.T) {
 	if got := product.Printed(t, "list", docs, false); got != wantText {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "list", []google.DriveFile{}, false); got != "No documents found\n" {
+	if got := product.Printed(t, "list", []any{}, false); got != "No documents found\n" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -888,3 +889,102 @@ func TestEmptyTitleIsSentAsGiven(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers).
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	doc := map[string]any{"doc-id-or-url": "D"}
+	create := map[string]any{"title": "T", "content": "hi"}
+	tab := map[string]any{"tab": "y"}
+	product.RunAnswered(t, fresh(), []googletest.Answered{
+		{Name: "create empty", Path: "create", Set: create, Answers: map[string]string{"POST /files": `{}`},
+			Out: "Document created\nID: undefined\nTitle: T\nLink: https://docs.google.com/document/d/undefined\n"},
+		{Name: "create null id", Path: "create", Set: create, Answers: map[string]string{"POST /files": `{"id":null,"name":"N"}`},
+			Out: "Document created\nID: null\nTitle: N\nLink: https://docs.google.com/document/d/null\n"},
+		{Name: "create mistyped", Path: "create", Set: create, Answers: map[string]string{"POST /files": `{"id":7,"name":"","webViewLink":0}`},
+			Out: "Document created\nID: 7\nTitle: T\nLink: https://docs.google.com/document/d/7\n"},
+		{Name: "create empty body", Path: "create", Set: create, Answers: map[string]string{"POST /files": ``},
+			Out: "Document created\nID: undefined\nTitle: T\nLink: https://docs.google.com/document/d/undefined\n"},
+		{Name: "create null", Path: "create", Set: create, Answers: map[string]string{"POST /files": `null`},
+			Err: "API_ERROR: Failed to create document: null is not an object (evaluating 'response.data.id')"},
+		{Name: "tabs null answer", Path: "tabs", Args: doc, Answers: map[string]string{"GET /documents/D": `null`},
+			Err: "API_ERROR: Failed to list document tabs: null is not an object (evaluating 'response.data.tabs')"},
+		{Name: "tabs empty body", Path: "tabs", Args: doc, Answers: map[string]string{"GET /documents/D": ``},
+			Out: "No tabs found (document has a single untitled tab)\n"},
+		{Name: "tabs null properties", Path: "tabs", Args: doc, Answers: map[string]string{"GET /documents/D": `{"tabs":[{"tabProperties":null,"childTabs":null}]}`},
+			Out: "Tabs (1)\n\n\t\n"},
+		{Name: "tabs mistyped", Path: "tabs", Args: doc,
+			Answers: map[string]string{"GET /documents/D": `{"tabs":[{"tabProperties":{"tabId":5,"title":null},"childTabs":[{"tabProperties":{"tabId":"c","title":false}}]}]}`},
+			Out:     "Tabs (2)\n\n5\t\n  c\tfalse\n"},
+		{Name: "tabs null tab", Path: "tabs", Args: doc, Answers: map[string]string{"GET /documents/D": `{"tabs":[null]}`},
+			Err: "API_ERROR: Failed to list document tabs: null is not an object (evaluating 'tab.tabProperties')"},
+		{Name: "tabs null child", Path: "tabs", Args: doc, Answers: map[string]string{"GET /documents/D": `{"tabs":[{"childTabs":[null]}]}`},
+			Err: "API_ERROR: Failed to list document tabs: null is not an object (evaluating 'tab.tabProperties')"},
+		{Name: "structure null", Path: "structure", Args: doc, Answers: map[string]string{"GET /documents/D": `null`}, Out: "null\n"},
+		{Name: "structure empty body", Path: "structure", Args: doc, Answers: map[string]string{"GET /documents/D": ``}, Out: "\"\"\n"},
+		{Name: "structure text", Path: "structure", Args: doc, Answers: map[string]string{"GET /documents/D": `oops`}, Out: "\"oops\"\n"},
+		{Name: "structure null documentTab", Path: "structure", Args: doc, Set: tab,
+			Answers: map[string]string{"GET /documents/D": `{"tabs":[{"tabProperties":{"tabId":5,"title":null}},{"tabProperties":{"tabId":"y"},"documentTab":null}]}`},
+			Out:     "null\n"},
+		{Name: "structure nested tab", Path: "structure", Args: doc, Set: tab,
+			Answers: map[string]string{"GET /documents/D": `{"tabs":[{"tabProperties":{"tabId":"z"},"childTabs":[{"tabProperties":{"tabId":"y"},"documentTab":{"k":0}}]}]}`},
+			Out:     "{\n  \"k\": 0\n}\n"},
+		{Name: "batch null", Path: "batch", Args: doc, Set: map[string]any{"requests-json": `[{"a":1}]`}, Answers: map[string]string{"POST :batchUpdate": `null`},
+			Err: "API_ERROR: Failed to execute batch update: null is not an object (evaluating 'response.data.replies')"},
+		{Name: "batch null replies", Path: "batch", Args: doc, Set: map[string]any{"requests-json": `[{"a":1}]`}, Answers: map[string]string{"POST :batchUpdate": `{"replies":null}`},
+			Out: "{\n  \"documentId\": \"D\",\n  \"replies\": []\n}\n"},
+		{Name: "batch odd replies", Path: "batch", Args: doc, Set: map[string]any{"requests-json": `[{"a":1}]`}, Answers: map[string]string{"POST :batchUpdate": `{"replies":[null,{},0]}`},
+			Out: "{\n  \"documentId\": \"D\",\n  \"replies\": [\n    null,\n    {},\n    0\n  ]\n}\n"},
+	})
+}
+
+// After documents.get, getStructure is outside Bun's try: a TypeError there
+// is the bare error ("Error: <message>", exit 1), not a CliError.
+func TestStructureTypeErrorsAreBare(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh(), false)
+	var answer string
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) { googletest.WriteRaw(w, 200, answer) })
+	for body, want := range map[string]string{
+		`null`:            "null is not an object (evaluating 'document.tabs')",
+		`{"tabs":[null]}`: "null is not an object (evaluating 'tab.tabProperties')",
+	} {
+		answer = body
+		_, err := product.Exec(fake.Ctx(), t, reg, "structure", product.Input(t, "structure", map[string]any{"doc-id-or-url": "D"}, map[string]any{"tab": "y"}))
+		var ce *clierr.Error
+		if err == nil || errors.As(err, &ce) || err.Error() != want {
+			t.Errorf("%s: %#v, Bun %q", body, err, want)
+		}
+	}
+}
+
+// The batch summary is `${result.replies.length} replies`: undefined for a
+// replies value that has no length, as Bun prints it.
+func TestBatchSummaryCountsRepliesAsBun(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh(), false)
+	var answer string
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) { googletest.WriteRaw(w, 200, answer) })
+	for body, want := range map[string]string{
+		`{"replies":{}}`:   "Batch update applied to D (undefined replies)",
+		`{"replies":0}`:    "Batch update applied to D (undefined replies)",
+		`{"replies":"ab"}`: "Batch update applied to D (2 replies)",
+		`{}`:               "Batch update applied to D (0 replies)",
+	} {
+		answer = body
+		var logs []string
+		sp := product.Spec(t, "batch")
+		wrapped := *sp
+		wrapped.Run = func(ctx context.Context, in plugins.CommandInput, rc *plugins.RunContext) (any, error) {
+			rc.Log = func(parts ...any) { logs = append(logs, parts[0].(string)) }
+			return sp.Run(ctx, in, rc)
+		}
+		in := product.Input(t, "batch", map[string]any{"doc-id-or-url": "D"}, map[string]any{"requests-json": `[{"a":1}]`})
+		if _, err := host.Execute(fake.Ctx(), reg, reg.Find("gdocs"), &wrapped, in); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(logs, "|") != want {
+			t.Errorf("%s: %q, Bun %q", body, logs, want)
+		}
+	}
+}

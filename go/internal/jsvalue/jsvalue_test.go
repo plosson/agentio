@@ -145,7 +145,7 @@ func TestStringIsJavaScriptsString(t *testing.T) {
 
 func TestTruthyIsJavaScripts(t *testing.T) {
 	// 1e-400 underflows to 0 in JavaScript too.
-	falsy := []any{nil, false, "", json.Number("0"), json.Number("-0"), json.Number("0.0"), json.Number("1e-400"), 0.0, math.NaN(), int64(0), 0}
+	falsy := []any{nil, Undefined, false, "", json.Number("0"), json.Number("-0"), json.Number("0.0"), json.Number("1e-400"), 0.0, math.NaN(), int64(0), 0}
 	truthy := []any{true, "0", " ", json.Number("0.1"), -1.0, int64(1), []any{}, NewObject()}
 	for _, v := range falsy {
 		if Truthy(v) {
@@ -155,6 +155,14 @@ func TestTruthyIsJavaScripts(t *testing.T) {
 	for _, v := range truthy {
 		if !Truthy(v) {
 			t.Errorf("%#v is truthy", v)
+		}
+		if Or(v, "fallback") == "fallback" {
+			t.Errorf("%#v || fallback is the fallback", v)
+		}
+	}
+	for _, v := range falsy {
+		if Or(v, Undefined) != Undefined {
+			t.Errorf("%#v || undefined is not undefined", v)
 		}
 	}
 }

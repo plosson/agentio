@@ -3,6 +3,7 @@ package gscript
 import (
 	"context"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	drive "google.golang.org/api/drive/v3"
@@ -13,27 +14,6 @@ const (
 	scriptMimeType = "application/vnd.google-apps.script"
 	editorURL      = "https://script.google.com/d/"
 )
-
-// project is GScriptProject: the optional fields are absent when the API
-// omits them.
-type project struct {
-	ScriptID       string `json:"scriptId"`
-	Title          string `json:"title"`
-	ParentID       string `json:"parentId,omitempty"`
-	CreateTime     string `json:"createTime,omitempty"`
-	UpdateTime     string `json:"updateTime,omitempty"`
-	Creator        string `json:"creator,omitempty"`
-	LastModifyUser string `json:"lastModifyUser,omitempty"`
-	URL            string `json:"url"`
-}
-
-// listItem is GScriptListItem.
-type listItem struct {
-	ScriptID     string `json:"scriptId"`
-	Title        string `json:"title"`
-	ParentID     string `json:"parentId,omitempty"`
-	ModifiedTime string `json:"modifiedTime,omitempty"`
-}
 
 // file is GScriptFile: a bare name (no extension) and its API type.
 type file struct {
@@ -96,51 +76,82 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 // errorMessage is GScriptClient.getErrorMessage.
 var errorMessage = google.StatusText("Insufficient permissions for this script project", "Script project not found")
 
+// The project and list objects are the Bun client's (GScriptProject,
+// GScriptListItem), built from the answer as JavaScript reads it
+// (google.Answer): a missing scriptId or id is undefined, and a null item or
+// answer fails with Bun's TypeError. Content files keep Bun's fallbacks
+// (name "", type SERVER_JS, source "") as strings.
+
+// Bun's transpiler inlines `response` into the expression a TypeError names
+// when the answer of these calls is null.
+const (
+	listFilesExpr = "(await this.drive.files.list({\n        pageSize: Math.min(limit, 100),\n        q,\n" +
+		"        fields: \"files(id,name,parents,modifiedTime)\",\n        orderBy: \"modifiedTime desc\"\n      })).data"
+	getContentExpr    = "(await this.script.projects.getContent({ scriptId })).data"
+	updateContentExpr = "(await this.script.projects.updateContent({\n        scriptId,\n        requestBody: {\n" +
+		"          files: files.map((f) => ({ name: f.name, type: f.type, source: f.source }))\n        }\n      })).data"
+)
+
 // create sends Bun's { title, parentId }: a nil parentID is left out, a given
 // "" is sent.
-func (a *api) create(title string, parentID *string) (*project, error) {
+func (a *api) create(title string, parentID *string) (*jsvalue.Object, error) {
 	req := &script.CreateProjectRequest{Title: title, ForceSendFields: []string{"Title"}}
 	if parentID != nil {
 		req.ParentId = *parentID
 		req.ForceSendFields = append(req.ForceSendFields, "ParentId")
 	}
-	resp, err := a.script.Projects.Create(req).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed("create script project", err)
-	}
-	return toProject(resp), nil
+	return projectAnswer(a, a.script.Projects.Create(req), "create script project")
 }
 
-func (a *api) metadata(scriptID string) (*project, error) {
-	resp, err := a.script.Projects.Get(scriptID).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed("get script project metadata", err)
+func (a *api) metadata(scriptID string) (*jsvalue.Object, error) {
+	return projectAnswer(a, a.script.Projects.Get(scriptID), "get script project metadata")
+}
+
+// projectAnswer is `return this.toProject(response.data)` inside the
+// client's try: either failure is thrown as "Failed to <operation>".
+func projectAnswer[C google.Call[C, *script.Project]](a *api, call C, operation string) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, call)
+	if err == nil {
+		var p *jsvalue.Object
+		if p, err = toProject(raw); err == nil {
+			return p, nil
+		}
 	}
-	return toProject(resp), nil
+	return nil, a.Failed(operation, err)
 }
 
 // list is the most recently modified non-trashed script files, those under
 // parentID when it is set, pageSize Math.min(limit, 100).
-func (a *api) list(parentID string, limit float64) ([]listItem, error) {
+func (a *api) list(parentID string, limit float64) ([]any, error) {
 	q := "mimeType='" + scriptMimeType + "' and trashed=false"
 	if parentID != "" {
 		q += " and '" + parentID + "' in parents"
 	}
-	resp, err := a.drive.Files.List().Q(q).Fields("files(id,name,parents,modifiedTime)").
-		OrderBy("modifiedTime desc").Context(a.Ctx).Do(google.PageSize(limit))
+	_, raw, err := google.Answer(a.Ctx, a.drive.Files.List().Q(q).Fields("files(id,name,parents,modifiedTime)").
+		OrderBy("modifiedTime desc"), google.PageSize(limit))
+	var files []any
+	if err == nil {
+		files, err = google.AnswerItems(raw, listFilesExpr, "files")
+	}
+	out := []any{}
+	for _, f := range files {
+		if err != nil {
+			break
+		}
+		if jsvalue.Nullish(f) {
+			err = jsvalue.TypeError(f, "file.id")
+			break
+		}
+		get := func(k string) any { return jsvalue.Member(f, k) }
+		out = append(out, jsvalue.ObjectOf(
+			"scriptId", get("id"),
+			"title", jsvalue.Or(get("name"), "Untitled"),
+			"parentId", jsvalue.Optional(get("parents"), "0"),
+			"modifiedTime", jsvalue.Or(get("modifiedTime"), jsvalue.Undefined),
+		))
+	}
 	if err != nil {
 		return nil, a.Failed("list script projects", err)
-	}
-	out := []listItem{}
-	for _, f := range resp.Files {
-		item := listItem{ScriptID: f.Id, Title: f.Name, ModifiedTime: f.ModifiedTime}
-		if item.Title == "" {
-			item.Title = "Untitled"
-		}
-		if len(f.Parents) > 0 {
-			item.ParentID = f.Parents[0]
-		}
-		out = append(out, item)
 	}
 	return out, nil
 }
@@ -153,11 +164,15 @@ func (a *api) delete(scriptID string) error {
 }
 
 func (a *api) getContent(scriptID string) ([]file, error) {
-	resp, err := a.script.Projects.GetContent(scriptID).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.script.Projects.GetContent(scriptID))
+	var files []file
+	if err == nil {
+		files, err = toFiles(raw, getContentExpr)
+	}
 	if err != nil {
 		return nil, a.Failed("get script content", err)
 	}
-	return toFiles(resp.Files), nil
+	return files, nil
 }
 
 // updateContent sends each file as { name, type, source }, an empty source
@@ -167,46 +182,54 @@ func (a *api) updateContent(scriptID string, files []file) ([]file, error) {
 	for _, f := range files {
 		body.Files = append(body.Files, &script.File{Name: f.Name, Type: f.Type, Source: f.Source, ForceSendFields: []string{"Name", "Type", "Source"}})
 	}
-	resp, err := a.script.Projects.UpdateContent(scriptID, body).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.script.Projects.UpdateContent(scriptID, body))
+	var out []file
+	if err == nil {
+		out, err = toFiles(raw, updateContentExpr)
+	}
 	if err != nil {
 		return nil, a.Failed("update script content", err)
 	}
-	return toFiles(resp.Files), nil
+	return out, nil
 }
 
-// toFiles defaults a missing name and source to "" and a missing type to SERVER_JS.
-func toFiles(files []*script.File) []file {
+// toFiles is `(<expr>.files || []).map(...)`: a missing name and source are
+// "", a missing type SERVER_JS, and a null file is Bun's TypeError.
+func toFiles(raw any, expr string) ([]file, error) {
+	items, err := google.AnswerItems(raw, expr, "files")
+	if err != nil {
+		return nil, err
+	}
 	out := []file{}
-	for _, f := range files {
-		if f == nil {
-			f = &script.File{}
+	for _, f := range items {
+		if jsvalue.Nullish(f) {
+			return nil, jsvalue.TypeError(f, "f.name")
 		}
-		item := file{Name: f.Name, Type: f.Type, Source: f.Source}
-		if item.Type == "" {
-			item.Type = "SERVER_JS"
-		}
-		out = append(out, item)
+		get := func(k string) any { return jsvalue.Member(f, k) }
+		out = append(out, file{
+			Name:   jsvalue.String(jsvalue.Or(get("name"), "")),
+			Type:   jsvalue.String(jsvalue.Or(get("type"), "SERVER_JS")),
+			Source: jsvalue.String(jsvalue.Or(get("source"), "")),
+		})
 	}
-	return out
+	return out, nil
 }
 
-func toProject(p *script.Project) *project {
-	out := &project{
-		ScriptID:   p.ScriptId,
-		Title:      p.Title,
-		ParentID:   p.ParentId,
-		CreateTime: p.CreateTime,
-		UpdateTime: p.UpdateTime,
-		URL:        editorURL + p.ScriptId + "/edit",
+// toProject is Bun toProject(data).
+func toProject(data any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(data) {
+		return nil, jsvalue.TypeError(data, "data.scriptId")
 	}
-	if out.Title == "" {
-		out.Title = "Untitled"
-	}
-	if p.Creator != nil {
-		out.Creator = p.Creator.Email
-	}
-	if p.LastModifyUser != nil {
-		out.LastModifyUser = p.LastModifyUser.Email
-	}
-	return out
+	get := func(k string) any { return jsvalue.Member(data, k) }
+	scriptID := get("scriptId")
+	return jsvalue.ObjectOf(
+		"scriptId", scriptID,
+		"title", jsvalue.Or(get("title"), "Untitled"),
+		"parentId", jsvalue.Or(get("parentId"), jsvalue.Undefined),
+		"createTime", jsvalue.Or(get("createTime"), jsvalue.Undefined),
+		"updateTime", jsvalue.Or(get("updateTime"), jsvalue.Undefined),
+		"creator", jsvalue.Or(jsvalue.Optional(get("creator"), "email"), jsvalue.Undefined),
+		"lastModifyUser", jsvalue.Or(jsvalue.Optional(get("lastModifyUser"), "email"), jsvalue.Undefined),
+		"url", editorURL+jsvalue.String(scriptID)+"/edit",
+	), nil
 }

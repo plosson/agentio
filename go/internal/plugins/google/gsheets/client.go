@@ -34,50 +34,17 @@ type number float64
 
 func (n number) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(float64(n)), nil }
 
-// values is GSheetsGetResult.
-type values struct {
-	Range  string  `json:"range"`
-	Values [][]any `json:"values"`
-}
+// The results built from an answer are the Bun client's objects
+// (GSheetsGetResult, GSheetsUpdateResult, GSheetsSpreadsheet, ...), read from
+// the answer as JavaScript reads it (google.Answer): a value the answer lacks
+// is undefined, a mistyped one prints as it came, and reading a field of a
+// null answer or item fails with Bun's TypeError.
 
-// updated is GSheetsUpdateResult and GSheetsAppendResult.
-type updated struct {
-	UpdatedRange   string `json:"updatedRange"`
-	UpdatedRows    number `json:"updatedRows"`
-	UpdatedColumns number `json:"updatedColumns"`
-	UpdatedCells   number `json:"updatedCells"`
-}
-
-// appended is the append result, printed as "Appended ...".
-type appended updated
-
-// cleared is GSheetsClearResult.
-type cleared struct {
-	ClearedRange string `json:"clearedRange"`
-}
-
-// sheet is GSheetsSheet.
-type sheet struct {
-	ID          int64  `json:"id"`
-	Title       string `json:"title"`
-	RowCount    int64  `json:"rowCount"`
-	ColumnCount int64  `json:"columnCount"`
-}
-
-// spreadsheet is GSheetsSpreadsheet.
-type spreadsheet struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Locale   string  `json:"locale,omitempty"`
-	TimeZone string  `json:"timeZone,omitempty"`
-	URL      string  `json:"url"`
-	Sheets   []sheet `json:"sheets"`
-}
-
-// formatted is GSheetsFormatResult.
+// formatted is GSheetsFormatResult. SheetTitle is the answer's
+// `properties.title || ""`.
 type formatted struct {
 	Range         string   `json:"range"`
-	SheetTitle    string   `json:"sheetTitle"`
+	SheetTitle    any      `json:"sheetTitle"`
 	AppliedFields []string `json:"appliedFields"`
 	Merged        bool     `json:"merged"`
 	Cleared       bool     `json:"cleared"`
@@ -86,17 +53,11 @@ type formatted struct {
 // resized is GSheetsResizeResult: PixelSize is absent for --auto.
 type resized struct {
 	Range      string  `json:"range"`
-	SheetTitle string  `json:"sheetTitle"`
+	SheetTitle any     `json:"sheetTitle"`
 	Dimension  string  `json:"dimension"`
 	Count      int     `json:"count"`
 	PixelSize  *number `json:"pixelSize,omitempty"`
 	Auto       bool    `json:"auto"`
-}
-
-// batched is GSheetsBatchResult.
-type batched struct {
-	Replies       int    `json:"replies"`
-	SpreadsheetID string `json:"spreadsheetId"`
 }
 
 // formatOptions is GSheetsFormatOptions after the command parsed its flags:
@@ -115,9 +76,10 @@ type formatOptions struct {
 }
 
 // api is GSheetsClient. Reads and simple writes go through the typed
-// sheets/v4 and drive/v3 clients. Calls whose body carries the caller's JSON
-// (values, CellFormat, batchUpdate requests) send ordered JSON at the sheets
-// client's BasePath, as the typed structs would drop or reorder it.
+// sheets/v4 and drive/v3 clients (google.Answer for the answer). Calls whose
+// body carries the caller's JSON (values, CellFormat, batchUpdate requests)
+// send it with CallJSON, as the typed structs would drop, reorder or reformat
+// it (unknown keys, key order, 1.0 versus 1).
 type api struct {
 	google.API
 	sheets *sheets.Service
@@ -139,14 +101,9 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 // errorMessage is GSheetsClient.getErrorMessage.
 var errorMessage = google.StatusText("Insufficient permissions to access this spreadsheet", "Spreadsheet not found")
 
-// callJSON sends body to the Sheets API and returns the reply object.
-func (a *api) callJSON(method, path string, body any) (*jsvalue.Object, error) {
-	v, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, method, a.sheets.BasePath, path, jsvalue.Stringify(body))
-	if err != nil {
-		return nil, err
-	}
-	obj, _ := v.(*jsvalue.Object)
-	return obj, nil
+// callJSON sends body verbatim to the Sheets API and returns the answer.
+func (a *api) callJSON(method, path string, body any) (any, error) {
+	return google.CallJSON(a.Ctx, a.RunContext, google.Camel, method, a.sheets.BasePath, path, jsvalue.Stringify(body))
 }
 
 var (
@@ -174,7 +131,7 @@ func valuesPath(spreadsheetID, a1 string) string {
 	return "v4/spreadsheets/" + url.PathEscape(spreadsheetID) + "/values/" + url.PathEscape(a1)
 }
 
-func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
+func (a *api) list(limit float64, query string) ([]any, error) {
 	files, err := google.ListDriveFiles(a.Ctx, a.drive, sheetMimeType, query, limit, spreadsheetURL)
 	if err != nil {
 		return nil, a.Failed("list spreadsheets", err)
@@ -183,8 +140,9 @@ func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
 }
 
 // get sends the options as googleapis does: a nil one is left out, a given ""
-// is sent empty.
-func (a *api) get(idOrURL, a1 string, dimension, render *string) (*values, error) {
+// is sent empty. The result is `{ range: data.range || cleanedRange, values:
+// data.values || [] }`.
+func (a *api) get(idOrURL, a1 string, dimension, render *string) (*jsvalue.Object, error) {
 	r := cleanRange(a1)
 	call := a.sheets.Spreadsheets.Values.Get(extractSpreadsheetID(idOrURL), r)
 	if dimension != nil {
@@ -193,35 +151,38 @@ func (a *api) get(idOrURL, a1 string, dimension, render *string) (*values, error
 	if render != nil {
 		call.ValueRenderOption(*render)
 	}
-	resp, err := call.Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed("get values", err)
+	_, raw, err := google.Answer(a.Ctx, call)
+	if err == nil {
+		var rng any
+		if rng, err = jsvalue.Path(raw, "response.data", "range"); err == nil {
+			return jsvalue.ObjectOf("range", jsvalue.Or(rng, r), "values", jsvalue.Or(jsvalue.Member(raw, "values"), []any{})), nil
+		}
 	}
-	out := &values{Range: resp.Range, Values: resp.Values}
-	if out.Range == "" {
-		out.Range = r
-	}
-	if out.Values == nil {
-		out.Values = [][]any{}
-	}
-	return out, nil
+	return nil, a.Failed("get values", err)
 }
 
-// counts reads `data.updatedRange || range` and each `data.<count> || 0`.
-func counts(obj *jsvalue.Object, r string) updated {
-	out := updated{UpdatedRange: r}
-	if s, _ := obj.Str("updatedRange"); s != "" {
-		out.UpdatedRange = s
-	}
-	count := func(key string) number {
-		v, _ := obj.Get(key)
-		if !jsvalue.Truthy(v) {
-			return 0
+// valuesError is the TypeError printGSheetsValues throws at the first row
+// that is null or undefined, after printing the rows before it.
+func valuesError(result *jsvalue.Object) error {
+	rows, _ := jsvalue.Member(result, "values").([]any)
+	for _, row := range rows {
+		if jsvalue.Nullish(row) {
+			return jsvalue.TypeError(row, "row.map")
 		}
-		return number(jsvalue.Number(jsvalue.String(v)))
 	}
-	out.UpdatedRows, out.UpdatedColumns, out.UpdatedCells = count("updatedRows"), count("updatedColumns"), count("updatedCells")
-	return out
+	return nil
+}
+
+// counts is the update and append result read from data (the answer, or its
+// updates): `data.updatedRange || range` and each `data.<count> || 0`.
+func counts(data any, r string) *jsvalue.Object {
+	get := func(k string) any { return jsvalue.Optional(data, k) }
+	return jsvalue.ObjectOf(
+		"updatedRange", jsvalue.Or(get("updatedRange"), r),
+		"updatedRows", jsvalue.Or(get("updatedRows"), 0),
+		"updatedColumns", jsvalue.Or(get("updatedColumns"), 0),
+		"updatedCells", jsvalue.Or(get("updatedCells"), 0),
+	)
 }
 
 func valuesBody(rows []any) *jsvalue.Object {
@@ -230,22 +191,24 @@ func valuesBody(rows []any) *jsvalue.Object {
 	return body
 }
 
-func (a *api) update(idOrURL, a1 string, rows []any, inputOption string) (*updated, error) {
+func (a *api) update(idOrURL, a1 string, rows []any, inputOption string) (*jsvalue.Object, error) {
 	r := cleanRange(a1)
 	if inputOption == "" {
 		inputOption = "USER_ENTERED"
 	}
 	q := jsvalue.NewSearchParams()
 	q.Set("valueInputOption", inputOption)
-	obj, err := a.callJSON("PUT", valuesPath(extractSpreadsheetID(idOrURL), r)+"?"+q.String(), valuesBody(rows))
+	raw, err := a.callJSON("PUT", valuesPath(extractSpreadsheetID(idOrURL), r)+"?"+q.String(), valuesBody(rows))
+	if err == nil && jsvalue.Nullish(raw) {
+		err = jsvalue.TypeError(raw, "response.data.updatedRange")
+	}
 	if err != nil {
 		return nil, a.Failed("update values", err)
 	}
-	out := counts(obj, r)
-	return &out, nil
+	return counts(raw, r), nil
 }
 
-func (a *api) append(idOrURL, a1 string, rows []any, inputOption string, insertOption *string) (*appended, error) {
+func (a *api) append(idOrURL, a1 string, rows []any, inputOption string, insertOption *string) (*jsvalue.Object, error) {
 	r := cleanRange(a1)
 	if inputOption == "" {
 		inputOption = "USER_ENTERED"
@@ -255,139 +218,213 @@ func (a *api) append(idOrURL, a1 string, rows []any, inputOption string, insertO
 	if insertOption != nil { // googleapis sends a given "" empty
 		q.Set("insertDataOption", *insertOption)
 	}
-	obj, err := a.callJSON("POST", valuesPath(extractSpreadsheetID(idOrURL), r)+":append?"+q.String(), valuesBody(rows))
+	raw, err := a.callJSON("POST", valuesPath(extractSpreadsheetID(idOrURL), r)+":append?"+q.String(), valuesBody(rows))
+	var updates any
+	if err == nil {
+		updates, err = jsvalue.Path(raw, appendResponseText+".data", "updates")
+	}
 	if err != nil {
 		return nil, a.Failed("append values", err)
 	}
-	updates, _ := obj.Get("updates")
-	inner, _ := updates.(*jsvalue.Object)
-	out := appended(counts(inner, r))
-	return &out, nil
+	return counts(updates, r), nil
 }
 
-func (a *api) clear(idOrURL, a1 string) (*cleared, error) {
+// Bun's transpiler inlines a `response` read once, so JavaScriptCore names
+// the call expression itself when its data is null (append's `updates`,
+// clear's `clearedRange`, batch's `replies`, the sheet lookup's `sheets`).
+const (
+	appendResponseText = `(await this.sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: cleanedRange,
+        valueInputOption,
+        insertDataOption: options.insertDataOption,
+        requestBody: {
+          values
+        }
+      }))`
+	clearResponseText = `(await this.sheets.spreadsheets.values.clear({
+          spreadsheetId,
+          range: cleanedRange
+        }))`
+	batchResponseText = `(await this.sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: { requests }
+        }))`
+	getResponseText = `(await this.sheets.spreadsheets.get({ spreadsheetId }))`
+)
+
+func (a *api) clear(idOrURL, a1 string) (*jsvalue.Object, error) {
 	r := cleanRange(a1)
-	resp, err := a.sheets.Spreadsheets.Values.Clear(extractSpreadsheetID(idOrURL), r, &sheets.ClearValuesRequest{}).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.sheets.Spreadsheets.Values.Clear(extractSpreadsheetID(idOrURL), r, &sheets.ClearValuesRequest{}))
+	var rng any
+	if err == nil {
+		rng, err = jsvalue.Path(raw, clearResponseText+".data", "clearedRange")
+	}
 	if err != nil {
 		return nil, a.Failed("clear values", err)
 	}
-	out := &cleared{ClearedRange: resp.ClearedRange}
-	if out.ClearedRange == "" {
-		out.ClearedRange = r
-	}
-	return out, nil
+	return jsvalue.ObjectOf("clearedRange", jsvalue.Or(rng, r)), nil
 }
 
-func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
+// metadata is GSheetsClient.metadata over spreadsheets.get.
+func (a *api) metadata(idOrURL string) (*jsvalue.Object, error) {
 	id := extractSpreadsheetID(idOrURL)
-	var resp sheets.Spreadsheet
-	raw, err := google.GetJSON(a.Ctx, a.RunContext, google.Camel, a.sheets.BasePath, "v4/spreadsheets/"+url.PathEscape(id), &resp)
+	_, raw, err := google.Answer(a.Ctx, a.sheets.Spreadsheets.Get(id))
+	var out *jsvalue.Object
+	if err == nil {
+		out, err = spreadsheetOf(raw, id)
+	}
 	if err != nil {
 		return nil, a.Failed("get metadata", err)
 	}
-	// Bun `const props = response.data.properties!; props.title`.
-	if p := jsvalue.Member(raw, "properties"); jsvalue.Nullish(p) {
-		return nil, a.Failed("get metadata", jsvalue.TypeError(p, "props.title"))
-	}
-	props := resp.Properties
-	out := &spreadsheet{ID: resp.SpreadsheetId, Title: props.Title, Locale: props.Locale, TimeZone: props.TimeZone, URL: resp.SpreadsheetUrl, Sheets: []sheet{}}
-	if out.Title == "" {
-		out.Title = "Untitled"
-	}
-	if out.URL == "" {
-		out.URL = spreadsheetURL + id
-	}
-	for _, s := range resp.Sheets {
-		item := sheet{Title: "Untitled"}
-		if p := s.Properties; p != nil {
-			item.ID = p.SheetId
-			if p.Title != "" {
-				item.Title = p.Title
-			}
-			if g := p.GridProperties; g != nil {
-				item.RowCount, item.ColumnCount = g.RowCount, g.ColumnCount
-			}
-		}
-		out.Sheets = append(out.Sheets, item)
-	}
 	return out, nil
 }
 
-func (a *api) create(title string, sheetNames []string) (*google.CreatedFile, error) {
+// spreadsheetOf is the GSheetsSpreadsheet metadata builds from data.
+func spreadsheetOf(data any, id string) (*jsvalue.Object, error) {
+	props, err := jsvalue.Path(data, "response.data", "properties")
+	if err != nil {
+		return nil, err
+	}
+	items, err := jsvalue.Items(jsvalue.Or(jsvalue.Member(data, "sheets"), []any{}), "(response.data.sheets || [])")
+	if err != nil {
+		return nil, err
+	}
+	list := []any{}
+	for _, s := range items {
+		if jsvalue.Nullish(s) {
+			return nil, jsvalue.TypeError(s, "sheet.properties")
+		}
+		p := jsvalue.Member(s, "properties")
+		grid := jsvalue.Optional(p, "gridProperties")
+		list = append(list, jsvalue.ObjectOf(
+			"id", jsvalue.Or(jsvalue.Optional(p, "sheetId"), 0),
+			"title", jsvalue.Or(jsvalue.Optional(p, "title"), "Untitled"),
+			"rowCount", jsvalue.Or(jsvalue.Optional(grid, "rowCount"), 0),
+			"columnCount", jsvalue.Or(jsvalue.Optional(grid, "columnCount"), 0),
+		))
+	}
+	title, err := jsvalue.Path(props, "props", "title")
+	if err != nil {
+		return nil, err
+	}
+	return jsvalue.ObjectOf(
+		"id", jsvalue.Member(data, "spreadsheetId"),
+		"title", jsvalue.Or(title, "Untitled"),
+		"locale", jsvalue.Or(jsvalue.Member(props, "locale"), jsvalue.Undefined),
+		"timeZone", jsvalue.Or(jsvalue.Member(props, "timeZone"), jsvalue.Undefined),
+		"url", jsvalue.Or(jsvalue.Member(data, "spreadsheetUrl"), spreadsheetURL+id),
+		"sheets", list,
+	), nil
+}
+
+// create is GSheetsClient.create: `{ id: data.spreadsheetId, title:
+// data.properties?.title || title, url: data.spreadsheetUrl || <link> }`.
+func (a *api) create(title string, sheetNames []string) (*jsvalue.Object, error) {
 	// Titles go as given, "" included, as Bun sends them.
 	body := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: title, ForceSendFields: []string{"Title"}}}
 	for _, name := range sheetNames {
 		body.Sheets = append(body.Sheets, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: jsvalue.Trim(name), ForceSendFields: []string{"Title"}}})
 	}
-	resp, err := a.sheets.Spreadsheets.Create(body).Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.sheets.Spreadsheets.Create(body))
+	var id any
+	if err == nil {
+		id, err = jsvalue.Path(raw, "response.data", "spreadsheetId")
+	}
 	if err != nil {
 		return nil, a.Failed("create spreadsheet", err)
 	}
-	out := &google.CreatedFile{ID: resp.SpreadsheetId, Title: title, URL: resp.SpreadsheetUrl}
-	if resp.Properties != nil && resp.Properties.Title != "" {
-		out.Title = resp.Properties.Title
-	}
-	if out.URL == "" {
-		out.URL = spreadsheetURL + resp.SpreadsheetId
-	}
-	return out, nil
+	return jsvalue.ObjectOf(
+		"id", id,
+		"title", jsvalue.Or(jsvalue.Optional(jsvalue.Member(raw, "properties"), "title"), title),
+		"url", jsvalue.Or(jsvalue.Member(raw, "spreadsheetUrl"), spreadsheetURL+jsvalue.String(id)),
+	), nil
 }
 
 // batchUpdate is spreadsheets.batchUpdate with requests sent as given.
-func (a *api) batchUpdate(spreadsheetID string, requests []any) (*jsvalue.Object, error) {
+func (a *api) batchUpdate(spreadsheetID string, requests []any) (any, error) {
 	body := jsvalue.NewObject()
 	body.Set("requests", requests)
 	return a.callJSON("POST", "v4/spreadsheets/"+url.PathEscape(spreadsheetID)+":batchUpdate", body)
 }
 
-func (a *api) batch(idOrURL string, requests []any) (*batched, error) {
+// batch is GSheetsClient.batch: `{ replies: response.data.replies?.length ??
+// 0, spreadsheetId }` (GSheetsBatchResult).
+func (a *api) batch(idOrURL string, requests []any) (*jsvalue.Object, error) {
 	id := extractSpreadsheetID(idOrURL)
 	if len(requests) == 0 {
 		return nil, a.Fail("INVALID_PARAMS", "requests must be a non-empty array", "")
 	}
-	resp, err := a.batchUpdate(id, requests)
+	raw, err := a.batchUpdate(id, requests)
+	var replies any
+	if err == nil {
+		replies, err = jsvalue.Path(raw, batchResponseText+".data", "replies")
+	}
 	if err != nil {
 		return nil, a.Failed("execute batch update", err)
 	}
-	replies, _ := resp.Get("replies")
-	items, _ := replies.([]any)
-	return &batched{Replies: len(items), SpreadsheetID: id}, nil
+	count := jsvalue.Optional(replies, "length")
+	if jsvalue.Nullish(count) {
+		count = 0
+	}
+	return jsvalue.ObjectOf("replies", count, "spreadsheetId", id), nil
 }
 
 // targetSheet is the resolveGridRange / resolveDimensionRange lookup: the
-// named sheet, or the first one when the range names none. A failed call is
-// reported as operation, the command's.
-func (a *api) targetSheet(spreadsheetID, title, operation string) (*sheets.SheetProperties, error) {
-	resp, err := a.sheets.Spreadsheets.Get(spreadsheetID).Context(a.Ctx).Do()
+// named sheet, or the first one when the range names none. It returns the
+// sheet's `properties.sheetId ?? 0` and `properties.title || ""`. A failed
+// call, or a null answer or sheet, is reported as operation, the command's.
+func (a *api) targetSheet(spreadsheetID, title, operation string) (sheetID, sheetTitle any, err error) {
+	_, raw, err := google.Answer(a.Ctx, a.sheets.Spreadsheets.Get(spreadsheetID))
+	var props any
+	if err == nil {
+		props, err = findSheet(raw, title)
+	}
 	if err != nil {
-		return nil, a.Failed(operation, err)
+		return nil, nil, a.Failed(operation, err)
 	}
-	var found *sheets.Sheet
-	if title != "" {
-		for _, s := range resp.Sheets {
-			if s.Properties != nil && s.Properties.Title == title {
-				found = s
-				break
-			}
-		}
-	} else if len(resp.Sheets) > 0 {
-		found = resp.Sheets[0]
-	}
-	if found == nil || found.Properties == nil {
+	if !jsvalue.Truthy(props) {
 		name := title
 		if name == "" {
 			name = "(first sheet)"
 		}
-		return nil, a.Fail("NOT_FOUND", "Sheet not found: "+name, "")
+		return nil, nil, a.Fail("NOT_FOUND", "Sheet not found: "+name, "")
 	}
-	return found.Properties, nil
+	sheetID = jsvalue.Member(props, "sheetId")
+	if jsvalue.Nullish(sheetID) {
+		sheetID = 0
+	}
+	return sheetID, jsvalue.Or(jsvalue.Member(props, "title"), ""), nil
+}
+
+// findSheet is `targetSheet?.properties` for the sheet named title (the
+// first sheet for ""), in the answer's `data.sheets || []`.
+func findSheet(data any, title string) (any, error) {
+	sheets, err := jsvalue.Path(data, getResponseText+".data", "sheets")
+	if err != nil {
+		return nil, err
+	}
+	sheets = jsvalue.Or(sheets, []any{})
+	if title == "" {
+		return jsvalue.Optional(jsvalue.Member(sheets, "0"), "properties"), nil
+	}
+	items, _ := sheets.([]any)
+	for _, s := range items {
+		if jsvalue.Nullish(s) {
+			return nil, jsvalue.TypeError(s, "s.properties")
+		}
+		if jsvalue.StrictEqual(jsvalue.Optional(jsvalue.Member(s, "properties"), "title"), title) {
+			return jsvalue.Member(s, "properties"), nil
+		}
+	}
+	return jsvalue.Undefined, nil
 }
 
 func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 	id := extractSpreadsheetID(idOrURL)
 	r := cleanRange(a1)
 	title, cells := parseA1Range(r)
-	props, err := a.targetSheet(id, title, "format range")
+	sheetID, sheetTitle, err := a.targetSheet(id, title, "format range")
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +432,7 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 	if err != nil {
 		return nil, err
 	}
-	grid := gridRange(props.SheetId, bounds)
+	grid := gridRange(sheetID, bounds)
 	var requests []any
 	applied := []string{}
 
@@ -500,7 +537,7 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 	if _, err := a.batchUpdate(id, requests); err != nil {
 		return nil, a.Failed("format range", err)
 	}
-	return &formatted{Range: r, SheetTitle: props.Title, AppliedFields: applied, Merged: o.merge, Cleared: o.clearFormat}, nil
+	return &formatted{Range: r, SheetTitle: sheetTitle, AppliedFields: applied, Merged: o.merge, Cleared: o.clearFormat}, nil
 }
 
 func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resized, error) {
@@ -516,7 +553,7 @@ func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resize
 	if cells == "" {
 		return nil, a.Fail("INVALID_PARAMS", "Resize range must reference columns or rows (e.g. Sheet1!A:C or Sheet1!1:10)", "")
 	}
-	props, err := a.targetSheet(id, title, "resize dimension")
+	sheetID, sheetTitle, err := a.targetSheet(id, title, "resize dimension")
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +572,7 @@ func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resize
 	if !hasCols {
 		dimension, start, end = "ROWS", b.startRow, b.endRow
 	}
-	dimRange := obj("sheetId", props.SheetId, "dimension", dimension)
+	dimRange := obj("sheetId", sheetID, "dimension", dimension)
 	setIndex(dimRange, "startIndex", start)
 	setIndex(dimRange, "endIndex", end)
 	var request *jsvalue.Object
@@ -547,7 +584,7 @@ func (a *api) resize(idOrURL, a1 string, pixelSize *float64, auto bool) (*resize
 	if _, err := a.batchUpdate(id, []any{request}); err != nil {
 		return nil, a.Failed("resize dimension", err)
 	}
-	out := &resized{Range: r, SheetTitle: props.Title, Dimension: dimension, Count: deref(end) - deref(start), Auto: auto}
+	out := &resized{Range: r, SheetTitle: sheetTitle, Dimension: dimension, Count: deref(end) - deref(start), Auto: auto}
 	if pixelSize != nil {
 		n := number(*pixelSize)
 		out.PixelSize = &n
@@ -696,7 +733,7 @@ func colLettersToIndex(letters string) int {
 }
 
 // gridRange is the GridRange Bun builds: sheetId, then each defined bound.
-func gridRange(sheetID int64, b bounds) *jsvalue.Object {
+func gridRange(sheetID any, b bounds) *jsvalue.Object {
 	g := obj("sheetId", sheetID)
 	setIndex(g, "startRowIndex", b.startRow)
 	setIndex(g, "endRowIndex", b.endRow)

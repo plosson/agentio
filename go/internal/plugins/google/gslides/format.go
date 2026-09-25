@@ -1,34 +1,33 @@
 package gslides
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
+// The printers read the Bun objects the client builds, as Bun's template
+// strings do: a missing field prints "undefined".
+
 // emuPerInch converts page size magnitudes (EMU) to inches.
 const emuPerInch = 914400
 
 // formatMetadata is printGSlidesMetadata.
-func formatMetadata(v any) string {
-	p, _ := v.(*presentation)
-	if p == nil {
-		return ""
+func formatMetadata(p any) string {
+	lines := []string{"ID: " + google.Field(p, "id"), "Title: " + google.Field(p, "title"), "URL: " + google.Field(p, "url"), "Slides: " + google.Field(p, "slideCount")}
+	width, height := jsvalue.Member(p, "width"), jsvalue.Member(p, "height")
+	if width != jsvalue.Undefined && height != jsvalue.Undefined {
+		lines = append(lines, "Dimensions: "+jsvalue.ToFixed(jsvalue.ToNumber(width)/emuPerInch, 2)+`" × `+jsvalue.ToFixed(jsvalue.ToNumber(height)/emuPerInch, 2)+`"`)
 	}
-	lines := []string{"ID: " + p.ID, "Title: " + p.Title, "URL: " + p.URL, fmt.Sprintf("Slides: %d", p.SlideCount)}
-	if p.Width != nil && p.Height != nil {
-		lines = append(lines, "Dimensions: "+jsvalue.ToFixed(*p.Width/emuPerInch, 2)+`" × `+jsvalue.ToFixed(*p.Height/emuPerInch, 2)+`"`)
-	}
-	if len(p.Slides) > 0 {
+	if slides, _ := jsvalue.Member(p, "slides").([]any); len(slides) > 0 {
 		lines = append(lines, "", "Slide index:")
-		for _, s := range p.Slides {
+		for _, s := range slides {
 			title := ""
-			if s.Title != "" {
-				title = " — " + s.Title
+			if google.Truthy(s, "title") {
+				title = " — " + google.Field(s, "title")
 			}
-			lines = append(lines, fmt.Sprintf("  [%d] %s%s", s.Index, s.ObjectID, title))
+			lines = append(lines, "  ["+google.Field(s, "index")+"] "+google.Field(s, "objectId")+title)
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -36,21 +35,22 @@ func formatMetadata(v any) string {
 
 // formatContent is printGSlidesContent.
 func formatContent(v any) string {
-	slides, _ := v.([]slideContent)
+	slides, _ := v.([]any)
 	if len(slides) == 0 {
 		return "No slides found"
 	}
 	var lines []string
 	for _, s := range slides {
-		lines = append(lines, fmt.Sprintf("\n--- Slide %d (%s) ---", s.Index+1, s.ObjectID))
-		if len(s.Elements) == 0 {
+		lines = append(lines, "\n--- Slide "+jsvalue.NumberString(jsvalue.ToNumber(jsvalue.Member(s, "index"))+1)+" ("+google.Field(s, "objectId")+") ---")
+		elements, _ := jsvalue.Member(s, "elements").([]any)
+		if len(elements) == 0 {
 			lines = append(lines, "(no text content)")
 		}
-		for _, e := range s.Elements {
-			lines = append(lines, e.Text)
+		for _, e := range elements {
+			lines = append(lines, google.Field(e, "text"))
 		}
-		if s.Notes != "" {
-			lines = append(lines, "\nNotes:", s.Notes)
+		if google.Truthy(s, "notes") {
+			lines = append(lines, "\nNotes:", google.Field(s, "notes"))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -60,10 +60,6 @@ func formatContent(v any) string {
 func formatCreated(v any) string { return google.FormatCreatedFile(v, "Presentation created") }
 
 // formatBatch is printGSlidesBatchResult.
-func formatBatch(v any) string {
-	b, _ := v.(*batched)
-	if b == nil {
-		return ""
-	}
-	return fmt.Sprintf("Batch update applied to %s\n  Replies: %d", b.PresentationID, b.Replies)
+func formatBatch(b any) string {
+	return "Batch update applied to " + google.Field(b, "presentationId") + "\n  Replies: " + google.Field(b, "replies")
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -457,7 +456,7 @@ func TestListSendsTheBunQueryAndFormats(t *testing.T) {
 	if got := product.Printed(t, "list", v, false); got != want {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "list", []google.DriveFile{}, false); got != "No presentations found\n" {
+	if got := product.Printed(t, "list", []any{}, false); got != "No presentations found\n" {
 		t.Fatalf("%q", got)
 	}
 	// parseInt("abc") is NaN, which gaxios sends as is.
@@ -798,3 +797,77 @@ func TestExportWriteFailsLikeNode(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing id is "undefined", a null slide, element or text run is Bun's
+// TypeError, and a body that is not JSON is its text.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	id := map[string]any{"id-or-url": "P1"}
+	get := func(body string) map[string]string { return map[string]string{"GET /v1/presentations/P1": body} }
+	batch := func(body string) map[string]string {
+		return map[string]string{"POST /v1/presentations/P1:batchUpdate": body}
+	}
+	batchSet := map[string]any{"requests-json": "[{}]"}
+	metaEmpty := "ID: undefined\nTitle: Untitled\nURL: https://docs.google.com/presentation/d/undefined\nSlides: 0\n"
+	product.RunAnswered(t, fresh(), []googletest.Answered{
+		{Name: "metadata empty", Path: "metadata", Args: id, Answers: get(`{}`), Out: metaEmpty},
+		{Name: "metadata empty body", Path: "metadata", Args: id, Answers: get(``), Out: metaEmpty},
+		{Name: "metadata text body", Path: "metadata", Args: id, Answers: get(`oops`), Out: metaEmpty},
+		{Name: "metadata null", Path: "metadata", Args: id, Answers: get(`null`),
+			Err: "API_ERROR: Failed to get presentation metadata: null is not an object (evaluating 'data.pageSize')"},
+		{Name: "metadata null slide", Path: "metadata", Args: id, Answers: get(`{"presentationId":"P1","slides":[null]}`),
+			Err: "API_ERROR: Failed to get presentation metadata: null is not an object (evaluating 'slide.objectId')"},
+		{Name: "metadata null element", Path: "metadata", Args: id, Answers: get(`{"presentationId":"P1","slides":[{"objectId":"s1","pageElements":[null]}]}`),
+			Err: "API_ERROR: Failed to get presentation metadata: null is not an object (evaluating 'element.shape')"},
+		{Name: "metadata null text run", Path: "metadata", Args: id,
+			Answers: get(`{"presentationId":"P1","title":null,"pageSize":{"width":{"magnitude":0},"height":{"magnitude":null}},"slides":[{},{"objectId":null,"pageElements":[{},{"shape":{}},{"shape":{"placeholder":{"type":"TITLE"},"text":{}}}]},{"objectId":"s3","pageElements":[{"shape":{"placeholder":{"type":"CENTERED_TITLE"},"text":{"textElements":[null]}}}]}]}`),
+			Err:     "API_ERROR: Failed to get presentation metadata: null is not an object (evaluating 'el.textRun')"},
+		{Name: "metadata mistyped", Path: "metadata", Args: id,
+			Answers: get(`{"presentationId":7,"title":5,"pageSize":{"width":{"magnitude":"abc"},"height":{"magnitude":true}}}`),
+			Out:     "ID: 7\nTitle: 5\nURL: https://docs.google.com/presentation/d/7\nSlides: 0\nDimensions: NaN\" × 0.00\"\n"},
+		{Name: "get empty", Path: "get", Args: id, Answers: get(`{}`), Out: "No slides found\n"},
+		{Name: "get null", Path: "get", Args: id, Answers: get(`null`),
+			Err: "API_ERROR: Failed to get slide content: null is not an object (evaluating '(await this.slides.presentations.get({ presentationId })).data.slides')"},
+		{Name: "get null slide", Path: "get", Args: id, Answers: get(`{"slides":[null]}`),
+			Err: "API_ERROR: Failed to get slide content: null is not an object (evaluating 'slide.pageElements')"},
+		{Name: "get null element", Path: "get", Args: id, Answers: get(`{"slides":[{"objectId":"s1","pageElements":[null]}]}`),
+			Err: "API_ERROR: Failed to get slide content: null is not an object (evaluating 'element.shape')"},
+		{Name: "get null notes element", Path: "get", Args: id, Answers: get(`{"slides":[{"objectId":"s1","slideProperties":{"notesPage":{"pageElements":[null]}}}]}`),
+			Err: "API_ERROR: Failed to get slide content: null is not an object (evaluating 'element.shape')"},
+		{Name: "get slide 0 of a null slide", Path: "get", Args: id, Set: map[string]any{"slide": "0"}, Answers: get(`{"slides":[null]}`),
+			Err: "API_ERROR: Failed to get slide content: null is not an object (evaluating 'slide.pageElements')"},
+		{Name: "get null slides", Path: "get", Args: id, Set: map[string]any{"slide": "0"}, Answers: get(`{"slides":null}`),
+			Err: "INVALID_PARAMS: Slide index 0 out of range (0–-1)"},
+		{Name: "get missing fields", Path: "get", Args: id,
+			Answers: get(`{"slides":[{},{"objectId":null,"pageElements":[{},{"shape":null},{"shape":{"text":null}},{"shape":{"text":{}}},{"shape":{"text":{"textElements":[{"textRun":{"content":"a\n"}}]}}}]}]}`),
+			Out:     "\n--- Slide 1 () ---\n(no text content)\n\n--- Slide 2 () ---\na\n"},
+		{Name: "get notes", Path: "get", Args: id,
+			Answers: get(`{"slides":[{"objectId":"s1","slideProperties":{"notesPage":{"pageElements":[{"shape":{"placeholder":{"type":"BODY"},"text":{"textElements":[]}}},{"shape":{"placeholder":{"type":"BODY"},"text":{"textElements":[{"textRun":{"content":"N"}}]}}}]}}},{"objectId":"s2","slideProperties":null},{"objectId":"s3","slideProperties":{"notesPage":null}}]}`),
+			Out:     "\n--- Slide 1 (s1) ---\n(no text content)\n\nNotes:\nN\n\n--- Slide 2 (s2) ---\n(no text content)\n\n--- Slide 3 (s3) ---\n(no text content)\n"},
+		{Name: "get mistyped", Path: "get", Args: id, Set: map[string]any{"slide": "0"},
+			Answers: get(`{"slides":[{"objectId":5,"pageElements":[{"shape":{"text":{"textElements":[{"textRun":{"content":7}}]}}}]}]}`),
+			Out:     "\n--- Slide 1 (5) ---\n7\n"},
+		{Name: "create empty", Path: "create", Args: map[string]any{"title": "T"}, Answers: map[string]string{"POST /v1/presentations": `{}`},
+			Out: "Presentation created\nID: undefined\nTitle: T\nURL: https://docs.google.com/presentation/d/undefined\n"},
+		{Name: "create null", Path: "create", Args: map[string]any{"title": "T"}, Answers: map[string]string{"POST /v1/presentations": `null`},
+			Err: "API_ERROR: Failed to create presentation: null is not an object (evaluating 'response.data.presentationId')"},
+		{Name: "create mistyped", Path: "create", Args: map[string]any{"title": "T"}, Answers: map[string]string{"POST /v1/presentations": `{"presentationId":5,"title":0}`},
+			Out: "Presentation created\nID: 5\nTitle: T\nURL: https://docs.google.com/presentation/d/5\n"},
+		{Name: "batch null", Path: "batch", Args: id, Set: batchSet, Answers: batch(`null`),
+			Err: "API_ERROR: Failed to execute batch update: null is not an object (evaluating '(await this.slides.presentations.batchUpdate({\n          presentationId,\n          requestBody: { requests }\n        })).data.replies')"},
+		{Name: "batch empty", Path: "batch", Args: id, Set: batchSet, Answers: batch(`{}`), Out: "Batch update applied to P1\n  Replies: 0\n"},
+		{Name: "batch null replies", Path: "batch", Args: id, Set: batchSet, Answers: batch(`{"replies":null}`), Out: "Batch update applied to P1\n  Replies: 0\n"},
+		{Name: "batch string replies", Path: "batch", Args: id, Set: batchSet, Answers: batch(`{"replies":"abc"}`), Out: "Batch update applied to P1\n  Replies: 3\n"},
+		{Name: "batch object replies", Path: "batch", Args: id, Set: batchSet, Answers: batch(`{"replies":{"length":4}}`), Out: "Batch update applied to P1\n  Replies: 4\n"},
+		{Name: "list missing fields", Path: "list",
+			Answers: map[string]string{"GET /files": `{"files":[{},{"id":"f2","name":null,"owners":[null]},{"id":"f3","owners":[{"emailAddress":"e"}],"modifiedTime":""}]}`},
+			Out:     "Presentations (3)\n\n[1] Untitled\n    ID: undefined\n    Link: https://docs.google.com/presentation/d/undefined\n\n[2] Untitled\n    ID: f2\n    Link: https://docs.google.com/presentation/d/f2\n\n[3] Untitled\n    ID: f3\n    Owner: e\n    Link: https://docs.google.com/presentation/d/f3\n\n"},
+		{Name: "list null file", Path: "list", Answers: map[string]string{"GET /files": `{"files":[null]}`},
+			Err: "API_ERROR: Failed to list presentations: null is not an object (evaluating 'file.id')"},
+		{Name: "copy empty", Path: "copy", Args: map[string]any{"id-or-url": "P1", "title": "T"}, Answers: map[string]string{"POST /copy": `{}`},
+			Out: "Presentation created\nID: undefined\nTitle: T\nURL: https://docs.google.com/presentation/d/undefined\n"},
+		{Name: "copy null", Path: "copy", Args: map[string]any{"id-or-url": "P1", "title": "T"}, Answers: map[string]string{"POST /copy": `null`},
+			Err: "API_ERROR: Failed to copy presentation: null is not an object (evaluating 'response.data.id')"},
+	})
+}

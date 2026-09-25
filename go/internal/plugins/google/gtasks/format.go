@@ -5,23 +5,27 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
+
+// The printers read the Bun objects the client builds (see parseTask), as
+// Bun's template strings do: a missing field prints "undefined".
 
 // formatTaskLists is printGTasksList.
 func formatTaskLists(v any) string {
-	page, _ := v.(*taskListPage)
-	if page == nil || len(page.TaskLists) == 0 {
+	lists, _ := jsvalue.Member(v, "taskLists").([]any)
+	if len(lists) == 0 {
 		return "No task lists found"
 	}
-	lines := []string{fmt.Sprintf("Task Lists (%d)", len(page.TaskLists)), ""}
-	for i, tl := range page.TaskLists {
-		lines = append(lines, fmt.Sprintf("[%d] %s", i+1, tl.Title), "    ID: "+tl.ID)
-		if tl.Updated != "" {
-			lines = append(lines, "    Updated: "+tl.Updated)
+	lines := []string{fmt.Sprintf("Task Lists (%d)", len(lists)), ""}
+	for i, tl := range lists {
+		lines = append(lines, fmt.Sprintf("[%d] %s", i+1, google.Field(tl, "title")), "    ID: "+google.Field(tl, "id"))
+		if google.Truthy(tl, "updated") {
+			lines = append(lines, "    Updated: "+google.Field(tl, "updated"))
 		}
 		lines = append(lines, "")
 	}
-	if page.NextPageToken != "" {
+	if google.Truthy(v, "nextPageToken") {
 		lines = append(lines, "(more results available)")
 	}
 	return strings.Join(lines, "\n")
@@ -29,11 +33,7 @@ func formatTaskLists(v any) string {
 
 // formatTaskListCreated is printGTaskListCreated.
 func formatTaskListCreated(v any) string {
-	tl, _ := v.(*taskList)
-	if tl == nil {
-		return ""
-	}
-	return strings.Join([]string{"Task list created", "ID: " + tl.ID, "Title: " + tl.Title}, "\n")
+	return strings.Join([]string{"Task list created", "ID: " + google.Field(v, "id"), "Title: " + google.Field(v, "title")}, "\n")
 }
 
 // formatTaskListDeleted is printGTaskListDeleted.
@@ -44,76 +44,65 @@ func formatTaskListDeleted(v any) string {
 
 // formatTasks is printGTasks.
 func formatTasks(v any) string {
-	page, _ := v.(*taskPage)
-	if page == nil || len(page.Tasks) == 0 {
+	tasks, _ := jsvalue.Member(v, "tasks").([]any)
+	if len(tasks) == 0 {
 		return "No tasks found"
 	}
-	lines := []string{fmt.Sprintf("Tasks (%d)", len(page.Tasks)), ""}
-	for i, t := range page.Tasks {
+	lines := []string{fmt.Sprintf("Tasks (%d)", len(tasks)), ""}
+	for i, t := range tasks {
 		icon := "[ ]"
-		if t.Status == "completed" {
+		if jsvalue.StrictEqual(jsvalue.Member(t, "status"), "completed") {
 			icon = "[x]"
 		}
 		due := ""
-		if t.Due != "" {
-			due = " (due: " + strings.SplitN(t.Due, "T", 2)[0] + ")"
+		if google.Truthy(t, "due") {
+			due = " (due: " + strings.SplitN(google.Field(t, "due"), "T", 2)[0] + ")"
 		}
-		lines = append(lines, fmt.Sprintf("[%d] %s %s%s", i+1, icon, t.Title, due), "    ID: "+t.ID, "    Status: "+t.Status)
-		if t.Notes != "" {
-			lines = append(lines, "    > "+jsvalue.Truncate(t.Notes, 60))
+		lines = append(lines, fmt.Sprintf("[%d] %s %s%s", i+1, icon, google.Field(t, "title"), due),
+			"    ID: "+google.Field(t, "id"), "    Status: "+google.Field(t, "status"))
+		if google.Truthy(t, "notes") {
+			lines = append(lines, "    > "+jsvalue.Truncate(google.Field(t, "notes"), 60))
 		}
 		lines = append(lines, "")
 	}
-	if page.NextPageToken != "" {
+	if google.Truthy(v, "nextPageToken") {
 		lines = append(lines, "(more results available)")
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatTask is printGTask.
-func formatTask(v any) string {
-	t, _ := v.(*task)
-	if t == nil {
-		return ""
-	}
-	lines := []string{"ID: " + t.ID, "Title: " + t.Title, "Status: " + t.Status}
-	for _, f := range []struct{ label, value string }{
-		{"Due", t.Due}, {"Completed", t.Completed}, {"Updated", t.Updated}, {"Parent", t.Parent}, {"Link", t.WebViewLink},
+func formatTask(t any) string {
+	lines := []string{"ID: " + google.Field(t, "id"), "Title: " + google.Field(t, "title"), "Status: " + google.Field(t, "status")}
+	for _, f := range []struct{ label, key string }{
+		{"Due", "due"}, {"Completed", "completed"}, {"Updated", "updated"}, {"Parent", "parent"}, {"Link", "webViewLink"},
 	} {
-		if f.value != "" {
-			lines = append(lines, f.label+": "+f.value)
+		if google.Truthy(t, f.key) {
+			lines = append(lines, f.label+": "+google.Field(t, f.key))
 		}
 	}
-	if t.Notes != "" {
-		lines = append(lines, "---", t.Notes)
+	if google.Truthy(t, "notes") {
+		lines = append(lines, "---", google.Field(t, "notes"))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatTaskCreated is printGTaskCreated.
-func formatTaskCreated(v any) string {
-	t, _ := v.(*task)
-	if t == nil {
-		return ""
+func formatTaskCreated(t any) string {
+	lines := []string{"Task created", "ID: " + google.Field(t, "id"), "Title: " + google.Field(t, "title"), "Status: " + google.Field(t, "status")}
+	if google.Truthy(t, "due") {
+		lines = append(lines, "Due: "+google.Field(t, "due"))
 	}
-	lines := []string{"Task created", "ID: " + t.ID, "Title: " + t.Title, "Status: " + t.Status}
-	if t.Due != "" {
-		lines = append(lines, "Due: "+t.Due)
-	}
-	if t.WebViewLink != "" {
-		lines = append(lines, "Link: "+t.WebViewLink)
+	if google.Truthy(t, "webViewLink") {
+		lines = append(lines, "Link: "+google.Field(t, "webViewLink"))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatStatusChange is the done/undo command's three console.log lines.
 func formatStatusChange(verb string) func(any) string {
-	return func(v any) string {
-		t, _ := v.(*task)
-		if t == nil {
-			return ""
-		}
-		return strings.Join([]string{"Task " + verb + ": " + t.Title, "ID: " + t.ID, "Status: " + t.Status}, "\n")
+	return func(t any) string {
+		return strings.Join([]string{"Task " + verb + ": " + google.Field(t, "title"), "ID: " + google.Field(t, "id"), "Status: " + google.Field(t, "status")}, "\n")
 	}
 }
 
@@ -130,14 +119,10 @@ func formatCleared(v any) string {
 }
 
 // formatMoved is the move command's console.log lines.
-func formatMoved(v any) string {
-	t, _ := v.(*task)
-	if t == nil {
-		return ""
-	}
-	lines := []string{"Task moved: " + t.Title, "ID: " + t.ID}
-	if t.Parent != "" {
-		lines = append(lines, "Parent: "+t.Parent)
+func formatMoved(t any) string {
+	lines := []string{"Task moved: " + google.Field(t, "title"), "ID: " + google.Field(t, "id")}
+	if google.Truthy(t, "parent") {
+		lines = append(lines, "Parent: "+google.Field(t, "parent"))
 	}
 	return strings.Join(lines, "\n")
 }

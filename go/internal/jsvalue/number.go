@@ -53,16 +53,21 @@ func String(v any) string {
 	case int64:
 		return strconv.FormatInt(t, 10)
 	case []any:
-		parts := make([]string, len(t))
-		for i, e := range t {
-			if e != nil {
-				parts[i] = String(e)
-			}
-		}
-		return strings.Join(parts, ",")
+		return Join(t, ",")
 	default:
 		return "[object Object]"
 	}
+}
+
+// Join is items.join(sep): null and undefined elements are empty.
+func Join(items []any, sep string) string {
+	parts := make([]string, len(items))
+	for i, e := range items {
+		if !Nullish(e) {
+			parts[i] = String(e)
+		}
+	}
+	return strings.Join(parts, sep)
 }
 
 // Truthy is `!!v` for a Parse value or a plain Go scalar.
@@ -86,6 +91,33 @@ func Truthy(v any) bool {
 	default:
 		return true
 	}
+}
+
+// ToNumber is Number(v) for a Parse value or a plain Go scalar: null and
+// false are 0, true 1, undefined NaN, and anything else is read from its
+// String(v) (so [] is 0, [5] is 5 and an object NaN).
+func ToNumber(v any) float64 {
+	switch x := v.(type) {
+	case nil:
+		return 0
+	case bool:
+		if x {
+			return 1
+		}
+		return 0
+	case float64:
+		return x
+	}
+	return Number(String(v))
+}
+
+// Or is `v || fallback`: v when it is truthy, else fallback (Undefined for
+// `v || undefined`).
+func Or(v, fallback any) any {
+	if Truthy(v) {
+		return v
+	}
+	return fallback
 }
 
 // Number is Number(s): surrounding whitespace is ignored, an empty string is

@@ -20,6 +20,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
 	"github.com/plosson/agentio/go/internal/testbox"
@@ -666,7 +667,7 @@ func TestListPagesUntilTheLimitWithBunsQueries(t *testing.T) {
 		}
 		var ids []string
 		for _, f := range v.(fileList).Files {
-			ids = append(ids, f.ID)
+			ids = append(ids, jsvalue.String(jsvalue.Member(f, "id")))
 		}
 		if strings.Join(sizes, ",") != c.pageSizes || strings.Join(ids, ",") != c.ids {
 			t.Fatalf("%s %v: pageSizes %v ids %v", c.path, c.set, sizes, ids)
@@ -1155,16 +1156,38 @@ func TestAPIErrorsPreferTheAPIMessage(t *testing.T) {
 	}
 }
 
+func mustParse(t *testing.T, raw string) any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// parsedFiles is Bun parseFile over each file of a JSON array.
+func parsedFiles(t *testing.T, raw string) []any {
+	t.Helper()
+	var out []any
+	for _, f := range mustParse(t, raw).([]any) {
+		o, err := parseFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
 // Expected text is what the Bun CLI printed against the same fixtures.
 func TestFormatMatchesBun(t *testing.T) {
-	list := fileList{Title: "Files", Files: []file{
-		{ID: "doc1", Name: "Quarterly Plan", MimeType: "application/vnd.google-apps.document", ModifiedTime: "2026-03-04T05:06:07.000Z", Starred: true, Shared: true},
-		{ID: "pdf1", Name: "report <final>.pdf", MimeType: "application/pdf", Size: 1536, ModifiedTime: "2026-02-01T00:00:00.000Z"},
-		{ID: "fold1", Name: "Archive", MimeType: "application/vnd.google-apps.folder", ModifiedTime: "2025-12-31T23:59:59.000Z"},
-		{ID: "sheet1", Name: "Budget", MimeType: "application/vnd.google-apps.spreadsheet"},
-		{ID: "img1", Name: "Untitled", MimeType: "image/gif", Size: 5368709120},
-		{ID: "vid1", Name: "clip.mov", MimeType: "video/quicktime", Size: 1048576, Starred: true},
-	}}
+	list := fileList{Title: "Files", Files: parsedFiles(t, `[
+		{"id":"doc1","name":"Quarterly Plan","mimeType":"application/vnd.google-apps.document","modifiedTime":"2026-03-04T05:06:07.000Z","starred":true,"shared":true},
+		{"id":"pdf1","name":"report <final>.pdf","mimeType":"application/pdf","size":"1536","modifiedTime":"2026-02-01T00:00:00.000Z"},
+		{"id":"fold1","name":"Archive","mimeType":"application/vnd.google-apps.folder","modifiedTime":"2025-12-31T23:59:59.000Z"},
+		{"id":"sheet1","name":"Budget","mimeType":"application/vnd.google-apps.spreadsheet"},
+		{"id":"img1","mimeType":"image/gif","size":"5368709120"},
+		{"id":"vid1","name":"clip.mov","mimeType":"video/quicktime","size":"1048576","starred":true}]`)}
 	wantList := "Files (6)\n\n" +
 		"gdoc           -  2026-03-04  *⇄ Quarterly Plan\n  doc1\n" +
 		"pdf       1.5 KB  2026-02-01     report <final>.pdf\n  pdf1\n" +
@@ -1185,9 +1208,9 @@ func TestFormatMatchesBun(t *testing.T) {
 		t.Fatal("short mime types")
 	}
 
-	pdf := &file{ID: "pdf1", Name: "report <final>.pdf", MimeType: "application/pdf", Size: 1536, ModifiedTime: "2026-02-01T00:00:00.000Z",
-		Owners: []string{"bob@example.com", "Unknown"}, Parents: []string{"fold1", "fold2"}, WebViewLink: "https://drive.google.com/file/d/pdf1/view",
-		WebContentLink: "https://drive.google.com/uc?id=pdf1&export=download", Description: "Café & co"}
+	pdf := parsedFiles(t, `[{"id":"pdf1","name":"report <final>.pdf","mimeType":"application/pdf","size":"1536","modifiedTime":"2026-02-01T00:00:00.000Z",
+		"owners":[{"emailAddress":"bob@example.com"},{}],"parents":["fold1","fold2"],"webViewLink":"https://drive.google.com/file/d/pdf1/view",
+		"webContentLink":"https://drive.google.com/uc?id=pdf1&export=download","description":"Café & co"}]`)[0]
 	wantFile := "ID: pdf1\nName: report <final>.pdf\nType: application/pdf\nSize: 1.5 KB\nDescription: Café & co\nOwners: bob@example.com, Unknown\n" +
 		"Parents: fold1, fold2\nStarred: no\nShared: no\nTrashed: no\nModified: 2026-02-01T00:00:00.000Z\nView: https://drive.google.com/file/d/pdf1/view\n" +
 		"Download: https://drive.google.com/uc?id=pdf1&export=download\n"
@@ -1195,23 +1218,25 @@ func TestFormatMatchesBun(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 
-	perms := []permission{
-		{ID: "p-owner", Type: "user", Role: "owner", EmailAddress: "alice@example.com", DisplayName: "Alice"},
-		{ID: "anyoneWithLink", Type: "anyone", Role: "reader", AllowFileDiscovery: true},
-		{ID: "p-dom", Type: "domain", Role: "commenter", Domain: "example.com"},
-		{ID: "p-grp", Type: "group", Role: "writer"},
+	perms, err := parsePermissions(mustParse(t, `{"permissions":[
+		{"id":"p-owner","type":"user","role":"owner","emailAddress":"alice@example.com","displayName":"Alice"},
+		{"id":"anyoneWithLink","type":"anyone","role":"reader","allowFileDiscovery":true},
+		{"id":"p-dom","type":"domain","role":"commenter","domain":"example.com"},
+		{"id":"p-grp","type":"group","role":"writer"}]}`))
+	if err != nil {
+		t.Fatal(err)
 	}
 	wantPerms := "Permissions (4)\n\n  owner      alice@example.com\n    ID: p-owner\n    Name: Alice\n  reader     anyone (discoverable)\n" +
 		"    ID: anyoneWithLink\n  commenter  example.com\n    ID: p-dom\n  writer     group\n    ID: p-grp\n"
 	if got := product.Printed(t, "permissions", perms, false); got != wantPerms {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "permissions", []permission{}, false); got != "No permissions found\n" {
+	if got := product.Printed(t, "permissions", []any{}, false); got != "No permissions found\n" {
 		t.Fatalf("%q", got)
 	}
 
-	up := &uploaded{ID: "up1", Name: "a.txt", MimeType: "text/plain", Size: 5, WebViewLink: "https://drive.google.com/file/d/up1/view",
-		Share: &shared{PermissionID: "perm-new", Type: "anyone", Role: "reader", FileID: "up1"}}
+	up := jsvalue.ObjectOf("id", "up1", "name", "a.txt", "mimeType", "text/plain", "size", int64(5), "webViewLink", "https://drive.google.com/file/d/up1/view",
+		"share", jsvalue.ObjectOf("permissionId", "perm-new", "type", "anyone", "role", "reader", "emailAddress", jsvalue.Undefined, "domain", jsvalue.Undefined))
 	if got := product.Printed(t, "put", up, false); got != "Uploaded: a.txt\n  ID: up1\n  Size: 5 B\n  Type: text/plain\n  Link: https://drive.google.com/file/d/up1/view\n"+
 		"Permission created\n  Permission ID: perm-new\n  Type: anyone\n  Role: reader\n  Public URL: https://drive.google.com/uc?id=up1\n" {
 		t.Fatalf("%q", got)
@@ -1219,10 +1244,10 @@ func TestFormatMatchesBun(t *testing.T) {
 	if got := product.Printed(t, "put", up, true); !strings.Contains(got, `"share": {`) || strings.Contains(got, "FileID") || strings.Contains(got, "fileId") {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "mkdir", &file{ID: "new1", Name: "nolink"}, false); got != "Created folder: nolink (new1)\n" {
+	if got := product.Printed(t, "mkdir", parsedFiles(t, `[{"id":"new1","name":"nolink"}]`)[0], false); got != "Created folder: nolink (new1)\n" {
 		t.Fatalf("%q", got)
 	}
-	if got := product.Printed(t, "move", &file{ID: "pdf1", Name: "report <final>.pdf"}, false); got != "Moved: report <final>.pdf (pdf1)\n" {
+	if got := product.Printed(t, "move", parsedFiles(t, `[{"id":"pdf1","name":"report <final>.pdf"}]`)[0], false); got != "Moved: report <final>.pdf (pdf1)\n" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -1246,3 +1271,187 @@ func TestEmptySearchQueryIsSent(t *testing.T) {
 // freshExpiry is a stored expiry far ahead: google-auth-library would
 // refresh an expiring token on its own before the call.
 const freshExpiry = 9_000_000_000_000
+
+// Answers with missing, null, empty and mistyped fields print what Bun
+// prints for them (captured from the Bun CLI against the same answers): a
+// missing id is "undefined", a size is parseInt of what was sent, a null
+// item or answer is Bun's TypeError, and a body that is not JSON is its text.
+func TestMissingAndNullFieldsPrintAsBun(t *testing.T) {
+	product.RunAnswered(t, fresh("full"), []googletest.Answered{
+		{Name: "list sizes, missing and null fields",
+			Path:    "list",
+			Answers: map[string]string{"GET /files": "{\"files\":[{\"name\":\"a\",\"size\":\"0\",\"modifiedTime\":\"\"},{\"id\":\"f2\",\"name\":null,\"mimeType\":null,\"size\":\"12abc\",\"starred\":null,\"shared\":true},{},{\"id\":\"f4\",\"size\":\"-5\",\"mimeType\":\"application/vnd.google-apps.folder\"},{\"id\":\"f5\",\"size\":\"abc\"},{\"id\":\"f6\",\"size\":5000000000000}]}"},
+			Out:     "Files (6)\n\nfile           -                 a\n  undefined\nfile        12 B              ⇄  Untitled\n  f2\nfile           -                 Untitled\n  undefined\nfolder  NaN undefined                 Untitled/\n  f4\nfile           -                 Untitled\n  f5\nfile    4.5 undefined                 Untitled\n  f6\n"},
+		{Name: "list null item",
+			Path:    "list",
+			Answers: map[string]string{"GET /files": "{\"files\":[{\"id\":\"a\"},null]}"},
+			Err:     "API_ERROR: Failed to list files: null is not an object (evaluating 'file.id')"},
+		{Name: "list null answer",
+			Path:    "list",
+			Answers: map[string]string{"GET /files": "null"},
+			Err:     "API_ERROR: Failed to list files: null is not an object (evaluating 'response.data.files')"},
+		{Name: "folders fractional size",
+			Path:    "folders",
+			Answers: map[string]string{"GET /files": "{\"files\":[{\"id\":\"a\",\"size\":0.5}]}"},
+			Out:     "Folders (1)\n\nfile           -                 Untitled\n  a\n"},
+		{Name: "search text answer",
+			Path:    "search",
+			Set:     map[string]any{"query": "x"},
+			Answers: map[string]string{"GET /files": "oops"},
+			Out:     "No files found\n"},
+		{Name: "get owners and parents with gaps",
+			Path:    "get",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /files/F": "{\"size\":\"2048\",\"owners\":[{\"displayName\":\"\",\"emailAddress\":\"e@x\"},{},{\"displayName\":\"D\"}],\"parents\":[null,\"p2\"],\"starred\":0,\"shared\":\"yes\",\"trashed\":null,\"description\":\"\"}"},
+			Out:     "ID: undefined\nName: Untitled\nType: application/octet-stream\nSize: 2 KB\nOwners: e@x, Unknown, D\nParents: , p2\nStarred: no\nShared: yes\nTrashed: no\n"},
+		{Name: "get null owner",
+			Path:    "get",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /files/F": "{\"owners\":[null]}"},
+			Err:     "API_ERROR: Failed to get file: null is not an object (evaluating 'o.displayName')"},
+		{Name: "get empty arrays",
+			Path:    "get",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /files/F": "{\"owners\":[],\"parents\":[]}"},
+			Out:     "ID: undefined\nName: Untitled\nType: application/octet-stream\nStarred: no\nShared: no\nTrashed: no\n"},
+		{Name: "get null answer",
+			Path:    "get",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /files/F": "null"},
+			Err:     "API_ERROR: Failed to get file: null is not an object (evaluating 'file.id')"},
+		{Name: "get mistyped",
+			Path:    "get",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /files/F": "{\"id\":\"F\",\"size\":\"1e3\",\"owners\":[{\"emailAddress\":5}]}"},
+			Out:     "ID: F\nName: Untitled\nType: application/octet-stream\nSize: 1 B\nOwners: 5\nStarred: no\nShared: no\nTrashed: no\n"},
+		{Name: "copy null parent",
+			Path:    "copy",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"POST /copy": "{\"parents\":[null]}"},
+			Out:     "Copied: Untitled\n  ID: undefined\n  Type: application/octet-stream\n  Folder: null\n"},
+		{Name: "copy null answer",
+			Path:    "copy",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"POST /copy": "null"},
+			Err:     "API_ERROR: Failed to copy file: null is not an object (evaluating 'response.data.id')"},
+		{Name: "mkdir empty answer",
+			Path:    "mkdir",
+			Args:    map[string]any{"name": "X"},
+			Answers: map[string]string{"POST /files": "{}"},
+			Out:     "Created folder: Untitled (undefined)\n"},
+		{Name: "rename empty name",
+			Path:    "rename",
+			Args:    map[string]any{"file-id-or-url": "F", "new-name": "N"},
+			Answers: map[string]string{"PATCH /files/F": "{\"name\":\"\"}"},
+			Out:     "Renamed: Untitled (undefined)\n"},
+		{Name: "trash null answer",
+			Path:    "trash",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"PATCH /files/F": "null"},
+			Err:     "API_ERROR: Failed to trash file: null is not an object (evaluating 'file.id')"},
+		{Name: "move null parents",
+			Path:    "move",
+			Args:    map[string]any{"file-id-or-url": "F", "folder-id-or-url": "D"},
+			Answers: map[string]string{"GET /files/F": "{\"parents\":[null,\"a\"]}", "PATCH /files/F": "{\"parents\":[null]}"},
+			Out:     "Moved: Untitled (undefined)\n  Folder: null\n"},
+		{Name: "permissions missing fields",
+			Path:    "permissions",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /permissions": "{\"permissions\":[{\"role\":\"reader\",\"type\":\"anyone\",\"allowFileDiscovery\":true},{\"role\":\"writer\",\"domain\":\"\",\"emailAddress\":null,\"displayName\":\"\"},{\"id\":\"p3\",\"role\":\"owner\",\"type\":\"user\",\"emailAddress\":\"u@x\",\"displayName\":\"U\"}]}"},
+			Out:     "Permissions (3)\n\n  reader     anyone (discoverable)\n    ID: undefined\n  writer     undefined\n    ID: undefined\n  owner      u@x\n    ID: p3\n    Name: U\n"},
+		{Name: "permissions null item",
+			Path:    "permissions",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /permissions": "{\"permissions\":[null]}"},
+			Err:     "API_ERROR: Failed to list permissions: null is not an object (evaluating 'p.id')"},
+		{Name: "permissions empty",
+			Path:    "permissions",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Answers: map[string]string{"GET /permissions": "{\"permissions\":[]}"},
+			Out:     "No permissions found\n"},
+		{Name: "share empty answer",
+			Path:    "share",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Set:     map[string]any{"anyone": true},
+			Answers: map[string]string{"POST /permissions": "{}"},
+			Out:     "Permission created\n  Permission ID: undefined\n  Type: undefined\n  Role: undefined\n"},
+		{Name: "share null role",
+			Path:    "share",
+			Args:    map[string]any{"file-id-or-url": "https://drive.google.com/file/d/ABC/view"},
+			Set:     map[string]any{"user": "u@x"},
+			Answers: map[string]string{"POST /permissions": "{\"type\":\"anyone\",\"role\":null,\"domain\":\"d\"}"},
+			Out:     "Permission created\n  Permission ID: undefined\n  Type: anyone\n  Role: null\n  Domain: d\n  Public URL: https://drive.google.com/uc?id=ABC\n"},
+		{Name: "share null answer",
+			Path:    "share",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Set:     map[string]any{"anyone": true},
+			Answers: map[string]string{"POST /permissions": "null"},
+			Err:     "API_ERROR: Failed to share file: null is not an object (evaluating 'response.data.id')"},
+		{Name: "unshare anyone without id",
+			Path:    "unshare",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Set:     map[string]any{"anyone": true},
+			Answers: map[string]string{"GET /permissions": "{\"permissions\":[{\"type\":\"anyone\"}]}"},
+			Err:     "API_ERROR: Failed to remove permission: Missing required parameters: permissionId"},
+		{Name: "unshare anyone numeric id",
+			Path:    "unshare",
+			Args:    map[string]any{"file-id-or-url": "F"},
+			Set:     map[string]any{"anyone": true},
+			Answers: map[string]string{"GET /permissions": "{\"permissions\":[{\"type\":\"anyone\",\"id\":7}]}", "DELETE /permissions/7": ""},
+			Out:     "Permission 7 removed\n"},
+	})
+}
+
+// Bun prints what it can before a printer or command step throws: the
+// permissions before the first one without a role, the upload before
+// --public reads its missing id.
+func TestPartialOutputBeforeBunsTypeError(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", fresh("full"), false)
+	var mu sync.Mutex
+	var answer string
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case h.Method == "GET" && h.Path == "/files/F" && h.Query.Get("alt") == "media":
+			googletest.WriteRaw(w, 200, "abc")
+		case h.Method == "GET" && h.Path == "/files/F":
+			googletest.WriteRaw(w, 200, `{"name":null,"mimeType":"text/plain"}`)
+		default:
+			googletest.WriteRaw(w, 200, answer)
+		}
+	})
+	run := func(body, path string, args, set map[string]any) (string, error) {
+		mu.Lock()
+		answer = body
+		mu.Unlock()
+		v, err := product.Exec(fake.Ctx(), t, reg, path, product.Input(t, path, args, set))
+		if v == nil {
+			return "", err
+		}
+		return product.Printed(t, path, v, false), err
+	}
+	out, err := run(`{"permissions":[{"id":"p1","role":"reader","type":"user"},{"id":"p2"},{"id":"p3","role":"x"}]}`,
+		"permissions", map[string]any{"file-id-or-url": "F"}, nil)
+	if out != "Permissions (3)\n\n  reader     user\n    ID: p1\n" || err == nil || err.Error() != "undefined is not an object (evaluating 'p.role.padEnd')" {
+		t.Fatalf("permissions: %q %v", out, err)
+	}
+	local := filepath.Join(t.TempDir(), "up.txt")
+	if err := os.WriteFile(local, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(`{"name":null,"webViewLink":"w"}`, "put", map[string]any{"file-path": local}, map[string]any{"public": true})
+	if out != "Uploaded: up.txt\n  ID: undefined\n  Size: 5 B\n  Type: text/plain\n  Link: w\n" || err == nil || err.Error() != "undefined is not an object (evaluating 'fileIdOrUrl.match')" {
+		t.Fatalf("put: %q %v", out, err)
+	}
+	out, err = run(`{"id":null}`, "put", map[string]any{"file-path": local}, map[string]any{"public": true})
+	if out != "Uploaded: up.txt\n  ID: null\n  Size: 5 B\n  Type: text/plain\n" || err == nil || err.Error() != "null is not an object (evaluating 'fileIdOrUrl.match')" {
+		t.Fatalf("put: %q %v", out, err)
+	}
+	dl := filepath.Join(t.TempDir(), "dl.bin")
+	out, err = run("", "download", map[string]any{"file-id-or-url": "F"}, map[string]any{"output": dl})
+	if err != nil || out != "Downloaded: Untitled\n  Path: "+dl+"\n  Size: 3 B\n  Type: text/plain\n" {
+		t.Fatalf("download: %q %v", out, err)
+	}
+}

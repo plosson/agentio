@@ -290,3 +290,66 @@ func (p Product) Printed(t *testing.T, path string, v any, asJSON bool) string {
 	}
 	return b.String()
 }
+
+// Answered is one command run against raw answers, with what Bun prints for
+// it: Out is Bun's stdout (with --json when JSON is set), Err its
+// "CODE: message" when the command fails.
+type Answered struct {
+	Name string
+	Path string
+	Args map[string]any
+	Set  map[string]any
+	// Answers maps "METHOD path-substring" to the raw body the fake Google
+	// answers (200); the longest matching key wins, no match is a 404.
+	Answers map[string]string
+	JSON    bool
+	Out     string
+	Err     string
+}
+
+// RunAnswered runs each case through the host with a profile holding creds
+// and compares stdout and the error with Bun's.
+func (p Product) RunAnswered(t *testing.T, creds map[string]any, cases []Answered) {
+	t.Helper()
+	reg := p.SetupVault(t)
+	p.SaveProfile(t, "acme", creds, false)
+	var mu sync.Mutex
+	var answers map[string]string
+	fake := NewFake(t, func(w http.ResponseWriter, h Hit) {
+		mu.Lock()
+		defer mu.Unlock()
+		best, found := "", false
+		for key := range answers {
+			method, sub, _ := strings.Cut(key, " ")
+			if method == h.Method && strings.Contains(h.Path, sub) && (!found || len(key) > len(best)) {
+				best, found = key, true
+			}
+		}
+		if !found {
+			WriteAPIError(w, 404, "no answer for "+h.Method+" "+h.Path)
+			return
+		}
+		WriteRaw(w, 200, answers[best])
+	})
+	for _, c := range cases {
+		mu.Lock()
+		answers = c.Answers
+		mu.Unlock()
+		v, err := p.Exec(fake.Ctx(), t, reg, c.Path, p.Input(t, c.Path, c.Args, c.Set))
+		got := ""
+		if err != nil {
+			ce := CliErr(t, err)
+			got = string(ce.Code) + ": " + ce.Message
+		}
+		if got != c.Err {
+			t.Errorf("%s: error %q, Bun %q", c.Name, got, c.Err)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		if out := p.Printed(t, c.Path, v, c.JSON); out != c.Out {
+			t.Errorf("%s: printed\n%s\nBun printed\n%s", c.Name, out, c.Out)
+		}
+	}
+}

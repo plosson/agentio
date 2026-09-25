@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -50,57 +51,11 @@ var attachmentMIME = map[string]string{
 	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
-type sender struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName"`
-	Email       string `json:"email,omitempty"`
-}
-
-type thread struct {
-	Name string `json:"name"`
-}
-
-// message is GChatMessage, in Bun's key order.
-type message struct {
-	Name       string  `json:"name"`
-	CreateTime string  `json:"createTime"`
-	UpdateTime string  `json:"updateTime"`
-	Text       string  `json:"text,omitempty"`
-	Sender     *sender `json:"sender,omitempty"`
-	Thread     *thread `json:"thread,omitempty"`
-}
-
-type space struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
-
-type organization struct {
-	Name       string `json:"name,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Department string `json:"department,omitempty"`
-}
-
-// user is GChatUser.
-type user struct {
-	Name          string         `json:"name"`
-	DisplayName   string         `json:"displayName,omitempty"`
-	Email         string         `json:"email,omitempty"`
-	PhoneNumbers  []string       `json:"phoneNumbers,omitempty"`
-	Organizations []organization `json:"organizations,omitempty"`
-	PhotoURL      string         `json:"photoUrl,omitempty"`
-	Locations     []string       `json:"locations,omitempty"`
-}
-
-type member struct {
-	Name       string `json:"name"`
-	Role       string `json:"role"`
-	State      string `json:"state"`
-	MemberType string `json:"memberType"`
-	User       *user  `json:"user,omitempty"`
-}
+// The models are the Bun client's objects (GChatMessage, GChatSpace,
+// GChatMember, GChatUser), built from the answers as JavaScript reads them
+// (google.Answer for the Chat API, plugins.ResponseJSON for Bun's plain
+// fetch calls): fields keep the values the answer gave, a missing one is
+// undefined, and a null item fails with Bun's TypeError.
 
 type sendResult struct {
 	MessageID     string `json:"messageId"`
@@ -125,9 +80,10 @@ func (s shown[T]) MarshalJSON() ([]byte, error) {
 	return stringify(s.Value, "")
 }
 
+// resolvedUser is Bun ResolvedUser: the name and email an id resolved to.
 type resolvedUser struct {
-	displayName string
-	email       string
+	displayName any
+	email       any
 }
 
 type api struct {
@@ -135,7 +91,7 @@ type api struct {
 	chat      *chat.Service
 	people    *people.Service
 	users     map[string]resolvedUser
-	fullUsers map[string]*user
+	fullUsers map[string]*jsvalue.Object
 	dir       *directory
 }
 
@@ -154,7 +110,7 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	}
 	return &api{
 		API:  google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage},
-		chat: chatSvc, people: peopleSvc, users: map[string]resolvedUser{}, fullUsers: map[string]*user{},
+		chat: chatSvc, people: peopleSvc, users: map[string]resolvedUser{}, fullUsers: map[string]*jsvalue.Object{},
 	}, nil
 }
 
@@ -256,13 +212,32 @@ func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
 	}
 	const suggestion = "Check that the space ID is valid and OAuth token is not expired"
 	parent := strings.ReplaceAll(url.PathEscape("spaces/"+o.spaceID), "%2F", "/") // {+parent}
+	// CallJSON, not the SDK: the payload goes as the user wrote it, and
+	// chat.Message would drop fields it does not know and reorder the rest.
 	created, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, http.MethodPost, a.chat.BasePath, "v1/"+parent+"/messages", jsvalue.Stringify(body))
+	if err == nil && jsvalue.Nullish(created) {
+		err = jsvalue.TypeError(created, createdName)
+	}
 	if err != nil {
 		return nil, a.StatusError("Failed to send message: ", err, suggestion)
 	}
-	name, _ := jsvalue.Member(created, "name").(string)
-	return &sendResult{MessageID: lastSegment(name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
+	return &sendResult{MessageID: messageID(jsvalue.Member(created, "name")), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
 }
+
+// createdName and uploadedRef are the expressions JavaScriptCore reports for
+// `response.data.name` in sendViaOAuth and `response.data.attachmentDataRef`
+// in uploadAttachment: Bun's transpiler inlines the single-use response.
+const (
+	createdName = "(await chat.spaces.messages.create({\n" +
+		"          parent: `spaces/${options.spaceId}`,\n" +
+		"          requestBody\n" +
+		"        })).data.name"
+	uploadedRef = "(await chat.media.upload({\n" +
+		"        parent: `spaces/${spaceId}`,\n" +
+		"        requestBody: { filename },\n" +
+		"        media: { mimeType, body: createReadStream(filePath) }\n" +
+		"      })).data.attachmentDataRef"
+)
 
 // uploadAttachments is Bun's Promise.all over uploadAttachment: every upload
 // runs at once, the refs keep the paths' order, and the first upload to fail
@@ -273,16 +248,15 @@ func (a *api) uploadAttachments(spaceID string, paths []string) ([]any, error) {
 	for i, path := range paths {
 		tasks[i] = func() error {
 			ref, err := a.uploadAttachment(spaceID, path)
-			if err == nil {
-				refs[i], _ = jsvalue.Parse(jsvalue.Stringify(ref))
-			}
+			refs[i] = ref
 			return err
 		}
 	}
 	return refs, plugins.All(tasks...)
 }
 
-func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, error) {
+// uploadAttachment returns the answer's attachmentDataRef as it came.
+func (a *api) uploadAttachment(spaceID, path string) (any, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, a.Fail("INVALID_PARAMS", "Failed to read attachment: "+path, "Check that the file exists and is readable")
 	}
@@ -298,16 +272,20 @@ func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, e
 		return nil, a.Fail("API_ERROR", prefix+err.Error(), suggestion)
 	}
 	defer f.Close()
-	resp, err := a.chat.Media.Upload("spaces/"+spaceID, &chat.UploadAttachmentRequest{Filename: filename}).
-		Media(f, googleapi.ContentType(mime)).Context(a.Ctx).Do()
+	_, data, err := google.Answer(a.Ctx, a.chat.Media.Upload("spaces/"+spaceID, &chat.UploadAttachmentRequest{Filename: filename}).
+		Media(f, googleapi.ContentType(mime)))
+	if err == nil && jsvalue.Nullish(data) {
+		err = jsvalue.TypeError(data, uploadedRef)
+	}
 	if err != nil {
 		return nil, a.StatusError(prefix, err, suggestion)
 	}
-	if resp.AttachmentDataRef == nil {
+	ref := jsvalue.Member(data, "attachmentDataRef")
+	if !jsvalue.Truthy(ref) {
 		return nil, a.Fail("API_ERROR", fmt.Sprintf("Upload of \"%s\" returned no attachmentDataRef", filename),
 			"Retry, or check that the file size is under the Chat API limit (200MB)")
 	}
-	return resp.AttachmentDataRef, nil
+	return ref, nil
 }
 
 type listOptions struct {
@@ -317,7 +295,7 @@ type listOptions struct {
 }
 
 // list returns the newest messages first and whether --limit cut the range.
-func (a *api) list(o listOptions) ([]message, bool, error) {
+func (a *api) list(o listOptions) ([]any, bool, error) {
 	if jsvalue.Trim(o.spaceID) == "" {
 		return nil, false, a.Fail("INVALID_PARAMS", "spaceId is required for listing messages", "Specify with --space or configure default in profile")
 	}
@@ -349,28 +327,27 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 		limit = 10
 	}
 	// The Chat API caps pageSize at 1000; page until the limit is reached.
-	var raw []*chat.Message
-	pageToken := ""
+	var raw []any
+	var pageToken any = jsvalue.Undefined
 	for {
 		call := a.chat.Spaces.Messages.List("spaces/" + spaceID).
-			PageSize(int64(min(limit-float64(len(raw)), 1000))).OrderBy("createTime desc").Context(a.Ctx)
+			PageSize(int64(min(limit-float64(len(raw)), 1000))).OrderBy("createTime desc")
 		if len(filters) > 0 {
 			call.Filter(strings.Join(filters, " AND "))
 		}
-		if pageToken != "" {
-			call.PageToken(pageToken)
+		if jsvalue.Truthy(pageToken) {
+			call.PageToken(jsvalue.String(pageToken))
 		}
-		resp, err := call.Do()
+		messages, next, err := page(a.Ctx, call, "messages")
 		if err != nil {
 			return nil, false, a.StatusError(prefix, err, suggestion)
 		}
-		raw = append(raw, resp.Messages...)
-		pageToken = resp.NextPageToken
-		if pageToken == "" || float64(len(raw)) >= limit {
+		raw = append(raw, messages...)
+		if pageToken = next; !jsvalue.Truthy(pageToken) || float64(len(raw)) >= limit {
 			break
 		}
 	}
-	truncated := pageToken != ""
+	truncated := jsvalue.Truthy(pageToken)
 	if float64(len(raw)) > limit {
 		if limit < 0 {
 			// `messages.length = limit` throws on a negative length.
@@ -378,23 +355,43 @@ func (a *api) list(o listOptions) ([]message, bool, error) {
 		}
 		raw = raw[:int(limit)]
 	}
-	var senders []string
-	seen := map[string]bool{}
+	// Bun `[...new Set(messages.map(m => m.sender?.name).filter(Boolean))]`.
+	var senders []any
 	for _, m := range raw {
-		if m.Sender != nil && m.Sender.Name != "" && !seen[m.Sender.Name] {
-			seen[m.Sender.Name] = true
-			senders = append(senders, m.Sender.Name)
+		if jsvalue.Nullish(m) {
+			return nil, false, a.StatusError(prefix, jsvalue.TypeError(m, "m.sender"), suggestion)
+		}
+		if name := jsvalue.Optional(jsvalue.Member(m, "sender"), "name"); jsvalue.Truthy(name) && !slices.ContainsFunc(senders, func(s any) bool { return jsvalue.StrictEqual(s, name) }) {
+			senders = append(senders, name)
 		}
 	}
 	a.resolveUsers(senders)
-	out := []message{}
+	out := []any{}
 	for _, m := range raw {
-		out = append(out, a.toMessage(m))
+		out = append(out, a.messageOf(m))
 	}
 	return out, truncated, nil
 }
 
-func (a *api) get(spaceID, messageID string) (*message, error) {
+// page is one page of a Chat list call: `response.data.<key> || []` and
+// `response.data.nextPageToken || undefined`.
+func page[C google.Call[C, T], T any](ctx context.Context, call C, key string) ([]any, any, error) {
+	_, data, err := google.Answer(ctx, call)
+	if err != nil {
+		return nil, nil, err
+	}
+	v, err := jsvalue.Path(data, "response.data", key)
+	if err != nil {
+		return nil, nil, err
+	}
+	items, err := jsvalue.Items(jsvalue.Or(v, []any{}), "(response.data."+key+" || [])")
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, jsvalue.Or(jsvalue.Member(data, "nextPageToken"), jsvalue.Undefined), nil
+}
+
+func (a *api) get(spaceID, messageID string) (*jsvalue.Object, error) {
 	if jsvalue.Trim(spaceID) == "" || jsvalue.Trim(messageID) == "" {
 		return nil, a.Fail("INVALID_PARAMS", "Both spaceId and messageId are required", "Specify with --space and message ID")
 	}
@@ -405,91 +402,114 @@ func (a *api) get(spaceID, messageID string) (*message, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := a.chat.Spaces.Messages.Get(fmt.Sprintf("spaces/%s/messages/%s", spaceID, messageID)).Context(a.Ctx).Do()
+	_, msg, err := google.Answer(a.Ctx, a.chat.Spaces.Messages.Get(fmt.Sprintf("spaces/%s/messages/%s", spaceID, messageID)))
+	if err == nil && !jsvalue.Truthy(msg) {
+		err = errors.New("Message not found")
+	}
 	if err != nil {
 		return nil, a.StatusError("Failed to get message: ", err, "Check that the space ID and message ID are valid")
 	}
-	if m.Sender != nil && m.Sender.Name != "" {
-		a.resolveUsers([]string{m.Sender.Name})
+	if name := jsvalue.Optional(jsvalue.Member(msg, "sender"), "name"); jsvalue.Truthy(name) {
+		a.resolveUsers([]any{name})
 	}
-	out := a.toMessage(m)
-	return &out, nil
+	return a.messageOf(msg), nil
 }
 
-func (a *api) toMessage(m *chat.Message) message {
-	out := message{Name: m.Name, CreateTime: m.CreateTime, UpdateTime: m.LastUpdateTime, Text: m.Text, Sender: a.enrichSender(m)}
-	if out.CreateTime == "" {
-		out.CreateTime = jsvalue.ISOString(now())
+// messageOf is the GChatMessage Bun's list and get build from msg.
+func (a *api) messageOf(msg any) *jsvalue.Object {
+	get := func(k string) any { return jsvalue.Member(msg, k) }
+	out := jsvalue.ObjectOf(
+		"name", jsvalue.Or(get("name"), ""),
+		"createTime", jsvalue.Or(get("createTime"), jsvalue.ISOString(now())),
+		"updateTime", jsvalue.Or(get("lastUpdateTime"), jsvalue.ISOString(now())),
+	)
+	if jsvalue.Truthy(get("text")) {
+		out.Set("text", get("text"))
 	}
-	if out.UpdateTime == "" {
-		out.UpdateTime = jsvalue.ISOString(now())
-	}
-	if m.Thread != nil && m.Thread.Name != "" {
-		out.Thread = &thread{Name: m.Thread.Name}
+	out.Set("sender", a.enrichSender(msg))
+	if name := jsvalue.Optional(get("thread"), "name"); jsvalue.Truthy(name) {
+		out.Set("thread", jsvalue.ObjectOf("name", name))
 	}
 	return out
 }
 
-func (a *api) enrichSender(m *chat.Message) *sender {
-	if m.Sender == nil || m.Sender.Name == "" {
-		return nil
+// enrichSender is Bun enrichSender: the resolved name and email, else the
+// message's own, else the id; undefined without a sender id.
+func (a *api) enrichSender(msg any) any {
+	s := jsvalue.Member(msg, "sender")
+	name := jsvalue.Optional(s, "name")
+	if !jsvalue.Truthy(name) {
+		return jsvalue.Undefined
 	}
-	cached := a.users[m.Sender.Name]
-	name := cached.displayName
-	if name == "" {
-		name = m.Sender.DisplayName
+	cached := resolvedUser{displayName: jsvalue.Undefined, email: jsvalue.Undefined}
+	if id, ok := name.(string); ok {
+		if c, ok := a.users[id]; ok {
+			cached = c
+		}
 	}
-	if name == "" {
-		name = m.Sender.Name
-	}
-	return &sender{Name: m.Sender.Name, DisplayName: name, Email: cached.email}
+	return jsvalue.ObjectOf(
+		"name", name,
+		"displayName", jsvalue.Or(jsvalue.Or(cached.displayName, jsvalue.Member(s, "displayName")), name),
+		"email", cached.email,
+	)
 }
 
-func (a *api) listSpaces() ([]space, error) {
+func (a *api) listSpaces() ([]any, error) {
 	if err := a.ensureOAuth("Listing spaces"); err != nil {
 		return nil, err
 	}
 	return a.listSpacesViaOAuth()
 }
 
-func (a *api) listSpacesViaOAuth() ([]space, error) {
-	out := []space{}
-	pageToken := ""
+func (a *api) listSpacesViaOAuth() ([]any, error) {
+	const prefix, suggestion = "Failed to list spaces: ", "Check that OAuth token is valid and has Chat scope"
+	out := []any{}
+	var pageToken any = jsvalue.Undefined
 	for {
-		call := a.chat.Spaces.List().PageSize(100).Context(a.Ctx)
-		if pageToken != "" {
-			call.PageToken(pageToken)
+		call := a.chat.Spaces.List().PageSize(100)
+		if jsvalue.Truthy(pageToken) {
+			call.PageToken(jsvalue.String(pageToken))
 		}
-		resp, err := call.Do()
+		spaces, next, err := page(a.Ctx, call, "spaces")
 		if err != nil {
-			return nil, a.StatusError("Failed to list spaces: ", err, "Check that OAuth token is valid and has Chat scope")
+			return nil, a.StatusError(prefix, err, suggestion)
 		}
-		for _, s := range resp.Spaces {
-			// Prefer spaceType (current API) over type (legacy): some DMs come
-			// back with type ROOM but spaceType DIRECT_MESSAGE.
-			kind := "ROOM"
-			if s.SpaceType == "DIRECT_MESSAGE" || s.SpaceType == "GROUP_CHAT" || s.Type == "DM" {
-				kind = "DM"
-			}
-			entry := space{Name: s.Name, DisplayName: s.DisplayName, Type: kind}
-			if entry.DisplayName == "" {
-				entry.DisplayName = "Unnamed"
-			}
-			if s.SpaceDetails != nil {
-				entry.Description = s.SpaceDetails.Description
+		for _, s := range spaces {
+			entry, err := spaceOf(s)
+			if err != nil {
+				return nil, a.StatusError(prefix, err, suggestion)
 			}
 			out = append(out, entry)
 		}
-		pageToken = resp.NextPageToken
-		if pageToken == "" {
+		if pageToken = next; !jsvalue.Truthy(pageToken) {
 			return out, nil
 		}
 	}
 }
 
+// spaceOf is the GChatSpace Bun's space list builds. It prefers spaceType
+// (current API) over type (legacy): some DMs come back with type ROOM but
+// spaceType DIRECT_MESSAGE.
+func spaceOf(s any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(s) {
+		return nil, jsvalue.TypeError(s, "space.spaceType")
+	}
+	get := func(k string) any { return jsvalue.Member(s, k) }
+	kind := "ROOM"
+	if st := get("spaceType"); jsvalue.StrictEqual(st, "DIRECT_MESSAGE") || jsvalue.StrictEqual(st, "GROUP_CHAT") || jsvalue.StrictEqual(get("type"), "DM") {
+		kind = "DM"
+	}
+	return jsvalue.ObjectOf(
+		"name", jsvalue.Or(get("name"), ""),
+		"displayName", jsvalue.Or(get("displayName"), "Unnamed"),
+		"type", kind,
+		"description", jsvalue.Or(jsvalue.Optional(get("spaceDetails"), "description"), jsvalue.Undefined),
+	), nil
+}
+
 // resolveSpaceID takes an id, or a display name looked up in the space list.
 func (a *api) resolveSpaceID(idOrName string) (string, error) {
-	if s, err := a.chat.Spaces.Get("spaces/" + idOrName).Context(a.Ctx).Do(); err == nil && s.Name != "" {
+	if _, s, err := google.Answer(a.Ctx, a.chat.Spaces.Get("spaces/"+idOrName)); err == nil && !jsvalue.Nullish(s) && google.Truthy(s, "name") {
 		return idOrName, nil
 	}
 	spaces, err := a.listSpacesViaOAuth()
@@ -497,14 +517,14 @@ func (a *api) resolveSpaceID(idOrName string) (string, error) {
 		return "", err
 	}
 	for _, s := range spaces {
-		if strings.EqualFold(s.DisplayName, idOrName) {
-			return strings.Replace(s.Name, "spaces/", "", 1), nil
+		if strings.EqualFold(google.Field(s, "displayName"), idOrName) {
+			return strings.Replace(google.Field(s, "name"), "spaces/", "", 1), nil
 		}
 	}
 	return "", a.Fail("NOT_FOUND", fmt.Sprintf("Space not found: \"%s\"", idOrName), `Use "agentio gchat spaces" to list available spaces`)
 }
 
-func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
+func (a *api) findDirectMessage(emailOrUserID string) (*jsvalue.Object, error) {
 	if err := a.ensureOAuth("Finding direct message"); err != nil {
 		return nil, err
 	}
@@ -564,7 +584,7 @@ func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
 		name = "Unnamed"
 	}
 	spaceName, _ := jsvalue.Member(data, "name").(string)
-	return &space{Name: spaceName, DisplayName: name, Type: "DM"}, nil
+	return jsvalue.ObjectOf("name", spaceName, "displayName", name, "type", "DM", "description", jsvalue.Undefined), nil
 }
 
 var digits = regexp.MustCompile(`^[0-9]+$`)
@@ -595,7 +615,7 @@ func (a *api) resolveUserResourceName(input string) (string, error) {
 	return userID, nil
 }
 
-func (a *api) listMembers(spaceIDOrName string) ([]member, error) {
+func (a *api) listMembers(spaceIDOrName string) ([]any, error) {
 	if err := a.ensureOAuth("Listing members"); err != nil {
 		return nil, err
 	}
@@ -603,59 +623,63 @@ func (a *api) listMembers(spaceIDOrName string) ([]member, error) {
 	if err != nil {
 		return nil, err
 	}
-	var all []*chat.Membership
-	pageToken := ""
+	const prefix, suggestion = "Failed to list members: ", "Check that the space ID is valid and OAuth token is not expired"
+	var all []any
+	var pageToken any = jsvalue.Undefined
 	for {
-		call := a.chat.Spaces.Members.List("spaces/" + spaceID).PageSize(100).Context(a.Ctx)
-		if pageToken != "" {
-			call.PageToken(pageToken)
+		call := a.chat.Spaces.Members.List("spaces/" + spaceID).PageSize(100)
+		if jsvalue.Truthy(pageToken) {
+			call.PageToken(jsvalue.String(pageToken))
 		}
-		resp, err := call.Do()
+		members, next, err := page(a.Ctx, call, "memberships")
 		if err != nil {
-			return nil, a.StatusError("Failed to list members: ", err, "Check that the space ID is valid and OAuth token is not expired")
+			return nil, a.StatusError(prefix, err, suggestion)
 		}
-		all = append(all, resp.Memberships...)
-		if pageToken = resp.NextPageToken; pageToken == "" {
+		all = append(all, members...)
+		if pageToken = next; !jsvalue.Truthy(pageToken) {
 			break
 		}
 	}
 	var names []string
 	for _, m := range all {
-		if m.Member != nil && strings.HasPrefix(m.Member.Name, "users/") {
-			names = append(names, m.Member.Name)
+		if jsvalue.Nullish(m) {
+			return nil, a.StatusError(prefix, jsvalue.TypeError(m, "m.member"), suggestion)
+		}
+		if name, ok := jsvalue.Optional(jsvalue.Member(m, "member"), "name").(string); ok && strings.HasPrefix(name, "users/") {
+			names = append(names, name)
 		}
 	}
-	byName := map[string]*user{}
+	byName := map[string]*jsvalue.Object{}
 	for _, u := range a.fetchPersons(names) {
 		if u != nil {
-			byName[u.Name] = u
+			byName[google.Field(u, "name")] = u
 		}
 	}
-	out := []member{}
+	out := []any{}
 	for _, m := range all {
-		entry := member{Name: m.Name, Role: m.Role, State: m.State, MemberType: "HUMAN"}
-		if entry.Role == "" {
-			entry.Role = "ROLE_UNSPECIFIED"
-		}
-		if entry.State == "" {
-			entry.State = "MEMBERSHIP_STATE_UNSPECIFIED"
-		}
-		if m.Member != nil {
-			if m.Member.Type != "" {
-				entry.MemberType = m.Member.Type
-			}
-			if u := byName[m.Member.Name]; u != nil {
-				entry.User = u
-			} else if m.Member.Name != "" {
-				entry.User = &user{Name: m.Member.Name, DisplayName: m.Member.DisplayName}
+		get := func(k string) any { return jsvalue.Member(m, k) }
+		inner := get("member")
+		userName := jsvalue.Optional(inner, "name")
+		var u any = jsvalue.Undefined
+		if jsvalue.Truthy(userName) {
+			if id, ok := userName.(string); ok && byName[id] != nil {
+				u = byName[id]
+			} else {
+				u = jsvalue.ObjectOf("name", userName, "displayName", jsvalue.Or(jsvalue.Optional(inner, "displayName"), jsvalue.Undefined))
 			}
 		}
-		out = append(out, entry)
+		out = append(out, jsvalue.ObjectOf(
+			"name", jsvalue.Or(get("name"), ""),
+			"role", jsvalue.Or(get("role"), "ROLE_UNSPECIFIED"),
+			"state", jsvalue.Or(get("state"), "MEMBERSHIP_STATE_UNSPECIFIED"),
+			"memberType", jsvalue.Or(jsvalue.Optional(inner, "type"), "HUMAN"),
+			"user", u,
+		))
 	}
 	return out, nil
 }
 
-func (a *api) getUser(userID string) (*user, error) {
+func (a *api) getUser(userID string) (*jsvalue.Object, error) {
 	if err := a.ensureOAuth("Getting user info"); err != nil {
 		return nil, err
 	}
@@ -675,14 +699,15 @@ const (
 	namePersonFields = "names,emailAddresses"
 )
 
+// personReply is one People API answer: data is `await res.json()`.
 type personReply struct {
-	person *people.Person
-	err    error
+	data any
+	err  error
 }
 
 // getPeople fetches people/<id> for each users/<id>, all at once (Bun
 // Promise.all), each with plain fetch as Bun does: no retries. A status that
-// is not ok is a *googleapi.Error; a body that is not a person is an error.
+// is not ok is a *googleapi.Error; a body that is not JSON is an error.
 func (a *api) getPeople(names []string, fields string) map[string]personReply {
 	out := make(map[string]personReply, len(names))
 	if len(names) == 0 {
@@ -708,8 +733,8 @@ func (a *api) getPeople(names []string, fields string) map[string]personReply {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := a.fetchPerson(token, strings.Replace(name, "users/", "", 1), fields)
-			replies[i] = personReply{person: p, err: err}
+			data, err := a.fetchPerson(token, strings.Replace(name, "users/", "", 1), fields)
+			replies[i] = personReply{data: data, err: err}
 		}()
 	}
 	wg.Wait()
@@ -720,7 +745,7 @@ func (a *api) getPeople(names []string, fields string) map[string]personReply {
 }
 
 // fetchPerson is Bun's `fetch(people/<id>?personFields=…)`, then res.json().
-func (a *api) fetchPerson(token, id, fields string) (*people.Person, error) {
+func (a *api) fetchPerson(token, id, fields string) (any, error) {
 	req, err := http.NewRequestWithContext(a.Ctx, http.MethodGet, a.people.BasePath+"v1/people/"+id+"?personFields="+fields, nil)
 	if err != nil {
 		return nil, err
@@ -738,17 +763,13 @@ func (a *api) fetchPerson(token, id, fields string) (*people.Person, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &googleapi.Error{Code: resp.StatusCode, Body: string(raw)}
 	}
-	var p people.Person
-	if null, err := plugins.DecodeJSON(resp.StatusCode, raw, &p); err != nil || null {
-		return nil, errors.New("not a person")
-	}
-	return &p, nil
+	return plugins.ResponseJSON(resp.StatusCode, raw)
 }
 
-// fetchPersons is fetchPerson for each name, the People API calls in
+// fetchPersons is Bun fetchPerson for each name, the People API calls in
 // parallel: the full profile, or the workspace directory when the API has
 // nothing. A name that cannot be resolved is nil.
-func (a *api) fetchPersons(names []string) []*user {
+func (a *api) fetchPersons(names []string) []*jsvalue.Object {
 	var missing []string
 	for _, name := range names {
 		if a.fullUsers[name] == nil {
@@ -756,7 +777,7 @@ func (a *api) fetchPersons(names []string) []*user {
 		}
 	}
 	replies := a.getPeople(missing, fullPersonFields)
-	out := make([]*user, len(names))
+	out := make([]*jsvalue.Object, len(names))
 	for i, name := range names {
 		if cached := a.fullUsers[name]; cached != nil {
 			out[i] = cached
@@ -767,7 +788,60 @@ func (a *api) fetchPersons(names []string) []*user {
 	return out
 }
 
-func (a *api) personToUser(name string, reply personReply) *user {
+// first is Bun `data.<key>?.[0]?.<field>`.
+func first(data any, key, field string) any {
+	return jsvalue.Optional(jsvalue.Optional(jsvalue.Member(data, key), "0"), field)
+}
+
+// mapped is Bun `data.<key>?.map(f)`: undefined when the list is nullish; a
+// null item or a list that is not an array throws (Bun's catch then drops
+// the person).
+func mapped(data any, key string, f func(any) any) (any, error) {
+	v := jsvalue.Member(data, key)
+	if jsvalue.Nullish(v) {
+		return jsvalue.Undefined, nil
+	}
+	items, err := jsvalue.Items(v, "data."+key+"?")
+	if err != nil {
+		return nil, err
+	}
+	out := []any{}
+	for _, item := range items {
+		if jsvalue.Nullish(item) {
+			return nil, jsvalue.TypeError(item, "item")
+		}
+		out = append(out, f(item))
+	}
+	return out, nil
+}
+
+// values is Bun `data.<key>?.map(x => x.value).filter(v => !!v)`.
+func values(data any, key string) (any, error) {
+	all, err := mapped(data, key, func(x any) any { return jsvalue.Member(x, "value") })
+	list, ok := all.([]any)
+	if err != nil || !ok {
+		return all, err
+	}
+	kept := []any{}
+	for _, v := range list {
+		if jsvalue.Truthy(v) {
+			kept = append(kept, v)
+		}
+	}
+	return kept, nil
+}
+
+// nonEmpty is Bun `list?.length ? list : undefined`.
+func nonEmpty(list any) any {
+	if l, ok := list.([]any); ok && len(l) > 0 {
+		return l
+	}
+	return jsvalue.Undefined
+}
+
+// personToUser is the rest of Bun fetchPerson: a failed status falls back to
+// the directory; any other failure, or an answer it cannot read, is nil.
+func (a *api) personToUser(name string, reply personReply) *jsvalue.Object {
 	if reply.err != nil {
 		var ge *googleapi.Error
 		if errors.As(reply.err, &ge) {
@@ -775,54 +849,58 @@ func (a *api) personToUser(name string, reply personReply) *user {
 		}
 		return nil
 	}
-	p := reply.person
-	u := &user{Name: name, DisplayName: personName(p), Email: personEmail(p)}
-	for _, n := range p.PhoneNumbers {
-		if n != nil && n.Value != "" {
-			u.PhoneNumbers = append(u.PhoneNumbers, n.Value)
-		}
+	data := reply.data
+	if jsvalue.Nullish(data) {
+		return nil // data.names: TypeError, caught
 	}
-	for _, o := range p.Organizations {
-		if o != nil {
-			u.Organizations = append(u.Organizations, organization{Name: o.Name, Title: o.Title, Department: o.Department})
-		}
+	displayName, email := first(data, "names", "displayName"), first(data, "emailAddresses", "value")
+	phones, err := values(data, "phoneNumbers")
+	if err != nil {
+		return nil
 	}
-	if len(p.Photos) > 0 && p.Photos[0] != nil {
-		u.PhotoURL = p.Photos[0].Url
+	orgs, err := mapped(data, "organizations", func(o any) any {
+		get := func(k string) any { return jsvalue.Member(o, k) }
+		return jsvalue.ObjectOf("name", get("name"), "title", get("title"), "department", get("department"))
+	})
+	if err != nil {
+		return nil
 	}
-	for _, l := range p.Locations {
-		if l != nil && l.Value != "" {
-			u.Locations = append(u.Locations, l.Value)
-		}
+	photo := first(data, "photos", "url")
+	locations, err := values(data, "locations")
+	if err != nil {
+		return nil
 	}
 	// Workspace coworkers come back 200 with empty fields; use the directory.
-	if u.DisplayName == "" && u.Email == "" {
+	if !jsvalue.Truthy(displayName) && !jsvalue.Truthy(email) {
 		if fallback := a.fallbackToDirectory(name); fallback != nil {
 			return fallback
 		}
 	}
+	u := jsvalue.ObjectOf(
+		"name", name,
+		"displayName", displayName,
+		"email", email,
+		"phoneNumbers", nonEmpty(phones),
+		"organizations", nonEmpty(orgs),
+		"photoUrl", photo,
+		"locations", nonEmpty(locations),
+	)
 	a.fullUsers[name] = u
-	if u.DisplayName != "" {
-		a.users[name] = resolvedUser{displayName: u.DisplayName, email: u.Email}
+	if jsvalue.Truthy(displayName) {
+		a.users[name] = resolvedUser{displayName: displayName, email: email}
 	}
 	return u
 }
 
-func personName(p *people.Person) string {
-	if len(p.Names) > 0 && p.Names[0] != nil {
-		return p.Names[0].DisplayName
+// entryEmail is a directory entry's email: undefined when it has none.
+func entryEmail(e *directoryEntry) any {
+	if e.Email == "" {
+		return jsvalue.Undefined
 	}
-	return ""
+	return e.Email
 }
 
-func personEmail(p *people.Person) string {
-	if len(p.EmailAddresses) > 0 && p.EmailAddresses[0] != nil {
-		return p.EmailAddresses[0].Value
-	}
-	return ""
-}
-
-func (a *api) fallbackToDirectory(name string) *user {
+func (a *api) fallbackToDirectory(name string) *jsvalue.Object {
 	d := a.directory()
 	if d == nil || d.ensureFresh(false) != nil {
 		return nil
@@ -831,18 +909,20 @@ func (a *api) fallbackToDirectory(name string) *user {
 	if entry == nil {
 		return nil
 	}
-	u := &user{Name: name, DisplayName: entry.DisplayName, Email: entry.Email}
+	u := jsvalue.ObjectOf("name", name, "displayName", entry.DisplayName, "email", entryEmail(entry))
 	a.fullUsers[name] = u
-	a.users[name] = resolvedUser{displayName: entry.DisplayName, email: entry.Email}
+	a.users[name] = resolvedUser{displayName: entry.DisplayName, email: entryEmail(entry)}
 	return u
 }
 
 // resolveUsers names message senders: the workspace directory first, then
-// the People API for anyone it does not know (self, personal contacts).
-func (a *api) resolveUsers(ids []string) {
-	var unknown []string
+// the People API for anyone it does not know (self, personal contacts). An
+// id that is not a string resolves to nothing (Bun's userId.replace throws
+// and is skipped), but still costs the directory refresh.
+func (a *api) resolveUsers(ids []any) {
+	var unknown []any
 	for _, id := range ids {
-		if _, ok := a.users[id]; !ok {
+		if s, ok := id.(string); !ok || !a.known(s) {
 			unknown = append(unknown, id)
 		}
 	}
@@ -852,25 +932,32 @@ func (a *api) resolveUsers(ids []string) {
 	if d := a.directory(); d != nil {
 		_ = d.ensureFresh(false)
 		for _, id := range unknown {
-			if entry := d.lookup(id); entry != nil {
-				a.users[id] = resolvedUser{displayName: entry.DisplayName, email: entry.Email}
+			if s, ok := id.(string); ok {
+				if entry := d.lookup(s); entry != nil {
+					a.users[s] = resolvedUser{displayName: entry.DisplayName, email: entryEmail(entry)}
+				}
 			}
 		}
 	}
 	var still []string
 	for _, id := range unknown {
-		if _, ok := a.users[id]; !ok {
-			still = append(still, id)
+		if s, ok := id.(string); ok && !a.known(s) {
+			still = append(still, s)
 		}
 	}
 	for id, reply := range a.getPeople(still, namePersonFields) {
-		if reply.err != nil || reply.person == nil {
+		if reply.err != nil || jsvalue.Nullish(reply.data) {
 			continue
 		}
-		if name := personName(reply.person); name != "" {
-			a.users[id] = resolvedUser{displayName: name, email: personEmail(reply.person)}
+		if name := first(reply.data, "names", "displayName"); jsvalue.Truthy(name) {
+			a.users[id] = resolvedUser{displayName: name, email: first(reply.data, "emailAddresses", "value")}
 		}
 	}
+}
+
+func (a *api) known(id string) bool {
+	_, ok := a.users[id]
+	return ok
 }
 
 // directory is the workspace directory of an OAuth profile with an email.
@@ -908,6 +995,14 @@ func (a *api) refreshDirectory() (*directoryRefresh, error) {
 		fetchedAt = jsvalue.ISOString(now())
 	}
 	return &directoryRefresh{Size: d.size(), Path: path, FetchedAt: fetchedAt}, nil
+}
+
+// messageID is Bun `response.data.name?.split('/').pop() || 'unknown'`.
+func messageID(name any) string {
+	if jsvalue.Nullish(name) {
+		return "unknown"
+	}
+	return lastSegment(jsvalue.String(name))
 }
 
 // lastSegment is Bun `name.split('/').pop() || 'unknown'`.

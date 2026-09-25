@@ -1,9 +1,8 @@
 package gdrive
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
@@ -26,90 +25,40 @@ const (
 	fileFields     = "id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description"
 )
 
-// file is GDriveFile.
-type file struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	MimeType       string   `json:"mimeType"`
-	Size           int64    `json:"size,omitempty"`
-	CreatedTime    string   `json:"createdTime,omitempty"`
-	ModifiedTime   string   `json:"modifiedTime,omitempty"`
-	Owners         []string `json:"owners,omitempty"`
-	Parents        []string `json:"parents,omitempty"`
-	WebViewLink    string   `json:"webViewLink,omitempty"`
-	WebContentLink string   `json:"webContentLink,omitempty"`
-	Starred        bool     `json:"starred"`
-	Trashed        bool     `json:"trashed"`
-	Shared         bool     `json:"shared"`
-	Description    string   `json:"description,omitempty"`
-}
+// The models are the Bun client's objects (GDriveFile, GDriveUploadResult,
+// GDriveCopyResult, GDrivePermission, GDriveShareResult), built from the
+// answer as JavaScript reads it (google.Answer): a field the answer lacks is
+// undefined, and a null item fails with Bun's TypeError.
 
-// fileList is a list result with the printGDriveFileList title.
+// fileList is a list result with the printGDriveFileList title; --json
+// prints the files alone.
 type fileList struct {
 	Title string
-	Files []file
+	Files []any
 }
 
-// MarshalJSON prints the files only, without escaping <, > and & (the host's
-// JSON.stringify rendering).
-func (l fileList) MarshalJSON() ([]byte, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(l.Files); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
-}
+func (l fileList) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(l.Files), nil }
 
 // downloaded is GDriveDownloadResult.
 type downloaded struct {
-	Filename string `json:"filename"`
+	Filename any    `json:"filename"`
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
-	MimeType string `json:"mimeType"`
+	MimeType any    `json:"mimeType"`
 }
 
-// uploaded is GDriveUploadResult, plus the permission `put --public` created.
-type uploaded struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	MimeType    string  `json:"mimeType"`
-	Size        int64   `json:"size"`
-	WebViewLink string  `json:"webViewLink,omitempty"`
-	Share       *shared `json:"share,omitempty"`
+func (d *downloaded) MarshalJSON() ([]byte, error) {
+	return jsvalue.Stringify(jsvalue.ObjectOf("filename", d.Filename, "path", d.Path, "size", d.Size, "mimeType", d.MimeType)), nil
 }
 
-// copied is GDriveCopyResult.
-type copied struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	MimeType    string   `json:"mimeType"`
-	Parents     []string `json:"parents,omitempty"`
-	WebViewLink string   `json:"webViewLink,omitempty"`
-}
-
-// permission is GDrivePermission.
-type permission struct {
-	ID                 string `json:"id"`
-	Type               string `json:"type"`
-	Role               string `json:"role"`
-	EmailAddress       string `json:"emailAddress,omitempty"`
-	Domain             string `json:"domain,omitempty"`
-	DisplayName        string `json:"displayName,omitempty"`
-	AllowFileDiscovery bool   `json:"allowFileDiscovery,omitempty"`
-}
-
-// shared is GDriveShareResult. FileID is the id printGDriveShared puts in the
-// public URL.
+// shared is GDriveShareResult (Result) with the id printGDriveShared puts in
+// the public URL.
 type shared struct {
-	PermissionID string `json:"permissionId"`
-	Type         string `json:"type"`
-	Role         string `json:"role"`
-	EmailAddress string `json:"emailAddress,omitempty"`
-	Domain       string `json:"domain,omitempty"`
-	FileID       string `json:"-"`
+	Result *jsvalue.Object
+	FileID string
 }
+
+func (s *shared) MarshalJSON() ([]byte, error) { return jsvalue.Stringify(s.Result), nil }
 
 // unshared is what `unshare` reports.
 type unshared struct {
@@ -247,29 +196,62 @@ func extractFileID(fileIDOrURL string) string {
 	return fileIDOrURL
 }
 
-func parseFile(f *drive.File) file {
-	out := file{
-		ID: f.Id, Name: f.Name, MimeType: f.MimeType, Size: f.Size,
-		CreatedTime: f.CreatedTime, ModifiedTime: f.ModifiedTime, Parents: f.Parents,
-		WebViewLink: f.WebViewLink, WebContentLink: f.WebContentLink,
-		Starred: f.Starred, Trashed: f.Trashed, Shared: f.Shared, Description: f.Description,
+// parseFile is Bun parseFile.
+func parseFile(f any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(f) {
+		return nil, jsvalue.TypeError(f, "file.id")
 	}
-	if out.Name == "" {
-		out.Name = "Untitled"
+	get := func(k string) any { return jsvalue.Member(f, k) }
+	opt := func(k string) any { return jsvalue.Or(get(k), jsvalue.Undefined) }
+	size := jsvalue.Undefined
+	if jsvalue.Truthy(get("size")) {
+		size = jsvalue.ParseInt(jsvalue.String(get("size")))
 	}
-	if out.MimeType == "" {
-		out.MimeType = "application/octet-stream"
-	}
-	for _, o := range f.Owners {
-		name := "Unknown"
-		if o != nil && o.DisplayName != "" {
-			name = o.DisplayName
-		} else if o != nil && o.EmailAddress != "" {
-			name = o.EmailAddress
+	owners := jsvalue.Undefined
+	if raw := get("owners"); !jsvalue.Nullish(raw) {
+		items, err := jsvalue.Items(raw, "file.owners?")
+		if err != nil {
+			return nil, err
 		}
-		out.Owners = append(out.Owners, name)
+		names := []any{}
+		for _, o := range items {
+			if jsvalue.Nullish(o) {
+				return nil, jsvalue.TypeError(o, "o.displayName")
+			}
+			names = append(names, jsvalue.Or(jsvalue.Or(jsvalue.Member(o, "displayName"), jsvalue.Member(o, "emailAddress")), "Unknown"))
+		}
+		owners = names
 	}
-	return out
+	return jsvalue.ObjectOf(
+		"id", get("id"),
+		"name", jsvalue.Or(get("name"), "Untitled"),
+		"mimeType", jsvalue.Or(get("mimeType"), "application/octet-stream"),
+		"size", size,
+		"createdTime", opt("createdTime"),
+		"modifiedTime", opt("modifiedTime"),
+		"owners", owners,
+		"parents", opt("parents"),
+		"webViewLink", opt("webViewLink"),
+		"webContentLink", opt("webContentLink"),
+		"starred", jsvalue.Or(get("starred"), false),
+		"trashed", jsvalue.Or(get("trashed"), false),
+		"shared", jsvalue.Or(get("shared"), false),
+		"description", opt("description"),
+	), nil
+}
+
+// answerFile is `this.parseFile(response.data)` inside a client method's
+// try: a failure, the call's or parseFile's, is "Failed to <operation>".
+func answerFile[C google.Call[C, *drive.File]](a *api, operation string, call C) (*jsvalue.Object, error) {
+	_, raw, err := google.Answer(a.Ctx, call)
+	if err != nil {
+		return nil, a.Failed(operation, err)
+	}
+	f, err := parseFile(raw)
+	if err != nil {
+		return nil, a.Failed(operation, err)
+	}
+	return f, nil
 }
 
 type listOptions struct {
@@ -281,7 +263,7 @@ type listOptions struct {
 }
 
 // list pages through files.list until limit files are collected.
-func (a *api) list(o listOptions) ([]file, error) {
+func (a *api) list(o listOptions) ([]any, error) {
 	var parts []string
 	if !o.includeTrash {
 		parts = append(parts, "trashed = false")
@@ -293,29 +275,49 @@ func (a *api) list(o listOptions) ([]file, error) {
 		parts = append(parts, o.query)
 	}
 	q := strings.Join(parts, " and ")
-	all := []file{}
-	pageToken := ""
+	all := []any{}
+	pageToken := jsvalue.Undefined
 	for {
 		call := a.svc.Files.List().Fields("nextPageToken,files(" + fileFields + ")").OrderBy(o.orderBy)
 		if q != "" {
 			call = call.Q(q)
 		}
-		if pageToken != "" {
-			call = call.PageToken(pageToken)
+		if pageToken != jsvalue.Undefined {
+			call = call.PageToken(jsvalue.String(pageToken))
 		}
-		resp, err := call.Context(a.Ctx).Do(google.PageSize(o.limit - float64(len(all))))
+		_, raw, err := google.Answer(a.Ctx, call, google.PageSize(o.limit-float64(len(all))))
+		if err == nil {
+			err = a.appendFiles(&all, raw)
+		}
 		if err != nil {
 			return nil, a.Failed("list files", err)
 		}
-		for _, f := range resp.Files {
-			all = append(all, parseFile(f))
-		}
-		pageToken = resp.NextPageToken
-		if pageToken == "" || !(float64(len(all)) < o.limit) {
+		pageToken = jsvalue.Or(jsvalue.Member(raw, "nextPageToken"), jsvalue.Undefined)
+		if !jsvalue.Truthy(pageToken) || !(float64(len(all)) < o.limit) {
 			break
 		}
 	}
 	return all[:sliceEnd(o.limit, len(all))], nil
+}
+
+// appendFiles is `allFiles.push(...(response.data.files || []).map(this.parseFile))`.
+func (a *api) appendFiles(all *[]any, raw any) error {
+	files, err := jsvalue.Path(raw, "response.data", "files")
+	if err != nil {
+		return err
+	}
+	items, err := jsvalue.Items(jsvalue.Or(files, []any{}), "(response.data.files || [])")
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		f, err := parseFile(item)
+		if err != nil {
+			return err
+		}
+		*all = append(*all, f)
+	}
+	return nil
 }
 
 // sliceEnd is the end index Array.prototype.slice(0, limit) uses.
@@ -332,7 +334,7 @@ func sliceEnd(limit float64, n int) int {
 	}
 }
 
-func (a *api) listFolders(limit float64, parentID, query string) ([]file, error) {
+func (a *api) listFolders(limit float64, parentID, query string) ([]any, error) {
 	parts := []string{"mimeType = '" + folderMimeType + "'", "trashed = false"}
 	if parentID != "" {
 		parts = append(parts, "'"+parentID+"' in parents")
@@ -343,7 +345,7 @@ func (a *api) listFolders(limit float64, parentID, query string) ([]file, error)
 	return a.list(listOptions{limit: limit, query: strings.Join(parts, " and "), orderBy: "name"})
 }
 
-func (a *api) search(query, mimeType string, limit float64, folderID string) ([]file, error) {
+func (a *api) search(query, mimeType string, limit float64, folderID string) ([]any, error) {
 	parts := []string{"trashed = false", "fullText contains '" + strings.ReplaceAll(query, "'", `\'`) + "'"}
 	if mimeType != "" {
 		parts = append(parts, "mimeType = '"+mimeType+"'")
@@ -354,13 +356,8 @@ func (a *api) search(query, mimeType string, limit float64, folderID string) ([]
 	return a.list(listOptions{limit: limit, query: strings.Join(parts, " and "), orderBy: "modifiedTime desc"})
 }
 
-func (a *api) get(fileIDOrURL string) (*file, error) {
-	f, err := a.svc.Files.Get(extractFileID(fileIDOrURL)).Fields(fileFields).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed("get file", err)
-	}
-	out := parseFile(f)
-	return &out, nil
+func (a *api) get(fileIDOrURL string) (*jsvalue.Object, error) {
+	return answerFile(a, "get file", a.svc.Files.Get(extractFileID(fileIDOrURL)).Fields(fileFields))
 }
 
 func supportedFormats(mimeType string) string {
@@ -396,17 +393,19 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 	var call interface {
 		Download(...googleapi.CallOption) (*http.Response, error)
 	}
-	mimeType := f.MimeType
-	if strings.HasPrefix(f.MimeType, "application/vnd.google-apps.") {
-		typeName := workspaceTypeName(f.MimeType)
+	fileMime := jsvalue.String(f.Value("mimeType"))
+	mimeType := f.Value("mimeType")
+	if strings.HasPrefix(fileMime, "application/vnd.google-apps.") {
+		typeName := workspaceTypeName(fileMime)
 		if format == "" {
-			return nil, a.Fail("INVALID_PARAMS", "Cannot download Google "+typeName+" directly", "Use --export with one of: "+supportedFormats(f.MimeType))
+			return nil, a.Fail("INVALID_PARAMS", "Cannot download Google "+typeName+" directly", "Use --export with one of: "+supportedFormats(fileMime))
 		}
-		mimeType = exportMimeType(f.MimeType, format)
-		if mimeType == "" {
-			return nil, a.Fail("INVALID_PARAMS", "Cannot export Google "+typeName+" to "+format, "Supported formats: "+supportedFormats(f.MimeType))
+		exportMime := exportMimeType(fileMime, format)
+		if exportMime == "" {
+			return nil, a.Fail("INVALID_PARAMS", "Cannot export Google "+typeName+" to "+format, "Supported formats: "+supportedFormats(fileMime))
 		}
-		call = a.svc.Files.Export(fileID, mimeType).Context(a.Ctx)
+		mimeType = exportMime
+		call = a.svc.Files.Export(fileID, exportMime).Context(a.Ctx)
 	} else {
 		if format != "" {
 			return nil, a.Fail("INVALID_PARAMS", "Export format is only for Google Workspace files", "Remove --export flag for regular files")
@@ -425,12 +424,12 @@ func (a *api) download(fileIDOrURL, outputPath, format string) (*downloaded, err
 	if err := nodefs.WriteFile(outputPath, body); err != nil {
 		return nil, a.Failed("download file", err)
 	}
-	return &downloaded{Filename: f.Name, Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
+	return &downloaded{Filename: f.Value("name"), Path: outputPath, Size: int64(len(body)), MimeType: mimeType}, nil
 }
 
 var lastExtension = regexp.MustCompile(`\.[^.]+$`)
 
-func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*uploaded, error) {
+func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*jsvalue.Object, error) {
 	if err := a.assertWriteAccess(); err != nil {
 		return nil, err
 	}
@@ -477,23 +476,26 @@ func (a *api) upload(filePath, name, folderID, mimeType string, convert bool) (*
 	}
 	defer body.Close()
 	// ChunkSize(0) sends one multipart request whatever the size, as Bun does.
-	f, err := a.svc.Files.Create(target).
+	_, raw, err := google.Answer(a.Ctx, a.svc.Files.Create(target).
 		Media(body, googleapi.ContentType(sourceMimeType), googleapi.ChunkSize(0)).
-		Fields("id,name,mimeType,size,webViewLink").Context(a.Ctx).Do()
+		Fields("id,name,mimeType,size,webViewLink"))
+	if err == nil && jsvalue.Nullish(raw) {
+		err = jsvalue.TypeError(raw, "response.data.id")
+	}
 	if err != nil {
 		return nil, a.Failed("upload file", err)
 	}
-	out := &uploaded{ID: f.Id, Name: f.Name, MimeType: f.MimeType, Size: info.Size(), WebViewLink: f.WebViewLink}
-	if out.Name == "" {
-		out.Name = fileName
-	}
-	if out.MimeType == "" {
-		out.MimeType = sourceMimeType
-	}
-	return out, nil
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	return jsvalue.ObjectOf(
+		"id", get("id"),
+		"name", jsvalue.Or(get("name"), fileName),
+		"mimeType", jsvalue.Or(get("mimeType"), sourceMimeType),
+		"size", info.Size(),
+		"webViewLink", jsvalue.Or(get("webViewLink"), jsvalue.Undefined),
+	), nil
 }
 
-func (a *api) copy(fileIDOrURL, name, folderID string) (*copied, error) {
+func (a *api) copy(fileIDOrURL, name, folderID string) (*jsvalue.Object, error) {
 	if err := a.assertWriteAccess(); err != nil {
 		return nil, err
 	}
@@ -501,36 +503,34 @@ func (a *api) copy(fileIDOrURL, name, folderID string) (*copied, error) {
 	if folderID != "" {
 		body.Parents = []string{folderID}
 	}
-	f, err := a.svc.Files.Copy(extractFileID(fileIDOrURL), body).SupportsAllDrives(true).
-		Fields("id,name,mimeType,parents,webViewLink").Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, a.svc.Files.Copy(extractFileID(fileIDOrURL), body).SupportsAllDrives(true).
+		Fields("id,name,mimeType,parents,webViewLink"))
+	if err == nil && jsvalue.Nullish(raw) {
+		err = jsvalue.TypeError(raw, "response.data.id")
+	}
 	if err != nil {
 		return nil, a.Failed("copy file", err)
 	}
-	out := &copied{ID: f.Id, Name: f.Name, MimeType: f.MimeType, Parents: f.Parents, WebViewLink: f.WebViewLink}
-	if out.Name == "" {
-		out.Name = "Untitled"
-	}
-	if out.MimeType == "" {
-		out.MimeType = "application/octet-stream"
-	}
-	return out, nil
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	return jsvalue.ObjectOf(
+		"id", get("id"),
+		"name", jsvalue.Or(get("name"), "Untitled"),
+		"mimeType", jsvalue.Or(get("mimeType"), "application/octet-stream"),
+		"parents", jsvalue.Or(get("parents"), jsvalue.Undefined),
+		"webViewLink", jsvalue.Or(get("webViewLink"), jsvalue.Undefined),
+	), nil
 }
 
 // update is files.update with supportsAllDrives and the full file fields.
-func (a *api) update(operation string, call *drive.FilesUpdateCall) (*file, error) {
-	f, err := call.SupportsAllDrives(true).Fields(fileFields).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed(operation, err)
-	}
-	out := parseFile(f)
-	return &out, nil
+func (a *api) update(operation string, call *drive.FilesUpdateCall) (*jsvalue.Object, error) {
+	return answerFile(a, operation, call.SupportsAllDrives(true).Fields(fileFields))
 }
 
-func (a *api) trash(fileIDOrURL string) (*file, error) {
+func (a *api) trash(fileIDOrURL string) (*jsvalue.Object, error) {
 	return a.update("trash file", a.svc.Files.Update(extractFileID(fileIDOrURL), &drive.File{Trashed: true}))
 }
 
-func (a *api) rename(fileIDOrURL, name string) (*file, error) {
+func (a *api) rename(fileIDOrURL, name string) (*jsvalue.Object, error) {
 	if err := a.assertWriteAccess(); err != nil {
 		return nil, err
 	}
@@ -538,23 +538,32 @@ func (a *api) rename(fileIDOrURL, name string) (*file, error) {
 	return a.update("rename file", a.svc.Files.Update(extractFileID(fileIDOrURL), body))
 }
 
-func (a *api) move(fileIDOrURL, folderIDOrURL string) (*file, error) {
+func (a *api) move(fileIDOrURL, folderIDOrURL string) (*jsvalue.Object, error) {
 	if err := a.assertWriteAccess(); err != nil {
 		return nil, err
 	}
 	fileID, folderID := extractFileID(fileIDOrURL), extractFileID(folderIDOrURL)
-	current, err := a.svc.Files.Get(fileID).SupportsAllDrives(true).Fields("parents").Context(a.Ctx).Do()
+	_, current, err := google.Answer(a.Ctx, a.svc.Files.Get(fileID).SupportsAllDrives(true).Fields("parents"))
+	var parents any
+	if err == nil {
+		// Bun reports this expression as its own transpiled source text.
+		parents, err = jsvalue.Path(current, "current.data", "parents")
+	}
 	if err != nil {
 		return nil, a.Failed("move file", err)
 	}
+	previous := ""
+	if list, ok := jsvalue.Or(parents, []any{}).([]any); ok {
+		previous = jsvalue.Join(list, ",")
+	}
 	call := a.svc.Files.Update(fileID, &drive.File{}).AddParents(folderID)
-	if previous := strings.Join(current.Parents, ","); previous != "" {
+	if previous != "" {
 		call = call.RemoveParents(previous)
 	}
 	return a.update("move file", call)
 }
 
-func (a *api) mkdir(name, parentIDOrURL string) (*file, error) {
+func (a *api) mkdir(name, parentIDOrURL string) (*jsvalue.Object, error) {
 	if err := a.assertWriteAccess(); err != nil {
 		return nil, err
 	}
@@ -562,26 +571,53 @@ func (a *api) mkdir(name, parentIDOrURL string) (*file, error) {
 	if parentIDOrURL != "" {
 		body.Parents = []string{extractFileID(parentIDOrURL)}
 	}
-	f, err := a.svc.Files.Create(body).SupportsAllDrives(true).Fields(fileFields).Context(a.Ctx).Do()
-	if err != nil {
-		return nil, a.Failed("create folder", err)
-	}
-	out := parseFile(f)
-	return &out, nil
+	return answerFile(a, "create folder", a.svc.Files.Create(body).SupportsAllDrives(true).Fields(fileFields))
 }
 
-func (a *api) permissions(fileIDOrURL string) ([]permission, error) {
-	resp, err := a.svc.Permissions.List(extractFileID(fileIDOrURL)).SupportsAllDrives(true).
-		Fields("permissions(id,type,role,emailAddress,domain,displayName,allowFileDiscovery)").Context(a.Ctx).Do()
+func (a *api) permissions(fileIDOrURL string) ([]any, error) {
+	_, raw, err := google.Answer(a.Ctx, a.svc.Permissions.List(extractFileID(fileIDOrURL)).SupportsAllDrives(true).
+		Fields("permissions(id,type,role,emailAddress,domain,displayName,allowFileDiscovery)"))
+	var out []any
+	if err == nil {
+		out, err = parsePermissions(raw)
+	}
 	if err != nil {
 		return nil, a.Failed("list permissions", err)
 	}
-	out := []permission{}
-	for _, p := range resp.Permissions {
-		out = append(out, permission{
-			ID: p.Id, Type: p.Type, Role: p.Role, EmailAddress: p.EmailAddress,
-			Domain: p.Domain, DisplayName: p.DisplayName, AllowFileDiscovery: p.AllowFileDiscovery,
-		})
+	return out, nil
+}
+
+// parsePermissions is `(response.data.permissions || []).map(...)` into
+// GDrivePermission objects. Bun reports a null answer with its own
+// transpiled source text.
+func parsePermissions(raw any) ([]any, error) {
+	list, err := jsvalue.Path(raw, "response.data", "permissions")
+	if err != nil {
+		return nil, err
+	}
+	items, err := jsvalue.Items(jsvalue.Or(list, []any{}), "(response.data.permissions || [])")
+	if err != nil {
+		return nil, err
+	}
+	out := []any{}
+	for _, p := range items {
+		if jsvalue.Nullish(p) {
+			return nil, jsvalue.TypeError(p, "p.id")
+		}
+		get := func(k string) any { return jsvalue.Member(p, k) }
+		discovery := get("allowFileDiscovery")
+		if jsvalue.Nullish(discovery) {
+			discovery = jsvalue.Undefined
+		}
+		out = append(out, jsvalue.ObjectOf(
+			"id", get("id"),
+			"type", get("type"),
+			"role", get("role"),
+			"emailAddress", jsvalue.Or(get("emailAddress"), jsvalue.Undefined),
+			"domain", jsvalue.Or(get("domain"), jsvalue.Undefined),
+			"displayName", jsvalue.Or(get("displayName"), jsvalue.Undefined),
+			"allowFileDiscovery", discovery,
+		))
 	}
 	return out, nil
 }
@@ -609,15 +645,34 @@ func (a *api) share(fileIDOrURL, printedID string, o shareOptions) (*shared, err
 	if o.emailMessage != nil {
 		call = call.EmailMessage(*o.emailMessage)
 	}
-	p, err := call.Context(a.Ctx).Do()
+	_, raw, err := google.Answer(a.Ctx, call)
+	if err == nil && jsvalue.Nullish(raw) {
+		err = jsvalue.TypeError(raw, "response.data.id")
+	}
 	if err != nil {
 		return nil, a.Failed("share file", err)
 	}
-	return &shared{PermissionID: p.Id, Type: p.Type, Role: p.Role, EmailAddress: p.EmailAddress, Domain: p.Domain, FileID: printedID}, nil
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	return &shared{Result: jsvalue.ObjectOf(
+		"permissionId", get("id"),
+		"type", get("type"),
+		"role", get("role"),
+		"emailAddress", jsvalue.Or(get("emailAddress"), jsvalue.Undefined),
+		"domain", jsvalue.Or(get("domain"), jsvalue.Undefined),
+	), FileID: printedID}, nil
 }
 
-func (a *api) unshare(fileIDOrURL, permissionID string) error {
-	if err := a.svc.Permissions.Delete(extractFileID(fileIDOrURL), permissionID).SupportsAllDrives(true).Context(a.Ctx).Do(); err != nil {
+// unshare is GDriveClient.unshare. googleapis refuses an undefined
+// permissionId before sending anything, and puts null in the path as "".
+func (a *api) unshare(fileIDOrURL string, permissionID any) error {
+	if permissionID == jsvalue.Undefined {
+		return a.Failed("remove permission", errors.New("Missing required parameters: permissionId"))
+	}
+	id := ""
+	if permissionID != nil {
+		id = jsvalue.String(permissionID)
+	}
+	if err := a.svc.Permissions.Delete(extractFileID(fileIDOrURL), id).SupportsAllDrives(true).Context(a.Ctx).Do(); err != nil {
 		return a.Failed("remove permission", err)
 	}
 	return nil

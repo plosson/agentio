@@ -8,76 +8,67 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
-// formatValues is printGSheetsValues: cells tab-separated, `String(cell ?? ”)`.
+// The printers read the Bun objects the client builds, as Bun's template
+// strings do: a missing field prints "undefined".
+
+// formatValues is printGSheetsValues: cells tab-separated, `String(cell ?? "")`.
+// It stops at a null row, where Bun throws (valuesError).
 func formatValues(v any) string {
-	r, _ := v.(*values)
-	if r == nil || len(r.Values) == 0 {
+	rows, _ := jsvalue.Member(v, "values").([]any)
+	if len(rows) == 0 {
 		return "No data found"
 	}
-	lines := []string{"Range: " + r.Range, ""}
-	for _, row := range r.Values {
-		cells := make([]string, len(row))
-		for i, cell := range row {
-			if cell != nil {
-				cells[i] = jsvalue.String(cell)
+	lines := []string{"Range: " + google.Field(v, "range"), ""}
+	for _, row := range rows {
+		cells, ok := row.([]any)
+		if !ok {
+			break
+		}
+		out := make([]string, len(cells))
+		for i, cell := range cells {
+			if !jsvalue.Nullish(cell) {
+				out[i] = jsvalue.String(cell)
 			}
 		}
-		lines = append(lines, strings.Join(cells, "\t"))
+		lines = append(lines, strings.Join(out, "\t"))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // countLines is the three lines both value writes print; head is
 // "Updated N cells in" or "Appended N cells to".
-func countLines(head string, u updated) string {
-	return fmt.Sprintf("%s %s\n  Rows: %s\n  Columns: %s", head, u.UpdatedRange, num(u.UpdatedRows), num(u.UpdatedColumns))
+func countLines(head string, v any) string {
+	return fmt.Sprintf("%s %s\n  Rows: %s\n  Columns: %s", head, google.Field(v, "updatedRange"), google.Field(v, "updatedRows"), google.Field(v, "updatedColumns"))
 }
-
-func num(n number) string { return jsvalue.NumberString(float64(n)) }
 
 // formatUpdated is printGSheetsUpdateResult.
 func formatUpdated(v any) string {
-	u, _ := v.(*updated)
-	if u == nil {
-		return ""
-	}
-	return countLines("Updated "+num(u.UpdatedCells)+" cells in", *u)
+	return countLines("Updated "+google.Field(v, "updatedCells")+" cells in", v)
 }
 
 // formatAppended is printGSheetsAppendResult.
 func formatAppended(v any) string {
-	u, _ := v.(*appended)
-	if u == nil {
-		return ""
-	}
-	return countLines("Appended "+num(u.UpdatedCells)+" cells to", updated(*u))
+	return countLines("Appended "+google.Field(v, "updatedCells")+" cells to", v)
 }
 
 // formatCleared is printGSheetsClearResult.
 func formatCleared(v any) string {
-	c, _ := v.(*cleared)
-	if c == nil {
-		return ""
-	}
-	return "Cleared " + c.ClearedRange
+	return "Cleared " + google.Field(v, "clearedRange")
 }
 
 // formatMetadata is printGSheetsMetadata.
 func formatMetadata(v any) string {
-	s, _ := v.(*spreadsheet)
-	if s == nil {
-		return ""
+	lines := []string{"ID: " + google.Field(v, "id"), "Title: " + google.Field(v, "title")}
+	if google.Truthy(v, "locale") {
+		lines = append(lines, "Locale: "+google.Field(v, "locale"))
 	}
-	lines := []string{"ID: " + s.ID, "Title: " + s.Title}
-	if s.Locale != "" {
-		lines = append(lines, "Locale: "+s.Locale)
+	if google.Truthy(v, "timeZone") {
+		lines = append(lines, "TimeZone: "+google.Field(v, "timeZone"))
 	}
-	if s.TimeZone != "" {
-		lines = append(lines, "TimeZone: "+s.TimeZone)
-	}
-	lines = append(lines, "URL: "+s.URL, "", "Sheets:")
-	for _, sh := range s.Sheets {
-		lines = append(lines, fmt.Sprintf("  [%d] %s (%d rows x %d cols)", sh.ID, sh.Title, sh.RowCount, sh.ColumnCount))
+	lines = append(lines, "URL: "+google.Field(v, "url"), "", "Sheets:")
+	sheets, _ := jsvalue.Member(v, "sheets").([]any)
+	for _, sh := range sheets {
+		lines = append(lines, fmt.Sprintf("  [%s] %s (%s rows x %s cols)", google.Field(sh, "id"), google.Field(sh, "title"), google.Field(sh, "rowCount"), google.Field(sh, "columnCount")))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -91,7 +82,7 @@ func formatFormatted(v any) string {
 	if f == nil {
 		return ""
 	}
-	lines := []string{"Formatted " + f.Range, "  Sheet: " + f.SheetTitle}
+	lines := []string{"Formatted " + f.Range, "  Sheet: " + jsvalue.String(f.SheetTitle)}
 	if f.Cleared {
 		lines = append(lines, "  Cleared existing formatting")
 	}
@@ -118,18 +109,14 @@ func formatResized(v any) string {
 	if !r.Auto {
 		size := "undefined"
 		if r.PixelSize != nil {
-			size = num(*r.PixelSize)
+			size = jsvalue.NumberString(float64(*r.PixelSize))
 		}
 		how = size + "px"
 	}
-	return fmt.Sprintf("Resized %d %s in %s\n  Sheet: %s\n  Size: %s", r.Count, unit, r.Range, r.SheetTitle, how)
+	return fmt.Sprintf("Resized %d %s in %s\n  Sheet: %s\n  Size: %s", r.Count, unit, r.Range, jsvalue.String(r.SheetTitle), how)
 }
 
 // formatBatch is printGSheetsBatchResult.
 func formatBatch(v any) string {
-	b, _ := v.(*batched)
-	if b == nil {
-		return ""
-	}
-	return fmt.Sprintf("Batch update applied to %s\n  Replies: %d", b.SpreadsheetID, b.Replies)
+	return "Batch update applied to " + google.Field(v, "spreadsheetId") + "\n  Replies: " + google.Field(v, "replies")
 }

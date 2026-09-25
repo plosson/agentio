@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins/google"
 )
 
 // formatSendResult is printGChatSendResult.
@@ -23,14 +24,16 @@ func formatSendResult(v any) string {
 	return strings.Join(lines, "\n")
 }
 
-func from(s *sender) string {
-	if s.Email != "" {
-		return fmt.Sprintf("%s <%s>", s.DisplayName, s.Email)
+// The printers read the Bun objects the client builds (messageOf, spaceOf,
+// listMembers, personToUser) as Bun's template strings do.
+
+// from is the printers' `sender.email ? \`${displayName} <${email}>\` :
+// sender.displayName || 'Unknown'`.
+func from(s any) string {
+	if google.Truthy(s, "email") {
+		return fmt.Sprintf("%s <%s>", google.Field(s, "displayName"), google.Field(s, "email"))
 	}
-	if s.DisplayName == "" {
-		return "Unknown"
-	}
-	return s.DisplayName
+	return jsvalue.String(jsvalue.Or(jsvalue.Member(s, "displayName"), "Unknown"))
 }
 
 // asJSON is the `--format json` rendering: JSON.stringify(value, null, 2).
@@ -44,7 +47,7 @@ func asJSON(v any) string {
 
 // formatMessageList is printGChatMessageList, or the JSON array.
 func formatMessageList(v any) string {
-	s, _ := v.(shown[[]message])
+	s, _ := v.(shown[[]any])
 	if s.JSON {
 		return asJSON(s.Value)
 	}
@@ -53,21 +56,21 @@ func formatMessageList(v any) string {
 	}
 	lines := []string{fmt.Sprintf("Messages (%d)", len(s.Value)), ""}
 	for i, m := range s.Value {
-		lines = append(lines, fmt.Sprintf("[%d] %s", i+1, m.Name))
-		if m.Sender != nil {
-			lines = append(lines, "    From: "+from(m.Sender))
+		lines = append(lines, fmt.Sprintf("[%d] %s", i+1, google.Field(m, "name")))
+		if google.Truthy(m, "sender") {
+			lines = append(lines, "    From: "+from(jsvalue.Member(m, "sender")))
 		}
-		if m.Text != "" {
-			lines = append(lines, "    > "+jsvalue.Truncate(m.Text, 100))
+		if google.Truthy(m, "text") {
+			lines = append(lines, "    > "+jsvalue.Truncate(google.Field(m, "text"), 100))
 		}
-		lines = append(lines, "    Date: "+m.CreateTime, "")
+		lines = append(lines, "    Date: "+google.Field(m, "createTime"), "")
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatMessage is printGChatMessage, or the JSON object.
 func formatMessage(v any) string {
-	s, _ := v.(shown[*message])
+	s, _ := v.(shown[*jsvalue.Object])
 	if s.Value == nil {
 		return ""
 	}
@@ -75,86 +78,85 @@ func formatMessage(v any) string {
 		return asJSON(s.Value)
 	}
 	m := s.Value
-	lines := []string{"ID: " + m.Name}
-	if m.Sender != nil {
-		lines = append(lines, "From: "+from(m.Sender))
+	lines := []string{"ID: " + google.Field(m, "name")}
+	if google.Truthy(m, "sender") {
+		lines = append(lines, "From: "+from(jsvalue.Member(m, "sender")))
 	}
-	lines = append(lines, "Date: "+m.CreateTime)
-	if m.Thread != nil {
-		lines = append(lines, "Thread: "+m.Thread.Name)
+	lines = append(lines, "Date: "+google.Field(m, "createTime"))
+	if google.Truthy(m, "thread") {
+		lines = append(lines, "Thread: "+google.Field(jsvalue.Member(m, "thread"), "name"))
 	}
-	if m.Text != "" {
-		lines = append(lines, "---", m.Text)
+	if google.Truthy(m, "text") {
+		lines = append(lines, "---", google.Field(m, "text"))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // formatSpaces is printGChatSpaceList.
 func formatSpaces(v any) string {
-	spaces, _ := v.([]space)
+	spaces, _ := v.([]any)
 	if len(spaces) == 0 {
 		return "No spaces found"
 	}
 	lines := []string{fmt.Sprintf("Spaces (%d)", len(spaces)), ""}
 	for _, s := range spaces {
-		name := s.DisplayName
-		if name == "" {
-			name = "Unnamed"
-		}
+		name := jsvalue.String(jsvalue.Or(jsvalue.Member(s, "displayName"), "Unnamed"))
 		desc := ""
-		if s.Description != "" {
-			desc = "  - " + s.Description
+		if google.Truthy(s, "description") {
+			desc = "  - " + google.Field(s, "description")
 		}
-		lines = append(lines, fmt.Sprintf("[%s] %s  %s%s", s.Type, strings.Replace(s.Name, "spaces/", "", 1), name, desc))
+		lines = append(lines, fmt.Sprintf("[%s] %s  %s%s", google.Field(s, "type"), strings.Replace(google.Field(s, "name"), "spaces/", "", 1), name, desc))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func orgLine(o organization) string {
-	var parts []string
-	for _, p := range []string{o.Title, o.Department, o.Name} {
-		if p != "" {
-			parts = append(parts, p)
+// orgLine is `[org.title, org.department, org.name].filter(Boolean).join(' · ')`.
+func orgLine(o any) string {
+	var parts []any
+	for _, k := range []string{"title", "department", "name"} {
+		if v := jsvalue.Member(o, k); jsvalue.Truthy(v) {
+			parts = append(parts, v)
 		}
 	}
-	return strings.Join(parts, " · ")
+	return jsvalue.Join(parts, " · ")
+}
+
+// list is a `?.length` list of an object built by the client.
+func list(o any, key string) []any {
+	l, _ := jsvalue.Optional(o, key).([]any)
+	return l
 }
 
 // formatMembers is printGChatMemberList.
 func formatMembers(v any) string {
-	members, _ := v.([]member)
+	members, _ := v.([]any)
 	if len(members) == 0 {
 		return "No members found"
 	}
 	lines := []string{fmt.Sprintf("Members (%d)", len(members)), ""}
 	for i, m := range members {
-		label, email := "(unknown)", ""
-		if m.User != nil {
-			if m.User.DisplayName != "" {
-				label = m.User.DisplayName
-			} else if m.User.Name != "" {
-				label = m.User.Name
-			}
-			if m.User.Email != "" {
-				email = " <" + m.User.Email + ">"
-			}
+		u := jsvalue.Member(m, "user")
+		label := jsvalue.String(jsvalue.Or(jsvalue.Or(jsvalue.Optional(u, "displayName"), jsvalue.Optional(u, "name")), "(unknown)"))
+		email := ""
+		if jsvalue.Truthy(jsvalue.Optional(u, "email")) {
+			email = " <" + google.Field(u, "email") + ">"
 		}
 		tags := ""
-		if m.Role == "ROLE_MANAGER" {
+		if jsvalue.StrictEqual(jsvalue.Member(m, "role"), "ROLE_MANAGER") {
 			tags += " [MANAGER]"
 		}
-		if m.MemberType == "BOT" {
+		if jsvalue.StrictEqual(jsvalue.Member(m, "memberType"), "BOT") {
 			tags += " [BOT]"
 		}
-		if m.State != "JOINED" {
-			tags += " [" + m.State + "]"
+		if !jsvalue.StrictEqual(jsvalue.Member(m, "state"), "JOINED") {
+			tags += " [" + google.Field(m, "state") + "]"
 		}
 		lines = append(lines, fmt.Sprintf("[%d] %s%s%s", i+1, label, email, tags))
-		if m.User != nil && m.User.Name != "" {
-			lines = append(lines, "    User ID: "+m.User.Name)
+		if jsvalue.Truthy(jsvalue.Optional(u, "name")) {
+			lines = append(lines, "    User ID: "+google.Field(u, "name"))
 		}
-		if m.User != nil && len(m.User.Organizations) > 0 {
-			if line := orgLine(m.User.Organizations[0]); line != "" {
+		if orgs := list(u, "organizations"); len(orgs) > 0 {
+			if line := orgLine(orgs[0]); line != "" {
 				lines = append(lines, "    "+line)
 			}
 		}
@@ -164,33 +166,33 @@ func formatMembers(v any) string {
 
 // formatUser is printGChatUser.
 func formatUser(v any) string {
-	u, _ := v.(*user)
+	u, _ := v.(*jsvalue.Object)
 	if u == nil {
 		return ""
 	}
-	lines := []string{"ID: " + u.Name}
-	if u.DisplayName != "" {
-		lines = append(lines, "Name: "+u.DisplayName)
+	lines := []string{"ID: " + google.Field(u, "name")}
+	if google.Truthy(u, "displayName") {
+		lines = append(lines, "Name: "+google.Field(u, "displayName"))
 	}
-	if u.Email != "" {
-		lines = append(lines, "Email: "+u.Email)
+	if google.Truthy(u, "email") {
+		lines = append(lines, "Email: "+google.Field(u, "email"))
 	}
-	if len(u.PhoneNumbers) > 0 {
-		lines = append(lines, "Phone: "+strings.Join(u.PhoneNumbers, ", "))
+	if phones := list(u, "phoneNumbers"); len(phones) > 0 {
+		lines = append(lines, "Phone: "+jsvalue.Join(phones, ", "))
 	}
-	if len(u.Organizations) > 0 {
+	if orgs := list(u, "organizations"); len(orgs) > 0 {
 		lines = append(lines, "Organizations:")
-		for _, o := range u.Organizations {
+		for _, o := range orgs {
 			if line := orgLine(o); line != "" {
 				lines = append(lines, "  - "+line)
 			}
 		}
 	}
-	if len(u.Locations) > 0 {
-		lines = append(lines, "Location: "+strings.Join(u.Locations, ", "))
+	if locations := list(u, "locations"); len(locations) > 0 {
+		lines = append(lines, "Location: "+jsvalue.Join(locations, ", "))
 	}
-	if u.PhotoURL != "" {
-		lines = append(lines, "Photo: "+u.PhotoURL)
+	if google.Truthy(u, "photoUrl") {
+		lines = append(lines, "Photo: "+google.Field(u, "photoUrl"))
 	}
 	return strings.Join(lines, "\n")
 }

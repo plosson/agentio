@@ -171,7 +171,7 @@ func getCmd() plugins.CommandSpec {
 				return nil, err
 			}
 			if in.Flag("body-only") {
-				return *m.Body, nil
+				return google.Field(m.Object, "body"), nil
 			}
 			return m, nil
 		},
@@ -219,8 +219,8 @@ func searchCmd() plugins.CommandSpec {
 			}
 			if in.Flag("ids-only") {
 				ids := idList{}
-				for _, m := range result.Messages {
-					ids = append(ids, m.ID)
+				for _, m := range items(member(result.Object, "messages")) {
+					ids = append(ids, google.Field(m, "id"))
 				}
 				return ids, nil
 			}
@@ -504,6 +504,9 @@ func labelsListCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
+			if err := labelNamesReadable(labels); err != nil {
+				return nil, err
+			}
 			return labelList(labels), nil
 		},
 		Format: render,
@@ -530,11 +533,7 @@ func labelsCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			l, err := a.createLabel(in.Arg("name"))
-			if err != nil {
-				return nil, err
-			}
-			return (*labelCreated)(l), nil
+			return plugins.Result(a.createLabel(in.Arg("name")))
 		},
 		Format: render,
 	}
@@ -591,7 +590,7 @@ func labelsRenameCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return &labelRenamed{Old: in.Arg("old"), Label: *l}, nil
+			return &labelRenamed{Old: in.Arg("old"), Label: l}, nil
 		},
 		Format: render,
 	}
@@ -613,13 +612,19 @@ func filtersListCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			var filters []filter
-			var names map[string]string
+			var filters []*jsvalue.Object
+			var names map[string]any
 			if err := plugins.All(
 				func() (err error) { filters, err = a.listFilters(); return },
 				func() (err error) { names, err = a.labelNamesByID(); return },
 			); err != nil {
 				return nil, err
+			}
+			if err := filterIDsReadable(filters); err != nil {
+				return nil, err
+			}
+			if text, err := formatFilterList(filters, names); err != nil {
+				return printedBefore(text, err)
 			}
 			return &filterListing{filters: filters, names: names}, nil
 		},
@@ -642,15 +647,18 @@ func filtersGetCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			var f *filter
-			var names map[string]string
+			var f *jsvalue.Object
+			var names map[string]any
 			if err := plugins.All(
 				func() (err error) { f, err = a.getFilter(in.Arg("id")); return },
 				func() (err error) { names, err = a.labelNamesByID(); return },
 			); err != nil {
 				return nil, err
 			}
-			return &filterView{filter: *f, names: names}, nil
+			if text, err := formatFilter(f, names); err != nil {
+				return printedBefore(text, err)
+			}
+			return &filterView{filter: f, names: names}, nil
 		},
 		Format: render,
 	}
@@ -766,7 +774,10 @@ func filtersCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return &filterCreated{filter: *f, names: names}, nil
+			if text, err := formatFilterCreated(f, names); err != nil {
+				return printedBefore(text, err)
+			}
+			return &filterCreated{filter: f, names: names}, nil
 		},
 		Format: render,
 	}
@@ -924,7 +935,7 @@ func attachmentCmd() plugins.CommandSpec {
 			name := in.Option("name")
 			var chosen []downloaded
 			for _, r := range results {
-				if name == "" || r.attachment.Filename == name {
+				if name == "" || jsvalue.StrictEqual(member(r.attachment, "filename"), name) {
 					chosen = append(chosen, r)
 				}
 			}
@@ -933,11 +944,12 @@ func attachmentCmd() plugins.CommandSpec {
 			}
 			out := &downloads{Count: len(chosen), Files: []downloadedFile{}}
 			for _, r := range chosen {
-				path := filepath.Join(in.Option("output"), r.attachment.Filename)
+				filename := google.Field(r.attachment, "filename")
+				path := filepath.Join(in.Option("output"), filename)
 				if err := writeFile(path, r.data); err != nil {
 					return out, err
 				}
-				out.Files = append(out.Files, downloadedFile{Filename: r.attachment.Filename, Path: path, Size: len(r.data)})
+				out.Files = append(out.Files, downloadedFile{Filename: filename, Path: path, Size: len(r.data)})
 			}
 			return out, nil
 		},
@@ -1063,18 +1075,16 @@ var bodyTag = regexp.MustCompile(`(?i)<body[^>]*>`)
 
 // exportHTML is the document Bun's export prints: a header block injected
 // after <body> of a full document, or a minimal page around a fragment.
-func exportHTML(m *message) string {
+func exportHTML(r *message) string {
+	m := r.Object
 	header := `
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px 20px; margin-bottom: 16px; border-bottom: 1px solid #ddd; background: #f9f9f9;">
-  <div style="font-size: 1.3em; font-weight: 600; margin-bottom: 12px;">` + escapeHTML(m.Subject) + `</div>
-  <div style="margin: 4px 0; font-size: 0.9em;"><strong>From:</strong> ` + escapeHTML(m.From) + `</div>
-  <div style="margin: 4px 0; font-size: 0.9em;"><strong>To:</strong> ` + escapeHTML(strings.Join(m.To, ", ")) + `</div>
-  <div style="margin: 4px 0; font-size: 0.9em;"><strong>Date:</strong> ` + escapeHTML(m.Date) + `</div>
+  <div style="font-size: 1.3em; font-weight: 600; margin-bottom: 12px;">` + escapeHTML(google.Field(m, "subject")) + `</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>From:</strong> ` + escapeHTML(google.Field(m, "from")) + `</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>To:</strong> ` + escapeHTML(join(member(m, "to"), ", ")) + `</div>
+  <div style="margin: 4px 0; font-size: 0.9em;"><strong>Date:</strong> ` + escapeHTML(google.Field(m, "date")) + `</div>
 </div>`
-	body := ""
-	if m.Body != nil {
-		body = *m.Body
-	}
+	body := jsvalue.String(jsvalue.Or(member(m, "body"), ""))
 	start := strings.ToLower(jsvalue.Trim(body))
 	if strings.HasPrefix(start, "<!doctype") || strings.HasPrefix(start, "<html") {
 		if loc := bodyTag.FindStringIndex(body); loc != nil {
