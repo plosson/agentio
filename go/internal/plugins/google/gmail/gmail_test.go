@@ -382,6 +382,77 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	}
 }
 
+// Bun archive and label print a dry-run plan before getGmailClient: no
+// profile, two profiles and no --profile, an unknown --profile, or a token
+// that cannot refresh offline all still print the plan. A real run does not.
+func TestDryRunNeedsNoProfile(t *testing.T) {
+	reg := product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		googletest.WriteAPIError(w, 500, "offline")
+	})
+	archive := func(opts map[string]any) (any, error) {
+		return product.Exec(fake.Ctx(), t, reg, "archive", product.Input(t, "archive", map[string]any{"message-id": []string{"a", "b"}}, opts))
+	}
+	label := func(opts map[string]any) (any, error) {
+		return product.Exec(fake.Ctx(), t, reg, "label", product.Input(t, "label", map[string]any{"id": []string{"a"}}, opts))
+	}
+	plan := func(profileFlag string) {
+		t.Helper()
+		opts := map[string]any{"dry-run": true}
+		if profileFlag != "" {
+			opts["profile"] = profileFlag
+		}
+		v, err := archive(opts)
+		if err != nil || render(v) != "[dry-run] archive\n  ids: 2\n  chunk size: 1000\n  chunks: 1\n  remove labels: INBOX\n  no API calls made" {
+			t.Fatalf("archive --profile %q: %q %v", profileFlag, render(v), err)
+		}
+		opts["apply"] = []string{"X"}
+		v, err = label(opts)
+		if err != nil || render(v) != "[dry-run] label\n  ids: 1\n  chunk size: 1000\n  chunks: 1\n  add labels: X\n  no API calls made" {
+			t.Fatalf("label --profile %q: %q %v", profileFlag, render(v), err)
+		}
+	}
+	plan("")
+	plan("nope")
+	product.SaveProfile(t, "a", storedCreds(1), false)
+	product.SaveProfile(t, "b", storedCreds(1), true)
+	plan("")
+	plan("a")
+	plan("b")
+	if n := len(fake.Recorded()); n != 0 {
+		t.Fatalf("a dry run reached the network %d times", n)
+	}
+	if got := product.LoadCreds(t, "a")["access_token"]; got != "at-old" {
+		t.Fatalf("a dry run refreshed the token: %v", got)
+	}
+	// Invalid input still fails, before any profile.
+	_, err := label(map[string]any{"dry-run": true})
+	wantErr(t, err, clierr.InvalidParams, "Specify at least one --apply or --remove", "")
+	// Without --dry-run the profile is still required.
+	_, err = archive(nil)
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || !strings.Contains(ce.Message, "Multiple gmail profiles") {
+		t.Fatalf("real run: %#v", ce)
+	}
+}
+
+// Bun parseChunkOpts is `parseInt(options.maxRetries ?? '5', 10) || 0`: a
+// given "" is NaN, so no retries; an absent option is the default.
+func TestChunkOptionsKeepAGivenEmptyValue(t *testing.T) {
+	for _, c := range []struct {
+		set           map[string]any
+		size, retries int
+	}{
+		{map[string]any{"chunk-size": nil, "max-retries": nil}, 1000, 5},
+		{map[string]any{"chunk-size": "", "max-retries": ""}, 1000, 0},
+		{map[string]any{"chunk-size": "7", "max-retries": "2"}, 7, 2},
+	} {
+		size, retries := chunkOptions(product.Input(t, "archive", nil, c.set))
+		if size != c.size || retries != c.retries {
+			t.Errorf("%v: %d %d", c.set, size, retries)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	var status int
 	var body any
@@ -504,13 +575,13 @@ func TestComposeFilesAndSpec(t *testing.T) {
 	fail := host.NewRunContext(nil, "", nil).Fail
 	subjectPath := tempFile(t, dir, "subject.txt", "  Café résumé  \n")
 	bodyPath := tempFile(t, dir, "body.txt", "Line one\nLine two\n")
-	r, err := resolveComposeText("", subjectPath, "", bodyPath, nil, fail)
+	r, err := resolveComposeText(nil, subjectPath, nil, bodyPath, nil, fail)
 	if err != nil || r.subject != "Café résumé" || r.body != "Line one\nLine two" || !r.bodyFromFileOrSpec {
 		t.Fatalf("%#v %v", r, err)
 	}
 	// Only one trailing newline goes, CRLF included; a BOM stays, as readFile keeps it.
 	crlf := tempFile(t, dir, "crlf.txt", "\ufeffBody\r\n\r\n")
-	if r, _ = resolveComposeText("", "", "", crlf, nil, fail); r.body != "\ufeffBody\r\n" {
+	if r, _ = resolveComposeText(nil, "", nil, crlf, nil, fail); r.body != "\ufeffBody\r\n" {
 		t.Fatalf("%q", r.body)
 	}
 	specPath := tempFile(t, dir, "draft.json", `{"to":"alice@example.com","cc":["bob@example.com"],"subject":"From spec","body":"Spec body","attachments":["./a.pdf"],"html":true}`)
@@ -522,26 +593,27 @@ func TestComposeFilesAndSpec(t *testing.T) {
 		*spec.subject != "From spec" || *spec.body != "Spec body" || strings.Join(spec.attachments, ",") != "./a.pdf" || !*spec.html || spec.replyTo != nil {
 		t.Fatalf("%#v", spec)
 	}
-	if r, _ = resolveComposeText("", "", "", "", spec, fail); r.subject != "From spec" || r.body != "Spec body" || !r.bodyFromFileOrSpec {
+	if r, _ = resolveComposeText(nil, "", nil, "", spec, fail); r.subject != "From spec" || r.body != "Spec body" || !r.bodyFromFileOrSpec {
 		t.Fatalf("%#v", r)
 	}
 	// Flags override the spec; both a flag and its file is refused.
-	_, err = resolveComposeText("Flag subject", subjectPath, "", "", nil, fail)
+	flagSubject, flagBody, flagWins := "Flag subject", "Flag body", "Flag wins"
+	_, err = resolveComposeText(&flagSubject, subjectPath, nil, "", nil, fail)
 	wantErr(t, err, clierr.InvalidParams, "Cannot use both --subject and --subject-file", "Prefer --subject-file for agent-written subjects to avoid shell quoting bugs.")
-	_, err = resolveComposeText("", "", "Flag body", filepath.Join(dir, "missing.txt"), nil, fail)
+	_, err = resolveComposeText(nil, "", &flagBody, filepath.Join(dir, "missing.txt"), nil, fail)
 	wantErr(t, err, clierr.InvalidParams, "Cannot use both --body and --body-file", "Prefer --body-file (or --body - for stdin) instead of shell-quoting the body.")
 	s1, b1 := "Spec subject", "Spec body"
-	if r, _ = resolveComposeText("Flag wins", "", "", "", &composeSpec{subject: &s1, body: &b1}, fail); r.subject != "Flag wins" || r.body != "Spec body" {
+	if r, _ = resolveComposeText(&flagWins, "", nil, "", &composeSpec{subject: &s1, body: &b1}, fail); r.subject != "Flag wins" || r.body != "Spec body" {
 		t.Fatalf("%#v", r)
 	}
 	// The guardrail runs on a file subject too.
 	bad := tempFile(t, dir, "bad-subject.txt", "Hello\nEOF\nagentio gmail draft")
-	if _, err = resolveComposeText("", bad, "", "", nil, fail); googletest.CliErr(t, err).Code != clierr.InvalidParams {
+	if _, err = resolveComposeText(nil, bad, nil, "", nil, fail); googletest.CliErr(t, err).Code != clierr.InvalidParams {
 		t.Fatal(err)
 	}
-	_, err = resolveComposeText("", "", "", "/tmp/does-not-exist-agentio-body.txt", nil, fail)
+	_, err = resolveComposeText(nil, "", nil, "/tmp/does-not-exist-agentio-body.txt", nil, fail)
 	wantErr(t, err, clierr.InvalidParams, "Failed to read body file: /tmp/does-not-exist-agentio-body.txt", "Check that the file exists and is readable UTF-8 text")
-	_, err = resolveComposeText("", dir, "", "", nil, fail)
+	_, err = resolveComposeText(nil, dir, nil, "", nil, fail)
 	wantErr(t, err, clierr.InvalidParams, "Failed to read subject file: "+dir, "Check that the file exists and is readable UTF-8 text")
 
 	// Spec checks, in Bun's order.
@@ -611,6 +683,39 @@ func TestSendOptionsAreBunsParse(t *testing.T) {
 	wantErr(t, err, clierr.InvalidParams, "Invalid inline format: nocolon.png", "Use format: contentId:filepath (e.g., logo:./logo.png)")
 	if basename("") != "" || basename("/") != "" || basename("a/b/") != "b" || basename("c") != "c" {
 		t.Fatal("basename")
+	}
+}
+
+// Bun resolveComposeText checks `options.subject !== undefined`: an explicit
+// --subject "" or --body "" is given, so it clashes with its file and hides the
+// spec's value (an empty body then reads stdin). On a read-only profile these
+// input errors come before the refusal, as in Bun.
+func TestGivenEmptySubjectOrBodyIsNotAbsent(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", storedCreds(time.Now().Add(24*time.Hour).UnixMilli()), true)
+	dir := t.TempDir()
+	subjectPath := tempFile(t, dir, "subject.txt", "Subj")
+	bodyPath := tempFile(t, dir, "body.txt", "Body")
+	specPath := tempFile(t, dir, "spec.json", `{"to":["a@example.com"],"subject":"SpecSubj","body":"SpecBody"}`)
+	send := func(set map[string]any, stdin any) error {
+		in := product.Input(t, "send", nil, set)
+		in.Stdin = stdin
+		_, err := product.Exec(context.Background(), t, reg, "send", in)
+		return err
+	}
+	err := send(map[string]any{"to": []string{"a@example.com"}, "subject": "", "subject-file": subjectPath, "body": "x"}, nil)
+	wantErr(t, err, clierr.InvalidParams, "Cannot use both --subject and --subject-file", "Prefer --subject-file for agent-written subjects to avoid shell quoting bugs.")
+	err = send(map[string]any{"to": []string{"a@example.com"}, "subject": "s", "body": "", "body-file": bodyPath}, nil)
+	wantErr(t, err, clierr.InvalidParams, "Cannot use both --body and --body-file", "Prefer --body-file (or --body - for stdin) instead of shell-quoting the body.")
+	err = send(map[string]any{"spec": specPath, "subject": ""}, nil)
+	wantErr(t, err, clierr.InvalidParams, "--subject is required (unless using --reply-to)", "Use --subject, --subject-file, or --spec")
+	err = send(map[string]any{"spec": specPath, "body": ""}, nil)
+	wantErr(t, err, clierr.InvalidParams, "Body is required. Use --body, --body-file, --spec, or pipe via stdin.", "")
+	fail := host.NewRunContext(nil, "", nil).Fail
+	in := product.Input(t, "send", nil, map[string]any{"spec": specPath, "body": ""})
+	in.Stdin = "piped"
+	if o, err := parseSendOptions(in, fail); err != nil || o.body != "piped" || o.subject != "SpecSubj" {
+		t.Fatalf("empty --body with a spec: %#v %v", o, err)
 	}
 }
 
@@ -1271,6 +1376,11 @@ func TestFiltersCommands(t *testing.T) {
 		{"size": "abc", "size-comparison": "smaller"}: "--size must be a non-negative integer (bytes)",
 		{"size": "-1", "size-comparison": "smaller"}:  "--size must be a non-negative integer (bytes)",
 		{"from": "a@example.com"}:                     "At least one action is required",
+		// Bun checks `!== undefined`: a given "" is set.
+		{"size": "", "size-comparison": "larger"}: "--size must be a non-negative integer (bytes)",
+		{"size": "5", "size-comparison": ""}:      `--size-comparison must be "larger" or "smaller"`,
+		{"size": "", "from": "a@example.com"}:     "--size and --size-comparison must be set together",
+		{"size": "", "size-comparison": ""}:       `--size-comparison must be "larger" or "smaller"`,
 	} {
 		_, err, _ := runDirect(t, fake.Ctx(), "filters create", product.Input(t, "filters create", nil, *set))
 		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != message {

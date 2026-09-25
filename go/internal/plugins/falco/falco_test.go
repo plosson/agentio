@@ -643,6 +643,14 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 			t.Fatalf("%s: %#v", path, ce)
 		}
 	}
+	// Bun checks --status before enforceWriteAccess, even with --unpaid.
+	for _, unpaid := range []bool{false, true} {
+		_, err := exec(t, reg, "peppol mark-paid", plugins.CommandInput{Args: map[string]any{"ref": "INV-1"},
+			Options: map[string]any{"status": "bogus", "unpaid": unpaid, "format": "text"}})
+		if ce := cliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "--status must be Paid or NotPaid, got: bogus" {
+			t.Fatalf("--unpaid %v: %#v", unpaid, ce)
+		}
+	}
 	if n := len(fake.recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
@@ -661,6 +669,41 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 		if h.Method != http.MethodGet {
 			t.Fatalf("a dry run wrote: %s %s", h.Method, h.Path)
 		}
+	}
+}
+
+// Bun requireIsoDate checks `value === undefined`, and Commander's
+// requiredOption takes a given --output "": an empty --since is rejected and
+// an empty --output fails in mkdir, before any API call.
+func TestGivenEmptySinceAndOutputAreNotAbsent(t *testing.T) {
+	reg := setupVault(t)
+	if err := profile.Save("falco", "rw", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	fake := newFake(t, func(w http.ResponseWriter, h hit) { reply(w, 200, `[]`) })
+	for _, c := range []struct {
+		path string
+		opts map[string]any
+		want string
+	}{
+		{"peppol list", map[string]any{"since": "", "format": "text"}, "INVALID_PARAMS: --since must be YYYY-MM-DD, got: "},
+		{"peppol sync", map[string]any{"output": "", "since": ""}, "INVALID_PARAMS: --since must be YYYY-MM-DD, got: "},
+		{"invoices sync", map[string]any{"output": "", "since": "", "include": "Invoice"}, "INVALID_PARAMS: --since must be YYYY-MM-DD, got: "},
+		{"peppol sync", map[string]any{"output": ""}, "ENOENT: no such file or directory, mkdir"},
+		{"invoices sync", map[string]any{"output": "", "include": "Invoice"}, "ENOENT: no such file or directory, mkdir"},
+		{"peppol sync", map[string]any{}, "INVALID_PARAMS: required option '--output <dir>' not specified"},
+	} {
+		_, err := exec(t, reg, c.path, plugins.CommandInput{Options: c.opts})
+		got := fmt.Sprint(err)
+		if ce, ok := err.(*clierr.Error); ok {
+			got = string(ce.Code) + ": " + ce.Message
+		}
+		if got != c.want {
+			t.Errorf("%s %v: %q", c.path, c.opts, got)
+		}
+	}
+	if n := len(fake.recorded()); n != 0 {
+		t.Fatalf("rejected input reached the API %d times", n)
 	}
 }
 

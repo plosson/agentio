@@ -44,10 +44,7 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 
 // addInputError is Commander's requiredOption check on --title.
 func addInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if in.Option("title") == "" {
-		return fail("INVALID_PARAMS", "required option '--title <title>' not specified", "")
-	}
-	return nil
+	return plugins.RequireOptions(in, fail, "--title <title>")
 }
 
 // updateInputError is Bun's --status check, made before enforceWriteAccess.

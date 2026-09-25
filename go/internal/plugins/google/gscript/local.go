@@ -201,16 +201,18 @@ func readdirNames(dir string) ([]string, error) {
 }
 
 // putSource is the content Bun put reads before it resolves the profile:
-// --source, else the --from file, else stdin trimmed.
+// --source, else the --from file, else stdin trimmed. A given "" counts, as
+// Bun checks `!== undefined`.
 func putSource(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	source, from := in.Option("source"), in.Option("from")
-	if source != "" && from != "" {
+	source, hasSource := in.LookupOption("source")
+	from, hasFrom := in.LookupOption("from")
+	if hasSource && hasFrom {
 		return "", fail("INVALID_PARAMS", "--source and --from are mutually exclusive", "")
 	}
-	if source != "" {
+	if hasSource {
 		return source, nil
 	}
-	if from != "" {
+	if hasFrom {
 		raw, err := nodefs.ReadFile(from)
 		if err != nil {
 			return "", err

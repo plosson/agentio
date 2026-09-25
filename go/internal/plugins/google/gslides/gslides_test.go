@@ -548,6 +548,8 @@ func TestGetPrintsTextAndNotes(t *testing.T) {
 		{"p2", "0", clierr.InvalidParams, "Slide index 0 out of range (0–-1)", "Use --slide 0 to -1"},
 		// Bun reads allSlides[NaN] and fails on the undefined slide.
 		{"p1", "abc", "API_ERROR", "Failed to get slide content: undefined is not an object (evaluating 'slide.pageElements')", ""},
+		// parseInt("") is NaN too: a given empty --slide is not absent.
+		{"p1", "", "API_ERROR", "Failed to get slide content: undefined is not an object (evaluating 'slide.pageElements')", ""},
 	} {
 		v, err := get(c.id, map[string]any{"slide": c.slide})
 		ce := googletest.CliErr(t, err)

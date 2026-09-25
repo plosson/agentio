@@ -297,6 +297,29 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 			t.Fatalf("%s: %#v", path, err)
 		}
 	}
+	// Bun checks the input before enforceWriteAccess: on a read-only profile
+	// missing input is the input error. Commander's required --title is
+	// present when given as "", so that one is refused.
+	for _, c := range []struct {
+		path string
+		opts map[string]any
+		args map[string]any
+		code clierr.Code
+		msg  string
+	}{
+		{"create", map[string]any{"space": "ENG", "content": "x"}, nil, clierr.InvalidParams, "required option '--title <title>' not specified"},
+		{"create", map[string]any{"title": "T", "content": "x"}, nil, clierr.InvalidParams, "--space or --space-id is required"},
+		{"create", map[string]any{"title": "T", "space": "ENG", "content": ""}, nil, clierr.InvalidParams, "Page body is required. Use --content or pipe via stdin."},
+		{"create", map[string]any{"title": "", "space": "ENG", "content": "x"}, nil, clierr.PermissionDenied, `Cannot create page: profile "ro" is read-only`},
+		{"update", map[string]any{}, map[string]any{"page-id": "1"}, clierr.InvalidParams, "Page body is required. Use --content or pipe via stdin."},
+		{"comment", map[string]any{}, map[string]any{"page-id": "1"}, clierr.InvalidParams, "Comment body is required. Provide as argument or pipe via stdin."},
+	} {
+		_, err := product.Exec(t, reg, c.path, plugins.CommandInput{Args: c.args, Options: c.opts, Stdin: " \n"})
+		ce, ok := err.(*clierr.Error)
+		if !ok || ce.Code != c.code || ce.Message != c.msg {
+			t.Fatalf("%s %v: %#v", c.path, c.opts, err)
+		}
+	}
 	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}
@@ -465,6 +488,13 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	if h.Method != "PUT" || h.Body["title"] != "Old" || h.Body["status"] != "current" || h.Body["id"] != "5" ||
 		!jsonEqual(h.Body["version"], map[string]any{"number": 5}) {
 		t.Fatalf("update %#v", h.Body)
+	}
+	// Bun `params.title ?? current.title`: a given --title "" is sent as is.
+	if _, err := product.Exec(t, reg, "update", plugins.CommandInput{Args: map[string]any{"page-id": "5"}, Options: opts("content", "new", "title", "")}); err != nil {
+		t.Fatal(err)
+	}
+	if h = last(); h.Body["title"] != "" {
+		t.Fatalf("update --title \"\" %#v", h.Body)
 	}
 
 	// comment: the argument wins over stdin.

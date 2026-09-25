@@ -202,14 +202,48 @@ func textOrJSON(in plugins.CommandInput, run *plugins.RunContext) (bool, error) 
 	}
 }
 
+// readSend is the send action's input handling, in Bun's order: --json reads
+// a file (or stdin when bare) and parses it; otherwise the argument, or stdin,
+// is the text, unless files are attached.
+func readSend(in plugins.CommandInput, fail plugins.FailFunc) (sendOptions, error) {
+	o := sendOptions{spaceID: in.Option("space"), attachments: in.List("attachment")}
+	text := in.Arg("message")
+	if source, ok := in.Options["json"]; ok && source != nil {
+		if text != "" {
+			return o, fail("INVALID_PARAMS", "Cannot use both text message and --json option",
+				"Use either: agentio gchat send \"text\" OR agentio gchat send --json file.json")
+		}
+		payload, err := plugins.JSONPayload(in, source, fail, "Pipe JSON content: cat message.json | agentio gchat send --json")
+		if err != nil {
+			return o, err
+		}
+		o.payload = payload
+	} else {
+		if text == "" {
+			text = plugins.Stdin(in)
+		}
+		if text == "" && len(o.attachments) == 0 {
+			return o, fail("INVALID_PARAMS", "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", "")
+		}
+	}
+	// Unescape shell-escaped characters (zsh history expansion: \! → !).
+	o.text = strings.ReplaceAll(text, `\!`, "!")
+	return o, nil
+}
+
 func sendCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "send",
 		Description: "Send a message to Google Chat",
 		Access:      "write",
-		Operation:   "send message",
-		Input:       "text",
-		Arguments:   []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
+		// Bun checks the message and --json input before enforceWriteAccess.
+		AccessFor: plugins.WriteUnlessInvalid(func(in plugins.CommandInput, fail plugins.FailFunc) error {
+			_, err := readSend(in, fail)
+			return err
+		}),
+		Operation: "send message",
+		Input:     "text",
+		Arguments: []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
 		Options: []plugins.OptionSpec{
 			{Flags: "--space <id>", Description: "Space ID (required for OAuth profiles)"},
 			{Flags: "--thread <id>", Description: "Thread ID (optional)"},
@@ -230,28 +264,10 @@ func sendCmd() plugins.CommandSpec {
 			"  agentio gchat send --json --space spaces/AAAA1234",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			o := sendOptions{spaceID: in.Option("space"), attachments: in.List("attachment")}
-			text := in.Arg("message")
-			if source, ok := in.Options["json"]; ok && source != nil {
-				if text != "" {
-					return nil, run.Fail("INVALID_PARAMS", "Cannot use both text message and --json option",
-						"Use either: agentio gchat send \"text\" OR agentio gchat send --json file.json")
-				}
-				payload, err := plugins.JSONPayload(in, source, run.Fail, "Pipe JSON content: cat message.json | agentio gchat send --json")
-				if err != nil {
-					return nil, err
-				}
-				o.payload = payload
-			} else {
-				if text == "" {
-					text = plugins.Stdin(in)
-				}
-				if text == "" && len(o.attachments) == 0 {
-					return nil, run.Fail("INVALID_PARAMS", "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file.", "")
-				}
+			o, err := readSend(in, run.Fail)
+			if err != nil {
+				return nil, err
 			}
-			// Unescape shell-escaped characters (zsh history expansion: \! → !).
-			o.text = strings.ReplaceAll(text, `\!`, "!")
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

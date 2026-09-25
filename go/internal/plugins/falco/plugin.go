@@ -44,11 +44,14 @@ func clientOf(ctx context.Context, run *plugins.RunContext) *client {
 
 var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-func requireIsoDate(run *plugins.RunContext, value, flagName string) error {
-	if value == "" || isoDate.MatchString(value) {
-		return nil
+// requireIsoDate is Bun requireIsoDate: an absent option is no filter, any
+// given value (even "") must be YYYY-MM-DD.
+func requireIsoDate(run *plugins.RunContext, in plugins.CommandInput, name string) (string, error) {
+	value, given := in.LookupOption(name)
+	if !given || isoDate.MatchString(value) {
+		return value, nil
 	}
-	return run.Fail("INVALID_PARAMS", flagName+" must be YYYY-MM-DD, got: "+value, "")
+	return "", run.Fail("INVALID_PARAMS", "--"+name+" must be YYYY-MM-DD, got: "+value, "")
 }
 
 func containsInsensitive(haystack *string, needle string) bool {
@@ -115,8 +118,8 @@ func peppolListCmd() plugins.CommandSpec {
 			"agentio falco peppol list --format json",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			since := in.Option("since")
-			if err := requireIsoDate(run, since, "--since"); err != nil {
+			since, err := requireIsoDate(run, in, "since")
+			if err != nil {
 				return nil, err
 			}
 			docs, err := clientOf(ctx, run).listPeppolDocuments(nil)
@@ -252,6 +255,7 @@ func markPaidCmd() plugins.CommandSpec {
 		Path:        "peppol mark-paid",
 		Description: "Set the payment status of an invoice",
 		Access:      "write",
+		AccessFor:   plugins.WriteUnlessInvalid(checkStatus),
 		Operation:   "mark an invoice as paid",
 		Arguments:   []plugins.ArgumentSpec{{Name: "ref", Description: "Peppol document ID, invoice ID, invoice reference, or fiduciary document ID", Required: true}},
 		Options: []plugins.OptionSpec{

@@ -56,6 +56,33 @@ func piped(content string, stdin any) string {
 	return strings.TrimSpace(text)
 }
 
+// checkCreate, checkPageBody and checkComment are the input checks Bun makes
+// before enforceWriteAccess (plugins.WriteUnlessInvalid): a read-only profile
+// gets the input error first.
+func checkCreate(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
+		return err
+	}
+	if in.Option("space") == "" && in.Option("space-id") == "" {
+		return fail("INVALID_PARAMS", "--space or --space-id is required", "")
+	}
+	return checkPageBody(in, fail)
+}
+
+func checkPageBody(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if piped(in.Option("content"), in.Stdin) == "" {
+		return fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
+	}
+	return nil
+}
+
+func checkComment(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if piped(in.Arg("body"), in.Stdin) == "" {
+		return fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
+	}
+	return nil
+}
+
 func spacesCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "spaces",
@@ -168,6 +195,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a Confluence page",
 		Access:      "write",
+		AccessFor:   plugins.WriteUnlessInvalid(checkCreate),
 		Operation:   "create page",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
@@ -186,17 +214,10 @@ func createCmd() plugins.CommandSpec {
 			`agentio confluence create --title "Sub Page" --space ENG --parent 123456 --content "<p>Content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if in.Option("title") == "" {
-				return nil, run.Fail("INVALID_PARAMS", "required option '--title <title>' not specified", "")
+			if err := checkCreate(in, run.Fail); err != nil {
+				return nil, err
 			}
-			if in.Option("space") == "" && in.Option("space-id") == "" {
-				return nil, run.Fail("INVALID_PARAMS", "--space or --space-id is required", "")
-			}
-			body := piped(in.Option("content"), in.Stdin)
-			if body == "" {
-				return nil, run.Fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
-			}
-			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.Option("parent"), body)
+			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.Option("parent"), piped(in.Option("content"), in.Stdin))
 		},
 		Format: formatCreated,
 	}
@@ -207,6 +228,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update a Confluence page (replaces body)",
 		Access:      "write",
+		AccessFor:   plugins.WriteUnlessInvalid(checkPageBody),
 		Operation:   "update page",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "page-id", Description: "Page ID", Required: true}},
@@ -223,11 +245,14 @@ func updateCmd() plugins.CommandSpec {
 			`agentio confluence update 123456 --title "New Title" --content "<p>New content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			body := piped(in.Option("content"), in.Stdin)
-			if body == "" {
-				return nil, run.Fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
+			if err := checkPageBody(in, run.Fail); err != nil {
+				return nil, err
 			}
-			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.Option("title"), body)
+			var title *string
+			if t, given := in.LookupOption("title"); given {
+				title = &t
+			}
+			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), title, piped(in.Option("content"), in.Stdin))
 		},
 		Format: formatUpdated,
 	}
@@ -255,6 +280,7 @@ func commentCmd() plugins.CommandSpec {
 		Path:        "comment",
 		Description: "Add a footer comment to a page",
 		Access:      "write",
+		AccessFor:   plugins.WriteUnlessInvalid(checkComment),
 		Operation:   "add comment",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -268,14 +294,10 @@ func commentCmd() plugins.CommandSpec {
 			`echo "LGTM" | agentio confluence comment 123456`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			body := in.Arg("body")
-			if body == "" {
-				body = piped("", in.Stdin)
+			if err := checkComment(in, run.Fail); err != nil {
+				return nil, err
 			}
-			if body == "" {
-				return nil, run.Fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
-			}
-			return apiFrom(ctx, run).addComment(in.Arg("page-id"), body)
+			return apiFrom(ctx, run).addComment(in.Arg("page-id"), piped(in.Arg("body"), in.Stdin))
 		},
 		Format: formatComment,
 	}

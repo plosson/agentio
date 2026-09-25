@@ -710,6 +710,9 @@ func TestBatchRequestsReadsExactlyOneSourceAsAnArray(t *testing.T) {
 		{map[string]any{}, "INVALID_PARAMS|Provide --requests-json or --file|"},
 		{map[string]any{"requests-json": "[]", "file": file}, "INVALID_PARAMS|--requests-json and --file are mutually exclusive|"},
 		{map[string]any{"requests-json": "[1,"}, "INVALID_PARAMS|Invalid JSON: JSON Parse error: Unexpected EOF|"},
+		// Bun `options.requestsJson ?? readFile(options.file)`: a given "" is
+		// the source, even beside --file.
+		{map[string]any{"requests-json": "", "file": file}, "INVALID_PARAMS|Invalid JSON: JSON Parse error: Unexpected EOF|"},
 		{map[string]any{"requests-json": `{"a":1}`}, "INVALID_PARAMS|Input must be a JSON array of Request objects|"},
 	} {
 		in := plugins.CommandInput{Options: c.opts}

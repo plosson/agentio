@@ -163,34 +163,41 @@ func loadComposeSpec(path string, fail plugins.FailFunc) (*composeSpec, error) {
 }
 
 // resolvedText is Bun ResolvedComposeText. An empty subject or body is
-// undefined: the host gives an absent flag as "".
+// undefined: every later Bun check on them is a falsy one.
 type resolvedText struct {
 	subject, body string
 	// bodyFromFileOrSpec skips the stdin fallback.
 	bodyFromFileOrSpec bool
 }
 
-// resolveComposeText is Bun resolveComposeText.
-func resolveComposeText(subject, subjectFile, body, bodyFile string, spec *composeSpec, fail plugins.FailFunc) (resolvedText, error) {
+// resolveComposeText is Bun resolveComposeText. A nil subject or body is an
+// absent flag; a given "" is kept, as Bun checks `!== undefined`.
+func resolveComposeText(subject *string, subjectFile string, body *string, bodyFile string, spec *composeSpec, fail plugins.FailFunc) (resolvedText, error) {
 	if spec == nil {
 		spec = &composeSpec{}
 	}
-	if subject != "" && subjectFile != "" {
+	if subject != nil && subjectFile != "" {
 		return resolvedText{}, fail("INVALID_PARAMS", "Cannot use both --subject and --subject-file",
 			"Prefer --subject-file for agent-written subjects to avoid shell quoting bugs.")
 	}
-	if body != "" && bodyFile != "" {
+	if body != nil && bodyFile != "" {
 		return resolvedText{}, fail("INVALID_PARAMS", "Cannot use both --body and --body-file",
 			"Prefer --body-file (or --body - for stdin) instead of shell-quoting the body.")
 	}
-	out := resolvedText{subject: subject, body: body}
+	var out resolvedText
+	if subject != nil {
+		out.subject = *subject
+	}
+	if body != nil {
+		out.body = *body
+	}
 	if subjectFile != "" {
 		text, err := readUTF8TextFile(subjectFile, "subject file", fail)
 		if err != nil {
 			return resolvedText{}, err
 		}
 		out.subject = jsvalue.Trim(text)
-	} else if subject == "" && spec.subject != nil {
+	} else if subject == nil && spec.subject != nil {
 		out.subject = *spec.subject
 	}
 	if bodyFile != "" {
@@ -206,7 +213,7 @@ func resolveComposeText(subject, subjectFile, body, bodyFile string, spec *compo
 		}
 		out.body = text
 		out.bodyFromFileOrSpec = true
-	} else if body == "" && spec.body != nil {
+	} else if body == nil && spec.body != nil {
 		out.body = *spec.body
 		out.bodyFromFileOrSpec = true
 	}
@@ -241,7 +248,13 @@ func parseSendOptions(in plugins.CommandInput, fail plugins.FailFunc) (*sendOpti
 			return nil, err
 		}
 	}
-	resolved, err := resolveComposeText(in.Option("subject"), in.Option("subject-file"), in.Option("body"), in.Option("body-file"), spec, fail)
+	given := func(name string) *string {
+		if value, ok := in.LookupOption(name); ok {
+			return &value
+		}
+		return nil
+	}
+	resolved, err := resolveComposeText(given("subject"), in.Option("subject-file"), given("body"), in.Option("body-file"), spec, fail)
 	if err != nil {
 		return nil, err
 	}

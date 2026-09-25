@@ -746,6 +746,13 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	if ce := cliErr(t, err); ce.Message != "required option '--query <text>' not specified" {
 		t.Fatalf("%#v", ce)
 	}
+	// Commander's requiredOption takes a given "": Bun sends the empty query.
+	if _, err = exec(t, reg, "search", plugins.CommandInput{Options: opts("query", "", "limit", "20")}); err != nil {
+		t.Fatal(err)
+	}
+	if string(last().Raw) != `{"query":"","options":{"path":"","max_results":20,"filename_only":false}}` {
+		t.Fatalf("search --query \"\" %s", last().Raw)
+	}
 
 	// mkdir forces the folder tag; move/copy send both paths normalized.
 	res, err = exec(t, reg, "mkdir", plugins.CommandInput{Args: map[string]any{"path": "New/"}})

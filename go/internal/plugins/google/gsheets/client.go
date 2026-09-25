@@ -100,14 +100,15 @@ type batched struct {
 }
 
 // formatOptions is GSheetsFormatOptions after the command parsed its flags:
-// an empty string or nil pointer is an absent option.
+// a nil pointer is an absent option, as is an empty align, valign, wrap or
+// border (Bun parses those with `if (!value)`).
 type formatOptions struct {
 	bold, italic, underline bool
 	fontSize                *float64
-	fontFamily              string
-	textColor, background   string
+	fontFamily              *string
+	textColor, background   *string
 	align, valign, wrap     string
-	numberFormat            string
+	numberFormat            *string
 	border                  string
 	merge, clearFormat      bool
 	raw                     *jsvalue.Object
@@ -399,8 +400,8 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 
 	cellFormat := jsvalue.NewObject()
 	var mask []string
-	if o.background != "" {
-		c, err := parseHexColor(o.background, a.Fail)
+	if o.background != nil {
+		c, err := parseHexColor(*o.background, a.Fail)
 		if err != nil {
 			return nil, err
 		}
@@ -415,8 +416,8 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 			mask = append(mask, f.key)
 		}
 	}
-	if o.numberFormat != "" {
-		cellFormat.Set("numberFormat", obj("type", "NUMBER", "pattern", o.numberFormat))
+	if o.numberFormat != nil {
+		cellFormat.Set("numberFormat", obj("type", "NUMBER", "pattern", *o.numberFormat))
 		mask = append(mask, "numberFormat")
 	}
 
@@ -435,12 +436,12 @@ func (a *api) format(idOrURL, a1 string, o formatOptions) (*formatted, error) {
 		textFormat.Set("fontSize", *o.fontSize)
 		textMask = append(textMask, "fontSize")
 	}
-	if o.fontFamily != "" {
-		textFormat.Set("fontFamily", o.fontFamily)
+	if o.fontFamily != nil {
+		textFormat.Set("fontFamily", *o.fontFamily)
 		textMask = append(textMask, "fontFamily")
 	}
-	if o.textColor != "" {
-		c, err := parseHexColor(o.textColor, a.Fail)
+	if o.textColor != nil {
+		c, err := parseHexColor(*o.textColor, a.Fail)
 		if err != nil {
 			return nil, err
 		}

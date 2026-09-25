@@ -70,29 +70,30 @@ func collectIDs(positional []string, in plugins.CommandInput) []string {
 	return strings.FieldsFunc(plugins.Stdin(in), jsvalue.IsSpace)
 }
 
-// chunkOptions is Bun parseChunkOpts.
+// chunkOptions is Bun parseChunkOpts: `options.x ?? default`, so a given ""
+// parses to NaN rather than taking the default.
 func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
-	size := jsvalue.ParseInt(cmp.Or(in.Option("chunk-size"), "1000"))
+	orDefault := func(name, def string) string {
+		if value, given := in.LookupOption(name); given {
+			return value
+		}
+		return def
+	}
+	size := jsvalue.ParseInt(orDefault("chunk-size", "1000"))
 	if math.IsNaN(size) || size == 0 {
 		size = 1000
 	}
-	retries := jsvalue.ParseInt(cmp.Or(in.Option("max-retries"), "5"))
+	retries := jsvalue.ParseInt(orDefault("max-retries", "5"))
 	if math.IsNaN(retries) {
 		retries = 0
 	}
 	return int(math.Min(math.Max(size, 1), 1000)), int(math.Max(retries, 0))
 }
 
-// writeUnless is an AccessFor: read for a dry run or for input Bun rejects
-// before its write check, else write.
-func writeUnless(check func(plugins.CommandInput, plugins.FailFunc) error) func(plugins.CommandInput) string {
-	access := plugins.WriteUnlessInvalid(check)
-	return func(in plugins.CommandInput) string {
-		if in.Flag("dry-run") {
-			return "read"
-		}
-		return access(in)
-	}
+// dryRun is a NoProfileFor: Bun prints the dry-run plan before
+// getGmailClient, so it needs no profile.
+func dryRun(in plugins.CommandInput) bool {
+	return in.Flag("dry-run")
 }
 
 var composeOptions = []plugins.OptionSpec{
@@ -389,14 +390,15 @@ var chunkOptionSpecs = []plugins.OptionSpec{
 func archiveCmd() plugins.CommandSpec {
 	check := checkIDs("message-id", "No message IDs provided")
 	return plugins.CommandSpec{
-		Path:        "archive",
-		Description: "Archive one or more messages (bulk-safe via batchModify)",
-		Access:      "write",
-		AccessFor:   writeUnless(check),
-		Operation:   "archive email",
-		Input:       "text",
-		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s) (or pipe one-per-line via stdin)", Variadic: true}},
-		Options:     chunkOptionSpecs,
+		Path:         "archive",
+		Description:  "Archive one or more messages (bulk-safe via batchModify)",
+		Access:       "write",
+		AccessFor:    plugins.WriteUnlessInvalid(check),
+		NoProfileFor: dryRun,
+		Operation:    "archive email",
+		Input:        "text",
+		Arguments:    []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s) (or pipe one-per-line via stdin)", Variadic: true}},
+		Options:      chunkOptionSpecs,
 		Examples: []string{
 			"# archive one message",
 			"agentio gmail archive 18c4f1a2b3d",
@@ -675,11 +677,13 @@ func filterCriteriaFrom(in plugins.CommandInput, fail plugins.FailFunc) (filterC
 		From: in.Option("from"), To: in.Option("to"), Subject: in.Option("subject"), Query: in.Option("query"),
 		NegatedQuery: in.Option("negated-query"), HasAttachment: in.Flag("has-attachment"), ExcludeChats: in.Flag("exclude-chats"),
 	}
-	sizeRaw, comparison := in.Option("size"), in.Option("size-comparison")
-	if (sizeRaw != "") != (comparison != "") {
+	// Bun checks `!== undefined`: a given "" is set.
+	sizeRaw, sizeGiven := in.LookupOption("size")
+	comparison, comparisonGiven := in.LookupOption("size-comparison")
+	if sizeGiven != comparisonGiven {
 		return c, fail("INVALID_PARAMS", "--size and --size-comparison must be set together", "")
 	}
-	if sizeRaw != "" {
+	if sizeGiven {
 		if comparison != "larger" && comparison != "smaller" {
 			return c, fail("INVALID_PARAMS", `--size-comparison must be "larger" or "smaller"`, "")
 		}
@@ -821,13 +825,14 @@ func checkLabel(in plugins.CommandInput, fail plugins.FailFunc) error {
 
 func labelCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
-		Path:        "label",
-		Description: "Apply and/or remove labels on messages or threads (bulk-safe via batchModify)",
-		Access:      "write",
-		AccessFor:   writeUnless(checkLabel),
-		Operation:   "modify labels",
-		Input:       "text",
-		Arguments:   []plugins.ArgumentSpec{{Name: "id", Description: "Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin", Variadic: true}},
+		Path:         "label",
+		Description:  "Apply and/or remove labels on messages or threads (bulk-safe via batchModify)",
+		Access:       "write",
+		AccessFor:    plugins.WriteUnlessInvalid(checkLabel),
+		NoProfileFor: dryRun,
+		Operation:    "modify labels",
+		Input:        "text",
+		Arguments:    []plugins.ArgumentSpec{{Name: "id", Description: "Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin", Variadic: true}},
 		Options: append([]plugins.OptionSpec{
 			{Flags: "--apply <name>", Description: "Label to apply (name or ID, repeatable)", Repeatable: true},
 			{Flags: "--remove <name>", Description: "Label to remove (name or ID, repeatable)", Repeatable: true},

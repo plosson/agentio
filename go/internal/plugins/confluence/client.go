@@ -324,18 +324,18 @@ func (a api) createPage(spaceKey, spaceID, title, parentID, body string) (pageCr
 	return created, nil
 }
 
-func (a api) updatePage(pageID, title, body string) (pageUpdated, error) {
+func (a api) updatePage(pageID string, title *string, body string) (pageUpdated, error) {
 	current, err := a.getPage(pageID, "storage")
 	if err != nil {
 		return pageUpdated{}, err
 	}
-	if title == "" {
-		title = current.Title
+	if title == nil { // Bun `params.title ?? current.title`: "" is kept.
+		title = &current.Title
 	}
 	payload := map[string]any{
 		"id":     pageID,
 		"status": current.Status,
-		"title":  title,
+		"title":  *title,
 		"body": map[string]any{
 			"representation": "storage",
 			"value":          textToStorage(body),

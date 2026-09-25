@@ -36,7 +36,7 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 	creds := map[string]any{}
 	profileName := ""
 	readOnly := false
-	if p.Profile != nil {
+	if p.Profile != nil && (spec.NoProfileFor == nil || !spec.NoProfileFor(in)) {
 		flag, _ := in.Options["profile"].(string)
 		name, err := profile.Require(p.ID, flag)
 		if err != nil {

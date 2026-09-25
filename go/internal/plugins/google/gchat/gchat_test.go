@@ -441,6 +441,28 @@ func TestReadOnlyProfileRefusesSendButRunsReads(t *testing.T) {
 		ce.Suggestion != "To modify this profile's access: agentio gchat profile update --profile ro --no-read-only" {
 		t.Fatalf("%#v", ce)
 	}
+	// Bun checks the message and --json input before enforceWriteAccess, so a
+	// read-only profile gets the input error.
+	missing := filepath.Join(t.TempDir(), "nope.json")
+	for _, c := range []struct {
+		args  map[string]any
+		set   map[string]any
+		stdin any
+		msg   string
+	}{
+		{nil, nil, nil, "Message or --attachment is required. Provide as argument, pipe via stdin, or attach a file."},
+		{nil, map[string]any{"json": missing}, nil, "Failed to read JSON file: " + missing},
+		{map[string]any{"message": "hi"}, map[string]any{"json": true}, nil, "Cannot use both text message and --json option"},
+		{nil, map[string]any{"json": true}, "{bad", "Invalid JSON: JSON Parse error: Expected '}'"},
+		{nil, map[string]any{"json": true}, nil, "No JSON provided via stdin"},
+	} {
+		in := product.Input(t, "send", c.args, c.set)
+		in.Stdin = c.stdin
+		_, err := product.Exec(fake.Ctx(), t, reg, "send", in)
+		if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != c.msg {
+			t.Errorf("%v %v: %#v", c.args, c.set, ce)
+		}
+	}
 	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}

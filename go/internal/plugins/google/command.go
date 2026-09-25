@@ -18,10 +18,11 @@ func EmailListInfo(creds map[string]any) string {
 
 // BatchRequests is the input the Bun batchUpdate escape hatches (gdocs,
 // gsheets, gslides) read before they resolve the profile: exactly one of
-// --requests-json and --file, holding a JSON array, kept in order.
+// --requests-json and --file, holding a JSON array, kept in order. A given
+// empty --requests-json is still the source (Bun `requestsJson ?? readFile`).
 func BatchRequests(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
-	requestsJSON, _ := in.Options["requests-json"].(string)
-	file, _ := in.Options["file"].(string)
+	requestsJSON, inline := in.LookupOption("requests-json")
+	file := in.Option("file")
 	if requestsJSON == "" && file == "" {
 		return nil, fail("INVALID_PARAMS", "Provide --requests-json or --file", "")
 	}
@@ -29,7 +30,7 @@ func BatchRequests(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error
 		return nil, fail("INVALID_PARAMS", "--requests-json and --file are mutually exclusive", "")
 	}
 	source := []byte(requestsJSON)
-	if file != "" {
+	if !inline {
 		raw, err := os.ReadFile(file)
 		if err != nil {
 			return nil, err

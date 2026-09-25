@@ -300,6 +300,10 @@ type CommandSpec struct {
 	// OperationFor, when set, names the action from the parsed input instead of
 	// Operation (Bun gmail draft: "update draft" with an id, else "create draft").
 	OperationFor func(in CommandInput) string
+	// NoProfileFor, when set and true for the input, runs Run with no profile
+	// and no credentials, for a Bun command that answers that input before it
+	// resolves a profile (gmail archive --dry-run prints its plan first).
+	NoProfileFor func(in CommandInput) bool
 	Examples     []string
 	// Run returns the value the host prints. A non-nil value returned together
 	// with an error is printed first, then the error is rendered (Bun: output,

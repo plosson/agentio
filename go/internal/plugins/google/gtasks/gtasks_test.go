@@ -325,6 +325,12 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 			t.Fatalf("%s: %#v", path, ce)
 		}
 	}
+	// Commander's requiredOption only rejects an absent --title: a given ""
+	// reaches enforceWriteAccess.
+	_, err := product.Exec(fake.Ctx(), t, reg, "add", product.Input(t, "add", args, map[string]any{"title": ""}))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.PermissionDenied {
+		t.Fatalf("add --title \"\": %#v", ce)
+	}
 	if n := len(fake.Recorded()); n != 0 {
 		t.Fatalf("a refused write reached the API %d times", n)
 	}

@@ -109,9 +109,9 @@ func getCmd() plugins.CommandSpec {
 			"Output includes text elements and speaker notes for each slide.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			// Commander's parseInt argParser: absent is undefined.
+			// Commander's parseInt argParser: absent is undefined, "" is NaN.
 			var slide *float64
-			if s := in.Option("slide"); s != "" {
+			if s, given := in.LookupOption("slide"); given {
 				n := jsvalue.ParseInt(s)
 				slide = &n
 			}

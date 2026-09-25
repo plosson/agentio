@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -40,12 +41,13 @@ func failIfAnyFailed(run *plugins.RunContext, failedCount, total int) error {
 		"Everything else was written. Re-run to retry only what is missing.")
 }
 
+// requireOutput is Commander's requiredOption: a given "" is kept, and then
+// fails in mkdir as in Bun.
 func requireOutput(run *plugins.RunContext, in plugins.CommandInput) (string, error) {
-	output := in.Option("output")
-	if output == "" {
-		return "", run.Fail("INVALID_PARAMS", "required option '--output <dir>' not specified", "")
+	if err := plugins.RequireOptions(in, run.Fail, "--output <dir>"); err != nil {
+		return "", err
 	}
-	return output, nil
+	return in.Option("output"), nil
 }
 
 // renameIfPresent moves <from><ext> to <to><ext> when the source exists.
@@ -66,12 +68,12 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 	if err != nil {
 		return nil, err
 	}
-	since := in.Option("since")
-	if err := requireIsoDate(run, since, "--since"); err != nil {
+	since, err := requireIsoDate(run, in, "since")
+	if err != nil {
 		return nil, err
 	}
 	c := clientOf(ctx, run)
-	if err := os.MkdirAll(output, 0o777); err != nil {
+	if err := nodefs.MkdirAll(output); err != nil {
 		return nil, err
 	}
 	all, err := c.listAllPeppolDocuments(func(page, added, total int) {
@@ -176,8 +178,8 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	if err != nil {
 		return nil, err
 	}
-	since := in.Option("since")
-	if err := requireIsoDate(run, since, "--since"); err != nil {
+	since, err := requireIsoDate(run, in, "since")
+	if err != nil {
 		return nil, err
 	}
 	types := map[string]bool{}
@@ -191,7 +193,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 	}
 
 	c := clientOf(ctx, run)
-	if err := os.MkdirAll(output, 0o777); err != nil {
+	if err := nodefs.MkdirAll(output); err != nil {
 		return nil, err
 	}
 	all, err := c.listBillingDocuments(billingTypes{
@@ -424,13 +426,21 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*jsvalue.Obje
 	}
 }
 
-func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	// Validate what was typed before --unpaid overrides it, so a bad --status
-	// is never silently discarded by the shortcut.
-	status := in.Option("status")
-	if status != "Paid" && status != "NotPaid" {
-		return nil, run.Fail("INVALID_PARAMS", "--status must be Paid or NotPaid, got: "+status, "")
+// checkStatus validates what was typed before --unpaid overrides it, so a bad
+// --status is never silently discarded by the shortcut. Bun checks it before
+// enforceWriteAccess (plugins.WriteUnlessInvalid).
+func checkStatus(in plugins.CommandInput, fail plugins.FailFunc) error {
+	if status := in.Option("status"); status != "Paid" && status != "NotPaid" {
+		return fail("INVALID_PARAMS", "--status must be Paid or NotPaid, got: "+status, "")
 	}
+	return nil
+}
+
+func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+	if err := checkStatus(in, run.Fail); err != nil {
+		return nil, err
+	}
+	status := in.Option("status")
 	if in.Flag("unpaid") {
 		status = "NotPaid"
 	}

@@ -627,6 +627,17 @@ func TestFormatBuildsTheBunBatchUpdate(t *testing.T) {
 		t.Fatal(got)
 	}
 
+	// Bun checks `!== undefined`: a given "" is sent (font size NaN is null).
+	if _, err = run("A1", map[string]any{"number-format": "", "font-family": "", "font-size": ""}); err != nil {
+		t.Fatal(err)
+	}
+	all = fake.Recorded()
+	want = `{"requests":[{"repeatCell":{"range":{"sheetId":0,"startRowIndex":0,"endRowIndex":1,"startColumnIndex":0,"endColumnIndex":1},"cell":{"userEnteredFormat":{"numberFormat":{"type":"NUMBER","pattern":""},"textFormat":{"fontSize":null,"fontFamily":""}}},` +
+		`"fields":"userEnteredFormat.numberFormat,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily"}}]}`
+	if all[len(all)-1].Raw != want {
+		t.Fatalf("empty values\n got %s\nwant %s", all[len(all)-1].Raw, want)
+	}
+
 	before := len(fake.Recorded())
 	for _, c := range []struct {
 		r                   string
@@ -635,6 +646,8 @@ func TestFormatBuildsTheBunBatchUpdate(t *testing.T) {
 		message, suggestion string
 		calls               int
 	}{
+		{"A1", map[string]any{"background": ""}, clierr.InvalidParams, "Invalid hex color: ", "Use format #rrggbb (e.g., #ff0000)", 1},
+		{"A1", map[string]any{"text-color": "", "bold": true}, clierr.InvalidParams, "Invalid hex color: ", "Use format #rrggbb (e.g., #ff0000)", 1},
 		{"A1", map[string]any{"align": "middle"}, clierr.InvalidParams, "Invalid --align value: middle", "Use left, center, or right", 0},
 		{"A1", map[string]any{"valign": "left"}, clierr.InvalidParams, "Invalid --valign value: left", "Use top, middle, or bottom", 0},
 		{"A1", map[string]any{"wrap": "none"}, clierr.InvalidParams, "Invalid --wrap value: none", "Use overflow, clip, or wrap", 0},
@@ -705,6 +718,13 @@ func TestResizeBuildsTheBunDimensionRequest(t *testing.T) {
 		t.Fatalf("%q %s", got, googletest.JSONText(v))
 	}
 
+	if _, err = run("Sheet1!A:C", map[string]any{"size": ""}); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); h.Raw != `{"requests":[{"updateDimensionProperties":{"range":{"sheetId":0,"dimension":"COLUMNS","startIndex":0,"endIndex":3},"properties":{"pixelSize":null},"fields":"pixelSize"}}]}` {
+		t.Fatal(h.Raw)
+	}
+
 	for _, c := range []struct {
 		r       string
 		set     map[string]any
@@ -714,6 +734,8 @@ func TestResizeBuildsTheBunDimensionRequest(t *testing.T) {
 	}{
 		{"A:B", nil, clierr.InvalidParams, "Specify --size <pixels> or --auto", 0},
 		{"A:B", map[string]any{"size": "1", "auto": true}, clierr.InvalidParams, "--size and --auto are mutually exclusive", 0},
+		// parseInt("") is NaN, which Bun counts as a given --size.
+		{"A:B", map[string]any{"size": "", "auto": true}, clierr.InvalidParams, "--size and --auto are mutually exclusive", 0},
 		{"My Sheet", map[string]any{"auto": true}, clierr.InvalidParams, "Resize range must reference columns or rows (e.g. Sheet1!A:C or Sheet1!1:10)", 0},
 		{"Sheet1!A1:B2", map[string]any{"auto": true}, clierr.InvalidParams, "Resize range must be columns-only (A:C) or rows-only (1:10), got A1:B2", 1},
 		{"Nope!A:B", map[string]any{"auto": true}, clierr.NotFound, "Sheet not found: Nope", 1},

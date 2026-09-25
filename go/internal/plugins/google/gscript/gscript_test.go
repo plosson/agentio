@@ -809,6 +809,57 @@ func TestPutInfersTheTypeAndReadsItsSource(t *testing.T) {
 	}
 }
 
+// Bun put checks `options.source !== undefined` and `options.from !==
+// undefined`: a given "" is content (or a path), not a fall back to stdin.
+func TestPutGivenEmptySourceOrFromIsNotAbsent(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "ro", fresh(), true)
+	fake := scriptFake(t, nil)
+	from := filepath.Join(t.TempDir(), "src.gs")
+	_ = os.WriteFile(from, []byte("from file"), 0o666)
+	put := func(profileName string, set map[string]any, stdin any) error {
+		set["profile"] = profileName
+		in := product.Input(t, "put", map[string]any{"id": "s1", "file": "Code"}, set)
+		in.Stdin = stdin
+		_, err := product.Exec(fake.Ctx(), t, reg, "put", in)
+		return err
+	}
+	for _, c := range []struct {
+		set   map[string]any
+		stdin any
+		code  clierr.Code
+		msg   string
+	}{
+		{map[string]any{"source": ""}, nil, clierr.PermissionDenied, `Cannot update script content: profile "ro" is read-only`},
+		{map[string]any{"source": ""}, "piped", clierr.PermissionDenied, `Cannot update script content: profile "ro" is read-only`},
+		{map[string]any{"source": "", "from": from}, nil, clierr.InvalidParams, "--source and --from are mutually exclusive"},
+		{map[string]any{"source": "x", "from": ""}, nil, clierr.InvalidParams, "--source and --from are mutually exclusive"},
+		{map[string]any{"from": ""}, "piped", "", "ENOENT: no such file or directory, open"},
+	} {
+		err := put("ro", c.set, c.stdin)
+		if ce, ok := err.(*clierr.Error); ok {
+			if ce.Code != c.code || ce.Message != c.msg {
+				t.Errorf("%v: %#v", c.set, ce)
+			}
+		} else if err == nil || c.code != "" || err.Error() != c.msg {
+			t.Errorf("%v: %v", c.set, err)
+		}
+	}
+	if n := len(fake.Recorded()); n != 0 {
+		t.Fatalf("a rejected put reached the API %d times", n)
+	}
+	// On a writable profile an empty --source empties the file, ignoring stdin.
+	product.SaveProfile(t, "rw", fresh(), false)
+	if err := put("rw", map[string]any{"source": ""}, "piped"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range fake.Last().JSON["files"].([]any) {
+		if m := f.(map[string]any); m["name"] == "Code" && m["source"] != "" {
+			t.Fatalf("sent %q", m["source"])
+		}
+	}
+}
+
 func TestStripExtAndLocalNamesMatchNode(t *testing.T) {
 	// Bun stripExt (Node extname + basename).
 	for in, want := range map[string]string{

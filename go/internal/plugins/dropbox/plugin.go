@@ -164,8 +164,8 @@ func searchCmd() plugins.CommandSpec {
 			"# Newly uploaded files can take a few minutes to become searchable.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if in.Option("query") == "" {
-				return nil, run.Fail("INVALID_PARAMS", "required option '--query <text>' not specified", "")
+			if err := plugins.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
+				return nil, err
 			}
 			limit, err := parseLimit(run, in.Option("limit"))
 			if err != nil {

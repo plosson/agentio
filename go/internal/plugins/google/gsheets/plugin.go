@@ -33,14 +33,23 @@ func New() *plugins.Plugin {
 }
 
 // intOption is a Commander option parsed with parseInt: nil when absent, NaN
-// when the value has no leading digits.
+// when the value (even "") has no leading digits.
 func intOption(in plugins.CommandInput, name string) *float64 {
-	s := in.Option(name)
-	if s == "" {
+	s, given := in.LookupOption(name)
+	if !given {
 		return nil
 	}
 	n := jsvalue.ParseInt(s)
 	return &n
+}
+
+// stringOption is a <value> option as Bun passes it on: nil when absent, a
+// given "" kept (the client checks `!== undefined`).
+func stringOption(in plugins.CommandInput, name string) *string {
+	if s, given := in.LookupOption(name); given {
+		return &s
+	}
+	return nil
 }
 
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
@@ -321,10 +330,10 @@ func formatCmd() plugins.CommandSpec {
 				italic:       in.Flag("italic"),
 				underline:    in.Flag("underline"),
 				fontSize:     intOption(in, "font-size"),
-				fontFamily:   in.Option("font-family"),
-				textColor:    in.Option("text-color"),
-				background:   in.Option("background"),
-				numberFormat: in.Option("number-format"),
+				fontFamily:   stringOption(in, "font-family"),
+				textColor:    stringOption(in, "text-color"),
+				background:   stringOption(in, "background"),
+				numberFormat: stringOption(in, "number-format"),
 				merge:        in.Flag("merge"),
 				clearFormat:  in.Flag("clear-format"),
 			}
