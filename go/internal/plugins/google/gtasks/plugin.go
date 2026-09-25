@@ -172,7 +172,7 @@ func listCmd() plugins.CommandSpec {
 			return plugins.Result(a.listTasks(listOptions{
 				tasklistID:    in.Arg("tasklist-id"),
 				limit:         jsvalue.ParseInt(in.Option("limit")),
-				showCompleted: in.Flag("show-completed") && !in.Flag("no-show-completed"),
+				showCompleted: in.Flag("show-completed"),
 				showHidden:    in.Flag("show-hidden"),
 				dueMin:        in.Option("due-min"),
 				dueMax:        in.Option("due-max"),

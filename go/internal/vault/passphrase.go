@@ -7,6 +7,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 )
 
 const MinPassphraseLen = 8
@@ -137,16 +138,25 @@ func StorePassphrase(passphrase string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(path, raw, 0o600)
+		return writePrivate(path, raw)
 	}
 	path := PassphrasePath()
 	if err := AssertTestWritable(path, "passphrase file"); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
-		return err
+		return nodefs.NodeFSError("mkdir", ConfigDir(), err)
 	}
-	return os.WriteFile(path, []byte(passphrase), 0o600)
+	return writePrivate(path, []byte(passphrase))
+}
+
+// writePrivate is writeFileSync(path, data, { mode: 0o600 }), failing with
+// Node's message.
+func writePrivate(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return nodefs.NodeFSError("open", path, err)
+	}
+	return nil
 }
 
 func ClearPassphrase() error {

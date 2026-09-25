@@ -1361,3 +1361,11 @@ func TestEmptySpaceReachesTheClient(t *testing.T) {
 		t.Fatalf("%#v", ce)
 	}
 }
+
+// `--format json` is JSON.stringify(value, null, 2): U+2028 and U+2029 as
+// they are.
+func TestFormatJSONKeepsLineSeparators(t *testing.T) {
+	if got, want := asJSON(map[string]any{"text": "a b <&>"}), "{\n  \"text\": \"a b <&>\"\n}"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

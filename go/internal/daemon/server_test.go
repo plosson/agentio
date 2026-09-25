@@ -371,7 +371,7 @@ func TestKeepaliveSkipsEmptyAndRefreshesStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := RunRefreshPass(context.Background(), reg, []string{"acme"})
+	result := RunRefreshPass(context.Background(), reg)
 	if result.Skipped != 1 || result.Refreshed != 1 || result.Failed != 0 {
 		t.Fatalf("%+v", result)
 	}
@@ -472,9 +472,9 @@ func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	StartKeepalive(context.Background(), reg, []string{"acme"}, 1)
+	StartKeepalive(context.Background(), reg, 1)
 	<-entered // the first pass is parked inside a refresh
-	StartKeepalive(context.Background(), reg, []string{"acme"}, 1)
+	StartKeepalive(context.Background(), reg, 1)
 	release <- struct{}{} // let the first pass finish
 	<-entered             // the next pass is parked
 	logs.take()

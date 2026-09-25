@@ -244,7 +244,13 @@ func (p Product) Input(t *testing.T, path string, args map[string]any, set map[s
 	for _, o := range p.Spec(t, path).Options {
 		name := strings.TrimPrefix(strings.Fields(o.Flags)[0], "--")
 		def, isBool := o.DefaultValue.(bool)
+		target := o.Negates()
 		switch {
+		case target != "":
+			// `--no-x` alone makes x default to true; after `--x` it keeps x's default.
+			if _, declared := in.Options[target]; !declared {
+				in.Options[target] = true
+			}
 		case o.Repeatable:
 			in.Options[name] = []string{}
 		case strings.Contains(o.Flags, "[") && !strings.Contains(o.Flags, "<"):

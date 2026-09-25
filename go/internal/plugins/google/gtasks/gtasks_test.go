@@ -468,7 +468,7 @@ func TestListingCommandsSendTheBunQueries(t *testing.T) {
 		t.Fatalf("list %s %v", h.Path, h.Query)
 	}
 	h = run("list", map[string]any{"tasklist-id": "L1"}, map[string]any{
-		"no-show-completed": true, "show-hidden": true, "limit": "500",
+		"show-completed": false, "show-hidden": true, "limit": "500",
 		"due-min": "2024-04-15T00:00:00Z", "due-max": "2024-04-22T00:00:00Z",
 	})
 	if h.Query.Get("showCompleted") != "false" || h.Query.Get("showHidden") != "true" || h.Query.Get("maxResults") != "100" ||

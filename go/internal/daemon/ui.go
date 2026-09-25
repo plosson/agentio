@@ -1,15 +1,15 @@
 package daemon
 
 import (
-	"bytes"
 	"crypto/rand"
 	_ "embed"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // The admin UI is the Bun daemon's page, byte for byte. src/daemon/ui/index.html
@@ -56,11 +56,5 @@ func (s *Server) page(w http.ResponseWriter) {
 	_, _ = io.WriteString(w, html)
 }
 
-// marshalJS encodes v as JSON.stringify does: no HTML escaping, no trailing newline.
-func marshalJS(v any) []byte {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v)
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-}
+// marshalJS is JSON.stringify(v).
+func marshalJS(v any) []byte { return jsvalue.Stringify(v) }

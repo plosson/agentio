@@ -559,3 +559,22 @@ func TestRunContextCarriesTheReadOnlyFlag(t *testing.T) {
 		t.Fatal("a bare run context is read-only")
 	}
 }
+
+// JSON.stringify writes U+2028 and U+2029 as they are; encoding/json escapes
+// them.
+func TestPrintResultJSONKeepsLineSeparators(t *testing.T) {
+	type row struct {
+		Text string `json:"text"`
+	}
+	value := map[string]any{"s": "a b c", "row": row{Text: " "}}
+	want := "{\n  \"row\": {\n    \"text\": \" \"\n  },\n  \"s\": \"a b c\"\n}\n"
+	for _, asJSON := range []bool{true, false} {
+		var out bytes.Buffer
+		if err := PrintResult(&out, &plugins.CommandSpec{}, value, asJSON); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != want {
+			t.Fatalf("json=%v: got %q, want %q", asJSON, out.String(), want)
+		}
+	}
+}

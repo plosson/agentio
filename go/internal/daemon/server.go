@@ -54,9 +54,6 @@ func (s *Server) now() time.Time {
 	return time.Now()
 }
 
-// order is the service order of every profile listing the hub serves, as Bun's.
-func (s *Server) order() []string { return profile.ServiceOrder }
-
 func (s *Server) Handler() http.Handler {
 	start := s.now()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +235,7 @@ func (s *Server) allowed(key *profile.KeyView, service, name string) (bool, erro
 }
 
 func (s *Server) listProfiles(w http.ResponseWriter, key *profile.KeyView) {
-	refs, err := profile.List("", s.order())
+	refs, err := profile.List("")
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -319,7 +316,7 @@ func (s *Server) credentials(w http.ResponseWriter, key *profile.KeyView, ref pr
 	log.Printf("v1 action=credentials key=%s (%s) profile=%s/%s outcome=ok refreshed=%t", key.ID, key.Name, ref.Service, ref.Name, fresh.Refreshed)
 	writeJSON(w, http.StatusOK, object{
 		{"service", ref.Service}, {"name", ref.Name}, {"readOnly", readOnly}, {"refreshed", fresh.Refreshed},
-		{"credentials", auth.RedactForRemote(s.Registry, ref.Service, fresh.Credentials)},
+		{"credentials", auth.ForRemote(s.Registry, ref.Service, fresh.Credentials)},
 	})
 }
 
@@ -600,7 +597,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodGet && path == "/ui/api/profiles":
-		refs, err := profile.List("", s.order())
+		refs, err := profile.List("")
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -612,24 +609,12 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, object{{"profiles", rows}})
 	case r.Method == http.MethodGet && path == "/ui/api/status":
 		test := r.URL.Query().Get("test") != "false"
-		rows, err := host.Statuses(r.Context(), s.Registry, s.order(), test)
+		rows, err := host.Statuses(r.Context(), s.Registry, test)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		// Grouped by service in first-seen order, as Bun builds its object.
-		services := object{}
-		at := map[string]int{}
-		for _, row := range rows {
-			i, seen := at[row.Service]
-			if !seen {
-				i = len(services)
-				at[row.Service] = i
-				services = append(services, field{row.Service, []statusRow{}})
-			}
-			services[i].value = append(services[i].value.([]statusRow), rowOf(row))
-		}
-		writeJSON(w, http.StatusOK, object{{"version", s.Version}, {"services", services}})
+		writeJSON(w, http.StatusOK, object{{"version", s.Version}, {"services", host.ByService(rows)}})
 	case r.Method == http.MethodGet && path == "/ui/api/keys":
 		keys, err := profile.ListKeys()
 		if err != nil {
@@ -662,7 +647,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 					writeErr(w, err)
 					return
 				}
-				writeJSON(w, http.StatusOK, rowOf(row))
+				writeJSON(w, http.StatusOK, row.Entry())
 				return
 			}
 			if ref.Action != "" {
@@ -711,18 +696,6 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 
 // statusRow is one `agentio status --json` row without its service, which the
 // UI routes carry in the key or the path instead.
-type statusRow struct {
-	Profile  string `json:"profile"`
-	ReadOnly bool   `json:"readOnly,omitempty"`
-	Status   string `json:"status"`
-	Info     string `json:"info,omitempty"`
-	Error    string `json:"error,omitempty"`
-}
-
-func rowOf(p host.ProfileStatus) statusRow {
-	return statusRow{Profile: p.Profile, ReadOnly: p.ReadOnly, Status: p.Status, Info: p.Info, Error: p.Error}
-}
-
 func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 	if err := unlockLimiter.Check(ClientIP(r), s.now()); err != nil {
 		writeErr(w, err)
@@ -742,7 +715,7 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	KeepaliveFromEnv(context.Background(), s.Registry, s.order())
+	KeepaliveFromEnv(context.Background(), s.Registry)
 	w.Header().Add("Set-Cookie", SessionCookie(CreateSession(s.now()), SecureRequest(r)))
 	writeJSON(w, http.StatusOK, object{{"ok", true}})
 }

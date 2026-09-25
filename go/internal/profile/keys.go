@@ -297,7 +297,7 @@ func validateScope(scope any) (vault.Scope, error) {
 }
 
 func knownRefs() (map[string]bool, error) {
-	refs, err := List("", nil)
+	refs, err := List("")
 	if err != nil {
 		return nil, err
 	}

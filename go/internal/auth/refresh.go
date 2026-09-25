@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/vault"
 )
 
 const (
@@ -99,6 +101,21 @@ func GetFresh(ctx context.Context, reg *plugins.Registry, service, profileName s
 		}
 		return Fresh{Credentials: cloned, Refreshed: true}, nil
 	})
+}
+
+// ForRemote is the credential object the hub hands out: RedactForRemote, in
+// the object's stored key order (vault.Ordered), as Bun sends it.
+func ForRemote(reg *plugins.Registry, service string, credentials map[string]any) *jsvalue.Object {
+	kept := RedactForRemote(reg, service, credentials)
+	ordered := vault.Ordered(credentials)
+	out := jsvalue.NewObject()
+	for _, k := range ordered.Keys() {
+		if _, ok := kept[k]; ok {
+			v, _ := ordered.Get(k)
+			out.Set(k, v)
+		}
+	}
+	return out
 }
 
 // RedactForRemote strips refresh material. A service with no refresher is a

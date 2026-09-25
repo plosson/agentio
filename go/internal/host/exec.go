@@ -9,6 +9,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 )
@@ -147,12 +148,10 @@ func PrintResult(w io.Writer, spec *plugins.CommandSpec, result any, asJSON bool
 	return writeJSON(w, result)
 }
 
-// writeJSON matches JSON.stringify(value, null, 2): no HTML escaping of <, >, &.
+// writeJSON is console.log(JSON.stringify(value, null, 2)).
 func writeJSON(w io.Writer, value any) error {
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	return enc.Encode(value)
+	_, err := w.Write(append(jsvalue.StringifyIndent(value), '\n'))
+	return err
 }
 
 // ParseStdin turns raw stdin into the command's declared input.

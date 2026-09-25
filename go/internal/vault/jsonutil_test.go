@@ -81,7 +81,8 @@ func TestContentsKeepsNumbersExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"config":{"profiles":{}},"credentials":{"s":{"p":{"f":0.1000,"n":12345678901234567890}}},"version":1,"x":{"n":1e400}}`
+	// The credential keeps its stored key order, as Bun writes it.
+	want := `{"config":{"profiles":{}},"credentials":{"s":{"p":{"n":12345678901234567890,"f":0.1000}}},"version":1,"x":{"n":1e400}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}

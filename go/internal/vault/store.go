@@ -333,8 +333,17 @@ func Lock() {
 }
 
 // Create writes a new vault, points at it, and stores the passphrase.
-// The pointer is removed again if the file write fails.
 func Create(vaultPath, passphrase string, contents *Contents) error {
+	if err := CreateFile(vaultPath, passphrase, contents); err != nil {
+		return err
+	}
+	return StorePassphrase(passphrase)
+}
+
+// CreateFile writes a new vault and points at it; storing the passphrase is
+// left to the caller, for which a failure is a warning. The pointer is removed
+// again if the file write fails.
+func CreateFile(vaultPath, passphrase string, contents *Contents) error {
 	if err := ValidateVaultPath(vaultPath); err != nil {
 		return err
 	}
@@ -362,9 +371,6 @@ func Create(vaultPath, passphrase string, contents *Contents) error {
 			os.Unsetenv("AGENTIO_PASSPHRASE")
 		}
 		setMemory(prev, prevSet)
-		return err
-	}
-	if err := StorePassphrase(passphrase); err != nil {
 		return err
 	}
 	return nil

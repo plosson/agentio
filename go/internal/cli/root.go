@@ -17,6 +17,7 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/daemon"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
@@ -41,6 +42,7 @@ import (
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/term"
 )
 
 // Version is the package.json version, set at build time
@@ -121,7 +123,7 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 	}
 	// Bun's handleError prints error.message: a failed send is fetch's bare
 	// error, not Go's `Get "…":` wrapping.
-	fmt.Fprintf(stderr, "Error: %s\n", plugins.FetchFailure(err).Error())
+	fmt.Fprintf(stderr, "Error: %s\n", errorMessage(err))
 	return 1
 }
 
@@ -271,12 +273,7 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 					in.Args[arg.Name] = args[i]
 				}
 			}
-			c.Flags().VisitAll(func(f *pflag.Flag) {
-				if f.Name == "json" && hostJSON {
-					return
-				}
-				in.Options[f.Name] = flagValue(c.Flags(), f)
-			})
+			in.Options = commandOptions(c.Flags(), hostJSON)
 			switch specCopy.Input {
 			case "text":
 				// Read when the command asks: Bun's commands read stdin only
@@ -327,6 +324,10 @@ const optionalBare = "true"
 // and requiredOption stay on the flag for commanderParse.
 func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 	for _, opt := range opts {
+		if target := opt.Negates(); target != "" {
+			addNegation(flags, target, opt.Description)
+			continue
+		}
 		fname := longName(opt.Flags)
 		if opt.Repeatable {
 			flags.StringArray(fname, []string{}, opt.Description)
@@ -347,11 +348,47 @@ func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 	}
 }
 
+// negates names, on a Commander `--no-x` flag, the x it sets to false.
+const negates = "agentio-negates"
+
+// negationOnly marks the x of a `--no-x` declared without `--x`: it holds the
+// value (default true), but the command line has no `--x`.
+const negationOnly = "agentio-negation-only"
+
+// addNegation declares Commander's `--no-<name>` (plugins.OptionSpec.Negates).
+// commanderParse turns it into `--<name>=false`, so the last of the pair wins
+// and the command reads <name>.
+func addNegation(flags *pflag.FlagSet, name, usage string) {
+	if flags.Lookup(name) == nil {
+		flags.Bool(name, true, usage)
+		flags.Lookup(name).Hidden = true
+		_ = flags.SetAnnotation(name, negationOnly, []string{"true"})
+	}
+	flags.Bool("no-"+name, false, usage)
+	_ = flags.SetAnnotation("no-"+name, negates, []string{name})
+}
+
+// commandOptions is Commander's opts(): every option by its attribute name,
+// so no `--no-x` of its own, no --help, and no host --json.
+func commandOptions(flags *pflag.FlagSet, hostJSON bool) map[string]any {
+	out := map[string]any{}
+	flags.VisitAll(func(f *pflag.Flag) {
+		if f.Name == "help" || (f.Name == "json" && hostJSON) || len(f.Annotations[negates]) > 0 {
+			return
+		}
+		out[f.Name] = flagValue(flags, f)
+	})
+	return out
+}
+
 // optionValues reads back the flags declareOptions added.
 func optionValues(flags *pflag.FlagSet, opts []plugins.OptionSpec) map[string]any {
 	out := map[string]any{}
 	for _, opt := range opts {
 		name := longName(opt.Flags)
+		if target := opt.Negates(); target != "" {
+			name = target
+		}
 		f := flags.Lookup(name)
 		if f == nil {
 			continue
@@ -456,7 +493,7 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		Use:   "list",
 		Short: "List " + p.DisplayName + " profiles",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			refs, err := profile.List(p.ID, nil)
+			refs, err := profile.List(p.ID)
 			if err != nil {
 				return err
 			}
@@ -490,21 +527,13 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 
 func updateCmd(service string) *cobra.Command {
 	var name string
-	var readOnly bool
-	var noReadOnly bool
+	var value bool
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update a profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("read-only") && !cmd.Flags().Changed("no-read-only") {
+			if !cmd.Flags().Changed("read-only") {
 				return clierr.New(clierr.InvalidParams, "No update specified", "Use --read-only or --no-read-only")
-			}
-			value := readOnly
-			if cmd.Flags().Changed("no-read-only") && !readOnly {
-				value = false
-			}
-			if noReadOnly {
-				value = false
 			}
 			ok, err := profile.SetReadOnly(service, name, value)
 			if err != nil {
@@ -523,8 +552,8 @@ func updateCmd(service string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "profile", "", "Profile name")
 	_ = cmd.MarkFlagRequired("profile")
-	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Set profile as read-only")
-	cmd.Flags().BoolVar(&noReadOnly, "no-read-only", false, "Remove read-only restriction")
+	cmd.Flags().BoolVar(&value, "read-only", false, "Set profile as read-only")
+	addNegation(cmd.Flags(), "read-only", "Remove read-only restriction")
 	return cmd
 }
 
@@ -600,7 +629,7 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 					return err
 				}
 			}
-			refs, err := profile.List(service, ids(reg))
+			refs, err := profile.List(service)
 			if err != nil {
 				return err
 			}
@@ -718,57 +747,93 @@ func streams(cmd *cobra.Command) host.Streams {
 }
 
 func keyCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "key", Short: "Manage API keys for remote agents"}
-	var name, hubURL string
-	var readOnly, manage, all bool
+	cmd := &cobra.Command{Use: "key", Short: "API keys that let remote agents read credentials from this vault"}
 	create := &cobra.Command{
-		Use:   "create",
-		Short: "Create an API key",
-		RunE: func(c *cobra.Command, _ []string) error {
-			scope := any([]string{})
-			if all {
-				scope = "*"
-			}
-			if hubURL == "" {
-				hubURL = "http://127.0.0.1:7890"
-			}
-			issued, err := profile.CreateKey(profile.KeyInput{
-				Name: name, AllowedProfiles: scope, ReadOnly: readOnly, CanManageProfiles: manage,
-			}, hubURL)
+		Use: "create <name>", Short: "Create a key and print its token once",
+		RunE: func(c *cobra.Command, args []string) error {
+			input, err := keyInput(c.Flags())
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Key %s created (%s)\n", issued.Key.ID, profile.DescribeScope(issued.Key))
-			fmt.Fprintln(c.OutOrStdout(), issued.Token)
+			input.Name = args[0]
+			if input.AllowedProfiles == nil {
+				return clierr.New(clierr.InvalidParams, "Choose a scope", "Pass --all or --profiles <service/name,...>")
+			}
+			hubURL, _ := c.Flags().GetString("url")
+			issued, err := profile.CreateKey(input, hubURL)
+			if err != nil {
+				return err
+			}
+			printIssued(c, issued)
 			return nil
 		},
 	}
-	create.Flags().StringVar(&name, "name", "", "Key name")
-	create.Flags().StringVar(&hubURL, "url", "http://127.0.0.1:7890", "Hub URL embedded in the token")
-	create.Flags().BoolVar(&readOnly, "read-only", false, "Force read-only")
-	create.Flags().BoolVar(&manage, "manage", false, "Allow this key to manage profiles")
-	create.Flags().BoolVar(&all, "all", false, "Allow every profile")
-	_ = create.MarkFlagRequired("name")
+	create.Flags().String("url", "", "Public base URL of this hub, embedded in the token")
+	_ = create.MarkFlagRequired("url")
+	keyScopeFlags(create.Flags())
+	create.Flags().Bool("read-only", false, "Force read-only on every profile the key can see")
+	create.Flags().Bool("can-manage-profiles", false, "Let the agent add, replace, rename and delete profiles from its machine")
 	list := &cobra.Command{
-		Use: "list", Short: "List API keys",
+		Use: "list", Short: "List keys (never the secrets)",
 		RunE: func(c *cobra.Command, _ []string) error {
 			keys, err := profile.ListKeys()
 			if err != nil {
 				return err
 			}
 			if len(keys) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), "No keys.")
+				fmt.Fprintln(c.OutOrStdout(), "No API keys. Create one with: agentio key create <name> --url <hub-url> --all")
 				return nil
 			}
 			for _, k := range keys {
-				fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s\n", k.ID, k.Name, profile.DescribeScope(k))
+				used := "never used"
+				if k.LastUsedAt != "" {
+					used = "last used " + k.LastUsedAt
+				}
+				fmt.Fprintf(c.OutOrStdout(), "%s  %s  agio1.…%s  %s  created %s  %s\n", k.ID, k.Name, k.Hint, profile.DescribeScope(k), k.CreatedAt, used)
 			}
 			return nil
 		},
 	}
-	var id string
+	update := &cobra.Command{
+		Use: "update <id>", Short: "Rename a key or change its scope",
+		RunE: func(c *cobra.Command, args []string) error {
+			patch, err := keyInput(c.Flags())
+			if err != nil {
+				return err
+			}
+			if patch == (profile.KeyInput{}) {
+				return clierr.New(clierr.InvalidParams, "Nothing to update", "Pass at least one option; see --help")
+			}
+			updated, err := profile.UpdateKey(args[0], patch)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Updated \"%s\" (%s): %s\n", updated.Name, updated.ID, profile.DescribeScope(updated))
+			return nil
+		},
+	}
+	update.Flags().String("name", "", "New display name")
+	keyScopeFlags(update.Flags())
+	update.Flags().Bool("read-only", false, "Force read-only")
+	addNegation(update.Flags(), "read-only", "Lift the key-level read-only restriction")
+	update.Flags().Bool("can-manage-profiles", false, "Let the agent add, replace, rename and delete profiles from its machine")
+	addNegation(update.Flags(), "can-manage-profiles", "Stop the agent from managing profiles")
+	rotate := &cobra.Command{
+		Use: "rotate <id>", Short: "Replace the secret; the old token stops working at once",
+		RunE: func(c *cobra.Command, args []string) error {
+			hubURL, _ := c.Flags().GetString("url")
+			issued, err := profile.RotateKey(args[0], hubURL)
+			if err != nil {
+				return err
+			}
+			printIssued(c, issued)
+			return nil
+		},
+	}
+	rotate.Flags().String("url", "", "Public base URL of this hub, embedded in the new token")
+	_ = rotate.MarkFlagRequired("url")
 	revoke := &cobra.Command{
-		Use: "revoke <id>", Short: "Revoke an API key",
+		Use: "revoke <id>", Short: "Delete a key; its token stops working at once",
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := profile.RevokeKey(args[0]); err != nil {
 				return err
@@ -777,52 +842,51 @@ func keyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	rotate := &cobra.Command{
-		Use: "rotate <id>", Short: "Rotate an API key secret",
-		RunE: func(c *cobra.Command, args []string) error {
-			if hubURL == "" {
-				hubURL = "http://127.0.0.1:7890"
-			}
-			issued, err := profile.RotateKey(args[0], hubURL)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(c.OutOrStdout(), issued.Token)
-			return nil
-		},
-	}
-	rotate.Flags().StringVar(&hubURL, "url", "http://127.0.0.1:7890", "Hub URL embedded in the token")
-	update := &cobra.Command{
-		Use: "update <id>", Short: "Update an API key",
-		RunE: func(c *cobra.Command, args []string) error {
-			patch := profile.KeyInput{}
-			if c.Flags().Changed("name") {
-				patch.Name = name
-			}
-			if c.Flags().Changed("read-only") {
-				patch.ReadOnly = readOnly
-			}
-			if c.Flags().Changed("manage") {
-				patch.CanManageProfiles = manage
-			}
-			if c.Flags().Changed("all") && all {
-				patch.AllowedProfiles = "*"
-			}
-			updated, err := profile.UpdateKey(args[0], patch)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(c.OutOrStdout(), "%s  %s\n", updated.ID, profile.DescribeScope(updated))
-			return nil
-		},
-	}
-	update.Flags().StringVar(&name, "name", "", "New name")
-	update.Flags().BoolVar(&readOnly, "read-only", false, "Force read-only")
-	update.Flags().BoolVar(&manage, "manage", false, "Allow profile management")
-	update.Flags().BoolVar(&all, "all", false, "Allow every profile")
-	_ = id
 	cmd.AddCommand(create, list, update, rotate, revoke)
 	return cmd
+}
+
+func keyScopeFlags(flags *pflag.FlagSet) {
+	flags.String("profiles", "", "Comma-separated service/name pairs the key may use")
+	flags.Bool("all", false, "Allow every profile")
+}
+
+// keyInput is Bun's keyInputFromOptions: an option not given stays nil.
+func keyInput(flags *pflag.FlagSet) (profile.KeyInput, error) {
+	var in profile.KeyInput
+	all, _ := flags.GetBool("all")
+	list, _ := flags.GetString("profiles")
+	if all && list != "" {
+		return in, clierr.New(clierr.InvalidParams, "--all and --profiles are mutually exclusive", "")
+	}
+	if all {
+		in.AllowedProfiles = "*"
+	} else if list != "" {
+		refs := []string{}
+		for _, ref := range strings.Split(list, ",") {
+			if ref = jsvalue.Trim(ref); ref != "" {
+				refs = append(refs, ref)
+			}
+		}
+		in.AllowedProfiles = refs
+	}
+	if f := flags.Lookup("name"); f != nil && f.Changed {
+		in.Name = f.Value.String()
+	}
+	for field, flag := range map[*any]string{&in.ReadOnly: "read-only", &in.CanManageProfiles: "can-manage-profiles"} {
+		if flags.Changed(flag) {
+			*field, _ = flags.GetBool(flag)
+		}
+	}
+	return in, nil
+}
+
+// printIssued writes the token alone to stdout, so it can be captured, and
+// everything else to stderr.
+func printIssued(c *cobra.Command, issued profile.IssuedKey) {
+	fmt.Fprintf(c.ErrOrStderr(), "Key \"%s\" (%s), %s\n", issued.Key.Name, issued.Key.ID, profile.DescribeScope(issued.Key))
+	fmt.Fprintln(c.ErrOrStderr(), "This token is shown once. Set it on the agent machine as AGENTIO_TOKEN.")
+	fmt.Fprintln(c.OutOrStdout(), issued.Token)
 }
 
 func daemonCmd(reg *plugins.Registry) *cobra.Command {
@@ -837,7 +901,7 @@ func daemonCmd(reg *plugins.Registry) *cobra.Command {
 				}
 				os.Unsetenv("AGENTIO_PASSPHRASE")
 				fmt.Fprintln(c.ErrOrStderr(), "Vault unlocked from AGENTIO_PASSPHRASE")
-				daemon.KeepaliveFromEnv(context.Background(), reg, ids(reg))
+				daemon.KeepaliveFromEnv(context.Background(), reg)
 			} else {
 				fmt.Fprintln(c.ErrOrStderr(), "Vault is locked")
 			}
@@ -933,46 +997,174 @@ func logoutCmd() *cobra.Command {
 
 func statusCmd(reg *plugins.Registry) *cobra.Command {
 	var asJSON bool
-	var noTest bool
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Check configured profiles",
+		Short: "Show configured profiles and credential status",
 		RunE: func(c *cobra.Command, _ []string) error {
-			rows, err := host.Statuses(context.Background(), reg, ids(reg), !noTest)
-			if err != nil {
-				return err
-			}
+			test, _ := c.Flags().GetBool("test")
+			render := statusText
 			if asJSON {
-				raw, err := json.MarshalIndent(rows, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Fprintln(c.OutOrStdout(), string(raw))
-				return nil
+				render = statusJSON
 			}
-			if len(rows) == 0 {
-				fmt.Fprintln(c.OutOrStdout(), "No profiles configured.")
-				return nil
-			}
-			for _, row := range rows {
-				extra := ""
-				if row.ReadOnly {
-					extra += " [read-only]"
-				}
-				if row.Info != "" {
-					extra += " " + row.Info
-				}
-				if row.Error != "" {
-					extra += " " + row.Error
-				}
-				fmt.Fprintf(c.OutOrStdout(), "%s/%s%s %s\n", row.Service, row.Profile, extra, row.Status)
+			if err := render(c, reg, test); err != nil {
+				// Bun's status prints the message alone, not the CliError format.
+				fmt.Fprintf(c.ErrOrStderr(), "Error: %s\n", errorMessage(err))
+				return &plugins.ExitStatus{Code: 1}
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output structured JSON")
-	cmd.Flags().BoolVar(&noTest, "no-test", false, "List profiles without calling validate")
+	addNegation(cmd.Flags(), "test", "Skip credential testing")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output in JSON format")
 	return cmd
+}
+
+// errorMessage is JavaScript's error.message: a CliError's message alone, a
+// failed fetch as Bun words it.
+func errorMessage(err error) string {
+	var ce *clierr.Error
+	if errors.As(err, &ce) {
+		return ce.Message
+	}
+	return plugins.FetchFailure(err).Error()
+}
+
+func statusJSON(c *cobra.Command, reg *plugins.Registry, test bool) error {
+	rows, err := host.Statuses(context.Background(), reg, test)
+	if err != nil {
+		return err
+	}
+	out := jsvalue.NewObject()
+	out.Set("version", Version)
+	if auth.IsRemote() {
+		h, err := auth.Hub()
+		if err != nil {
+			return err
+		}
+		out.Set("hub", h.URL)
+		canManage, err := auth.RemoteCanManage()
+		if err != nil {
+			return err
+		}
+		if canManage != nil {
+			out.Set("canManageProfiles", *canManage)
+		}
+	} else {
+		out.Set("configDir", vault.ConfigDir())
+	}
+	out.Set("services", host.ByService(rows))
+	fmt.Fprintln(c.OutOrStdout(), string(jsvalue.StringifyIndent(out)))
+	return nil
+}
+
+// statusText prints each row as soon as its check finishes, with a spinner on
+// a terminal's stderr while it runs.
+func statusText(c *cobra.Command, reg *plugins.Registry, test bool) error {
+	stdout := c.OutOrStdout()
+	fmt.Fprintf(stdout, "agentio v%s\n", Version)
+	if auth.IsRemote() {
+		h, err := auth.Hub()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Hub: %s\n\n", h.URL)
+	} else {
+		fmt.Fprintf(stdout, "Config: %s\n\n", vault.ConfigDir())
+	}
+	refs, err := profile.List("")
+	if err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		fmt.Fprintln(stdout, "No profiles configured.")
+		fmt.Fprintln(stdout, "Run: agentio <service> profile add")
+		return nil
+	}
+	serviceWidth, profileWidth := 0, 0
+	for _, ref := range refs {
+		serviceWidth = max(serviceWidth, jsvalue.Length(ref.Service))
+		profileWidth = max(profileWidth, jsvalue.Length(ref.Name))
+	}
+	var spin *spinner
+	if test && isTerminal(c.ErrOrStderr()) {
+		spin = &spinner{w: c.ErrOrStderr()}
+	}
+	for i, ref := range refs {
+		spin.start(ref.Service+" "+ref.Name, i+1, len(refs))
+		row, err := host.Check(context.Background(), reg, ref, test)
+		spin.stop()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, statusLine(row, serviceWidth, profileWidth))
+	}
+	return nil
+}
+
+// statusLine is Bun's formatStatusLine.
+func statusLine(s host.ProfileStatus, serviceWidth, profileWidth int) string {
+	readOnly := ""
+	if s.ReadOnly != nil && *s.ReadOnly {
+		readOnly = " [RO]"
+	}
+	var status, details string
+	switch s.Status {
+	case "ok":
+		status, details = "ok", s.Info
+	case "invalid":
+		status, details = "ERR", s.Error
+	case "no-creds":
+		status, details = "ERR", "no credentials"
+	case "skipped":
+		status = "-"
+	}
+	line := jsvalue.PadEnd(s.Service, serviceWidth) + "  " + jsvalue.PadEnd(s.Profile+readOnly, profileWidth+5) +
+		"  " + jsvalue.PadEnd(status, 3) + "  " + details
+	return strings.TrimRightFunc(line, jsvalue.IsSpace)
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinner is Bun status's progress line on stderr. A nil spinner does nothing.
+type spinner struct {
+	w    io.Writer
+	done chan struct{}
+	wg   sync.WaitGroup
+}
+
+func (s *spinner) start(label string, index, total int) {
+	if s == nil {
+		return
+	}
+	s.done = make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for frame := 0; ; frame++ {
+			fmt.Fprintf(s.w, "\r\x1b[K  %s checking %s (%d/%d)", spinnerFrames[frame%len(spinnerFrames)], label, index, total)
+			select {
+			case <-s.done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func (s *spinner) stop() {
+	if s == nil {
+		return
+	}
+	close(s.done)
+	s.wg.Wait()
+	fmt.Fprint(s.w, "\r\x1b[K")
 }
 
 func reauthCmd(reg *plugins.Registry) *cobra.Command {
@@ -982,7 +1174,7 @@ func reauthCmd(reg *plugins.Registry) *cobra.Command {
 		Short:  "Re-authenticate expired or invalid profiles",
 		Hidden: true,
 		RunE: func(c *cobra.Command, _ []string) error {
-			rows, err := host.Statuses(context.Background(), reg, ids(reg), true)
+			rows, err := host.Statuses(context.Background(), reg, true)
 			if err != nil {
 				return err
 			}

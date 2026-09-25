@@ -323,7 +323,7 @@ func TestProfileAddRequireProfile(t *testing.T) {
 	if code != 1 || setups != 0 || out != "" || errOut != "error: required option '--profile <name>' not specified\n" {
 		t.Fatalf("absent --profile: code %d setups %d\n%q\n%q", code, setups, out, errOut)
 	}
-	if refs, _ := profile.List("desk", nil); len(refs) != 0 {
+	if refs, _ := profile.List("desk"); len(refs) != 0 {
 		t.Fatalf("absent --profile saved %v", refs)
 	}
 	code, out, errOut = exec("desk", "profile", "add", "--profile", "")
@@ -637,8 +637,7 @@ func TestGoogleTestInputIsWhatTheCLIBuildsWithoutFlags(t *testing.T) {
 			if err := flags.Parse(nil); err != nil {
 				t.Fatal(err)
 			}
-			want := map[string]any{}
-			flags.VisitAll(func(f *pflag.Flag) { want[f.Name] = flagValue(flags, f) })
+			want := commandOptions(flags, false)
 			if got := harness.Input(t, spec.Path, nil, nil).Options; !reflect.DeepEqual(got, want) {
 				t.Errorf("%s %s:\n got %#v\nwant %#v", plugin.ID, spec.Path, got, want)
 			}

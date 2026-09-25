@@ -5,7 +5,6 @@ package gchat
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -178,16 +177,12 @@ func postJSON(ctx context.Context, fetch func(context.Context, *http.Request) (*
 	return fetch(ctx, req)
 }
 
-// stringify is JSON.stringify(v, null, indent): no HTML escaping.
+// stringify is JSON.stringify(v, null, indent), indent "" or two spaces.
 func stringify(v any, indent string) ([]byte, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", indent)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
+	if indent == "" {
+		return jsvalue.Stringify(v), nil
 	}
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+	return jsvalue.StringifyIndent(v), nil
 }
 
 // textOrJSON is Bun's `--format <format>` check, made before

@@ -24,6 +24,10 @@ type Ref struct {
 	Service  string
 	Name     string
 	ReadOnly bool
+	// ReadOnlyStated is whether the entry states readOnly, false included, as
+	// Bun's listings pass entry.readOnly on as stored. A hub listing states
+	// only true (Bun: readOnly || undefined).
+	ReadOnlyStated bool
 }
 
 func RefOf(service, name string) string { return service + "/" + name }
@@ -152,53 +156,62 @@ var ServiceOrder = []string{
 	"github", "jira", "confluence", "slack", "telegram", "discourse", "dropbox", "sql", "revolut", "falco",
 }
 
-// List returns profiles. preferred is the catalog order; unknown stored ids follow, sorted.
-// A service filter returns that service even when it has no profiles.
-func List(service string, preferred []string) ([]Ref, error) {
+// List returns profiles in Bun's order: services in ServiceOrder, then the
+// other ids sorted; each service's profiles as stored. A service filter
+// returns that service even when it has no profiles.
+func List(service string) ([]Ref, error) {
+	byService := map[string][]Ref{}
 	if auth.IsRemote() {
 		all, err := auth.RemoteProfiles()
 		if err != nil {
 			return nil, err
 		}
-		var out []Ref
 		for _, p := range all {
-			if service == "" || p.Service == service {
-				out = append(out, Ref{Service: p.Service, Name: p.Name, ReadOnly: p.ReadOnly})
-			}
+			byService[p.Service] = append(byService[p.Service], Ref{Service: p.Service, Name: p.Name, ReadOnly: p.ReadOnly, ReadOnlyStated: p.ReadOnly})
 		}
-		return out, nil
-	}
-	c, err := vault.Load()
-	if err != nil {
-		return nil, err
-	}
-	var services []string
-	if service != "" {
-		services = []string{service}
 	} else {
-		seen := map[string]bool{}
-		for _, id := range preferred {
-			if _, ok := c.Config.Profiles[id]; ok {
-				services = append(services, id)
-				seen[id] = true
-			}
+		c, err := vault.Load()
+		if err != nil {
+			return nil, err
 		}
-		var rest []string
-		for id := range c.Config.Profiles {
-			if !seen[id] {
-				rest = append(rest, id)
+		for svc, list := range c.Config.Profiles {
+			refs := []Ref{}
+			for _, p := range list {
+				refs = append(refs, Ref{Service: svc, Name: p.Name, ReadOnly: p.ReadOnly, ReadOnlyStated: p.StatesReadOnly()})
 			}
+			byService[svc] = refs
 		}
-		sort.Strings(rest)
-		services = append(services, rest...)
+	}
+	services := []string{service}
+	if service == "" {
+		services = orderedServices(byService)
 	}
 	var out []Ref
 	for _, svc := range services {
-		for _, p := range c.Config.Profiles[svc] {
-			out = append(out, Ref{Service: svc, Name: p.Name, ReadOnly: p.ReadOnly})
-		}
+		out = append(out, byService[svc]...)
 	}
 	return out, nil
+}
+
+// orderedServices is Bun's configuredServiceIds: ServiceOrder first, then the
+// rest sorted.
+func orderedServices[V any](present map[string]V) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ServiceOrder {
+		if _, ok := present[id]; ok {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	var rest []string
+	for id := range present {
+		if !seen[id] {
+			rest = append(rest, id)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
 }
 
 // ChooseName picks the stored name. An explicit name wins, even when taken.

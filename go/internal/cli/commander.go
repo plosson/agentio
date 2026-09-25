@@ -36,7 +36,7 @@ const flagSpecs = "agentio-commander-flags"
 // (`--profile <name>`, `--url <url>`, …).
 var hostPlaceholders = map[string]string{
 	"profile": "name", "to": "name", "name": "name", "url": "url", "path": "path",
-	"file": "path", "key": "key", "passphrase": "value",
+	"file": "path", "key": "key", "passphrase": "value", "profiles": "list",
 }
 
 // negativeNumber is Commander's negativeNumberArg: an operand of a command
@@ -128,7 +128,9 @@ func parseOptions(cmd *cobra.Command, args []string) (levelOptions, *parsed) {
 			return &parsed{version: true}
 		}
 		lvl.given[f.Name] = true
-		if value == nil {
+		if target := f.Annotations[negates]; len(target) > 0 {
+			lvl.options = append(lvl.options, "--"+target[0]+"=false")
+		} else if value == nil {
 			lvl.options = append(lvl.options, "--"+f.Name)
 		} else {
 			lvl.options = append(lvl.options, "--"+f.Name+"="+*value)
@@ -231,7 +233,7 @@ func maybeOption(arg string) bool { return len(arg) > 1 && arg[0] == '-' }
 func findOption(cmd *cobra.Command, arg string) *pflag.Flag {
 	var found *pflag.Flag
 	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
-		if found != nil || f.Name == "help" {
+		if found != nil || f.Name == "help" || len(f.Annotations[negationOnly]) > 0 {
 			return
 		}
 		if arg == "--"+f.Name || (f.Shorthand != "" && arg == "-"+f.Shorthand) {

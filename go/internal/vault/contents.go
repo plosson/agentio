@@ -18,6 +18,10 @@ type ProfileValue struct {
 	extra         map[string]json.RawMessage
 }
 
+// StatesReadOnly is whether the entry has a readOnly member, true or false
+// (Bun's entry.readOnly is not undefined).
+func (p ProfileValue) StatesReadOnly() bool { return p.ReadOnly || p.readOnlyFalse }
+
 // profileObject is the object form of a ProfileValue.
 type profileObject struct {
 	Name     string `json:"name"`
@@ -156,9 +160,9 @@ func (c *Config) UnmarshalJSON(b []byte) (err error) {
 // Contents is the decrypted vault document. Top-level keys Go does not model
 // survive a load and save.
 type Contents struct {
-	Version     int                                  `json:"version"`
-	Config      Config                               `json:"config"`
-	Credentials map[string]map[string]map[string]any `json:"credentials"`
+	Version     int         `json:"version"`
+	Config      Config      `json:"config"`
+	Credentials Credentials `json:"credentials"`
 
 	extra map[string]json.RawMessage
 }

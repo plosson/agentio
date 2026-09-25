@@ -150,6 +150,18 @@ type OptionSpec struct {
 	Required bool
 }
 
+// Negates is the option a Commander negatable flag sets: "x" for a `--no-x`
+// switch, "" otherwise. `--no-x` sets x to false, and the last of `--x` and
+// `--no-x` wins. Declared after `--x`, it leaves x's default as it is; alone,
+// x defaults to true and there is no `--x`. The command reads x, never "no-x".
+func (o OptionSpec) Negates() string {
+	fields := strings.Fields(o.Flags)
+	if len(fields) != 1 || !strings.HasPrefix(fields[0], "--no-") {
+		return ""
+	}
+	return strings.TrimPrefix(fields[0], "--no-")
+}
+
 type CommandInput struct {
 	Args    map[string]any
 	Options map[string]any

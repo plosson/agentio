@@ -205,12 +205,20 @@ func writeValue(b *bytes.Buffer, v any) {
 		b.WriteByte(']')
 	case json.Marshaler:
 		// Called directly: json.Marshal would escape <, > and & in the result.
+		// The result is read back and written again, so a MarshalJSON built on
+		// encoding/json (which escapes U+2028 and U+2029) still reads as
+		// JSON.stringify.
 		raw, err := t.MarshalJSON()
 		if err != nil {
 			b.WriteString("null")
 			return
 		}
-		b.Write(raw)
+		parsed, err := Parse(raw)
+		if err != nil {
+			b.Write(raw)
+			return
+		}
+		writeValue(b, parsed)
 	default:
 		writeReflect(b, reflect.ValueOf(v))
 	}

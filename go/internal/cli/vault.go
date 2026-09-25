@@ -25,7 +25,7 @@ func vaultCmd() *cobra.Command {
 
 func vaultInit() *cobra.Command {
 	var path, pass string
-	var stdin, noMigrate bool
+	var stdin bool
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a new vault",
@@ -36,13 +36,16 @@ func vaultInit() *cobra.Command {
 					"A vault is already configured at "+current,
 					"Use `agentio vault set` to switch, `vault passphrase` to change it, or `vault reset` to wipe it")
 			}
+			vaultPath := path
+			if !cmd.Flags().Changed("path") {
+				var err error
+				if vaultPath, err = promptVaultPath(cmd); err != nil {
+					return err
+				}
+			}
 			passphrase, err := resolvePassphrase(cmd, pass, stdin, true)
 			if err != nil {
 				return err
-			}
-			vaultPath := path
-			if vaultPath == "" {
-				vaultPath = vault.DefaultVaultPath()
 			}
 			if err := vault.ValidateVaultPath(vaultPath); err != nil {
 				return err
@@ -50,43 +53,121 @@ func vaultInit() *cobra.Command {
 			if err := vault.ValidatePassphrase(passphrase); err != nil {
 				return err
 			}
+			out := cmd.OutOrStdout()
 			hasConfig, _ := vault.DetectLegacy()
-			if hasConfig && !noMigrate {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Found legacy config — importing it into the new vault.")
-				legacy, err := vault.ReadLegacy()
-				if err != nil {
+			if migrate, _ := cmd.Flags().GetBool("migrate"); !hasConfig || !migrate {
+				if err := createVault(cmd, vaultPath, passphrase, vault.EmptyContents()); err != nil {
 					return err
 				}
-				contents := vault.EmptyContents()
-				contents.Config = legacy.Config
-				contents.Credentials = legacy.Credentials
-				if err := vault.Create(vaultPath, passphrase, contents); err != nil {
-					return err
-				}
-				if err := vault.ArchiveLegacy(); err != nil {
-					return err
-				}
-				if !legacy.TokensRecovered && hasConfig {
-					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: legacy credentials could not be recovered. Re-authenticate each service.")
-				}
-			} else {
-				if err := vault.Create(vaultPath, passphrase, vault.EmptyContents()); err != nil {
-					return err
-				}
+				return nudgeFirstService(cmd)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Vault created at %s\n", vault.NormalizeVaultPath(vaultPath))
-			fmt.Fprintln(cmd.OutOrStdout(), "\nNext: configure a service. Examples:")
-			fmt.Fprintln(cmd.OutOrStdout(), "  agentio gmail profile add")
-			fmt.Fprintln(cmd.OutOrStdout(), "  agentio slack profile add")
-			fmt.Fprintln(cmd.OutOrStdout(), "Run `agentio --help` to see all available services.")
-			return nil
+			fmt.Fprintln(cmd.ErrOrStderr(), "Found legacy config — importing it into the new vault.")
+			target := prepareVaultPath(cmd, vaultPath)
+			legacy, err := vault.ReadLegacy()
+			if err != nil {
+				return err
+			}
+			contents := vault.EmptyContents()
+			contents.Config = legacy.Config
+			contents.Credentials = legacy.Credentials
+			if err := vault.CreateFile(target, passphrase, contents); err != nil {
+				return err
+			}
+			if err := vault.ArchiveLegacy(); err != nil {
+				return err
+			}
+			storePassphrase(cmd, passphrase)
+			configPath, tokensPath := vault.LegacyPaths()
+			fmt.Fprintf(out, "Vault created at %s\n", target)
+			preserved := configPath + ".bak"
+			if _, err := os.Stat(tokensPath + ".bak"); err == nil {
+				preserved += " and " + tokensPath + ".bak"
+			}
+			fmt.Fprintf(out, "Legacy files preserved at %s\n", preserved)
+			fmt.Fprintln(out, "Delete them once you have confirmed the vault works.")
+			if !legacy.TokensRecovered {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Warning: legacy credentials could not be recovered. Re-authenticate each service.")
+			}
+			return nudgeFirstService(cmd)
 		},
 	}
 	cmd.Flags().StringVar(&path, "path", "", "Where to create the vault file")
-	cmd.Flags().StringVar(&pass, "passphrase", "", "Vault passphrase")
+	cmd.Flags().StringVar(&pass, "passphrase", "", "Vault passphrase (visible in shell history and process list)")
 	cmd.Flags().BoolVar(&stdin, "passphrase-stdin", false, "Read the vault passphrase from stdin")
-	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Ignore any legacy config instead of importing it")
+	addNegation(cmd.Flags(), "migrate", "Ignore any legacy config instead of importing it")
 	return cmd
+}
+
+// promptVaultPath is Bun's location prompt: on a terminal it asks, with the
+// default path, until the answer is absolute; otherwise the default path.
+func promptVaultPath(cmd *cobra.Command) (string, error) {
+	def := vault.DefaultVaultPath()
+	if !host.IsTerminal(cmd.InOrStdin()) {
+		return def, nil
+	}
+	setup := host.NewSetupContext(streams(cmd))
+	for {
+		answer, err := setup.Prompt("Vault file location: ("+def+")", false)
+		if err != nil {
+			return "", err
+		}
+		if answer == "" {
+			return def, nil
+		}
+		if isAbs(answer) {
+			return answer, nil
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), "Path must be absolute")
+	}
+}
+
+// prepareVaultPath is the normalised vault path, named when it differs.
+func prepareVaultPath(cmd *cobra.Command, vaultPath string) string {
+	target := vault.NormalizeVaultPath(vaultPath)
+	if target != vaultPath {
+		fmt.Fprintf(cmd.OutOrStdout(), "Path is a directory; using %s\n", target)
+	}
+	return target
+}
+
+// createVault is Bun's createVault: the vault file, the pointer, then the
+// passphrase, whose store failing is only a warning.
+func createVault(cmd *cobra.Command, vaultPath, passphrase string, contents *vault.Contents) error {
+	target := prepareVaultPath(cmd, vaultPath)
+	if err := vault.CreateFile(target, passphrase, contents); err != nil {
+		return err
+	}
+	storePassphrase(cmd, passphrase)
+	fmt.Fprintf(cmd.OutOrStdout(), "Vault created at %s\n", target)
+	return nil
+}
+
+// storePassphrase is Bun's: a store that fails leaves a warning.
+func storePassphrase(cmd *cobra.Command, passphrase string) {
+	if err := vault.StorePassphrase(passphrase); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not store passphrase: %s\n", err.Error())
+		fmt.Fprintln(cmd.ErrOrStderr(), "Set AGENTIO_PASSPHRASE in your environment for future commands.")
+	}
+}
+
+// nudgeFirstService suggests a first service while the vault has no profile.
+func nudgeFirstService(cmd *cobra.Command) error {
+	contents, err := vault.Load()
+	if err != nil {
+		return err
+	}
+	for _, list := range contents.Config.Profiles {
+		if len(list) > 0 {
+			return nil
+		}
+	}
+	out := cmd.OutOrStdout()
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "Next: configure a service. Examples:")
+	fmt.Fprintln(out, "  agentio gmail profile add")
+	fmt.Fprintln(out, "  agentio slack profile add")
+	fmt.Fprintln(out, "Run `agentio --help` to see all available services.")
+	return nil
 }
 
 func vaultStatus() *cobra.Command {
@@ -162,10 +243,7 @@ func vaultSet() *cobra.Command {
 			}
 			vault.Reset()
 			vault.SetMemoryPassphrase(passphrase)
-			if err := vault.StorePassphrase(passphrase); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not store passphrase: %s\n", err.Error())
-				fmt.Fprintln(cmd.ErrOrStderr(), "Set AGENTIO_PASSPHRASE in your environment for future commands.")
-			}
+			storePassphrase(cmd, passphrase)
 			if previous == vaultPath {
 				fmt.Fprintf(cmd.OutOrStdout(), "Vault unchanged: %s\n", vaultPath)
 			} else {
@@ -210,9 +288,7 @@ func vaultPassphrase() *cobra.Command {
 			if err := vault.Save(current); err != nil {
 				return err
 			}
-			if err := vault.StorePassphrase(next); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not store passphrase: %s\n", err.Error())
-			}
+			storePassphrase(cmd, next)
 			fmt.Fprintln(cmd.OutOrStdout(), "Passphrase changed")
 			return nil
 		},
@@ -371,7 +447,10 @@ func vaultImport() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := vault.Create(vault.DefaultVaultPath(), passphrase, imported); err != nil {
+				if err := vault.ValidatePassphrase(passphrase); err != nil {
+					return err
+				}
+				if err := createVault(cmd, vault.DefaultVaultPath(), passphrase, imported); err != nil {
 					return err
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Configuration imported successfully")

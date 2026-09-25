@@ -17,6 +17,9 @@ import (
 // Legacy files from before the single vault. Init reads them once, writes the
 // new vault, then renames the originals to .bak.
 
+// LegacyPaths are the pre-vault config.json and tokens.enc.
+func LegacyPaths() (configPath, tokensPath string) { return legacyPaths() }
+
 func legacyPaths() (configPath, tokensPath string) {
 	dir := ConfigDir()
 	return filepath.Join(dir, "config.json"), filepath.Join(dir, "tokens.enc")
