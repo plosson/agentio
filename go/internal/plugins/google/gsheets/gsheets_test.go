@@ -490,6 +490,15 @@ func TestValueCommandsSendTheBunRequestsAndPrintTheBunText(t *testing.T) {
 	if h := last(); len(h.Query["majorDimension"]) != 0 || len(h.Query["valueRenderOption"]) != 0 {
 		t.Fatalf("absent options sent: %v", h.Query)
 	}
+	// Bun passes the options to googleapis, which sends a given "" as
+	// `majorDimension=&valueRenderOption=`.
+	if _, err = product.Exec(fake.Ctx(), t, reg, "get", product.Input(t, "get", map[string]any{"spreadsheet-id-or-url": "s1", "range": "Empty!A1"},
+		map[string]any{"dimension": "", "render": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); !h.Query.Has("majorDimension") || h.Query.Get("majorDimension") != "" || !h.Query.Has("valueRenderOption") || h.Query.Get("valueRenderOption") != "" {
+		t.Fatalf("given empty options: %v", h.Query)
+	}
 	if got := product.Printed(t, "get", v, false); got != "No data found\n" || googletest.JSONText(v) != `{"range":"Empty!A1","values":[]}` {
 		t.Fatalf("%q %s", got, googletest.JSONText(v))
 	}
@@ -535,6 +544,14 @@ func TestValueCommandsSendTheBunRequestsAndPrintTheBunText(t *testing.T) {
 	}
 	if h := last(); len(h.Query["insertDataOption"]) != 0 {
 		t.Fatalf("absent --insert sent: %v", h.Query)
+	}
+	// A given --insert "" is sent as `insertDataOption=`, as googleapis does.
+	if _, err = product.Exec(fake.Ctx(), t, reg, "append", product.Input(t, "append", map[string]any{"spreadsheet-id-or-url": "s1", "range": "A1", "values": []string{"a", "b"}},
+		map[string]any{"insert": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); h.Query.Encode() != "insertDataOption=&valueInputOption=USER_ENTERED" || h.Raw != `{"values":[["a b"]]}` {
+		t.Fatalf("given empty --insert: %v %s", h.Query, h.Raw)
 	}
 	if got := product.Printed(t, "append", v, false); got != "Appended 0 cells to Sheet1!A:C\n  Rows: 0\n  Columns: 0\n" {
 		t.Fatalf("%q", got)

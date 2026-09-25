@@ -540,6 +540,13 @@ func TestCreateAndMetadataPrintTheProject(t *testing.T) {
 	if strings.Join(bodies, "|") != `{"title":"Helper"}|{"parentId":"sheet9","title":"Bound"}` {
 		t.Fatalf("%q", bodies)
 	}
+	// Bun sends { title, parentId: options.parentId }: a given --parent "" is kept.
+	if _, err := product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, map[string]any{"title": "T", "parent": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if h := fake.Last(); h.Body != `{"parentId":"","title":"T"}` {
+		t.Fatalf("create --parent \"\" %s", h.Raw)
+	}
 	before := len(fake.Recorded())
 	_, err = product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, nil))
 	if ce := googletest.CliErr(t, err); ce.Code != clierr.InvalidParams || ce.Message != "required option '--title <title>' not specified" || len(fake.Recorded()) != before {

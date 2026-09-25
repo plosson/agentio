@@ -290,7 +290,7 @@ func pageBody(response apiPage, bodyFormat string) string {
 	return ""
 }
 
-func (a api) createPage(spaceKey, spaceID, title, parentID, body string) (pageCreated, error) {
+func (a api) createPage(spaceKey, spaceID, title string, parentID *string, body string) (pageCreated, error) {
 	if spaceID == "" && spaceKey != "" {
 		found, err := a.getSpace(spaceKey)
 		if err != nil {
@@ -310,8 +310,8 @@ func (a api) createPage(spaceKey, spaceID, title, parentID, body string) (pageCr
 			"value":          textToStorage(body),
 		},
 	}
-	if parentID != "" {
-		payload["parentId"] = parentID
+	if parentID != nil { // Bun sends a given "" as is.
+		payload["parentId"] = *parentID
 	}
 	var response apiPage
 	if err := a.request(http.MethodPost, a.v2(), "/pages", payload, &response); err != nil {
@@ -539,8 +539,11 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: false, Error: fmt.Sprintf("API returned %d", resp.StatusCode)}, nil
 }
 
-func limitQuery(raw string, fallback int) string {
-	if raw == "" {
+// limitQuery is Bun `parseInt(options.limit, 10)`, then `limit ?? fallback`:
+// only an absent --limit takes the fallback, a given "" is NaN.
+func limitQuery(in plugins.CommandInput, fallback int) string {
+	raw, given := in.LookupOption("limit")
+	if !given {
 		return strconv.Itoa(fallback)
 	}
 	n, ok := jsParseInt(raw)

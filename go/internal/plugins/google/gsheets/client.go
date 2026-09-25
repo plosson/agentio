@@ -182,14 +182,16 @@ func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
 	return files, nil
 }
 
-func (a *api) get(idOrURL, a1, dimension, render string) (*values, error) {
+// get sends the options as googleapis does: a nil one is left out, a given ""
+// is sent empty.
+func (a *api) get(idOrURL, a1 string, dimension, render *string) (*values, error) {
 	r := cleanRange(a1)
 	call := a.sheets.Spreadsheets.Values.Get(extractSpreadsheetID(idOrURL), r)
-	if dimension != "" {
-		call.MajorDimension(dimension)
+	if dimension != nil {
+		call.MajorDimension(*dimension)
 	}
-	if render != "" {
-		call.ValueRenderOption(render)
+	if render != nil {
+		call.ValueRenderOption(*render)
 	}
 	resp, err := call.Context(a.Ctx).Do()
 	if err != nil {
@@ -243,15 +245,15 @@ func (a *api) update(idOrURL, a1 string, rows []any, inputOption string) (*updat
 	return &out, nil
 }
 
-func (a *api) append(idOrURL, a1 string, rows []any, inputOption, insertOption string) (*appended, error) {
+func (a *api) append(idOrURL, a1 string, rows []any, inputOption string, insertOption *string) (*appended, error) {
 	r := cleanRange(a1)
 	if inputOption == "" {
 		inputOption = "USER_ENTERED"
 	}
 	q := jsvalue.NewSearchParams()
 	q.Set("valueInputOption", inputOption)
-	if insertOption != "" {
-		q.Set("insertDataOption", insertOption)
+	if insertOption != nil { // googleapis sends a given "" empty
+		q.Set("insertDataOption", *insertOption)
 	}
 	obj, err := a.callJSON("POST", valuesPath(extractSpreadsheetID(idOrURL), r)+":append?"+q.String(), valuesBody(rows))
 	if err != nil {

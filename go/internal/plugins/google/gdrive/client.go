@@ -587,8 +587,10 @@ func (a *api) permissions(fileIDOrURL string) ([]permission, error) {
 }
 
 type shareOptions struct {
-	kind, role, emailAddress, domain, emailMessage string
-	notify, allowFileDiscovery                     bool
+	kind, role, emailAddress, domain string
+	// emailMessage is nil when absent; googleapis sends a given "" empty.
+	emailMessage               *string
+	notify, allowFileDiscovery bool
 }
 
 // share is GDriveClient.share. Google rejects allowFileDiscovery on anything
@@ -604,8 +606,8 @@ func (a *api) share(fileIDOrURL, printedID string, o shareOptions) (*shared, err
 	}
 	call := a.svc.Permissions.Create(extractFileID(fileIDOrURL), body).SupportsAllDrives(true).
 		SendNotificationEmail(o.notify).Fields("id,type,role,emailAddress,domain")
-	if o.emailMessage != "" {
-		call = call.EmailMessage(o.emailMessage)
+	if o.emailMessage != nil {
+		call = call.EmailMessage(*o.emailMessage)
 	}
 	p, err := call.Context(a.Ctx).Do()
 	if err != nil {

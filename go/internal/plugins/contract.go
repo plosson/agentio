@@ -143,6 +143,15 @@ func (in CommandInput) LookupOption(name string) (string, bool) {
 	return s, ok
 }
 
+// OptionPtr is LookupOption as a value Bun passes on to its client: nil when
+// absent (undefined), a given "" kept.
+func (in CommandInput) OptionPtr(name string) *string {
+	if s, ok := in.LookupOption(name); ok {
+		return &s
+	}
+	return nil
+}
+
 // Flag is a switch option; absent or of another type is false.
 func (in CommandInput) Flag(name string) bool {
 	b, _ := in.Options[name].(bool)

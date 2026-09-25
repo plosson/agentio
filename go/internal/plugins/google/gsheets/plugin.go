@@ -43,15 +43,6 @@ func intOption(in plugins.CommandInput, name string) *float64 {
 	return &n
 }
 
-// stringOption is a <value> option as Bun passes it on: nil when absent, a
-// given "" kept (the client checks `!== undefined`).
-func stringOption(in plugins.CommandInput, name string) *string {
-	if s, given := in.LookupOption(name); given {
-		return &s
-	}
-	return nil
-}
-
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
 func parseValues(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
@@ -181,7 +172,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.Option("dimension"), in.Option("render")))
+			return plugins.Result(a.get(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.OptionPtr("dimension"), in.OptionPtr("render")))
 		},
 		Format: formatValues,
 	}
@@ -258,7 +249,7 @@ func appendCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.Option("insert")))
+			return plugins.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.OptionPtr("insert")))
 		},
 		Format: formatAppended,
 	}
@@ -330,10 +321,10 @@ func formatCmd() plugins.CommandSpec {
 				italic:       in.Flag("italic"),
 				underline:    in.Flag("underline"),
 				fontSize:     intOption(in, "font-size"),
-				fontFamily:   stringOption(in, "font-family"),
-				textColor:    stringOption(in, "text-color"),
-				background:   stringOption(in, "background"),
-				numberFormat: stringOption(in, "number-format"),
+				fontFamily:   in.OptionPtr("font-family"),
+				textColor:    in.OptionPtr("text-color"),
+				background:   in.OptionPtr("background"),
+				numberFormat: in.OptionPtr("number-format"),
 				merge:        in.Flag("merge"),
 				clearFormat:  in.Flag("clear-format"),
 			}

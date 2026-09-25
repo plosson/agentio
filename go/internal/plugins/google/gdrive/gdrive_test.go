@@ -1015,6 +1015,9 @@ func TestShareSendsBunsPermissionBody(t *testing.T) {
 			"Permission created\n  Permission ID: perm-1\n  Type: anyone\n  Role: reader\n  Public URL: https://drive.google.com/uc?id=https://drive.google.com/drive/folders/D1\n"},
 		{"f1", map[string]any{"group": "g@example.com", "notify": true, "message": "hi"},
 			`{"emailAddress":"g@example.com","role":"reader","type":"group"}`, map[string]string{"sendNotificationEmail": "true", "emailMessage": "hi"}, ""},
+		// googleapis sends a given --message "" as `emailMessage=`.
+		{"f1", map[string]any{"user": "a@example.com", "notify": true, "message": ""},
+			`{"emailAddress":"a@example.com","role":"reader","type":"user"}`, map[string]string{"sendNotificationEmail": "true", "emailMessage": ""}, ""},
 		{"f1", map[string]any{"domain": "example.com", "role": "commenter", "message": "ignored"},
 			`{"domain":"example.com","role":"commenter","type":"domain"}`, map[string]string{"sendNotificationEmail": "false", "emailMessage": "ignored"},
 			"Permission created\n  Permission ID: perm-1\n  Type: domain\n  Role: commenter\n  Domain: example.com\n"},
@@ -1031,7 +1034,7 @@ func TestShareSendsBunsPermissionBody(t *testing.T) {
 			t.Fatalf("%v: %s %s %s %v", c.set, h.Method, h.Path, googletest.JSONText(h.JSON), h.Query)
 		}
 		for k, want := range c.query {
-			if h.Query.Get(k) != want {
+			if !h.Query.Has(k) || h.Query.Get(k) != want {
 				t.Fatalf("%v: %s=%q", c.set, k, h.Query.Get(k))
 			}
 		}

@@ -621,7 +621,7 @@ func shareCmd() plugins.CommandSpec {
 				role:               in.Option("role"),
 				emailAddress:       email,
 				domain:             in.Option("domain"),
-				emailMessage:       in.Option("message"),
+				emailMessage:       in.OptionPtr("message"),
 				notify:             in.Flag("notify"),
 				allowFileDiscovery: in.Flag("allow-discovery"),
 			}))

@@ -68,7 +68,7 @@ func createCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.create(in.Option("title"), in.Option("parent")))
+			return plugins.Result(a.create(in.Option("title"), in.OptionPtr("parent")))
 		},
 		Format: formatProject,
 	}

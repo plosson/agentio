@@ -96,8 +96,14 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 // errorMessage is GScriptClient.getErrorMessage.
 var errorMessage = google.StatusText("Insufficient permissions for this script project", "Script project not found")
 
-func (a *api) create(title, parentID string) (*project, error) {
-	req := &script.CreateProjectRequest{Title: title, ParentId: parentID, ForceSendFields: []string{"Title"}}
+// create sends Bun's { title, parentId }: a nil parentID is left out, a given
+// "" is sent.
+func (a *api) create(title string, parentID *string) (*project, error) {
+	req := &script.CreateProjectRequest{Title: title, ForceSendFields: []string{"Title"}}
+	if parentID != nil {
+		req.ParentId = *parentID
+		req.ForceSendFields = append(req.ForceSendFields, "ParentId")
+	}
 	resp, err := a.script.Projects.Create(req).Context(a.Ctx).Do()
 	if err != nil {
 		return nil, a.Failed("create script project", err)

@@ -101,7 +101,7 @@ func spacesCmd() plugins.CommandSpec {
 			"agentio confluence spaces --limit 10",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listSpaces(limitQuery(in.Option("limit"), 50), in.Option("type"))
+			return apiFrom(ctx, run).listSpaces(limitQuery(in, 50), in.Option("type"))
 		},
 		Format: formatSpaces,
 	}
@@ -127,7 +127,7 @@ func pagesCmd() plugins.CommandSpec {
 			"agentio confluence pages --space ENG --limit 50",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listPages(in.Option("space"), in.Option("space-id"), in.Option("parent"), limitQuery(in.Option("limit"), 25))
+			return apiFrom(ctx, run).listPages(in.Option("space"), in.Option("space-id"), in.Option("parent"), limitQuery(in, 25))
 		},
 		Format: formatPages,
 	}
@@ -184,7 +184,7 @@ func searchCmd() plugins.CommandSpec {
 			`agentio confluence search --space ENG --type page --text "onboarding"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).search(in.Option("cql"), in.Option("space"), in.Option("type"), in.Option("text"), limitQuery(in.Option("limit"), 25))
+			return apiFrom(ctx, run).search(in.Option("cql"), in.Option("space"), in.Option("type"), in.Option("text"), limitQuery(in, 25))
 		},
 		Format: formatSearch,
 	}
@@ -217,7 +217,7 @@ func createCmd() plugins.CommandSpec {
 			if err := checkCreate(in, run.Fail); err != nil {
 				return nil, err
 			}
-			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.Option("parent"), piped(in.Option("content"), in.Stdin))
+			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.OptionPtr("parent"), piped(in.Option("content"), in.Stdin))
 		},
 		Format: formatCreated,
 	}
@@ -248,11 +248,7 @@ func updateCmd() plugins.CommandSpec {
 			if err := checkPageBody(in, run.Fail); err != nil {
 				return nil, err
 			}
-			var title *string
-			if t, given := in.LookupOption("title"); given {
-				title = &t
-			}
-			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), title, piped(in.Option("content"), in.Stdin))
+			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.OptionPtr("title"), piped(in.Option("content"), in.Stdin))
 		},
 		Format: formatUpdated,
 	}

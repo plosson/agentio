@@ -434,6 +434,24 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	if h := last(); h.Query.Get("limit") != "NaN" || h.Query.Has("type") {
 		t.Fatalf("spaces NaN %v", h.Query)
 	}
+	// A given --limit "" is parseInt("") = NaN too, as Bun sends it (spaces,
+	// pages and search: `limit=NaN`, not the default).
+	for _, c := range []struct {
+		path string
+		opts map[string]any
+		want url.Values
+	}{
+		{"spaces", opts("limit", ""), url.Values{"limit": {"NaN"}}},
+		{"pages", opts("limit", ""), url.Values{"limit": {"NaN"}}},
+		{"search", opts("text", "q", "limit", ""), url.Values{"cql": {`text ~ "q"`}, "limit": {"NaN"}}},
+	} {
+		if _, err := product.Exec(t, reg, c.path, plugins.CommandInput{Options: c.opts}); err != nil {
+			t.Fatal(err)
+		}
+		if h := last(); h.Query.Encode() != c.want.Encode() {
+			t.Fatalf("%s --limit \"\": %v", c.path, h.Query)
+		}
+	}
 
 	// pages: a space key is resolved to its id first.
 	if _, err := product.Exec(t, reg, "pages", plugins.CommandInput{Options: opts("space", "ENG", "parent", "3", "limit", "25")}); err != nil {
@@ -475,6 +493,14 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 	}
 	if _, has := h.Body["parentId"]; has {
 		t.Fatal("parentId sent although --parent was not given")
+	}
+	// A given --parent "" is sent as Bun sends it: "parentId":"".
+	if _, err := product.Exec(t, reg, "create", plugins.CommandInput{Options: opts("title", "T", "space-id", "9", "parent", "", "content", "x")}); err != nil {
+		t.Fatal(err)
+	}
+	if h = last(); !jsonEqual(h.Body, map[string]any{"spaceId": "9", "status": "current", "title": "T", "parentId": "",
+		"body": map[string]any{"representation": "storage", "value": "<p>x</p>"}}) {
+		t.Fatalf("create --parent \"\" %s", h.Raw)
 	}
 	if formatCreated(res) != "Page created\nID: 900\nTitle: T\nSpace: 77\nLink: https://acme.atlassian.net/wiki/spaces/ENG/pages/900" {
 		t.Fatalf("%q", formatCreated(res))
