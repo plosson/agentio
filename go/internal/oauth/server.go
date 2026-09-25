@@ -23,8 +23,10 @@ import (
 const (
 	portStart = 3000
 	portEnd   = 3010
-	timeout   = 5 * time.Minute
 )
+
+// timeout is a variable so tests can shorten it; the message stays Bun's.
+var timeout = 5 * time.Minute
 
 const (
 	htmlOK    = "<html><body><h1>Authorization Successful!</h1><p>You can close this window and return to the terminal.</p></body></html>"
@@ -182,6 +184,9 @@ func AwaitCode(ctx context.Context, cfg AwaitConfig) (Result, error) {
 	go func() {
 		fmt.Fprint(errOut, "? Redirect URL (or code): ")
 		line, err := in.ReadLine(pasteCtx)
+		if err == io.EOF && line == "" {
+			return // Bun: nothing left to paste, the callback or the timeout decides
+		}
 		if err != nil && line == "" {
 			pasteErr <- err
 			return
