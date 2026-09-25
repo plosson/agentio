@@ -272,8 +272,9 @@ func positiveInt(flag string) func(context.Context, plugins.CommandInput, *plugi
 	})
 }
 
-// confirmed asks before a destructive call. A closed stdin never answers in
-// Bun, so the process ends without acting or printing "Cancelled".
+// confirmed asks before a destructive call. An answer that cannot be read
+// ends the command without acting or printing "Cancelled"; a closed stdin is
+// an empty answer, so no.
 func confirmed(run *plugins.RunContext, question string) bool {
 	ok, err := run.Confirm(question)
 	if err != nil {

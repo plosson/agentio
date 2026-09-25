@@ -287,6 +287,23 @@ func setupContext(answers map[string][]string, logged *[]string) *plugins.SetupC
 		answers[q] = queue[1:]
 		return queue[0], nil
 	}
+	// A menu takes its queued answers as typed at a terminal; with none left
+	// it is asked off one.
+	sc.Select = func(message string, choices []plugins.Choice) (int, error) {
+		mu.Lock()
+		key := message
+		for _, c := range choices {
+			key += " | " + c.Name
+		}
+		queue := answers[key]
+		answers[key] = nil
+		mu.Unlock()
+		var in io.Reader = strings.NewReader("")
+		if len(queue) > 0 {
+			in = testbox.Terminal(strings.NewReader(strings.Join(queue, "\n") + "\n"))
+		}
+		return host.NewSetupContext(host.Streams{In: in, Out: io.Discard, Err: io.Discard}).Select(message, choices)
+	}
 	if logged != nil {
 		sc.Log = func(parts ...any) {
 			for _, p := range parts {
@@ -319,7 +336,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	var logged []string
 	sc := setupContext(map[string][]string{
 		"? Email: ": {"  pierre@example.com "}, "? Password: ": {" pw "}, "? Two-factor code: ": {" 123456 "},
-		"? Organization (1-2): ": {"9", "2"},
+		"Organization | Acme BV — BE0123456789 | Béta  SPRL!": {"9", "2"},
 	}, &logged)
 	var out bytes.Buffer
 	before := time.Now().UnixMilli()
@@ -337,8 +354,8 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	if hits[2].Path != "/user/me" || hits[2].Auth != "Bearer access-abc" || hits[2].Host != "api.my-falco.be" {
 		t.Fatalf("%#v", hits[2])
 	}
-	// An out-of-range answer is asked again, as a select cannot pick one.
-	if strings.Join(logged, "|") != "\nFalco Setup\n|? Organization|  1) Acme BV — BE0123456789|  2) Béta  SPRL!" {
+	// An out-of-range answer ("9") is asked again, as a select cannot pick one.
+	if strings.Join(logged, "|") != "\nFalco Setup\n" {
 		t.Fatalf("%q", logged)
 	}
 	stored := loadCreds(t, "beta-sprl")

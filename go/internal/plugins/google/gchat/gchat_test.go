@@ -25,6 +25,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -153,9 +154,23 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	}
 }
 
-// scripted answers setup prompts in order; an exhausted script is EOF.
+// scripted answers setup prompts and menus in order; an exhausted script is
+// EOF, and a menu with no answer left is one asked off a terminal.
 func scripted(sc *plugins.SetupContext, answers ...string) *[]string {
 	var asked []string
+	sc.Select = func(message string, choices []plugins.Choice) (int, error) {
+		q := message
+		for _, c := range choices {
+			q += " | " + c.Name + " - " + c.Description
+		}
+		asked = append(asked, q)
+		var in io.Reader = strings.NewReader("")
+		if len(answers) > 0 {
+			in = testbox.Terminal(strings.NewReader(answers[0] + "\n"))
+			answers = answers[1:]
+		}
+		return host.NewSetupContext(host.Streams{In: in, Out: io.Discard, Err: io.Discard}).Select(message, choices)
+	}
 	sc.Prompt = func(q string, _ bool) (string, error) {
 		asked = append(asked, q)
 		if len(answers) == 0 {
@@ -210,7 +225,7 @@ func TestSetupOAuthUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	if err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(*asked) != 1 || !strings.HasPrefix((*asked)[0], "Choose profile type:\n  1) Webhook") {
+	if len(*asked) != 1 || (*asked)[0] != "Choose profile type: | Webhook - Simple incoming webhook URL | OAuth - Full API access with Google Workspace account" {
 		t.Fatalf("prompts %q", *asked)
 	}
 	authURL, _ := url.Parse(opts.AuthorizationURL("http://localhost:3001/callback"))
@@ -334,7 +349,6 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 		{[]string{"1", "\ufeff"}, "Webhook URL is required", ""},
 		{[]string{"1", "::not a url"}, "", "Check that the URL is correct and accessible"},
 		{nil, "Interactive input required but not running in terminal", "Run this command in an interactive terminal"},
-		{[]string{"3"}, `Unknown profile type "3"`, "Choose one of the listed types"},
 	}
 	for _, c := range cases {
 		_, _, err := run(plugins.SetupOptions{Profile: "bad"}, c.answers...)

@@ -12,6 +12,7 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
@@ -112,23 +113,16 @@ To use a vault that already exists, run 'agentio vault set <path>' instead.`,
 // default path, until the answer is absolute; otherwise the default path.
 func promptVaultPath(cmd *cobra.Command) (string, error) {
 	def := vault.DefaultVaultPath()
-	if !host.IsTerminal(cmd.InOrStdin()) {
+	p := host.NewPrompter(streams(cmd))
+	if !p.Interactive() {
 		return def, nil
 	}
-	setup := host.NewSetupContext(streams(cmd))
-	for {
-		answer, err := setup.Prompt("Vault file location: ("+def+")", false)
-		if err != nil {
-			return "", err
+	return p.Input("Vault file location:", def, func(v string) string {
+		if !isAbs(v) {
+			return "Path must be absolute"
 		}
-		if answer == "" {
-			return def, nil
-		}
-		if isAbs(answer) {
-			return answer, nil
-		}
-		fmt.Fprintln(cmd.ErrOrStderr(), "Path must be absolute")
-	}
+		return ""
+	})
 }
 
 // prepareVaultPath is the normalised vault path, named when it differs.
@@ -344,9 +338,23 @@ This deletes the vault file itself. To simply stop using a vault without
 destroying it, point agentio elsewhere with 'agentio vault set <path>'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !force {
-				return clierr.New(clierr.InvalidParams,
-					"Refusing to reset without confirmation and no terminal is available to prompt",
-					"Re-run with --force if you are sure")
+				p := host.NewPrompter(streams(cmd))
+				if !p.Interactive() {
+					return clierr.New(clierr.InvalidParams,
+						"Refusing to reset without confirmation and no terminal is available to prompt",
+						"Re-run with --force if you are sure")
+				}
+				ok, err := p.YesNo("This will delete the vault, pointer, and stored passphrase. Continue?", false)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Aborted")
+					return nil
+				}
+			}
+			if err := vault.RemoveLegacyBackups(); err != nil {
+				return err
 			}
 			if err := vault.ResetVault(); err != nil {
 				return err
@@ -377,9 +385,6 @@ func vaultExport() *cobra.Command {
   # bring your own encryption key (64 hex chars)
   agentio vault export --all --key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !all {
-				all = true
-			}
 			encryptionKey := key
 			if encryptionKey == "" {
 				buf := make([]byte, 32)
@@ -395,25 +400,41 @@ func vaultExport() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			exported := vault.EmptyContents()
-			count := 0
-			for service, list := range contents.Config.Profiles {
-				for _, entry := range list {
-					exported.Config.Profiles[service] = append(exported.Config.Profiles[service], vault.ProfileValue{Name: entry.Name})
-					if creds, ok := contents.Credentials[service][entry.Name]; ok {
-						if exported.Credentials[service] == nil {
-							exported.Credentials[service] = map[string]map[string]any{}
-						}
-						exported.Credentials[service][entry.Name] = creds
-					}
-					count++
+			var profiles []selection
+			for _, service := range contents.Config.Services() {
+				for _, entry := range contents.Config.Profiles[service] {
+					profiles = append(profiles, selection{service, entry.Name})
 				}
 			}
-			if count == 0 {
+			if len(profiles) == 0 {
 				return clierr.New(clierr.NotFound, "No profiles configured", "Add profiles first with: agentio <service> profile add")
 			}
-			// Bun's exporter stores profile names as strings. Match that blob.
-			raw := exportBlob(exported)
+			selected := profiles
+			if p := host.NewPrompter(streams(cmd)); !all && p.Interactive() {
+				choice, err := p.Select("What would you like to export?", []plugins.Choice{
+					{Name: fmt.Sprintf("All profiles (%d)", len(profiles))},
+					{Name: "Select specific profiles"},
+				}, 0)
+				if err != nil {
+					return err
+				}
+				if choice == 1 {
+					choices := make([]plugins.Choice, len(profiles))
+					for i, sel := range profiles {
+						choices[i] = plugins.Choice{Name: sel.service + ": " + sel.name}
+					}
+					picked, err := p.Checkbox("Select profiles to export:", choices, true)
+					if err != nil {
+						return err
+					}
+					selected = nil
+					for _, i := range picked {
+						selected = append(selected, profiles[i])
+					}
+				}
+			}
+			count := len(selected)
+			raw := exportBlob(contents, selected)
 			enc, err := vault.Encrypt(raw, encryptionKey)
 			if err != nil {
 				return err
@@ -581,7 +602,14 @@ func vaultClear() *cobra.Command {
   agentio vault clear --force`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !force {
-				return clierr.New(clierr.InvalidParams, "Refusing to clear without --force", "Re-run with --force if you are sure")
+				ok, err := host.NewPrompter(streams(cmd)).Confirm("This will delete all profiles, credentials, and API keys. Are you sure?")
+				if err != nil {
+					return err
+				}
+				if !ok {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Aborted")
+					return nil
+				}
 			}
 			if err := vault.Update(func(cur *vault.Contents) error {
 				cur.Config = vault.Config{Profiles: map[string][]vault.ProfileValue{}}
@@ -628,15 +656,21 @@ func resolvePassphrase(cmd *cobra.Command, flag string, fromStdin, create bool) 
 			"A passphrase is required and no terminal is available to prompt",
 			"Use --passphrase-stdin, --passphrase <value>, or set AGENTIO_PASSPHRASE")
 	}
-	setup := host.NewSetupContext(streams(cmd))
+	p := host.NewPrompter(streams(cmd))
 	if !create {
-		return setup.Prompt("Vault passphrase:", true)
+		return p.Password("Vault passphrase:", nil)
 	}
-	pass, err := setup.Prompt(fmt.Sprintf("Create a passphrase (min %d chars):", vault.MinPassphraseLen), true)
+	// Bun promptNewPassphrase: a short one is asked again, not refused.
+	pass, err := p.Password(fmt.Sprintf("Create a passphrase (min %d chars):", vault.MinPassphraseLen), func(v string) string {
+		if err := vault.ValidatePassphrase(v); err != nil {
+			return err.(*clierr.Error).Message
+		}
+		return ""
+	})
 	if err != nil {
 		return "", err
 	}
-	again, err := setup.Prompt("Confirm passphrase:", true)
+	again, err := p.Password("Confirm passphrase:", nil)
 	if err != nil {
 		return "", err
 	}
@@ -654,22 +688,35 @@ func isAbs(path string) bool { return filepath.IsAbs(path) }
 
 func joinPath(a, b string) string { return filepath.Join(a, b) }
 
-// exportBlob matches Bun's exporter: profile entries are bare names, and API
-// keys stay out of the blob.
-func exportBlob(c *vault.Contents) string {
-	profiles := map[string][]string{}
-	for service, list := range c.Config.Profiles {
-		for _, entry := range list {
-			profiles[service] = append(profiles[service], entry.Name)
+// selection is one profile picked for export.
+type selection struct{ service, name string }
+
+// exportBlob is Bun's export document for the selected profiles, in their
+// order: profile entries are bare names, credentials go as stored, and
+// read-only flags and API keys stay out.
+func exportBlob(c *vault.Contents, selected []selection) string {
+	profiles, credentials := jsvalue.NewObject(), jsvalue.NewObject()
+	for _, sel := range selected {
+		names, _ := profiles.Get(sel.service)
+		list, _ := names.([]any)
+		profiles.Set(sel.service, append(list, sel.name))
+		if creds := c.Credentials[sel.service][sel.name]; creds != nil {
+			byName, _ := credentials.Get(sel.service)
+			obj, _ := byName.(*jsvalue.Object)
+			if obj == nil {
+				obj = jsvalue.NewObject()
+				credentials.Set(sel.service, obj)
+			}
+			obj.Set(sel.name, vault.Ordered(creds))
 		}
 	}
-	body := map[string]any{
-		"version":     c.Version,
-		"config":      map[string]any{"profiles": profiles},
-		"credentials": c.Credentials,
-	}
-	raw, _ := json.Marshal(body)
-	return string(raw)
+	config := jsvalue.NewObject()
+	config.Set("profiles", profiles)
+	body := jsvalue.NewObject()
+	body.Set("version", 1)
+	body.Set("config", config)
+	body.Set("credentials", credentials)
+	return string(jsvalue.Stringify(body))
 }
 
 func decodeExport(plain string) (*vault.Contents, error) {

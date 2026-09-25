@@ -2,6 +2,7 @@ package vault
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -36,5 +37,27 @@ func TestCredentialsKeepTheirStoredOrderUntilChanged(t *testing.T) {
 	}
 	if got := string(jsvalue.Stringify(Ordered(map[string]any{"b": 1, "a": 2}))); got != `{"a":2,"b":1}` {
 		t.Fatalf("unknown object: %s", got)
+	}
+}
+
+// Bun lists a vault's services in the order they were stored (Object.entries);
+// a Go map has none, so Config remembers it, through a clone as well.
+func TestConfigServicesKeepTheStoredOrder(t *testing.T) {
+	c, err := decodeContents([]byte(`{"version":1,"config":{"profiles":{"slack":[],"github":[],"gmail":[]}},"credentials":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Config.Services(), ","); got != "slack,github,gmail" {
+		t.Fatalf("decoded %s", got)
+	}
+	cloned, err := clone(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(cloned.Config.Profiles, "github")
+	cloned.Config.Profiles["dropbox"] = nil
+	cloned.Config.Profiles["confluence"] = nil
+	if got := strings.Join(cloned.Config.Services(), ","); got != "slack,gmail,confluence,dropbox" {
+		t.Fatalf("cloned %s", got)
 	}
 }

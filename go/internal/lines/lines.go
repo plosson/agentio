@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"os"
+	"reflect"
 	"sync"
 )
 
@@ -25,23 +25,23 @@ type Reader struct {
 }
 
 var (
-	filesMu sync.Mutex
-	files   = map[*os.File]*Reader{}
+	readersMu sync.Mutex
+	readers   = map[io.Reader]*Reader{}
 )
 
-// For returns the Reader for r. A file, os.Stdin above all, gets one Reader
-// for the life of the process, whoever asks.
+// For returns the Reader for r. The same r, os.Stdin above all, gets one
+// Reader for the life of the process, whoever asks: every prompt of a command
+// reads the same buffered lines. A reader that cannot be a map key gets its own.
 func For(r io.Reader) *Reader {
-	f, ok := r.(*os.File)
-	if !ok {
+	if !reflect.TypeOf(r).Comparable() {
 		return &Reader{br: bufio.NewReader(r)}
 	}
-	filesMu.Lock()
-	defer filesMu.Unlock()
-	if files[f] == nil {
-		files[f] = &Reader{br: bufio.NewReader(f)}
+	readersMu.Lock()
+	defer readersMu.Unlock()
+	if readers[r] == nil {
+		readers[r] = &Reader{br: bufio.NewReader(r)}
 	}
-	return files[f]
+	return readers[r]
 }
 
 // ReadLine returns the next line, with its newline, as bufio.Reader.ReadString

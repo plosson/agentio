@@ -58,21 +58,16 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	return setupOAuth(ctx, setup)
 }
 
-// chooseType is Bun's interactiveSelect, asked as a numbered prompt as the
-// confluence site choice is.
+// chooseType is Bun's interactiveSelect of the profile type.
 func chooseType(setup *plugins.SetupContext) (string, error) {
-	answer, err := setup.Prompt("Choose profile type:\n  1) Webhook — Simple incoming webhook URL\n  2) OAuth — Full API access with Google Workspace account", false)
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if err != nil || answer == "" {
-		return "", setup.Fail("INVALID_PARAMS", "Interactive input required but not running in terminal", "Run this command in an interactive terminal")
+	i, err := setup.Select("Choose profile type:", []plugins.Choice{
+		{Name: "Webhook", Description: "Simple incoming webhook URL"},
+		{Name: "OAuth", Description: "Full API access with Google Workspace account"},
+	})
+	if err != nil {
+		return "", err
 	}
-	switch answer {
-	case "1", "webhook":
-		return "webhook", nil
-	case "2", "oauth":
-		return "oauth", nil
-	}
-	return "", setup.Fail("INVALID_PARAMS", fmt.Sprintf("Unknown profile type %q", answer), "Choose one of the listed types")
+	return []string{"webhook", "oauth"}[i], nil
 }
 
 func setupWebhook(ctx context.Context, suggested string, setup *plugins.SetupContext) (*plugins.SetupResult, error) {

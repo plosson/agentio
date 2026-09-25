@@ -3,6 +3,7 @@
 package testbox
 
 import (
+	"io"
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/auth"
@@ -23,3 +24,11 @@ func Isolate(t *testing.T) {
 	vault.Reset()
 	auth.Reset()
 }
+
+// Terminal is r read as a terminal (host.IsTerminal): a person at a keyboard,
+// for the prompts that only run on one.
+func Terminal(r io.Reader) io.Reader { return terminal{r} }
+
+type terminal struct{ io.Reader }
+
+func (terminal) IsTerminal() bool { return true }

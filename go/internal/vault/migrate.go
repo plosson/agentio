@@ -133,3 +133,19 @@ func legacyKey() ([]byte, error) {
 	machine := host + "-" + u.Username + "-agentio-v1"
 	return scrypt.Key([]byte(machine), []byte("agentio-salt"), scryptN, scryptR, scryptP, keyLen)
 }
+
+// RemoveLegacyBackups deletes the config.json.bak and tokens.enc.bak a
+// migration left, as Bun's vault reset does. A failed delete is ignored.
+func RemoveLegacyBackups() error {
+	configPath, tokensPath := legacyPaths()
+	for _, p := range []string{configPath + ".bak", tokensPath + ".bak"} {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := AssertTestWritable(p, "legacy backup"); err != nil {
+			return err
+		}
+		_ = os.Remove(p)
+	}
+	return nil
+}

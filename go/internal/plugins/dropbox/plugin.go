@@ -358,8 +358,8 @@ func deleteCmd() plugins.CommandSpec {
 				}
 				confirmed, err := run.Confirm("Delete " + what + ` "` + e.Path + `"?`)
 				if err != nil {
-					// Closed stdin: Bun's readline never answers and the process
-					// exits without deleting or printing "Cancelled".
+					// An answer that cannot be read: nothing is deleted or
+					// printed. A closed stdin is an empty answer, so no.
 					return nil, nil
 				}
 				if !confirmed {

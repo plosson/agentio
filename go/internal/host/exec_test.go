@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/lines"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
@@ -448,9 +447,8 @@ func TestOperationForNamesTheRefusalFromTheInput(t *testing.T) {
 func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
 	for answer, want := range map[string]bool{"y\n": true, " YES \n": true, "n\n": false, "yep\n": false, "\n": false, "": false} {
 		var errOut bytes.Buffer
-		in := strings.NewReader(answer)
-		got, _ := confirm(Streams{In: in, Err: &errOut}, lines.For(in), `Delete file "/a"?`)
-		if got != want {
+		got, err := NewPrompter(Streams{In: strings.NewReader(answer), Err: &errOut}).Confirm(`Delete file "/a"?`)
+		if got != want || err != nil { // end of input is a "no", as Bun's readLine null
 			t.Errorf("%q: got %v", answer, got)
 		}
 		if errOut.String() != `Delete file "/a"? (y/n): ` {

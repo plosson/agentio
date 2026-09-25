@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -823,15 +824,15 @@ func TestDeleteAsksFirstAndACancelSendsNothing(t *testing.T) {
 		}
 		writeJSON(w, 200, map[string]any{"metadata": map[string]any{".tag": "folder", "path_display": "/Old"}})
 	})
-	// A closed stdin neither deletes nor prints "Cancelled", as in Bun.
+	// An answer that cannot be read neither deletes nor prints "Cancelled".
 	run := host.NewRunContext(storedCreds(int64(1)), "acme", context.Background())
-	run.Confirm = func(string) (bool, error) { return false, io.EOF }
-	run.Log = func(parts ...any) { t.Fatalf("logged %v on a closed stdin", parts) }
+	run.Confirm = func(string) (bool, error) { return false, errors.New("read failed") }
+	run.Log = func(parts ...any) { t.Fatalf("logged %v on a failed read", parts) }
 	res, err := spec(t, "delete").Run(context.Background(), plugins.CommandInput{
 		Args: map[string]any{"path": "old"}, Options: map[string]any{"force": false},
 	}, run)
 	if err != nil || res != nil || strings.Join(fake.paths(), " ") != "/2/files/get_metadata" {
-		t.Fatalf("closed stdin: %#v %v %v", res, err, fake.paths())
+		t.Fatalf("failed read: %#v %v %v", res, err, fake.paths())
 	}
 	for _, answer := range []bool{false, true} {
 		var asked []string

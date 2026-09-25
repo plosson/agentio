@@ -165,34 +165,17 @@ func accessibleSites(ctx context.Context, do fetchFunc, access string) ([]site, 
 	return sites, nil
 }
 
+// chooseSite is Bun select<Product>Site: an interactiveSelect of the sites.
 func (a App) chooseSite(setup *plugins.SetupContext, sites []site) (site, error) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Select a %s site:", a.DisplayName)
+	choices := make([]plugins.Choice, len(sites))
 	for i, s := range sites {
-		fmt.Fprintf(&b, "\n  %d) %s — %s", i+1, s.Name, s.URL)
+		choices[i] = plugins.Choice{Name: s.Name, Description: s.URL}
 	}
-	answer, err := setup.Prompt(b.String(), false)
-	answer = strings.TrimSpace(answer)
-	if err != nil || answer == "" {
-		return site{}, setup.Fail(
-			"INVALID_PARAMS",
-			"Interactive input required but not running in terminal",
-			"Run this command in an interactive terminal",
-		)
+	i, err := setup.Select(fmt.Sprintf("Select a %s site:", a.DisplayName), choices)
+	if err != nil {
+		return site{}, err
 	}
-	if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(sites) {
-		return sites[n-1], nil
-	}
-	for _, s := range sites {
-		if answer == s.Name || answer == s.URL || answer == s.ID {
-			return s, nil
-		}
-	}
-	return site{}, setup.Fail(
-		"INVALID_PARAMS",
-		fmt.Sprintf("Unknown %s site %q", a.DisplayName, answer),
-		"Choose one of the listed sites",
-	)
+	return sites[i], nil
 }
 
 // performOAuth is Bun perform<Product>OAuthFlow(select<Product>Site).

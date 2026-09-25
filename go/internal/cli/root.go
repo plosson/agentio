@@ -154,7 +154,23 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 	addGitHubVaultSecretCommands(root, reg)
 	root.AddCommand(docsCmd(), daemonCmd(reg), doctorCmd(), keyCmd(), loginCmd(), logoutCmd(), pluginCmd(reg),
 		profileCmd(reg), reauthCmd(reg), skillCmd(reg), statusCmd(reg), vaultCmd())
+	root.AddCommand(removedCmd("setup", "agentio vault init"), removedCmd("config", "agentio vault export | import | clear"))
 	return root
+}
+
+// removedCmd is Bun's hidden stub for a command folded into `vault` in 2.0:
+// the old name fails with a pointer to the new one, whatever follows it.
+func removedCmd(name, replacement string) *cobra.Command {
+	return &cobra.Command{
+		Use:         name,
+		Hidden:      true,
+		Args:        cobra.ArbitraryArgs,
+		Annotations: map[string]string{loose: "true"},
+		RunE: func(*cobra.Command, []string) error {
+			return clierr.New(clierr.InvalidParams, "`agentio "+name+"` was removed in 2.0",
+				"use `"+replacement+"` (see: agentio vault --help)")
+		},
+	}
 }
 
 var (
@@ -1220,6 +1236,7 @@ func reauthCmd(reg *plugins.Registry) *cobra.Command {
 		Short:  "Re-authenticate expired or invalid profiles",
 		Hidden: true,
 		RunE: func(c *cobra.Command, _ []string) error {
+			fmt.Fprint(c.ErrOrStderr(), "Checking profile credentials...\n\n")
 			rows, err := host.Statuses(context.Background(), reg, true)
 			if err != nil {
 				return err
@@ -1234,11 +1251,28 @@ func reauthCmd(reg *plugins.Registry) *cobra.Command {
 				fmt.Fprintln(c.OutOrStdout(), "All profiles are valid.")
 				return nil
 			}
+			selected := bad
 			if !all {
-				return clierr.New(clierr.InvalidParams, "Refusing to reauth without --all", "Re-run with --all")
+				// Every invalid profile starts checked, so off a terminal all go.
+				choices := make([]plugins.Choice, len(bad))
+				for i, row := range bad {
+					reason := row.Error
+					if reason == "" {
+						reason = "no credentials"
+					}
+					choices[i] = plugins.Choice{Name: fmt.Sprintf("%s / %s (%s)", row.Service, row.Profile, reason), Checked: true}
+				}
+				picked, err := host.NewPrompter(streams(c)).Checkbox("Select profiles to re-authenticate:", choices, true)
+				if err != nil {
+					return err
+				}
+				selected = nil
+				for _, i := range picked {
+					selected = append(selected, bad[i])
+				}
 			}
 			setup := host.NewSetupContext(streams(c))
-			for _, row := range bad {
+			for _, row := range selected {
 				if err := host.Reauth(context.Background(), reg, row.Service, row.Profile, setup, c.ErrOrStderr()); err != nil {
 					fmt.Fprintf(c.ErrOrStderr(), "\n  Failed to reauth %s / %s: %s\n", row.Service, row.Profile, err.Error())
 				}

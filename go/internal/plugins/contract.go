@@ -77,11 +77,21 @@ type OAuthSetupResult struct {
 type SetupContext struct {
 	Prompt  func(question string, secret bool) (string, error)
 	Confirm func(question string) (bool, error)
+	// Select is Bun's interactiveSelect with no default: the index of the
+	// choice picked on a terminal; off one, an INVALID_PARAMS refusal.
+	Select  func(message string, choices []Choice) (int, error)
 	Log     func(parts ...any)
 	OpenURL func(url string) bool
 	OAuth   func(ctx context.Context, opts OAuthSetupOptions) (OAuthSetupResult, error)
 	Fail    func(code ErrorCode, message, suggestion string) error
 	Fetch   func(ctx context.Context, req *http.Request) (*http.Response, error)
+}
+
+// Choice is one entry of a menu (Bun SelectChoice / CheckboxChoice).
+type Choice struct {
+	Name        string
+	Description string
+	Checked     bool // a checkbox entry that starts checked
 }
 
 // RunContext is what a command handler receives. Credentials are already fresh.

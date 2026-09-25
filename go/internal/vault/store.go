@@ -417,7 +417,11 @@ func clone(c *Contents) (*Contents, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decodeContents(b)
+	out, err := decodeContents(b)
+	if err == nil {
+		out.Config.services = append([]string(nil), c.Config.Services()...)
+	}
+	return out, err
 }
 
 func itoa(n int) string {

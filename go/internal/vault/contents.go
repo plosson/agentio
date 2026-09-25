@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // ProfileValue is one config.profiles entry. Older vaults stored a bare
@@ -145,7 +148,8 @@ type Config struct {
 	Profiles map[string][]ProfileValue `json:"profiles"`
 	APIKeys  []APIKey                  `json:"apiKeys,omitempty"`
 
-	extra map[string]json.RawMessage
+	extra    map[string]json.RawMessage
+	services []string // the profiles keys in stored order
 }
 
 type plainConfig Config
@@ -153,8 +157,41 @@ type plainConfig Config
 func (c Config) MarshalJSON() ([]byte, error) { return marshalKeeping(plainConfig(c), c.extra) }
 
 func (c *Config) UnmarshalJSON(b []byte) (err error) {
-	c.extra, err = unmarshalKeeping(b, (*plainConfig)(c))
-	return err
+	if c.extra, err = unmarshalKeeping(b, (*plainConfig)(c)); err != nil {
+		return err
+	}
+	var members struct {
+		Profiles json.RawMessage `json:"profiles"`
+	}
+	if json.Unmarshal(b, &members) == nil {
+		if v, err := jsvalue.Parse(members.Profiles); err == nil {
+			if obj, ok := v.(*jsvalue.Object); ok {
+				c.services = obj.Keys()
+			}
+		}
+	}
+	return nil
+}
+
+// Services are the services with a profiles entry, in the order Bun lists
+// them (Object.entries): as stored, then any added since, sorted.
+func (c Config) Services() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range c.services {
+		if _, ok := c.Profiles[s]; ok && !seen[s] {
+			out = append(out, s)
+			seen[s] = true
+		}
+	}
+	var added []string
+	for s := range c.Profiles {
+		if !seen[s] {
+			added = append(added, s)
+		}
+	}
+	sort.Strings(added)
+	return append(out, added...)
 }
 
 // Contents is the decrypted vault document. Top-level keys Go does not model

@@ -401,8 +401,18 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	}
 }
 
+// withAnswers answers prompts and menus in order; a menu with no answer left
+// is one asked off a terminal.
 func withAnswers(replies ...string) *plugins.SetupContext {
 	sc := &plugins.SetupContext{Log: func(...any) {}, Fail: fail}
+	sc.Select = func(message string, choices []plugins.Choice) (int, error) {
+		var in io.Reader = strings.NewReader("")
+		if len(replies) > 0 {
+			in = testbox.Terminal(strings.NewReader(replies[0] + "\n"))
+			replies = replies[1:]
+		}
+		return host.NewSetupContext(host.Streams{In: in, Out: io.Discard, Err: io.Discard}).Select(message, choices)
+	}
 	sc.Prompt = func(string, bool) (string, error) {
 		if len(replies) == 0 {
 			return "", io.EOF
@@ -477,7 +487,6 @@ func TestInteractiveSetupBuildsTheURL(t *testing.T) {
 		msg     string
 	}{
 		{nil, "Interactive input required but not running in terminal"},
-		{[]string{"9"}, `Unknown database type "9"`},
 		{[]string{"3", " "}, "Database path is required"},
 		{[]string{"2", ""}, "Host is required"},
 		{[]string{"2", "h", "", ""}, "Database name is required"},

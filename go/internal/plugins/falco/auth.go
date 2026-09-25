@@ -283,26 +283,17 @@ func promptPassword(setup *plugins.SetupContext, question string) string {
 	return answer
 }
 
-// promptChoice stands in for inquirer's select. One option needs no question,
-// which keeps a single-organization login non-interactive past the password.
+// promptChoice is inquirer's select. One option needs no question, which
+// keeps a single-organization login non-interactive past the password.
 func promptChoice(setup *plugins.SetupContext, message string, names []string) (int, error) {
 	if len(names) == 1 {
 		return 0, nil
 	}
-	setup.Log("? " + message)
+	choices := make([]plugins.Choice, len(names))
 	for i, name := range names {
-		setup.Log(fmt.Sprintf("  %d) %s", i+1, name))
+		choices[i] = plugins.Choice{Name: name}
 	}
-	for {
-		answer, err := setup.Prompt(fmt.Sprintf("? %s (1-%d): ", message, len(names)), false)
-		if err != nil {
-			return 0, setup.Fail("INVALID_PARAMS", "An organization choice is required", "")
-		}
-		n, err := strconv.Atoi(jsvalue.Trim(answer))
-		if err == nil && n >= 1 && n <= len(names) {
-			return n - 1, nil
-		}
-	}
+	return setup.Select(message, choices)
 }
 
 // loginInteractively runs the password and optional second-factor exchange.

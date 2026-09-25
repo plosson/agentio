@@ -196,27 +196,16 @@ var dbTypes = []struct{ value, name, description, port string }{
 }
 
 // promptInteractiveConnection asks for each part and builds the URL with
-// encodeURIComponent. Bun's arrow-key select is a numbered prompt here, as
-// the other ported selects are.
+// encodeURIComponent.
 func promptInteractiveConnection(setup *plugins.SetupContext) (string, error) {
 	setup.Log("\nSQL Database Setup (Interactive)\n")
-	question := "Select database type:"
+	choices := make([]plugins.Choice, len(dbTypes))
 	for i, t := range dbTypes {
-		question += fmt.Sprintf("\n  %d) %s — %s", i+1, t.name, t.description)
+		choices[i] = plugins.Choice{Name: t.name, Description: t.description}
 	}
-	answer, err := setup.Prompt(question, false)
-	answer = strings.ToLower(strings.TrimSpace(answer))
-	if err != nil || answer == "" {
-		return "", setup.Fail("INVALID_PARAMS", "Interactive input required but not running in terminal", "Run this command in an interactive terminal")
-	}
-	chosen := -1
-	for i, t := range dbTypes {
-		if answer == fmt.Sprint(i+1) || answer == t.value || answer == strings.ToLower(t.name) {
-			chosen = i
-		}
-	}
-	if chosen < 0 {
-		return "", setup.Fail("INVALID_PARAMS", fmt.Sprintf("Unknown database type %q", answer), "Choose one of the listed types")
+	chosen, err := setup.Select("Select database type:", choices)
+	if err != nil {
+		return "", err
 	}
 	dbType := dbTypes[chosen]
 

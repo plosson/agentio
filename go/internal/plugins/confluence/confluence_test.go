@@ -75,9 +75,13 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		opts = o
 		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
-	sc.Prompt = func(q string, _ bool) (string, error) {
+	sc.Select = func(message string, choices []plugins.Choice) (int, error) {
+		q := message
+		for _, c := range choices {
+			q += " | " + c.Name + " - " + c.Description
+		}
 		prompts = append(prompts, q)
-		return "2", nil
+		return 1, nil
 	}
 	var out bytes.Buffer
 	before := time.Now().UnixMilli()
@@ -103,7 +107,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		token.Body["redirect_uri"] != "http://localhost:9999/callback" {
 		t.Fatalf("token request %#v", token.Body)
 	}
-	if len(prompts) != 1 || !strings.Contains(prompts[0], "beta") {
+	if len(prompts) != 1 || prompts[0] != "Select a Confluence site: | alpha - https://alpha.atlassian.net | beta - https://beta.atlassian.net" {
 		t.Fatalf("prompts %v", prompts)
 	}
 	// The suggested name is the site hostname, and the host saved it.

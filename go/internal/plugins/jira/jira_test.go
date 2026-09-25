@@ -91,9 +91,13 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		opts = o
 		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
-	sc.Prompt = func(q string, _ bool) (string, error) {
+	sc.Select = func(message string, choices []plugins.Choice) (int, error) {
+		q := message
+		for _, c := range choices {
+			q += " | " + c.Name + " - " + c.Description
+		}
 		prompts = append(prompts, q)
-		return "2", nil
+		return 1, nil
 	}
 	var out bytes.Buffer
 	before := time.Now().UnixMilli()
@@ -119,7 +123,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 		token.Body["redirect_uri"] != "http://localhost:9999/callback" {
 		t.Fatalf("token request %#v", token.Body)
 	}
-	if len(prompts) != 1 || !strings.HasPrefix(prompts[0], "Select a JIRA site:") || !strings.Contains(prompts[0], "beta") {
+	if len(prompts) != 1 || prompts[0] != "Select a JIRA site: | alpha - https://alpha.atlassian.net | beta - https://beta.atlassian.net" {
 		t.Fatalf("prompts %v", prompts)
 	}
 	// The suggested name is the site hostname, and the host saved it.
@@ -667,5 +671,41 @@ func TestProfileListInfoAndNoProfile(t *testing.T) {
 	}
 	if len(fake.Recorded()) != 0 {
 		t.Fatal("API called without a profile")
+	}
+}
+
+// Bun's site choice is interactiveSelect: off a terminal, with more than one
+// site, a piped answer is not read and setup is refused.
+func TestSiteChoiceOffATerminalIsRefused(t *testing.T) {
+	product.SetupVault(t)
+	atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) {
+		switch {
+		case h.Host == "auth.atlassian.com" && h.Path == "/oauth/token":
+			writeJSON(w, 200, map[string]any{"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600})
+		case h.Host == "api.atlassian.com" && h.Path == "/oauth/token/accessible-resources":
+			writeJSON(w, 200, []map[string]any{
+				{"id": "c-a", "url": "https://alpha.atlassian.net", "name": "alpha", "scopes": []string{}},
+				{"id": "c-b", "url": "https://beta.atlassian.net", "name": "beta", "scopes": []string{}},
+			})
+		default:
+			w.WriteHeader(404)
+		}
+	})
+	piped := strings.NewReader("2\n")
+	sc := host.NewSetupContext(host.Streams{In: piped, Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
+		return plugins.OAuthSetupResult{Code: "code-1", RedirectURI: "http://localhost:9999/callback"}, nil
+	}
+	err := host.AddProfile(context.Background(), New(), plugins.SetupOptions{}, sc, &bytes.Buffer{})
+	var ce *clierr.Error
+	if !errors.As(err, &ce) || ce.Code != clierr.InvalidParams || ce.Message != "Interactive input required but not running in terminal" ||
+		ce.Suggestion != "Run this command in an interactive terminal" {
+		t.Fatalf("%v", err)
+	}
+	if piped.Len() != 2 {
+		t.Fatal("the piped answer was read")
+	}
+	if c, _ := vault.Load(); len(c.Config.Profiles["jira"]) != 0 {
+		t.Fatal("a profile was saved")
 	}
 }

@@ -53,8 +53,13 @@ func FindPort() (int, error) {
 	return 0, fmt.Errorf("no available port found in range %d-%d", portStart, portEnd)
 }
 
-// LaunchBrowser opens url with the platform opener. A missing opener returns false.
+// LaunchBrowser opens url with the platform opener. A missing opener returns
+// false, and so does a test run (AGENTIO_TEST=1, set by testbox.Isolate): no
+// test may reach a real browser, whatever PATH holds.
 func LaunchBrowser(raw string) bool {
+	if os.Getenv("AGENTIO_TEST") == "1" {
+		return false
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

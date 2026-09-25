@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -1286,10 +1287,10 @@ func TestOwnAccountMoveAsksFirstAndACancelMovesNothing(t *testing.T) {
 	if err != nil || res != nil || strings.Join(asked, "") != question || strings.Join(logged, "") != "Cancelled" {
 		t.Fatalf("%#v %v %q %q", res, err, asked, logged)
 	}
-	// Closed stdin: Bun never answers, so nothing moves and nothing is printed.
+	// An answer that cannot be read: nothing moves and nothing is printed.
 	res, err = runCmd(t, "pay", in(), func(run *plugins.RunContext) {
-		run.Confirm = func(string) (bool, error) { return false, io.EOF }
-		run.Log = func(parts ...any) { t.Fatalf("logged %v on a closed stdin", parts) }
+		run.Confirm = func(string) (bool, error) { return false, errors.New("read failed") }
+		run.Log = func(parts ...any) { t.Fatalf("logged %v on a failed read", parts) }
 	})
 	if err != nil || res != nil || strings.Contains(fake.calls(), "/transfer") {
 		t.Fatalf("%#v %v %s", res, err, fake.calls())

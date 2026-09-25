@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,4 +81,25 @@ func TestPasteAtEndOfInputLeavesTheCallbackToDecide(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	})
+}
+
+// A test run never reaches a browser, even with an opener on PATH.
+func TestLaunchBrowserIsOffDuringTests(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "opened")
+	script := "#!/bin/sh\ntouch " + marker + "\n"
+	for _, name := range []string{"open", "xdg-open"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("AGENTIO_TEST", "1")
+	if LaunchBrowser("https://example.invalid/auth") {
+		t.Fatal("LaunchBrowser reported an opened browser during a test")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the opener ran during a test")
+	}
 }

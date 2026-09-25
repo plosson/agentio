@@ -28,6 +28,10 @@ type parsed struct {
 	version bool           // -V, --version: print the version, exit 0
 }
 
+// loose marks a command that takes any option and any number of arguments
+// (Commander allowUnknownOption and allowExcessArguments).
+const loose = "agentio-commander-loose"
+
 // flagSpecs is the Commander flags string (Option.flags, used in its error
 // messages) of a plugin option, kept on the pflag flag.
 const flagSpecs = "agentio-commander-flags"
@@ -89,6 +93,7 @@ func parseLevel(cmd *cobra.Command, operands, words []string) parsed {
 		return ""
 	}
 	switch {
+	case cmd.Annotations[loose] != "":
 	case cmd.Runnable() || !cmd.HasSubCommands():
 		if msg := unknownOption(); msg != "" {
 			return parsed{err: msg}

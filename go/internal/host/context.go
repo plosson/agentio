@@ -6,10 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/lines"
 	"github.com/plosson/agentio/go/internal/oauth"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/term"
@@ -54,10 +52,11 @@ func fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 // NewSetupContext builds the host surface a profile.setup receives.
 func NewSetupContext(s Streams) *plugins.SetupContext {
 	// One line reader over In, shared by every prompt.
-	rd := lines.For(s.in())
+	p := NewPrompter(s)
 	return &plugins.SetupContext{
-		Prompt:  func(q string, secret bool) (string, error) { return prompt(s, rd, q, secret) },
-		Confirm: func(q string) (bool, error) { return confirm(s, rd, q) },
+		Prompt:  p.Ask,
+		Confirm: p.Confirm,
+		Select:  func(message string, choices []plugins.Choice) (int, error) { return p.Select(message, choices, -1) },
 		Log:     func(parts ...any) { fmt.Fprintln(s.err(), parts...) },
 		OpenURL: oauth.LaunchBrowser,
 		OAuth: func(ctx context.Context, opts plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
@@ -76,7 +75,7 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 			}
 			res, err := oauth.AwaitCode(ctx, oauth.AwaitConfig{
 				Port: port, ServiceName: opts.ServiceName, ExpectedState: opts.ExpectedState,
-				AuthURL: authURL, Lines: rd, Err: s.err(),
+				AuthURL: authURL, Lines: p.rd, Err: s.err(),
 			})
 			if err != nil {
 				return plugins.OAuthSetupResult{}, err
@@ -100,48 +99,17 @@ func NewRunContext(creds map[string]any, profileName string, ctx context.Context
 		Signal:      ctx,
 		Fetch:       fetch,
 		Log:         logStderr,
-		Confirm:     func(q string) (bool, error) { return confirm(StdStreams(), lines.For(os.Stdin), q) },
+		Confirm:     func(q string) (bool, error) { return NewPrompter(StdStreams()).Confirm(q) },
 		Fail:        fail,
 	}
 }
 
-// prompt reads its answer from rd, the line reader over s.In.
-func prompt(s Streams, rd *lines.Reader, question string, secret bool) (string, error) {
-	if !strings.HasSuffix(question, " ") {
-		question += " "
-	}
-	fmt.Fprint(s.err(), question)
-	if secret && IsTerminal(s.in()) && !rd.Waiting() {
-		fd := int(os.Stdin.Fd())
-		b, err := term.ReadPassword(fd)
-		fmt.Fprintln(s.err())
-		if err != nil {
-			return "", err
-		}
-		return string(b), nil
-	}
-	line, err := rd.ReadLine(context.Background())
-	if err != nil && line == "" {
-		return "", err
-	}
-	return strings.TrimRight(line, "\r\n"), nil
-}
-
-func confirm(s Streams, rd *lines.Reader, question string) (bool, error) {
-	answer, err := prompt(s, rd, question+" (y/n): ", false)
-	if err != nil {
-		return false, err
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
-// IsTerminal reports whether r is a terminal (Bun process.stdin.isTTY).
+// IsTerminal reports whether r is a terminal (Bun process.stdin.isTTY). A
+// reader that says it is one (testbox.Terminal) is.
 func IsTerminal(r io.Reader) bool {
+	if t, ok := r.(interface{ IsTerminal() bool }); ok {
+		return t.IsTerminal()
+	}
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
