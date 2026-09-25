@@ -248,13 +248,7 @@ func parseSendOptions(in plugins.CommandInput, fail plugins.FailFunc) (*sendOpti
 			return nil, err
 		}
 	}
-	given := func(name string) *string {
-		if value, ok := in.LookupOption(name); ok {
-			return &value
-		}
-		return nil
-	}
-	resolved, err := resolveComposeText(given("subject"), in.Option("subject-file"), given("body"), in.Option("body-file"), spec, fail)
+	resolved, err := resolveComposeText(in.OptionPtr("subject"), in.Option("subject-file"), in.OptionPtr("body"), in.Option("body-file"), spec, fail)
 	if err != nil {
 		return nil, err
 	}

@@ -1046,9 +1046,10 @@ func TestACutErrorBodyFailsLikeBun(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 409) })
 	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
 	_, err := a.account()
-	if _, isAPI := err.(*apiError); isAPI || err == nil || err.Error() != plugins.BunSocketClosed {
+	if _, isAPI := err.(*apiError); isAPI {
 		t.Fatalf("%#v", err)
 	}
+	testbox.WantSocketClosed(t, err)
 }
 
 func TestNormalizePathAndHeaderEscaping(t *testing.T) {

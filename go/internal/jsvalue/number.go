@@ -125,25 +125,80 @@ func Number(s string) float64 {
 	return f
 }
 
-// ParseInt is parseInt(s, 10): leading digits after optional whitespace and
-// sign, NaN when there are none.
-func ParseInt(s string) float64 {
+// ParseInt is parseInt(s, 10).
+func ParseInt(s string) float64 { return ParseIntRadix(s, 10) }
+
+// ParseIntRadix is parseInt(s, radix): leading JavaScript whitespace, one
+// sign, a 0x/0X prefix only when radix is 16 or 0 (0 is otherwise 10), then
+// the longest run of digits; NaN when there are none or radix is outside
+// 2..36. Results past 2^53 round as JavaScriptCore does: radix 10 as a
+// decimal literal, powers of two from the last digit up, others as summed.
+func ParseIntRadix(s string, radix int) float64 {
 	s = strings.TrimLeftFunc(s, IsSpace)
 	neg := false
 	if s != "" && (s[0] == '-' || s[0] == '+') {
-		neg = s[0] == '-'
-		s = s[1:]
+		neg, s = s[0] == '-', s[1:]
 	}
-	end := 0
-	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
-		end++
+	stripPrefix := radix == 0 || radix == 16
+	if radix == 0 {
+		radix = 10
+	} else if radix < 2 || radix > 36 {
+		return math.NaN()
+	}
+	if stripPrefix && len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		s, radix = s[2:], 16
+	}
+	n, end := 0.0, 0
+	for ; end < len(s); end++ {
+		d := digitValue(s[end])
+		if d >= radix {
+			break
+		}
+		n = float64(n*float64(radix)) + float64(d) // rounded twice, not fused
 	}
 	if end == 0 {
 		return math.NaN()
 	}
-	n, _ := strconv.ParseFloat(s[:end], 64)
+	if n >= 1<<53 {
+		switch radix {
+		case 10:
+			n, _ = strconv.ParseFloat(s[:end], 64)
+		case 2, 4, 8, 16, 32:
+			n = parseIntOverflow(s[:end], radix)
+		}
+	}
 	if neg {
 		n = -n
+	}
+	return n
+}
+
+// digitValue is c as a base-36 digit, 36 when it is none.
+func digitValue(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'z':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'Z':
+		return int(c-'A') + 10
+	}
+	return 36
+}
+
+// parseIntOverflow is JavaScriptCore parseIntOverflow: digits summed from the
+// last one up, the place value growing until it overflows.
+func parseIntOverflow(digits string, radix int) float64 {
+	n, place := 0.0, 1.0
+	for i := len(digits) - 1; i >= 0; i-- {
+		if math.IsInf(place, 1) {
+			if digits[i] != '0' {
+				return math.Inf(1)
+			}
+		} else {
+			n += float64(digitValue(digits[i])) * place
+		}
+		place *= float64(radix)
 	}
 	return n
 }

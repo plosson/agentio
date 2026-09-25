@@ -167,7 +167,7 @@ func (p *fxParser) parse() (*fxNode, error) {
 		default:
 			tag, ok := fxReadTagExp(s, i, true, ">")
 			if !ok {
-				pos := len(utf16.Encode([]rune(s[:i])))
+				pos := jsvalue.Length(s[:i])
 				units := utf16.Encode([]rune(s))
 				context := string(utf16.Decode(units[max(0, pos-50):min(len(units), pos+50)]))
 				return nil, fmt.Errorf("readTagExp returned undefined at position %d. Context: \"%s\"", pos, context)
@@ -370,7 +370,7 @@ func (p *fxParser) decode(s string) (string, error) {
 		out.WriteString(replacement)
 		last = j + 1
 		i = last
-		if delta := fxUnits(replacement) - (fxUnits(token) + 2); delta > 0 {
+		if delta := jsvalue.Length(replacement) - (jsvalue.Length(token) + 2); delta > 0 {
 			p.expanded += delta
 			if p.expanded > fxMaxExpandedLength {
 				return "", fmt.Errorf("[EntityReplacer] Expanded content length limit exceeded: %d > %d", p.expanded, fxMaxExpandedLength)
@@ -387,7 +387,7 @@ func (p *fxParser) decode(s string) (string, error) {
 func (p *fxParser) numericReference(token string) (string, bool) {
 	var cp float64
 	if len(token) > 1 && (token[1] == 'x' || token[1] == 'X') {
-		cp = fxParseHex(token[2:])
+		cp = jsvalue.ParseIntRadix(token[2:], 16)
 	} else {
 		cp = jsvalue.ParseInt(token[1:])
 	}
@@ -403,44 +403,6 @@ func (p *fxParser) numericReference(token string) (string, bool) {
 		return string(c), true
 	}
 }
-
-// fxParseHex is parseInt(s, 16).
-func fxParseHex(s string) float64 {
-	s = strings.TrimLeftFunc(s, jsvalue.IsSpace)
-	neg := false
-	if s != "" && (s[0] == '-' || s[0] == '+') {
-		neg, s = s[0] == '-', s[1:]
-	}
-	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
-		s = s[2:]
-	}
-	n, digits := 0.0, 0
-	for ; digits < len(s); digits++ {
-		c := s[digits]
-		var d byte
-		switch {
-		case c >= '0' && c <= '9':
-			d = c - '0'
-		case c >= 'a' && c <= 'f':
-			d = c - 'a' + 10
-		case c >= 'A' && c <= 'F':
-			d = c - 'A' + 10
-		default:
-			goto done
-		}
-		n = n*16 + float64(d)
-	}
-done:
-	if digits == 0 {
-		return math.NaN()
-	}
-	if neg {
-		n = -n
-	}
-	return n
-}
-
-func fxUnits(s string) int { return len(utf16.Encode([]rune(s))) }
 
 type fxTag struct {
 	name, exp      string
@@ -694,7 +656,7 @@ func (p *fxParser) readEntity(i int) (string, string, int, error) {
 	if err != nil {
 		return "", "", 0, err
 	}
-	if n := fxUnits(val); n > fxMaxEntitySize {
+	if n := jsvalue.Length(val); n > fxMaxEntitySize {
 		return "", "", 0, fmt.Errorf("Entity \"%s\" size (%d) exceeds maximum allowed size (%d)", name, n, fxMaxEntitySize)
 	}
 	return name, val, i - 1, nil

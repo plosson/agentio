@@ -194,10 +194,10 @@ export function setProfileReadOnly(
     const index = findProfileIndex(config, service, profileName);
     if (index === -1) return false;
     const serviceProfiles = config.profiles[service]!;
-    // Already writable: leave the entry in the form it is stored in.
-    if (!readOnly && !normalizeProfile(serviceProfiles[index]).readOnly) return true;
-
     const entry = normalizeProfile(serviceProfiles[index]);
+    // Already writable: leave the entry in the form it is stored in.
+    if (!readOnly && !entry.readOnly) return true;
+
     if (readOnly) {
       entry.readOnly = true;
     } else {

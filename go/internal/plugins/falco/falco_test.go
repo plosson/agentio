@@ -857,9 +857,12 @@ func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
 	ctx := context.Background()
 	plain := func(name string, err error) {
 		t.Helper()
-		if _, isAPI := err.(*apiError); isAPI || err == nil || err.Error() != plugins.BunSocketClosed {
-			t.Errorf("%s: %#v", name, err)
-		}
+		t.Run(name, func(t *testing.T) {
+			if _, isAPI := err.(*apiError); isAPI {
+				t.Errorf("%#v", err)
+			}
+			testbox.WantSocketClosed(t, err)
+		})
 	}
 	for _, s := range []int{200, 500} {
 		status = s
@@ -910,9 +913,7 @@ func TestACutPeppolDownloadWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	_, err := exec(t, reg, "peppol get", plugins.CommandInput{Args: map[string]any{"id": "doc-1"},
 		Options: map[string]any{"output": dir, "extract-pdf": true}})
-	if err == nil || err.Error() != plugins.BunSocketClosed {
-		t.Fatalf("%v", err)
-	}
+	testbox.WantSocketClosed(t, err)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("a truncated download was saved: %v", entries)
 	}

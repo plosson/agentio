@@ -7,7 +7,6 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
-	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/testbox"
 )
 
@@ -21,8 +20,9 @@ func TestHubCallFailsLikeBunWhenTheAnswerIsCut(t *testing.T) {
 		}))
 		raw, _, err := auth.HubCall(srv.URL, "/v1/profiles", auth.Call{Token: "t"})
 		srv.Close()
-		if _, isCli := err.(*clierr.Error); isCli || raw != nil || err == nil || err.Error() != plugins.BunSocketClosed {
+		if _, isCli := err.(*clierr.Error); isCli || raw != nil {
 			t.Errorf("%d: %q %#v", status, raw, err)
 		}
+		testbox.WantSocketClosed(t, err)
 	}
 }

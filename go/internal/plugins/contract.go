@@ -152,6 +152,17 @@ func (in CommandInput) OptionPtr(name string) *string {
 	return nil
 }
 
+// IntOptionPtr is a <value> option with Commander's parseInt argParser: nil
+// when absent (undefined), NaN when the value (even "") has no leading digits.
+func (in CommandInput) IntOptionPtr(name string) *float64 {
+	s, ok := in.LookupOption(name)
+	if !ok {
+		return nil
+	}
+	n := jsvalue.ParseInt(s)
+	return &n
+}
+
 // Flag is a switch option; absent or of another type is false.
 func (in CommandInput) Flag(name string) bool {
 	b, _ := in.Options[name].(bool)

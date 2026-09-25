@@ -32,17 +32,6 @@ func New() *plugins.Plugin {
 	}
 }
 
-// intOption is a Commander option parsed with parseInt: nil when absent, NaN
-// when the value (even "") has no leading digits.
-func intOption(in plugins.CommandInput, name string) *float64 {
-	s, given := in.LookupOption(name)
-	if !given {
-		return nil
-	}
-	n := jsvalue.ParseInt(s)
-	return &n
-}
-
 // parseValues is Bun parseValues: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
 func parseValues(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
@@ -320,7 +309,7 @@ func formatCmd() plugins.CommandSpec {
 				bold:         in.Flag("bold"),
 				italic:       in.Flag("italic"),
 				underline:    in.Flag("underline"),
-				fontSize:     intOption(in, "font-size"),
+				fontSize:     in.IntOptionPtr("font-size"),
 				fontFamily:   in.OptionPtr("font-family"),
 				textColor:    in.OptionPtr("text-color"),
 				background:   in.OptionPtr("background"),
@@ -381,7 +370,7 @@ func resizeCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.resize(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), intOption(in, "size"), in.Flag("auto")))
+			return plugins.Result(a.resize(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), in.IntOptionPtr("size"), in.Flag("auto")))
 		},
 		Format: formatResized,
 	}

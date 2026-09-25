@@ -70,20 +70,15 @@ func collectIDs(positional []string, in plugins.CommandInput) []string {
 	return strings.FieldsFunc(plugins.Stdin(in), jsvalue.IsSpace)
 }
 
-// chunkOptions is Bun parseChunkOpts: `options.x ?? default`, so a given ""
+// chunkOptions is Bun parseChunkOpts: `options.x ?? default`, the default
+// being the one chunkOptionSpecs declares (filled by the host), so a given ""
 // parses to NaN rather than taking the default.
 func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
-	orDefault := func(name, def string) string {
-		if value, given := in.LookupOption(name); given {
-			return value
-		}
-		return def
-	}
-	size := jsvalue.ParseInt(orDefault("chunk-size", "1000"))
+	size := jsvalue.ParseInt(in.Option("chunk-size"))
 	if math.IsNaN(size) || size == 0 {
 		size = 1000
 	}
-	retries := jsvalue.ParseInt(orDefault("max-retries", "5"))
+	retries := jsvalue.ParseInt(in.Option("max-retries"))
 	if math.IsNaN(retries) {
 		retries = 0
 	}

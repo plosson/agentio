@@ -20,9 +20,6 @@ type Streams struct {
 	In  io.Reader
 	Out io.Writer
 	Err io.Writer
-
-	// lines is the one line reader over In, shared by every prompt.
-	lines *lines.Reader
 }
 
 func StdStreams() Streams {
@@ -34,13 +31,6 @@ func (s Streams) in() io.Reader {
 		return s.In
 	}
 	return os.Stdin
-}
-
-func (s Streams) lineReader() *lines.Reader {
-	if s.lines != nil {
-		return s.lines
-	}
-	return lines.For(s.in())
 }
 
 func (s Streams) err() io.Writer {
@@ -63,10 +53,11 @@ func fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 
 // NewSetupContext builds the host surface a profile.setup receives.
 func NewSetupContext(s Streams) *plugins.SetupContext {
-	s.lines = s.lineReader()
+	// One line reader over In, shared by every prompt.
+	rd := lines.For(s.in())
 	return &plugins.SetupContext{
-		Prompt:  func(q string, secret bool) (string, error) { return prompt(s, q, secret) },
-		Confirm: func(q string) (bool, error) { return confirm(s, q) },
+		Prompt:  func(q string, secret bool) (string, error) { return prompt(s, rd, q, secret) },
+		Confirm: func(q string) (bool, error) { return confirm(s, rd, q) },
 		Log:     func(parts ...any) { fmt.Fprintln(s.err(), parts...) },
 		OpenURL: oauth.LaunchBrowser,
 		OAuth: func(ctx context.Context, opts plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
@@ -85,7 +76,7 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 			}
 			res, err := oauth.AwaitCode(ctx, oauth.AwaitConfig{
 				Port: port, ServiceName: opts.ServiceName, ExpectedState: opts.ExpectedState,
-				AuthURL: authURL, Lines: s.lines, Err: s.err(),
+				AuthURL: authURL, Lines: rd, Err: s.err(),
 			})
 			if err != nil {
 				return plugins.OAuthSetupResult{}, err
@@ -107,18 +98,18 @@ func NewRunContext(creds map[string]any, profileName string, ctx context.Context
 		Signal:      ctx,
 		Fetch:       fetch,
 		Log:         func(parts ...any) { fmt.Fprintln(os.Stderr, parts...) },
-		Confirm:     func(q string) (bool, error) { return confirm(StdStreams(), q) },
+		Confirm:     func(q string) (bool, error) { return confirm(StdStreams(), lines.For(os.Stdin), q) },
 		Fail:        fail,
 	}
 }
 
-func prompt(s Streams, question string, secret bool) (string, error) {
+// prompt reads its answer from rd, the line reader over s.In.
+func prompt(s Streams, rd *lines.Reader, question string, secret bool) (string, error) {
 	if !strings.HasSuffix(question, " ") {
 		question += " "
 	}
 	fmt.Fprint(s.err(), question)
-	in := s.lineReader()
-	if secret && isTerminal(s.in()) && !in.Waiting() {
+	if secret && isTerminal(s.in()) && !rd.Waiting() {
 		fd := int(os.Stdin.Fd())
 		b, err := term.ReadPassword(fd)
 		fmt.Fprintln(s.err())
@@ -127,15 +118,15 @@ func prompt(s Streams, question string, secret bool) (string, error) {
 		}
 		return string(b), nil
 	}
-	line, err := in.ReadLine(context.Background())
+	line, err := rd.ReadLine(context.Background())
 	if err != nil && line == "" {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-func confirm(s Streams, question string) (bool, error) {
-	answer, err := prompt(s, question+" (y/n): ", false)
+func confirm(s Streams, rd *lines.Reader, question string) (bool, error) {
+	answer, err := prompt(s, rd, question+" (y/n): ", false)
 	if err != nil {
 		return false, err
 	}

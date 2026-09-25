@@ -71,6 +71,48 @@ func TestParseIntIsJavaScripts(t *testing.T) {
 	}
 }
 
+// Expected values are Bun's parseInt(s, radix). The large ones pin
+// JavaScriptCore's rounding, which is neither exact nor a plain sum for powers
+// of two, and a sum rounded at each step (no fused multiply-add) otherwise.
+func TestParseIntRadixIsJavaScripts(t *testing.T) {
+	nan := math.NaN()
+	for _, c := range []struct {
+		in    string
+		radix int
+		want  float64
+	}{
+		{"", 16, nan}, {" ", 10, nan}, {"\u00a0\u2028\ufeff\u3000 12", 10, 12},
+		{"\u180e12", 10, nan}, {"\u200b12", 10, nan}, {"\u008512", 16, nan}, {"\x0012", 10, nan},
+		{"-12", 10, -12}, {"+12", 10, 12}, {"- 12", 10, nan}, {"--12", 10, nan}, {"-", 16, nan}, {"+", 10, nan},
+		{"0x1A", 16, 26}, {"0X1a", 16, 26}, {"0x", 16, nan}, {"-0x1f", 16, -31}, {" +0xff", 16, 255},
+		{"0x1A", 10, 0}, {"0x1A", 0, 26}, {"0x10", 8, 0}, {"0b11", 2, 0}, {"0x0x1", 16, 0},
+		{"12abc", 10, 12}, {"FFg", 16, 255}, {"ff", 15, nan}, {"zz", 36, 1295}, {"ZZ", 36, 1295},
+		{"z", 35, nan}, {"19", 9, 1}, {"12", 2, 1}, {"1", 0, 1}, {"1.9", 10, 1}, {"1e3", 10, 1},
+		{"1", 1, nan}, {"1", 37, nan}, {"1", -1, nan}, {"1", -16, nan}, {"0x1", 1, nan},
+		{"\u0663", 10, nan}, {"\uff11", 10, nan}, {"é1", 16, nan}, {"00012", 10, 12},
+		{"9007199254740993", 10, 9007199254740992},
+		{"123456789012345678901234567890", 10, 1.2345678901234568e+29},
+		{strings.Repeat("1", 400), 10, math.Inf(1)},
+		{"-" + strings.Repeat("f", 300), 16, math.Inf(-1)},
+		{"1" + strings.Repeat("0", 300), 16, math.Inf(1)},
+		{strings.Repeat("0", 300) + "1", 16, 1},
+		{"5ed8cd3b08cc9dc3ce9fa", 16, 7.166427752530308e+24},
+		{"1uufadksf0hl6g8gb", 32, 2.378276947556157e+24},
+		{"4117765555626147467665715", 8, 1.9627150406253187e+22},
+		{"-0Xkbr2Afb4C9CEA69FD299z29cD", 35, -2.5553772363083416e+32},
+		{"zzzzzzzzzzzzzzz", 36, 2.2107391972073336e+23},
+		{"12121212121212121212121212", 3, 1588666142705},
+	} {
+		got := ParseIntRadix(c.in, c.radix)
+		if math.Float64bits(got) != math.Float64bits(c.want) && !(math.IsNaN(got) && math.IsNaN(c.want)) {
+			t.Errorf("parseInt(%q, %d) = %v, want %v", c.in, c.radix, got, c.want)
+		}
+	}
+	if !math.Signbit(ParseIntRadix("-0", 16)) || !math.Signbit(ParseIntRadix("-0x0", 16)) {
+		t.Error("parseInt('-0', 16) is -0")
+	}
+}
+
 func TestNumberIsJavaScriptsNumber(t *testing.T) {
 	cases := map[string]string{
 		"": "0", "  ": "0", " 7 ": "7", "\uFEFF5": "5", "\u00855": "NaN", " 0x1F ": "31", "0b101": "5", "0o17": "15",

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/plosson/agentio/go/internal/lines"
+	"github.com/plosson/agentio/go/internal/testbox"
 )
 
 func TestParseRedirectRejectsTheWaysAPasteGoesWrong(t *testing.T) {
@@ -41,12 +41,7 @@ func TestParseRedirectRejectsTheWaysAPasteGoesWrong(t *testing.T) {
 func TestPasteAtEndOfInputLeavesTheCallbackToDecide(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no browser opener
 	await := func(t *testing.T) (int, chan error, chan Result) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		port := ln.Addr().(*net.TCPAddr).Port
-		_ = ln.Close()
+		port := testbox.FreePort(t)
 		errs, results := make(chan error, 1), make(chan Result, 1)
 		go func() {
 			res, err := AwaitCode(context.Background(), AwaitConfig{

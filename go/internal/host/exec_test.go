@@ -5,14 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/lines"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/acme"
 	"github.com/plosson/agentio/go/internal/plugins/board"
@@ -228,12 +227,7 @@ func TestReadOnlyRefusalNamesTheOperation(t *testing.T) {
 func TestOAuthUsesAPinnedCallbackPort(t *testing.T) {
 	testbox.Isolate(t)
 	t.Setenv("PATH", t.TempDir()) // no browser opener
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
+	port := testbox.FreePort(t)
 
 	pr, pw := io.Pipe() // a paste that never arrives
 	defer pw.Close()
@@ -242,15 +236,7 @@ func TestOAuthUsesAPinnedCallbackPort(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		want := fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port)
-		for i := 0; i < 200; i++ {
-			resp, err := http.Get(want)
-			if err == nil {
-				resp.Body.Close()
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		testbox.GetWhenUp(fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port))
 	}()
 	res, err := setup.OAuth(context.Background(), plugins.OAuthSetupOptions{
 		ServiceName: "Demo", ExpectedState: "s1", Port: port,
@@ -277,26 +263,12 @@ func TestOAuthCallbackLeavesStdinToTheNextPrompt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			testbox.Isolate(t)
 			t.Setenv("PATH", t.TempDir()) // no browser opener
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			port := ln.Addr().(*net.TCPAddr).Port
-			_ = ln.Close()
+			port := testbox.FreePort(t)
 
 			pr, pw := io.Pipe()
 			defer pw.Close()
 			setup := NewSetupContext(Streams{In: pr, Out: io.Discard, Err: io.Discard})
-			go func() {
-				for i := 0; i < 200; i++ {
-					resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port))
-					if err == nil {
-						resp.Body.Close()
-						return
-					}
-					time.Sleep(10 * time.Millisecond)
-				}
-			}()
+			go testbox.GetWhenUp(fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port))
 			res, err := setup.OAuth(context.Background(), plugins.OAuthSetupOptions{
 				ServiceName: "Demo", ExpectedState: "s1", Port: port,
 				AuthorizationURL: func(string) string { return "https://example.invalid/auth" },
@@ -304,12 +276,7 @@ func TestOAuthCallbackLeavesStdinToTheNextPrompt(t *testing.T) {
 			if err != nil || res.Code != "abc" {
 				t.Fatalf("oauth %#v %v", res, err)
 			}
-			go func() {
-				for _, part := range parts {
-					_, _ = io.WriteString(pw, part)
-					time.Sleep(20 * time.Millisecond)
-				}
-			}()
+			go testbox.Feed(pw, parts...)
 			answered := make(chan string, 1)
 			go func() {
 				site, err := setup.Prompt("? Select a site (1-2):", false)
@@ -556,7 +523,8 @@ func TestNoProfileForRunsWithoutAProfile(t *testing.T) {
 func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
 	for answer, want := range map[string]bool{"y\n": true, " YES \n": true, "n\n": false, "yep\n": false, "\n": false, "": false} {
 		var errOut bytes.Buffer
-		got, _ := confirm(Streams{In: strings.NewReader(answer), Err: &errOut}, `Delete file "/a"?`)
+		in := strings.NewReader(answer)
+		got, _ := confirm(Streams{In: in, Err: &errOut}, lines.For(in), `Delete file "/a"?`)
 		if got != want {
 			t.Errorf("%q: got %v", answer, got)
 		}
@@ -580,10 +548,7 @@ func TestSetupPromptsShareOneStdinReader(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pr, pw := io.Pipe()
 			go func() {
-				for _, part := range parts {
-					_, _ = io.WriteString(pw, part)
-					time.Sleep(20 * time.Millisecond)
-				}
+				testbox.Feed(pw, parts...)
 				_ = pw.Close()
 			}()
 			setup := NewSetupContext(Streams{In: pr, Out: io.Discard, Err: io.Discard})

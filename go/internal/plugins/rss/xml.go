@@ -3,6 +3,7 @@ package rss
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -635,45 +636,19 @@ func (p *saxParser) parseEntity() (string, error) {
 	if r, ok := saxEntities[lower]; ok {
 		return string(r), nil
 	}
-	var num float64 = -1
-	numStr := ""
+	num, radix := math.NaN(), 10
 	digits := lower
 	if strings.HasPrefix(lower, "#x") {
-		digits = lower[2:]
-		num, numStr = jsParseIntRadix(digits, 16)
+		digits, radix = lower[2:], 16
+		num = jsvalue.ParseIntRadix(digits, radix)
 	} else if strings.HasPrefix(lower, "#") {
 		digits = lower[1:]
-		num, numStr = jsParseIntRadix(digits, 10)
+		num = jsvalue.ParseIntRadix(digits, radix)
 	}
+	// num.toString(radix) must give back the digits, leading zeros dropped.
 	digits = strings.TrimLeft(digits, "0")
-	if num < 0 || numStr != digits || num > 0x10FFFF {
+	if math.IsNaN(num) || num < 0 || num > 0x10FFFF || strconv.FormatInt(int64(num), radix) != digits {
 		return "", p.fail("Invalid character entity")
 	}
 	return string(rune(num)), nil
-}
-
-// jsParseIntRadix is parseInt(s, radix) and num.toString(radix), for the
-// digits sax compares; -1 stands for NaN.
-func jsParseIntRadix(s string, radix int) (float64, string) {
-	end := 0
-	for end < len(s) {
-		c := s[end]
-		if !(c >= '0' && c <= '9') && !(radix == 16 && c >= 'a' && c <= 'f') {
-			break
-		}
-		end++
-	}
-	if end == 0 {
-		return -1, ""
-	}
-	digits := strings.TrimLeft(s[:end], "0")
-	if digits == "" {
-		return 0, "0"
-	}
-	if len(digits) > 8 {
-		// Past 0x10FFFF either way; the comparison fails on the range.
-		return 0x110000, digits
-	}
-	n, _ := strconv.ParseInt(digits, radix, 64)
-	return float64(n), digits
 }

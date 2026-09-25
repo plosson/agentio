@@ -442,7 +442,7 @@ func TestChunkOptionsKeepAGivenEmptyValue(t *testing.T) {
 		set           map[string]any
 		size, retries int
 	}{
-		{map[string]any{"chunk-size": nil, "max-retries": nil}, 1000, 5},
+		{nil, 1000, 5},
 		{map[string]any{"chunk-size": "", "max-retries": ""}, 1000, 0},
 		{map[string]any{"chunk-size": "7", "max-retries": "2"}, 7, 2},
 	} {
