@@ -8,7 +8,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
@@ -22,14 +26,15 @@ const (
 
 // KeyView is an API key without its secret hash.
 type KeyView struct {
-	ID                string      `json:"id"`
-	Name              string      `json:"name"`
-	Hint              string      `json:"hint,omitempty"`
-	AllowedProfiles   vault.Scope `json:"allowedProfiles"`
-	ReadOnly          bool        `json:"readOnly"`
-	CanManageProfiles bool        `json:"canManageProfiles"`
-	CreatedAt         string      `json:"createdAt"`
-	LastUsedAt        string      `json:"lastUsedAt,omitempty"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	Hint            string      `json:"hint,omitempty"`
+	AllowedProfiles vault.Scope `json:"allowedProfiles"`
+	ReadOnly        bool        `json:"readOnly"`
+	CreatedAt       string      `json:"createdAt"`
+	LastUsedAt      string      `json:"lastUsedAt,omitempty"`
+	// Last, as Bun's view appends the normalised flag after the stored fields.
+	CanManageProfiles bool `json:"canManageProfiles"`
 }
 
 func view(k vault.APIKey) KeyView {
@@ -79,22 +84,21 @@ func newKeyID() string {
 }
 
 func ValidateKeyName(name string) (string, error) {
-	trimmed := trimSpace(name)
-	if trimmed == "" || len(trimmed) > maxKeyName {
+	trimmed := strings.TrimFunc(name, jsSpace)
+	// JavaScript counts UTF-16 code units.
+	if trimmed == "" || len(utf16.Encode([]rune(trimmed))) > maxKeyName {
 		return "", clierr.New(clierr.InvalidParams, fmt.Sprintf("A key needs a name of 1 to %d characters", maxKeyName), "")
 	}
 	return trimmed, nil
 }
 
-func trimSpace(s string) string {
-	i, j := 0, len(s)
-	for i < j && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
-		i++
+// jsSpace is what String.prototype.trim strips: WhiteSpace and LineTerminator.
+func jsSpace(r rune) bool {
+	switch r {
+	case '\t', '\n', '\v', '\f', '\r', 0xA0, 0xFEFF, 0x2028, 0x2029:
+		return true
 	}
-	for j > i && (s[j-1] == ' ' || s[j-1] == '\t' || s[j-1] == '\n') {
-		j--
-	}
-	return s[i:j]
+	return unicode.Is(unicode.Zs, r)
 }
 
 func ValidateFlag(field string, value any) (bool, error) {
@@ -105,15 +109,49 @@ func ValidateFlag(field string, value any) (bool, error) {
 	return b, nil
 }
 
+// ValidateHubURL returns the URL's origin as a WHATWG URL reports it, the way
+// Bun's validateHubUrl does: scheme and host lowercased, the default port
+// dropped, and "http:host" read as "http://host".
 func ValidateHubURL(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-		if err != nil || parsed == nil || parsed.Host == "" {
-			return "", clierr.New(clierr.InvalidParams, "The hub URL must be absolute, e.g. https://vault.example.com", "")
-		}
+	absolute := clierr.New(clierr.InvalidParams, "The hub URL must be absolute, e.g. https://vault.example.com", "")
+	parsed, err := url.Parse(strings.TrimFunc(raw, func(r rune) bool { return r <= ' ' }))
+	if err != nil || parsed.Scheme == "" {
+		return "", absolute
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
 		return "", clierr.New(clierr.InvalidParams, "The hub URL must use http or https", "")
 	}
-	return parsed.Scheme + "://" + parsed.Host, nil
+	host := parsed.Host
+	if host == "" {
+		// Special schemes skip any slashes before the host.
+		rest := strings.TrimLeft(parsed.Opaque+parsed.Path, `/\`)
+		if i := strings.IndexAny(rest, `/\?#`); i >= 0 {
+			rest = rest[:i]
+		}
+		host = rest
+	}
+	host = strings.ToLower(host)
+	port := ""
+	if i := strings.LastIndex(host, ":"); i >= 0 && i > strings.LastIndex(host, "]") {
+		host, port = host[:i], host[i+1:]
+	}
+	if host == "" {
+		return "", absolute
+	}
+	if port != "" {
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return "", absolute
+		}
+		port = strconv.FormatUint(n, 10)
+		if port == map[string]string{"http": "80", "https": "443"}[parsed.Scheme] {
+			port = ""
+		}
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return parsed.Scheme + "://" + host, nil
 }
 
 func DescribeScope(k KeyView) string {

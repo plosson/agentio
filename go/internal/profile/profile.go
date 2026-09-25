@@ -144,6 +144,14 @@ func IsReadOnly(service, name string) (bool, error) {
 	return false, nil
 }
 
+// ServiceOrder is Bun's ALL_SERVICES (src/types/config.ts), the order every
+// Bun profile listing follows; configured ids not in it come after, sorted.
+// It is not the plugin catalog: rss is absent, so its profiles sort last.
+var ServiceOrder = []string{
+	"gdocs", "gdrive", "gmail", "gcal", "gtasks", "gchat", "gsheets", "gslides", "gscript",
+	"github", "jira", "confluence", "slack", "telegram", "discourse", "dropbox", "sql", "revolut", "falco",
+}
+
 // List returns profiles. preferred is the catalog order; unknown stored ids follow, sorted.
 // A service filter returns that service even when it has no profiles.
 func List(service string, preferred []string) ([]Ref, error) {

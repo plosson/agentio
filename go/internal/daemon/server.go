@@ -1,10 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -54,16 +54,8 @@ func (s *Server) now() time.Time {
 	return time.Now()
 }
 
-func (s *Server) order() []string {
-	if s.Registry == nil {
-		return nil
-	}
-	var ids []string
-	for _, p := range s.Registry.Plugins() {
-		ids = append(ids, p.ID)
-	}
-	return ids
-}
+// order is the service order of every profile listing the hub serves, as Bun's.
+func (s *Server) order() []string { return profile.ServiceOrder }
 
 func (s *Server) Handler() http.Handler {
 	start := s.now()
@@ -74,9 +66,10 @@ func (s *Server) Handler() http.Handler {
 		// segment is decoded once, where it is parsed.
 		path := r.URL.EscapedPath()
 		if path == "/health" && r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok", "timestamp": s.now().UnixMilli(),
-				"uptime": s.now().Sub(start).Milliseconds(), "locked": !vault.Unlocked(),
+			now := s.now()
+			writeJSON(w, http.StatusOK, object{
+				{"status", "ok"}, {"timestamp", now.UnixMilli()},
+				{"uptime", now.Sub(start).Milliseconds()}, {"locked", !vault.Unlocked()},
 			})
 			return
 		}
@@ -106,15 +99,15 @@ func (s *Server) handleV1(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+		// A field that is not a string fails like an empty one, as in Bun.
+		body, err := readObject(r)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
 		if path == "/v1/device" {
-			var body struct {
-				Name string `json:"name"`
-			}
-			if err := readJSON(r, &body); err != nil {
-				writeErr(w, err)
-				return
-			}
-			started, err := StartDevice(body.Name, s.now())
+			name, _ := body["name"].(string)
+			started, err := StartDevice(name, s.now())
 			if err != nil {
 				writeErr(w, err)
 				return
@@ -122,14 +115,8 @@ func (s *Server) handleV1(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusCreated, started)
 			return
 		}
-		var body struct {
-			DeviceCode string `json:"deviceCode"`
-		}
-		if err := readJSON(r, &body); err != nil {
-			writeErr(w, err)
-			return
-		}
-		poll, err := PollDevice(body.DeviceCode, s.now())
+		deviceCode, _ := body["deviceCode"].(string)
+		poll, err := PollDevice(deviceCode, s.now())
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -256,7 +243,7 @@ func (s *Server) listProfiles(w http.ResponseWriter, key *profile.KeyView) {
 		writeErr(w, err)
 		return
 	}
-	var rows []map[string]any
+	rows := []object{}
 	for _, ref := range refs {
 		if !profile.KeyAllows(*key, ref.Service, ref.Name) {
 			continue
@@ -266,15 +253,12 @@ func (s *Server) listProfiles(w http.ResponseWriter, key *profile.KeyView) {
 			writeErr(w, err)
 			return
 		}
-		rows = append(rows, map[string]any{
-			"service": ref.Service, "name": ref.Name,
-			"readOnly": profile.EffectiveReadOnly(*key, ref.ReadOnly), "hasCredentials": has,
+		rows = append(rows, object{
+			{"service", ref.Service}, {"name", ref.Name},
+			{"readOnly", profile.EffectiveReadOnly(*key, ref.ReadOnly)}, {"hasCredentials", has},
 		})
 	}
-	if rows == nil {
-		rows = []map[string]any{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"profiles": rows, "canManageProfiles": key.CanManageProfiles})
+	writeJSON(w, http.StatusOK, object{{"profiles", rows}, {"canManageProfiles", key.CanManageProfiles}})
 }
 
 func (s *Server) profileStatus(w http.ResponseWriter, key *profile.KeyView, ref profRef) {
@@ -289,19 +273,19 @@ func (s *Server) profileStatus(w http.ResponseWriter, key *profile.KeyView, ref 
 		return
 	}
 	if !has {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "no_creds", "readOnly": readOnly})
+		writeJSON(w, http.StatusOK, object{{"status", "no_creds"}, {"readOnly", readOnly}})
 		return
 	}
 	_, err = auth.GetFresh(rContext(), s.Registry, ref.Service, ref.Name, auth.RefreshOptions{Buffer: auth.HubRefreshBuffer})
 	if ce, ok := err.(*clierr.Error); ok && ce.Code == clierr.TokenExpired {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "needs_reauth", "readOnly": readOnly})
+		writeJSON(w, http.StatusOK, object{{"status", "needs_reauth"}, {"readOnly", readOnly}})
 		return
 	}
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "readOnly": readOnly})
+	writeJSON(w, http.StatusOK, object{{"status", "ok"}, {"readOnly", readOnly}})
 }
 
 func (s *Server) credentials(w http.ResponseWriter, key *profile.KeyView, ref profRef) {
@@ -333,9 +317,9 @@ func (s *Server) credentials(w http.ResponseWriter, key *profile.KeyView, ref pr
 		return
 	}
 	log.Printf("v1 action=credentials key=%s (%s) profile=%s/%s outcome=ok refreshed=%t", key.ID, key.Name, ref.Service, ref.Name, fresh.Refreshed)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"service": ref.Service, "name": ref.Name, "readOnly": readOnly, "refreshed": fresh.Refreshed,
-		"credentials": auth.RedactForRemote(s.Registry, ref.Service, fresh.Credentials),
+	writeJSON(w, http.StatusOK, object{
+		{"service", ref.Service}, {"name", ref.Name}, {"readOnly", readOnly}, {"refreshed", fresh.Refreshed},
+		{"credentials", auth.RedactForRemote(s.Registry, ref.Service, fresh.Credentials)},
 	})
 }
 
@@ -381,7 +365,7 @@ func (s *Server) saveProfile(w http.ResponseWriter, r *http.Request, key *profil
 		return
 	}
 	ro, _ := profile.IsReadOnly(ref.Service, ref.Name)
-	writeJSON(w, http.StatusCreated, map[string]any{"service": ref.Service, "name": ref.Name, "readOnly": ro})
+	writeJSON(w, http.StatusCreated, object{{"service", ref.Service}, {"name", ref.Name}, {"readOnly", ro}})
 }
 
 func (s *Server) renameProfile(w http.ResponseWriter, r *http.Request, key *profile.KeyView, ref profRef) {
@@ -410,7 +394,7 @@ func (s *Server) renameProfile(w http.ResponseWriter, r *http.Request, key *prof
 		writeErr(w, failure)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"service": ref.Service, "name": to})
+	writeJSON(w, http.StatusOK, object{{"service", ref.Service}, {"name", to}})
 }
 
 func (s *Server) deleteProfile(w http.ResponseWriter, key *profile.KeyView, ref profRef) {
@@ -453,19 +437,105 @@ func readJSON(r *http.Request, dest any) error {
 	return nil
 }
 
+// readObject reads a JSON body the way the Bun routes use it: a bad body is
+// INVALID_PARAMS, and a body that is not an object reads every field as absent.
+func readObject(r *http.Request) (map[string]any, error) {
+	var body any
+	if err := readJSON(r, &body); err != nil {
+		return nil, err
+	}
+	if m, ok := body.(map[string]any); ok {
+		return m, nil
+	}
+	return map[string]any{}, nil
+}
+
+// jsString is JavaScript's String(v) for what a JSON body can hold, so a hub URL
+// that is not a string fails validation with Bun's message instead of the body's.
+func jsString(v any, present bool) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case nil:
+		if present {
+			return "null"
+		}
+		return "undefined"
+	case bool, float64:
+		return fmt.Sprint(t)
+	case []any:
+		parts := make([]string, len(t))
+		for i, item := range t {
+			if item != nil {
+				parts[i] = jsString(item, true)
+			}
+		}
+		return strings.Join(parts, ",")
+	default:
+		return "[object Object]"
+	}
+}
+
+func hubURL(body map[string]any) string {
+	v, ok := body["url"]
+	return jsString(v, ok)
+}
+
+// keyInput passes the key fields through untouched; profile validates them.
+func keyInput(body map[string]any) profile.KeyInput {
+	return profile.KeyInput{
+		Name: body["name"], AllowedProfiles: normalizeScope(body["allowedProfiles"]),
+		ReadOnly: body["readOnly"], CanManageProfiles: body["canManageProfiles"],
+	}
+}
+
+// presentNull stands for a field sent as null: a patch validates it, where an
+// absent field is left alone. It is never a valid name, scope or flag.
+type presentNull struct{}
+
+func patchField(body map[string]any, key string) any {
+	v, ok := body[key]
+	if ok && v == nil {
+		return presentNull{}
+	}
+	return v
+}
+
+// object is a JSON object that keeps its field order, as a JavaScript one does.
+type object []field
+
+type field struct {
+	key   string
+	value any
+}
+
+func (o object) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, f := range o {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.Write(marshalJS(f.key))
+		buf.WriteByte(':')
+		buf.Write(marshalJS(f.value))
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(body)
+	_, _ = w.Write(marshalJS(body))
 }
 
 func writeErr(w http.ResponseWriter, err error) {
 	if ce, ok := err.(*clierr.Error); ok {
-		body := map[string]any{"error": ce.Message, "code": ce.Code}
+		body := object{{"error", ce.Message}, {"code", ce.Code}}
 		if ce.Suggestion != "" {
-			body["suggestion"] = ce.Suggestion
+			body = append(body, field{"suggestion", ce.Suggestion})
 		}
 		writeJSON(w, clierr.HTTPStatus(ce.Code), body)
 		return
@@ -474,7 +544,7 @@ func writeErr(w http.ResponseWriter, err error) {
 	if err != nil {
 		msg = err.Error()
 	}
-	writeJSON(w, http.StatusInternalServerError, map[string]any{"error": msg, "code": "API_ERROR"})
+	writeJSON(w, http.StatusInternalServerError, object{{"error", msg}, {"code", "API_ERROR"}})
 }
 
 func recoverLog(w http.ResponseWriter) {
@@ -501,7 +571,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet && path == "/ui/api/session" {
-		writeJSON(w, http.StatusOK, map[string]any{"authenticated": HasSession(r, s.now()), "locked": !vault.Unlocked()})
+		writeJSON(w, http.StatusOK, object{{"authenticated", HasSession(r, s.now())}, {"locked", !vault.Unlocked()}})
 		return
 	}
 	if r.Method == http.MethodPost && path == "/ui/api/unlock" {
@@ -535,11 +605,11 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		rows := []map[string]any{}
+		rows := []object{}
 		for _, ref := range refs {
-			rows = append(rows, map[string]any{"service": ref.Service, "name": ref.Name, "readOnly": ref.ReadOnly})
+			rows = append(rows, object{{"service", ref.Service}, {"name", ref.Name}, {"readOnly", ref.ReadOnly}})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"profiles": rows})
+		writeJSON(w, http.StatusOK, object{{"profiles", rows}})
 	case r.Method == http.MethodGet && path == "/ui/api/status":
 		test := r.URL.Query().Get("test") != "false"
 		rows, err := host.Statuses(r.Context(), s.Registry, s.order(), test)
@@ -547,18 +617,26 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		services := map[string][]host.ProfileStatus{}
+		// Grouped by service in first-seen order, as Bun builds its object.
+		services := object{}
+		at := map[string]int{}
 		for _, row := range rows {
-			services[row.Service] = append(services[row.Service], row)
+			i, seen := at[row.Service]
+			if !seen {
+				i = len(services)
+				at[row.Service] = i
+				services = append(services, field{row.Service, []statusRow{}})
+			}
+			services[i].value = append(services[i].value.([]statusRow), rowOf(row))
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"version": s.Version, "services": services})
+		writeJSON(w, http.StatusOK, object{{"version", s.Version}, {"services", services}})
 	case r.Method == http.MethodGet && path == "/ui/api/keys":
 		keys, err := profile.ListKeys()
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+		writeJSON(w, http.StatusOK, object{{"keys", keys}})
 	case r.Method == http.MethodPost && path == "/ui/api/keys":
 		s.createKey(w, r)
 	default:
@@ -584,7 +662,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 					writeErr(w, err)
 					return
 				}
-				writeJSON(w, http.StatusOK, row)
+				writeJSON(w, http.StatusOK, rowOf(row))
 				return
 			}
 			if ref.Action != "" {
@@ -631,30 +709,18 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) page(w http.ResponseWriter) {
-	nonce := make([]byte, 16)
-	_, _ = rand.Read(nonce)
-	n := base64.StdEncoding.EncodeToString(nonce)
-	meta := map[string]any{}
-	if s.Registry != nil {
-		for _, p := range s.Registry.Plugins() {
-			color := ""
-			if p.Brand != nil && regexp.MustCompile(`^#[0-9a-fA-F]{6}$`).MatchString(p.Brand.Color) {
-				color = p.Brand.Color
-			}
-			meta[p.ID] = map[string]any{"displayName": p.DisplayName, "color": color}
-		}
-	}
-	raw, _ := json.Marshal(meta)
-	escaped := strings.NewReplacer("<", `\u003c`, ">", `\u003e`, "&", `\u0026`).Replace(string(raw))
-	html := strings.ReplaceAll(uiPage, "__CSP_NONCE__", n)
-	html = strings.ReplaceAll(html, "__PLUGIN_METADATA__", escaped)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	for k, v := range securityHeaders(n) {
-		w.Header().Set(k, v)
-	}
-	_, _ = io.WriteString(w, html)
+// statusRow is one `agentio status --json` row without its service, which the
+// UI routes carry in the key or the path instead.
+type statusRow struct {
+	Profile  string `json:"profile"`
+	ReadOnly bool   `json:"readOnly,omitempty"`
+	Status   string `json:"status"`
+	Info     string `json:"info,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+func rowOf(p host.ProfileStatus) statusRow {
+	return statusRow{Profile: p.Profile, ReadOnly: p.ReadOnly, Status: p.Status, Info: p.Info, Error: p.Error}
 }
 
 func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
@@ -662,24 +728,23 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var body struct {
-		Passphrase string `json:"passphrase"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if body.Passphrase == "" {
+	passphrase, _ := body["passphrase"].(string)
+	if passphrase == "" {
 		writeErr(w, clierr.New(clierr.InvalidParams, "passphrase is required", ""))
 		return
 	}
-	if err := vault.Unlock(body.Passphrase); err != nil {
+	if err := vault.Unlock(passphrase); err != nil {
 		writeErr(w, err)
 		return
 	}
 	KeepaliveFromEnv(context.Background(), s.Registry, s.order())
 	w.Header().Add("Set-Cookie", SessionCookie(CreateSession(s.now()), SecureRequest(r)))
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, object{{"ok", true}})
 }
 
 func signedOut(w http.ResponseWriter, r *http.Request) {
@@ -704,19 +769,12 @@ func authorizeCode(pathname string) string {
 }
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request, code string) {
-	var body struct {
-		Approve           bool   `json:"approve"`
-		Name              string `json:"name"`
-		URL               string `json:"url"`
-		AllowedProfiles   any    `json:"allowedProfiles"`
-		ReadOnly          any    `json:"readOnly"`
-		CanManageProfiles any    `json:"canManageProfiles"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if !body.Approve {
+	if body["approve"] != true {
 		if err := DenyDevice(code, s.now()); err != nil {
 			writeErr(w, err)
 			return
@@ -724,15 +782,12 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, code string) 
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	key, err := ApproveDevice(code, profile.KeyInput{
-		Name: body.Name, AllowedProfiles: normalizeScope(body.AllowedProfiles),
-		ReadOnly: body.ReadOnly, CanManageProfiles: body.CanManageProfiles,
-	}, body.URL, s.now())
+	key, err := ApproveDevice(code, keyInput(body), hubURL(body), s.now())
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"key": key})
+	writeJSON(w, http.StatusCreated, object{{"key", key}})
 }
 
 func normalizeScope(v any) any {
@@ -740,11 +795,13 @@ func normalizeScope(v any) any {
 	case string:
 		return t
 	case []any:
-		var out []string
+		out := make([]string, 0, len(t))
 		for _, item := range t {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
+			s, ok := item.(string)
+			if !ok {
+				return t // not a list of strings: left for validation to reject
 			}
+			out = append(out, s)
 		}
 		return out
 	default:
@@ -753,21 +810,12 @@ func normalizeScope(v any) any {
 }
 
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name              string `json:"name"`
-		URL               string `json:"url"`
-		AllowedProfiles   any    `json:"allowedProfiles"`
-		ReadOnly          any    `json:"readOnly"`
-		CanManageProfiles any    `json:"canManageProfiles"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	issued, err := profile.CreateKey(profile.KeyInput{
-		Name: body.Name, AllowedProfiles: normalizeScope(body.AllowedProfiles),
-		ReadOnly: body.ReadOnly, CanManageProfiles: body.CanManageProfiles,
-	}, body.URL)
+	issued, err := profile.CreateKey(keyInput(body), hubURL(body))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -776,14 +824,12 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, id string) {
-	var body struct {
-		URL string `json:"url"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	issued, err := profile.RotateKey(id, body.URL)
+	issued, err := profile.RotateKey(id, hubURL(body))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -792,39 +838,17 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func (s *Server) updateKey(w http.ResponseWriter, r *http.Request, id string) {
-	var body struct {
-		Name              any `json:"name"`
-		AllowedProfiles   any `json:"allowedProfiles"`
-		ReadOnly          any `json:"readOnly"`
-		CanManageProfiles any `json:"canManageProfiles"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	// Distinguish omitted fields from present nulls. Re-read as a map.
-	raw := map[string]any{}
-	// body already consumed. The struct lost omitted info: zero values.
-	// Callers of PATCH send the fields they change. Zero name means omitted
-	// only when the JSON lacked the key. We already decoded into struct, so
-	// a missing name is "". Treat empty name as omitted.
-	patch := profile.KeyInput{}
-	if body.Name != nil {
-		if s, ok := body.Name.(string); ok && s != "" {
-			patch.Name = s
-		}
-	}
-	if body.AllowedProfiles != nil {
-		patch.AllowedProfiles = normalizeScope(body.AllowedProfiles)
-	}
-	if body.ReadOnly != nil {
-		patch.ReadOnly = body.ReadOnly
-	}
-	if body.CanManageProfiles != nil {
-		patch.CanManageProfiles = body.CanManageProfiles
-	}
-	_ = raw
-	updated, err := profile.UpdateKey(id, patch)
+	updated, err := profile.UpdateKey(id, profile.KeyInput{
+		Name:              patchField(body, "name"),
+		AllowedProfiles:   normalizeScope(patchField(body, "allowedProfiles")),
+		ReadOnly:          patchField(body, "readOnly"),
+		CanManageProfiles: patchField(body, "canManageProfiles"),
+	})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -833,16 +857,13 @@ func (s *Server) updateKey(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func (s *Server) patchProfile(w http.ResponseWriter, r *http.Request, ref profRef) {
-	var body struct {
-		ReadOnly any `json:"readOnly"`
-		Name     any `json:"name"`
-	}
-	if err := readJSON(r, &body); err != nil {
+	body, err := readObject(r)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if body.Name != nil {
-		to, ok := body.Name.(string)
+	if name, present := body["name"]; present {
+		to, ok := name.(string)
 		if !ok {
 			writeErr(w, clierr.New(clierr.InvalidParams, "name must be a string", ""))
 			return
@@ -856,10 +877,10 @@ func (s *Server) patchProfile(w http.ResponseWriter, r *http.Request, ref profRe
 			writeErr(w, failure)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"service": ref.Service, "name": to})
+		writeJSON(w, http.StatusOK, object{{"service", ref.Service}, {"name", to}})
 		return
 	}
-	readOnly, err := profile.ValidateFlag("readOnly", body.ReadOnly)
+	readOnly, err := profile.ValidateFlag("readOnly", body["readOnly"])
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -873,7 +894,7 @@ func (s *Server) patchProfile(w http.ResponseWriter, r *http.Request, ref profRe
 		writeErr(w, clierr.ProfileNotFoundError(ref.Service, ref.Name))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"service": ref.Service, "name": ref.Name, "readOnly": readOnly})
+	writeJSON(w, http.StatusOK, object{{"service", ref.Service}, {"name", ref.Name}, {"readOnly", readOnly}})
 }
 
 func keyRef(pathname string) (id string, rotate bool, ok bool) {

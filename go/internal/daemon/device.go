@@ -143,8 +143,8 @@ func DescribeDevice(userCode string, now time.Time) (DeviceView, error) {
 	}
 	return DeviceView{
 		UserCode: req.userCode, Name: req.name,
-		CreatedAt: req.createdAt.UTC().Format(time.RFC3339),
-		ExpiresAt: req.createdAt.Add(DeviceTTL).UTC().Format(time.RFC3339),
+		CreatedAt: isoTime(req.createdAt),
+		ExpiresAt: isoTime(req.createdAt.Add(DeviceTTL)),
 	}, nil
 }
 
@@ -193,6 +193,9 @@ func liveLocked(userCode string, now time.Time) (*pending, error) {
 	}
 	return nil, unknownCode()
 }
+
+// isoTime is JavaScript's Date.toISOString: UTC, milliseconds, Z.
+func isoTime(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }
 
 func unknownCode() *clierr.Error {
 	return clierr.New(clierr.NotFound, "Unknown or expired login code", "Run `agentio login` again to get a new one")

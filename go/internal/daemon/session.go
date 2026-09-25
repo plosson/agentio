@@ -68,8 +68,10 @@ func ClearSessions() {
 	ResetSessions()
 }
 
+// SecureRequest is whether the Set-Cookie gets Secure: the request came over
+// TLS, or the fronting proxy says it did with exactly "https", as Bun compares.
 func SecureRequest(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("x-forwarded-proto"), "https") || r.TLS != nil
+	return strings.Join(r.Header.Values("X-Forwarded-Proto"), ", ") == "https" || r.TLS != nil
 }
 
 func SessionCookie(id string, secure bool) string {
