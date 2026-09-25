@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -588,5 +590,86 @@ func TestGoogleTestInputIsWhatTheCLIBuildsWithoutFlags(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no commands checked")
+	}
+}
+
+// A new vault must be encrypted with the passphrase that gets stored, even when
+// AGENTIO_PASSPHRASE holds another one, or the next load fails and wipes it.
+func TestNewVaultUsesTheGivenPassphraseOverTheEnv(t *testing.T) {
+	const key = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+	blob, err := vault.Encrypt(`{"version":1,"config":{"profiles":{"board":["desk"]}},"credentials":{"board":{"desk":{"token":"sek"}}}}`, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"init":   {"vault", "init", "--passphrase", "new-pass-456", "--no-migrate"},
+		"import": {"vault", "import", "--key", key, "--passphrase", "new-pass-456"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			initCLI(t)
+			t.Setenv("AGENTIO_PASSPHRASE", "old-pass-123")
+			t.Setenv("AGENTIO_CONFIG", blob)
+			if code, _, errOut := run(t, args...); code != 0 {
+				t.Fatal(errOut)
+			}
+			enc, err := os.ReadFile(vault.DefaultVaultPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := vault.Decrypt(string(enc), "new-pass-456"); err != nil {
+				t.Fatal("vault is not encrypted with the passphrase given on the command line")
+			}
+			t.Setenv("AGENTIO_PASSPHRASE", "")
+			vault.Reset()
+			if _, err := vault.Load(); err != nil {
+				t.Fatalf("load with the stored passphrase: %v", err)
+			}
+			if stored, err := os.ReadFile(vault.PassphrasePath()); err != nil || string(stored) != "new-pass-456" {
+				t.Fatalf("stored passphrase %q %v", stored, err)
+			}
+		})
+	}
+	t.Run("set", func(t *testing.T) {
+		initCLI(t)
+		t.Setenv("AGENTIO_CONFIG", blob)
+		if code, _, errOut := run(t, "vault", "import", "--key", key, "--passphrase", "new-pass-456"); code != 0 {
+			t.Fatal(errOut)
+		}
+		t.Setenv("AGENTIO_PASSPHRASE", "old-pass-123")
+		vault.Reset()
+		code, out, errOut := run(t, "vault", "set", vault.DefaultVaultPath(), "--passphrase", "new-pass-456")
+		if code != 0 || !strings.Contains(out, "1 profile(s) available") {
+			t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+		}
+	})
+}
+
+// A failed write must not be reported as an import.
+func TestImportReportsAFailedVaultWrite(t *testing.T) {
+	const key = "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+	blob, err := vault.Encrypt(`{"version":1,"config":{"profiles":{"board":["desk"]}},"credentials":{"board":{"desk":{"token":"sek"}}}}`, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][]string{
+		"replace": {"vault", "import", "--key", key},
+		"merge":   {"vault", "import", "--key", key, "--merge"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			initCLI(t)
+			if code, _, errOut := run(t, "vault", "init", "--passphrase", "test-pass-123", "--no-migrate"); code != 0 {
+				t.Fatal(errOut)
+			}
+			t.Setenv("AGENTIO_CONFIG", blob)
+			dir := filepath.Dir(vault.DefaultVaultPath())
+			if err := os.Chmod(dir, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			code, out, errOut := run(t, args...)
+			if code == 0 || strings.Contains(out, "successfully") || !strings.Contains(errOut, "permission denied") {
+				t.Fatalf("code %d\n%s\n%s", code, out, errOut)
+			}
+		})
 	}
 }

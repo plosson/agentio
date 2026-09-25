@@ -333,12 +333,20 @@ func Create(vaultPath, passphrase string, contents *Contents) error {
 	if err := WritePointer(vaultPath); err != nil {
 		return err
 	}
-	// Resident for the write, without depending on the caller's env.
+	// AGENTIO_PASSPHRASE wins over memory, so point it at the new passphrase,
+	// as Bun does: the file must be encrypted with what gets stored.
+	prevEnv, hadEnv := os.LookupEnv("AGENTIO_PASSPHRASE")
 	prev := memPass
 	prevSet := memSet
+	os.Setenv("AGENTIO_PASSPHRASE", passphrase)
 	SetMemoryPassphrase(passphrase)
 	if err := Save(contents); err != nil {
 		_ = DeletePointer()
+		if hadEnv {
+			os.Setenv("AGENTIO_PASSPHRASE", prevEnv)
+		} else {
+			os.Unsetenv("AGENTIO_PASSPHRASE")
+		}
 		memPass = prev
 		memSet = prevSet
 		return err

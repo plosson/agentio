@@ -150,7 +150,13 @@ func vaultSet() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := vault.Decrypt(string(encoded), passphrase); err != nil {
+			// Count from what was decrypted: a load would take AGENTIO_PASSPHRASE first.
+			var contents vault.Contents
+			plain, err := vault.Decrypt(string(encoded), passphrase)
+			if err == nil {
+				err = json.Unmarshal([]byte(plain), &contents)
+			}
+			if err != nil {
 				return clierr.New(clierr.AuthFailed, "Could not decrypt "+vaultPath, "Wrong passphrase, or the file is not an agentio vault")
 			}
 			previous, _ := vault.ReadPointer()
@@ -171,14 +177,11 @@ func vaultSet() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "Previous: %s (left on disk)\n", previous)
 				}
 			}
-			contents, err := vault.Load()
-			if err == nil {
-				n := 0
-				for _, list := range contents.Config.Profiles {
-					n += len(list)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%d profile(s) available\n", n)
+			n := 0
+			for _, list := range contents.Config.Profiles {
+				n += len(list)
 			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%d profile(s) available\n", n)
 			return nil
 		},
 	}
@@ -415,6 +418,9 @@ func vaultImport() *cobra.Command {
 				profile.Prune(cur)
 				return nil
 			})
+			if err != nil {
+				return err
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Configuration imported successfully")
 			return nil
 		},
