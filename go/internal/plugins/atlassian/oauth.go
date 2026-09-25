@@ -77,10 +77,6 @@ func secret() (string, error) {
 	return obscure.Reveal(SecretEnc)
 }
 
-func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 func randomState() string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

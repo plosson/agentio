@@ -783,14 +783,14 @@ func TestLoginAndRefreshFollowBun(t *testing.T) {
 	ctx := context.Background()
 
 	status, body = 200, tokensJSON
-	res, err := login(ctx, defaultFetch, "a@b.c", "pw", nil)
+	res, err := login(ctx, plugins.Fetch, "a@b.c", "pw", nil)
 	if err != nil || res.twoFactorRequired || res.tokens.accessToken != "access-abc" || res.tokens.refreshToken != "refresh-xyz" ||
 		res.tokens.expiresIn != 600 || res.tokens.refreshTokenExpiresIn != 86400 {
 		t.Fatalf("%#v %v", res, err)
 	}
 	// A truncated success response still contains a live token; never echo it.
 	status, body = 200, `{"access_token":"eyJhbGciOi-LIVE-TOKEN`
-	_, err = login(ctx, defaultFetch, "a@b.c", "pw", nil)
+	_, err = login(ctx, plugins.Fetch, "a@b.c", "pw", nil)
 	ae := apiErr(t, err)
 	if strings.Contains(ae.message+ae.suggestion, "LIVE-TOKEN") || strings.Contains(ae.message+ae.suggestion, "access_token") ||
 		ae.message != "Falco returned a login response that could not be read" {
@@ -798,37 +798,37 @@ func TestLoginAndRefreshFollowBun(t *testing.T) {
 	}
 	// Storing an undefined refresh token disables refresh silently.
 	status, body = 200, `{"access_token":"a","expires_in":600}`
-	_, err = login(ctx, defaultFetch, "a@b.c", "pw", nil)
+	_, err = login(ctx, plugins.Fetch, "a@b.c", "pw", nil)
 	if ae := apiErr(t, err); ae.code != "API_ERROR" ||
 		ae.message != "Falco returned an incomplete token response (missing refresh_token, refresh_token_expires_in)" {
 		t.Fatalf("%#v", ae)
 	}
 	status, body = 400, `{"error":"two_factor_required"}`
-	if res, err := login(ctx, defaultFetch, "a@b.c", "pw", nil); err != nil || !res.twoFactorRequired {
+	if res, err := login(ctx, plugins.Fetch, "a@b.c", "pw", nil); err != nil || !res.twoFactorRequired {
 		t.Fatalf("%#v %v", res, err)
 	}
 	status, body = 400, `{"error":"invalid_credentials"}`
-	_, err = login(ctx, defaultFetch, "a@b.c", "hunter2", nil)
+	_, err = login(ctx, plugins.Fetch, "a@b.c", "hunter2", nil)
 	if ae := apiErr(t, err); ae.message != "Invalid Falco credentials" || strings.Contains(ae.message+ae.suggestion, "hunter2") {
 		t.Fatalf("%#v", ae)
 	}
 	status, body = 503, strings.Repeat("x", 300)
-	_, err = login(ctx, defaultFetch, "a@b.c", "pw", nil)
+	_, err = login(ctx, plugins.Fetch, "a@b.c", "pw", nil)
 	if ae := apiErr(t, err); ae.code != "AUTH_FAILED" || ae.message != "Falco login failed (HTTP 503): "+strings.Repeat("x", 200) {
 		t.Fatalf("%#v", ae)
 	}
 
 	status, body = 200, `{"access_token":"a","refresh_token":"rotated-new","expires_in":600,"refresh_token_expires_in":1}`
-	if tok, err := refreshToken(ctx, defaultFetch, "refresh-old"); err != nil || tok.refreshToken != "rotated-new" {
+	if tok, err := refreshToken(ctx, plugins.Fetch, "refresh-old"); err != nil || tok.refreshToken != "rotated-new" {
 		t.Fatalf("%#v %v", tok, err)
 	}
 	status, body = 200, `{"access_token":"a","expires_in":600}`
-	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	_, err = refreshToken(ctx, plugins.Fetch, "refresh-old")
 	if ae := apiErr(t, err); ae.code != "API_ERROR" || !strings.Contains(ae.message, "refresh_token") {
 		t.Fatalf("%#v", ae)
 	}
 	status, body = 400, "invalid_grant"
-	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	_, err = refreshToken(ctx, plugins.Fetch, "refresh-old")
 	if ae := apiErr(t, err); ae.code != "TOKEN_EXPIRED" || ae.suggestion != "Run: agentio reauth" {
 		t.Fatalf("%#v", ae)
 	}
@@ -838,7 +838,7 @@ func TestTransportFailuresAreNetworkErrors(t *testing.T) {
 	prev := http.DefaultTransport
 	http.DefaultTransport = rewriteTransport{target: &url.URL{Scheme: "http", Host: "127.0.0.1:1"}, base: prev}
 	t.Cleanup(func() { http.DefaultTransport = prev })
-	_, err := login(context.Background(), defaultFetch, "a@b.c", "pw", nil)
+	_, err := login(context.Background(), plugins.Fetch, "a@b.c", "pw", nil)
 	if ae := apiErr(t, err); ae.code != "NETWORK_ERROR" || !strings.HasPrefix(ae.message, "Could not reach Falco: ") {
 		t.Fatalf("%#v", ae)
 	}
@@ -870,7 +870,7 @@ func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
 		plain(fmt.Sprintf("getJson %d", s), err)
 		_, err = testClient().listBillingDocuments(billingTypes{invoices: true})
 		plain(fmt.Sprintf("billing list %d", s), err)
-		_, err = login(ctx, defaultFetch, "a@b.c", "pw", nil)
+		_, err = login(ctx, plugins.Fetch, "a@b.c", "pw", nil)
 		plain(fmt.Sprintf("login %d", s), err)
 	}
 	status = 200
@@ -878,7 +878,7 @@ func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
 	plain("peppol download", err)
 	_, err = testClient().downloadBillingDocumentPdf("bill-1")
 	plain("billing download", err)
-	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	_, err = refreshToken(ctx, plugins.Fetch, "refresh-old")
 	plain("refresh", err)
 	if err := testClient().setInvoicePaymentStatus("inv-1", "paid"); err != nil {
 		t.Errorf("an unread success body failed: %v", err)
@@ -897,7 +897,7 @@ func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
 	if ae := apiErr(t, err); ae.message != "Falco request failed while updating Peppol payment status for doc-1 (HTTP 500)" {
 		t.Errorf("%#v", ae)
 	}
-	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	_, err = refreshToken(ctx, plugins.Fetch, "refresh-old")
 	if ae := apiErr(t, err); ae.code != "TOKEN_EXPIRED" || ae.message != "Falco refresh failed (HTTP 500): " {
 		t.Errorf("%#v", ae)
 	}

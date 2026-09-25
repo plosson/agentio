@@ -80,10 +80,6 @@ func noSleep(t *testing.T) *[]time.Duration {
 	return &waits
 }
 
-func hostFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 func setupContext(code string) *plugins.SetupContext {
 	return &plugins.SetupContext{
 		Log: func(...any) {},
@@ -94,7 +90,7 @@ func setupContext(code string) *plugins.SetupContext {
 			}
 			return plugins.OAuthSetupResult{Code: code, RedirectURI: redirect}, nil
 		},
-		Fetch: hostFetch,
+		Fetch: plugins.Fetch,
 		Fail: func(code plugins.ErrorCode, message, suggestion string) error {
 			return errors.New(code + ": " + message)
 		},
@@ -355,7 +351,7 @@ func TestNewServiceUsesTheStoredTokenAndNeverRefreshes(t *testing.T) {
 	})
 	run := &plugins.RunContext{
 		Credentials: map[string]any{"access_token": "at-stored", "refresh_token": "rt", "expiry_date": int64(1), "token_type": "Bearer"},
-		Fetch:       hostFetch,
+		Fetch:       plugins.Fetch,
 	}
 	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
 	if err != nil {
@@ -380,7 +376,7 @@ func TestPatchIsNotRetriedAndErrorsKeepGaxiosFields(t *testing.T) {
 	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 		writeJSON(w, 500, map[string]any{"error": map[string]any{"code": 500, "message": "Backend Error", "errors": []any{map[string]any{"message": "inner"}}}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "a"}, Fetch: hostFetch}
+	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "a"}, Fetch: plugins.Fetch}
 	svc, err := NewService(fake.ctx(), run, Camel, calendar.NewService)
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +512,7 @@ func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}(fake.srv.Config.Handler)
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at-stored"}, Fetch: hostFetch}
+	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at-stored"}, Fetch: plugins.Fetch}
 	base := fake.srv.URL + "/api/"
 	body := `[{"updateTextStyle":{"textStyle":{"bold":false},"fields":"bold","unknownField":1}}]`
 	v, err := CallJSON(context.Background(), run, Camel, "POST", base, "v1/docs/d1:batchUpdate", []byte(body))
@@ -559,7 +555,7 @@ func TestDriveServiceUsesCamelTokensAndPageSizeCapsLikeMathMin(t *testing.T) {
 	run := &plugins.RunContext{
 		// A Snake key must not be read by a Drive client.
 		Credentials: map[string]any{"accessToken": "at-camel", "access_token": "at-snake", "tokenType": "Bearer"},
-		Fetch:       hostFetch,
+		Fetch:       plugins.Fetch,
 	}
 	svc, err := DriveService(fake.ctx(), run)
 	if err != nil {
@@ -646,7 +642,7 @@ func TestDriveFilesListFormatAndValidate(t *testing.T) {
 			map[string]any{"id": "p2", "owners": []any{}, "webViewLink": "https://example.com/p2"},
 		}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at", "email": "me@example.com"}, Fetch: hostFetch}
+	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at", "email": "me@example.com"}, Fetch: plugins.Fetch}
 	svc, err := DriveService(fake.ctx(), run)
 	if err != nil {
 		t.Fatal(err)
@@ -736,7 +732,7 @@ func TestMaxResultsCapsLikeMathMin(t *testing.T) {
 	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
 		writeJSON(w, 200, map[string]any{"items": []any{}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"access_token": "at"}, Fetch: hostFetch}
+	run := &plugins.RunContext{Credentials: map[string]any{"access_token": "at"}, Fetch: plugins.Fetch}
 	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
 	if err != nil {
 		t.Fatal(err)

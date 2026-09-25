@@ -1052,6 +1052,14 @@ func TestACutErrorBodyFailsLikeBun(t *testing.T) {
 	testbox.WantSocketClosed(t, err)
 }
 
+// A success body is read with response.json(), which rejects the same way.
+func TestACutSuccessBodyFailsLikeBun(t *testing.T) {
+	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
+	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	_, err := a.account()
+	testbox.WantSocketClosed(t, err)
+}
+
 func TestNormalizePathAndHeaderEscaping(t *testing.T) {
 	for in, want := range map[string]string{
 		"": "", " / ": "", "Docs": "/Docs", "/Docs///": "/Docs", "//": "", "id:abc": "id:abc",

@@ -194,7 +194,7 @@ func HubCall(hubURL, path string, call Call) (json.RawMessage, int, error) {
 	if call.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := plugins.NewHTTPClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, clierr.New(clierr.NetworkError,
@@ -202,7 +202,7 @@ func HubCall(hubURL, path string, call Call) (json.RawMessage, int, error) {
 			"Check the network, and that the hub daemon is running")
 	}
 	defer resp.Body.Close()
-	raw, err := plugins.ReadBody(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, 0, err
 	}

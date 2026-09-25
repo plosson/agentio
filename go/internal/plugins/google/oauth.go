@@ -88,10 +88,6 @@ var Scopes = map[string][]string{
 
 type fetchFunc func(context.Context, *http.Request) (*http.Response, error)
 
-func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 // AuthorizeURL is google-auth-library generateAuthUrl({ access_type:
 // 'offline', scope, prompt: 'consent' }), parameters in the same order.
 func AuthorizeURL(scopes []string, redirectURI string) string {
@@ -172,7 +168,7 @@ func refreshTokens(ctx context.Context, stored Tokens) (Tokens, error) {
 	if err != nil {
 		return Tokens{}, err
 	}
-	tok, err := conf.TokenSource(tokenContext(ctx, defaultFetch), &oauth2.Token{RefreshToken: stored.RefreshToken}).Token()
+	tok, err := conf.TokenSource(tokenContext(ctx, plugins.Fetch), &oauth2.Token{RefreshToken: stored.RefreshToken}).Token()
 	if err != nil {
 		return Tokens{}, tokenError(err)
 	}

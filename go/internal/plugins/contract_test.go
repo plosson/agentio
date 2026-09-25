@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 )
@@ -224,24 +227,65 @@ type timeoutErr struct{}
 func (timeoutErr) Error() string { return "i/o timeout" }
 func (timeoutErr) Timeout() bool { return true }
 
-// A body read that fails part-way keeps nothing and fails as Bun's fetch does.
-func TestReadBodyRejectsLikeBunAndKeepsNothing(t *testing.T) {
+// roundTripper answers every request with a body that fails with err after
+// "partial".
+type roundTripper struct{ err error }
+
+func (rt roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	body := io.NopCloser(&failingReader{data: []byte("partial"), err: rt.err})
+	return &http.Response{StatusCode: 200, Body: body, Request: req}, nil
+}
+
+// A body read that fails part-way fails as Bun's fetch does, whatever reads it.
+func TestBunTransportFailsBodyReadsLikeBun(t *testing.T) {
 	cases := []struct {
 		err  error
 		want string
 	}{
 		{io.ErrUnexpectedEOF, BunSocketClosed},
 		{syscall.ECONNRESET, BunSocketClosed},
+		{context.Canceled, BunSocketClosed},
 		{context.DeadlineExceeded, "The operation timed out."},
 		{timeoutErr{}, "The operation timed out."},
 	}
 	for _, c := range cases {
-		raw, err := ReadBody(&failingReader{data: []byte("partial"), err: c.err})
-		if raw != nil || err == nil || err.Error() != c.want {
-			t.Errorf("%v: %q %v", c.err, raw, err)
+		client := &http.Client{Transport: BunTransport{Base: roundTripper{c.err}}}
+		resp, err := client.Get("http://example.invalid/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%v: %v", c.err, err)
 		}
 	}
-	if raw, err := ReadBody(strings.NewReader("whole")); err != nil || string(raw) != "whole" {
+	client := &http.Client{Transport: BunTransport{Base: roundTripper{io.EOF}}}
+	resp, err := client.Get("http://example.invalid/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := io.ReadAll(resp.Body); err != nil || string(raw) != "partial" {
 		t.Fatalf("%q %v", raw, err)
+	}
+}
+
+// A body that outlives the timeout fails as AbortSignal.timeout does, not with
+// the text http.Client.Timeout would add.
+func TestBunTransportTimeoutCoversTheBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, "0123456789")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	resp, err := NewHTTPClient(50 * time.Millisecond).Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err == nil || err.Error() != "The operation timed out." {
+		t.Fatalf("%v", err)
 	}
 }

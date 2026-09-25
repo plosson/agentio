@@ -233,7 +233,7 @@ func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
 }
 
 func responseError(resp *http.Response, operation string) error {
-	raw, err := plugins.ReadBody(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}

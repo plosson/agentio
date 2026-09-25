@@ -74,7 +74,7 @@ func MaxResults(limit, max float64) googleapi.CallOption {
 func HTTPClient(run *plugins.RunContext, keys Keys) *http.Client {
 	fetch := run.Fetch
 	if fetch == nil {
-		fetch = defaultFetch
+		fetch = plugins.Fetch
 	}
 	stored := keys.Read(run.Credentials)
 	source := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: stored.AccessToken, TokenType: stored.TokenType})

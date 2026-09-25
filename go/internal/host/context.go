@@ -45,10 +45,10 @@ func fail(code plugins.ErrorCode, message, suggestion string) error {
 }
 
 func fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	if req.Context() == nil || req.Context() == context.Background() {
-		req = req.WithContext(ctx)
+	if req.Context() != nil && req.Context() != context.Background() {
+		ctx = req.Context()
 	}
-	return http.DefaultClient.Do(req)
+	return plugins.Fetch(ctx, req)
 }
 
 // NewSetupContext builds the host surface a profile.setup receives.

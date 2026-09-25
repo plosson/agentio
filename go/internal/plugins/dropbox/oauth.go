@@ -33,10 +33,6 @@ var dropboxScopes = []string{
 	"sharing.write",
 }
 
-func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 // pkcePair is createPkcePair: a base64url verifier of 64 random bytes and its
 // S256 challenge.
 func pkcePair() (verifier, challenge string, err error) {
@@ -275,7 +271,7 @@ func stale(creds map[string]any, nowMs, bufferMs int64) bool {
 
 // refresh keeps the refresh token: Dropbox does not rotate it.
 func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
-	data, err := postTokenRequest(ctx, defaultFetch, formEncode(
+	data, err := postTokenRequest(ctx, plugins.Fetch, formEncode(
 		"grant_type", "refresh_token",
 		"refresh_token", str(creds, "refreshToken"),
 		"client_id", str(creds, "appKey"),

@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -203,7 +204,7 @@ func postTokenRequest(ctx context.Context, do fetchFunc, environment any, body *
 		return nil, &apiError{code: "NETWORK_ERROR", message: "Could not reach the Revolut token endpoint: " + err.Error()}
 	}
 	defer resp.Body.Close()
-	raw, err := plugins.ReadBody(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

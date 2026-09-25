@@ -50,7 +50,7 @@ func Refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 		return nil, err
 	}
 	old := Str(creds, "refreshToken")
-	next, err := requestToken(ctx, defaultFetch, map[string]any{
+	next, err := requestToken(ctx, plugins.Fetch, map[string]any{
 		"grant_type":    "refresh_token",
 		"client_id":     ClientID,
 		"client_secret": clientSecret,

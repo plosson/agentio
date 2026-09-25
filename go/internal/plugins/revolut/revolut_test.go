@@ -1629,7 +1629,7 @@ func TestACutDownloadFailsLikeBunAndWritesNothing(t *testing.T) {
 // connection: a plain error, not "unexpected token response".
 func TestACutTokenResponseFailsLikeBun(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
-	_, err := postTokenRequest(context.Background(), defaultFetch, "production", jsvalue.NewSearchParams())
+	_, err := postTokenRequest(context.Background(), plugins.Fetch, "production", jsvalue.NewSearchParams())
 	if _, isAPI := err.(*apiError); isAPI {
 		t.Fatalf("%#v", err)
 	}

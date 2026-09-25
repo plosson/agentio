@@ -18,6 +18,7 @@ import (
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -292,6 +293,19 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 	}
 	if n := len(fake.Recorded()); n != 1 {
 		t.Fatalf("%d requests", n)
+	}
+}
+
+// gaxios reads the answer with Bun's fetch, whose body read rejects with the
+// plain TypeError when the connection drops mid-body.
+func TestACutAnswerFailsLikeBun(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) { testbox.CutShort(t, w, 200) })
+	_, err := product.Exec(fake.Ctx(), t, reg, "lists list", product.Input(t, "lists list", nil, nil))
+	ce := googletest.CliErr(t, err)
+	if ce.Code != clierr.APIError || ce.Message != "Tasks API error: "+plugins.BunSocketClosed {
+		t.Fatalf("%#v", ce)
 	}
 }
 

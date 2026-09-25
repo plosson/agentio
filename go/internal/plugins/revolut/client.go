@@ -33,10 +33,6 @@ func apiBaseURL(environment any) string {
 
 type fetchFunc func(context.Context, *http.Request) (*http.Response, error)
 
-func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 // apiError is the CliError Bun's client throws. Commands hand it to Fail.
 type apiError struct {
 	code       plugins.ErrorCode
@@ -81,7 +77,7 @@ type client struct {
 
 func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *client {
 	if fetch == nil {
-		fetch = defaultFetch
+		fetch = plugins.Fetch
 	}
 	env := credential(creds, "environment")
 	return &client{ctx: ctx, fetch: fetch, baseURL: apiBaseURL(env), environment: env, accessToken: credential(creds, "accessToken")}
@@ -109,7 +105,7 @@ func (c *client) send(method, path string, headers [][2]string, body []byte) (*h
 		var resp *http.Response
 		if resp, err = c.fetch(c.ctx, req); err == nil {
 			defer resp.Body.Close()
-			raw, err := plugins.ReadBody(resp.Body)
+			raw, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return nil, nil, err
 			}

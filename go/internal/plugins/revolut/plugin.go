@@ -66,7 +66,7 @@ func stale(creds map[string]any, nowMs, bufferMs int64) bool {
 
 // refresh keeps the refresh token: Revolut does not rotate it.
 func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
-	t, err := refreshRevolutToken(ctx, defaultFetch, creds)
+	t, err := refreshRevolutToken(ctx, plugins.Fetch, creds)
 	if err != nil {
 		return nil, err
 	}

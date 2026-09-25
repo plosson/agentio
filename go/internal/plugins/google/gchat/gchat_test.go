@@ -71,13 +71,13 @@ func captureStderr(t *testing.T, fn func()) string {
 	return <-done
 }
 
-// useTLS sends the host's fetch (http.DefaultClient) through srv's
+// useTLS sends the host's fetch (over http.DefaultTransport) through srv's
 // transport, so an https:// webhook reaches the fake.
 func useTLS(t *testing.T, srv *httptest.Server) {
 	t.Helper()
-	prev := http.DefaultClient.Transport
-	http.DefaultClient.Transport = srv.Client().Transport
-	t.Cleanup(func() { http.DefaultClient.Transport = prev })
+	prev := http.DefaultTransport
+	http.DefaultTransport = srv.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = prev })
 }
 
 // The command table is the Bun surface: `bun run src/index.ts gchat --help`

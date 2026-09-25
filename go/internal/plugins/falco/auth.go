@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -142,7 +143,7 @@ func login(ctx context.Context, do fetchFunc, username, password string, twoFaCo
 		return loginResult{}, networkError(err)
 	}
 	defer resp.Body.Close()
-	raw, err := plugins.ReadBody(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return loginResult{}, err
 	}
@@ -203,7 +204,10 @@ func refreshToken(ctx context.Context, do fetchFunc, token string) (tokens, erro
 	}
 	defer resp.Body.Close()
 	// Bun reads an error body with .catch(() => ""), a success one with json().
-	raw, err := plugins.ReadBody(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		raw = nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return tokens{}, &apiError{
 			code:       "TOKEN_EXPIRED",
@@ -258,7 +262,7 @@ func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 	if raw, present := creds["refreshExpiryDate"]; present && float64(time.Now().UnixMilli()) >= toNumber(raw) {
 		return nil, &apiError{code: "TOKEN_EXPIRED", message: "The Falco refresh token has expired", suggestion: "Run: agentio reauth"}
 	}
-	t, err := refreshToken(ctx, defaultFetch, jsvalue.String(orNull(creds["refreshToken"])))
+	t, err := refreshToken(ctx, plugins.Fetch, jsvalue.String(orNull(creds["refreshToken"])))
 	if err != nil {
 		return nil, err
 	}

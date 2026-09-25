@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
 )
@@ -194,19 +195,75 @@ func HTTPStatusToErrorCode(status int) ErrorCode {
 // the connection drops before the body is complete.
 const BunSocketClosed = "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
 
-// ReadBody is `await response.arrayBuffer()` (or text(), json()) under Bun:
-// a body that cannot be read in full rejects with a plain error, and none of
-// it is kept. A timeout reads as AbortSignal.timeout's rejection.
-func ReadBody(body io.Reader) ([]byte, error) {
-	raw, err := io.ReadAll(body)
-	if err == nil {
-		return raw, nil
+// BunTransport is Bun's fetch as an http.RoundTripper: a response body that
+// cannot be read in full fails as `await response.arrayBuffer()` (or text(),
+// json()) rejects under Bun, so a plain io.ReadAll(resp.Body) anywhere
+// returns Bun's error. A timeout reads as AbortSignal.timeout's rejection.
+type BunTransport struct {
+	// Base sends the request; nil is http.DefaultTransport at the time of the
+	// call, which tests replace.
+	Base http.RoundTripper
+	// Timeout, when set, covers the whole exchange, body included. It lives
+	// here rather than in http.Client.Timeout, which rewrites body errors.
+	Timeout time.Duration
+}
+
+func (t BunTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.Base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	cancel := context.CancelFunc(func() {})
+	if t.Timeout > 0 {
+		var ctx context.Context
+		ctx, cancel = context.WithTimeout(req.Context(), t.Timeout)
+		req = req.WithContext(ctx)
+	}
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	resp.Body = &bunBody{ReadCloser: resp.Body, ctx: req.Context(), cancel: cancel}
+	return resp, nil
+}
+
+type bunBody struct {
+	io.ReadCloser
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (b *bunBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err == nil || err == io.EOF {
+		return n, err
 	}
 	var timeout interface{ Timeout() bool }
-	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
-		return nil, errors.New("The operation timed out.")
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() ||
+		errors.Is(b.ctx.Err(), context.DeadlineExceeded) {
+		return n, errors.New("The operation timed out.")
 	}
-	return nil, errors.New(BunSocketClosed)
+	return n, errors.New(BunSocketClosed)
+}
+
+func (b *bunBody) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
+}
+
+// NewHTTPClient is an http.Client that fails like Bun's fetch (BunTransport);
+// timeout 0 is none.
+func NewHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{Transport: BunTransport{Timeout: timeout}}
+}
+
+var bunClient = NewHTTPClient(0)
+
+// Fetch is Bun's global fetch: req sent under ctx, its body failing as Bun's
+// does. It is what the host hands a plugin, and a plugin's own default.
+func Fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
+	return bunClient.Do(req.WithContext(ctx))
 }
 
 // FailFunc is RunContext.Fail. Input checks take it so they also run from an

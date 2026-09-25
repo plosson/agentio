@@ -33,10 +33,6 @@ var (
 
 type fetchFunc func(context.Context, *http.Request) (*http.Response, error)
 
-func defaultFetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(ctx))
-}
-
 // apiError is Bun's CliError thrown by the client. Commands hand it to Fail.
 type apiError struct {
 	code       plugins.ErrorCode
@@ -64,7 +60,7 @@ type client struct {
 
 func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *client {
 	if fetch == nil {
-		fetch = defaultFetch
+		fetch = plugins.Fetch
 	}
 	// The host refreshes before handing credentials over, so an access token is
 	// present in practice; an empty one simply fails the first call as 401.
@@ -110,7 +106,11 @@ func (c *client) send(method, url string, headers [][2]string, body []byte, what
 		return response{}, &apiError{code: "NETWORK_ERROR", message: fmt.Sprintf("Could not reach Falco while %s: %s", what, err.Error())}
 	}
 	defer resp.Body.Close()
-	raw, readErr := plugins.ReadBody(resp.Body)
+	raw, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		// A failed read keeps nothing: an error body read with .catch(() => "").
+		raw = nil
+	}
 	return response{status: resp.StatusCode, contentType: resp.Header.Get("Content-Type"), body: raw, readErr: readErr}, nil
 }
 
