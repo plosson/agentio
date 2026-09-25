@@ -91,6 +91,21 @@ func TestRegistryRejectsABrokenContract(t *testing.T) {
 			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate,
 				SetupOptions: []OptionSpec{{Flags: "--profile <name>", Description: "nope"}}}
 		}, "profile add redeclares host option"},
+		{"group that is a command", func(p *Plugin) {
+			p.Groups = []GroupSpec{{Path: "items list", Description: "List"}}
+		}, "invalid or duplicate group"},
+		{"group with no command under it", func(p *Plugin) {
+			p.Groups = []GroupSpec{{Path: "things", Description: "Things"}}
+		}, "invalid or duplicate group"},
+		{"group that is only a prefix of a word", func(p *Plugin) {
+			p.Groups = []GroupSpec{{Path: "item", Description: "Item"}}
+		}, "invalid or duplicate group"},
+		{"group described twice", func(p *Plugin) {
+			p.Groups = []GroupSpec{{Path: "items", Description: "Items"}, {Path: "items", Description: "Again"}}
+		}, "invalid or duplicate group"},
+		{"group without a description", func(p *Plugin) {
+			p.Groups = []GroupSpec{{Path: "items", Description: " \t"}}
+		}, "invalid or duplicate group"},
 		{"setup option without a long flag", func(p *Plugin) {
 			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate,
 				SetupOptions: []OptionSpec{{Flags: "-k <key>", Description: "short only"}}}
@@ -159,5 +174,13 @@ func TestProfileOptionPlacement(t *testing.T) {
 		if flags(in) != flags(c.in) {
 			t.Error("WithProfileOption changed its input")
 		}
+	}
+}
+
+func TestGroupDescriptionsRegister(t *testing.T) {
+	p := valid()
+	p.Groups = []GroupSpec{{Path: "items", Description: "Manage items"}}
+	if _, err := NewRegistry(p); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -16,13 +16,16 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "sql",
-		DisplayName: "SQL",
-		Description: "Use when running SQL queries via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "sql",
+		DisplayName:        "SQL",
+		Description:        "Use when running SQL queries via the agentio CLI.",
+		CommandDescription: "SQL database operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:    setup,
-			Validate: validate,
+			AddDescription:     "Add a new SQL database profile",
+			ProfileDescription: "Profile name (auto-detected from connection if not provided)",
+			Setup:              setup,
+			Validate:           validate,
 			// A connection URL does not expire: no refresh lifecycle, no
 			// secret fields, and the hub serves the whole credential map.
 			ListInfo: listInfo,

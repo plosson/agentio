@@ -24,16 +24,19 @@ var app = atlassian.App{
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "jira",
-		DisplayName: "JIRA",
-		Description: "Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "jira",
+		DisplayName:        "JIRA",
+		Description:        "Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.",
+		CommandDescription: "JIRA operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          app.Setup,
-			Validate:       validate,
-			Reauthenticate: app.Reauthenticate,
-			ListInfo:       atlassian.ListInfo,
-			Refresh:        atlassian.RefreshSpec(),
+			AddDescription:     "Add a new JIRA profile with OAuth authentication",
+			ProfileDescription: "Profile name (auto-detected from site URL if not provided)",
+			Setup:              app.Setup,
+			Validate:           validate,
+			Reauthenticate:     app.Reauthenticate,
+			ListInfo:           atlassian.ListInfo,
+			Refresh:            atlassian.RefreshSpec(),
 		},
 		Commands: []plugins.CommandSpec{
 			projectsCmd(), searchCmd(), getCmd(), commentCmd(), transitionsCmd(), transitionCmd(),

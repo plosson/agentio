@@ -14,16 +14,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gslides",
-		DisplayName: "Google Slides",
-		Description: "Use when interacting with Google Slides via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gslides",
+		DisplayName:        "Google Slides",
+		Description:        "Use when interacting with Google Slides via the agentio CLI.",
+		CommandDescription: "Google Slides operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.Setup("gslides", "Google Slides"),
-			Validate:       google.ValidateDriveFiles(presentationMimeType),
-			Reauthenticate: google.Reauthenticate("gslides", google.Camel),
-			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.Setup("gslides", "Google Slides"),
+			Validate:           google.ValidateDriveFiles(presentationMimeType),
+			Reauthenticate:     google.Reauthenticate("gslides", google.Camel),
+			Refresh:            google.Camel.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			listCmd(), metadataCmd(), getCmd(), exportCmd(), createCmd(), copyCmd(), batchCmd(),

@@ -22,16 +22,22 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gmail",
-		DisplayName: "Gmail",
-		Description: "Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gmail",
+		DisplayName:        "Gmail",
+		Description:        "Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.",
+		CommandDescription: "Gmail operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.SnakeSetup("gmail", "Gmail", "Could not fetch email from Gmail"),
-			Validate:       validate,
-			Reauthenticate: google.Reauthenticate("gmail", google.Snake),
-			Refresh:        google.Snake.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.SnakeSetup("gmail", "Gmail", "Could not fetch email from Gmail"),
+			Validate:           validate,
+			Reauthenticate:     google.Reauthenticate("gmail", google.Snake),
+			Refresh:            google.Snake.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
+		},
+		Groups: []plugins.GroupSpec{
+			{Path: "labels", Description: "Manage Gmail labels"},
+			{Path: "filters", Description: "Manage Gmail filters"},
 		},
 		Commands: []plugins.CommandSpec{
 			listCmd(), getCmd(), searchCmd(), sendCmd(), draftCmd(), draftDeleteCmd(),

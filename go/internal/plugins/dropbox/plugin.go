@@ -10,15 +10,17 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "dropbox",
-		DisplayName: "Dropbox",
-		Description: "Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "dropbox",
+		DisplayName:        "Dropbox",
+		Description:        "Use when interacting with Dropbox via the agentio CLI - list, search, download, upload, move, copy, delete, share links.",
+		CommandDescription: "Dropbox operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
-			Reauthenticate: reauth,
-			ListInfo:       listInfo,
+			ProfileDescription: "Profile name (defaults to the account email)",
+			Setup:              setup,
+			Validate:           validate,
+			Reauthenticate:     reauth,
+			ListInfo:           listInfo,
 			SetupOptions: []plugins.OptionSpec{
 				{Flags: "--app-key <key>", Description: "App key from the Dropbox App Console"},
 			},

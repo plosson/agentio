@@ -96,14 +96,12 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 		fmt.Fprintln(stderr, line.err)
 		return 1
 	case line.help != nil:
+		// Commander help({ error: true }) goes to stderr and exits 1.
 		if line.helpErr {
-			root.SetOut(stderr)
-		}
-		root.SetArgs(append(commandWords(line.help), "--help"))
-		_ = root.Execute()
-		if line.helpErr {
+			outputHelp(stderr, line.help)
 			return 1
 		}
+		outputHelp(stdout, line.help)
 		return 0
 	}
 	root.SetArgs(line.argv)
@@ -138,6 +136,8 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 		},
 	}
 	root.Flags().BoolP("version", "V", false, "output the version number")
+	root.SetHelpFunc(func(c *cobra.Command, _ []string) { outputHelp(c.OutOrStdout(), c) })
+	root.Annotations = map[string]string{afterHelp: "\nFor agent/LLM usage: run `agentio skill <service>` to dump a full SKILL.md, or `agentio docs` for the machine-readable command index.\n"}
 	// commanderParse dispatches the line, so cobra's own `completion` and root
 	// `help` commands are never reached; Bun's root has neither.
 	root.CompletionOptions.DisableDefaultCmd = true
@@ -155,8 +155,24 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 	root.AddCommand(docsCmd(), daemonCmd(reg), doctorCmd(), keyCmd(), loginCmd(), logoutCmd(), pluginCmd(reg),
 		profileCmd(reg), reauthCmd(reg), skillCmd(reg), statusCmd(reg), vaultCmd())
 	root.AddCommand(removedCmd("setup", "agentio vault init"), removedCmd("config", "agentio vault export | import | clear"))
+	// Bun's root help groups (helpGroup).
+	root.AddGroup(&cobra.Group{ID: servicesGroup, Title: "Services"}, &cobra.Group{ID: "advanced", Title: "Advanced"},
+		&cobra.Group{ID: "setup", Title: "Setup"})
+	for group, names := range map[string][]string{
+		"setup":    {"vault", "login", "logout", "status", "doctor", "update"},
+		"advanced": {"daemon", "key", "plugin", "profile"},
+	} {
+		for _, name := range names {
+			if c := findCommand(root, name); c != nil {
+				c.GroupID = group
+			}
+		}
+	}
 	return root
 }
+
+// servicesGroup is the root help group of the service commands.
+const servicesGroup = "services"
 
 // removedCmd is Bun's hidden stub for a command folded into `vault` in 2.0:
 // the old name fails with a pointer to the new one, whatever follows it.
@@ -237,10 +253,17 @@ func topName(cmd *cobra.Command) string {
 }
 
 func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
-	cmd := &cobra.Command{Use: p.ID, Short: p.Description}
+	cmd := &cobra.Command{Use: p.ID, Short: p.CommandDescription, GroupID: servicesGroup}
+	if cmd.Short == "" {
+		cmd.Short = p.Description
+	}
+	groups := map[string]string{}
+	for _, g := range p.Groups {
+		groups[g.Path] = g.Description
+	}
 	for i := range p.Commands {
 		spec := p.Commands[i]
-		leaf := nested(cmd, spec.Path)
+		leaf := nested(cmd, spec.Path, groups)
 		leaf.Short = spec.Description
 		use := leaf.Name()
 		for _, arg := range spec.Arguments {
@@ -263,11 +286,8 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 			}
 			group.Annotations[defaultCommand] = leaf.Name()
 		}
-		if !describesArguments(spec.Arguments) {
-			if leaf.Annotations == nil {
-				leaf.Annotations = map[string]string{}
-			}
-			leaf.Annotations[argsUndescribed] = "true"
+		for _, arg := range spec.Arguments {
+			describeArgument(leaf, arg.Name, arg.Description)
 		}
 		leaf.Example = examplesBlock(spec.Examples, spec.ExampleNotes)
 		options := spec.Options
@@ -343,17 +363,6 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	return cmd
 }
 
-// describesArguments is Commander's visibleArguments test: arguments show in
-// the reference only when one of them has a description.
-func describesArguments(args []plugins.ArgumentSpec) bool {
-	for _, arg := range args {
-		if arg.Description != "" {
-			return true
-		}
-	}
-	return false
-}
-
 // optionalBare is what pflag stores for a `[value]` flag given without a value.
 const optionalBare = "true"
 
@@ -382,9 +391,9 @@ func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 		}
 		_ = flags.SetAnnotation(fname, flagSpecs, []string{opt.Flags})
 		if opt.Repeatable {
-			setDefault(flags, fname, "")
-		} else if opt.DefaultValue != nil && opt.DefaultValue != "" {
-			setDefault(flags, fname, jsvalue.String(opt.DefaultValue))
+			setDefault(flags, fname, []any{})
+		} else if opt.DefaultValue != nil {
+			setDefault(flags, fname, opt.DefaultValue)
 		}
 		if opt.Required {
 			_ = flags.SetAnnotation(fname, cobra.BashCompOneRequiredFlag, []string{"true"})
@@ -479,9 +488,12 @@ func isOptionalValue(flags string) bool {
 // defaultCommand is the group annotation naming its CommandSpec.Default child.
 const defaultCommand = "agentio-default-command"
 
-func nested(root *cobra.Command, path string) *cobra.Command {
+// nested finds or adds the command at path under root; a group it adds on
+// the way takes its description from groups (by path).
+func nested(root *cobra.Command, path string, groups map[string]string) *cobra.Command {
 	cur := root
-	for _, part := range strings.Fields(path) {
+	words := strings.Fields(path)
+	for i, part := range words {
 		var child *cobra.Command
 		for _, existing := range cur.Commands() {
 			if existing.Name() == part {
@@ -490,7 +502,7 @@ func nested(root *cobra.Command, path string) *cobra.Command {
 			}
 		}
 		if child == nil {
-			child = &cobra.Command{Use: part}
+			child = &cobra.Command{Use: part, Short: groups[strings.Join(words[:i+1], " ")]}
 			cur.AddCommand(child)
 		}
 		cur = child
@@ -511,21 +523,26 @@ func longName(flags string) string {
 	return flags
 }
 
+// serviceProfile is Bun's createProfileCommands, then the service's `add`.
 func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	group := &cobra.Command{Use: "profile", Short: "Manage " + p.DisplayName + " profiles"}
 	var profileName string
 	var readOnly bool
 	add := &cobra.Command{
-		Use:   "add",
-		Short: "Add a new " + p.DisplayName + " profile",
+		Use:     "add",
+		Short:   p.Profile.AddDescription,
+		Example: examplesBlock(p.Profile.AddExamples, nil),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts := plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly, Options: optionValues(cmd.Flags(), p.Profile.SetupOptions)}
 			return host.AddProfile(context.Background(), p, opts, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
 		},
 	}
-	profileUsage := "Profile name"
-	if p.Profile.RequireProfile {
-		profileUsage = "Profile name (required)"
+	if add.Short == "" {
+		add.Short = "Add a new " + p.DisplayName + " profile"
+	}
+	profileUsage := p.Profile.ProfileDescription
+	if profileUsage == "" {
+		profileUsage = "Profile name"
 	}
 	add.Flags().StringVar(&profileName, "profile", "", profileUsage)
 	if p.Profile.RequireProfile {
@@ -564,17 +581,18 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 			return nil
 		},
 	}
-	group.AddCommand(add, list, updateCmd(p.ID), renameCmd(p.ID), removeCmd(p.ID))
+	group.AddCommand(list, updateCmd(p), renameCmd(p), removeCmd(p), add)
 	_ = reg
 	return group
 }
 
-func updateCmd(service string) *cobra.Command {
+func updateCmd(p *plugins.Plugin) *cobra.Command {
+	service := p.ID
 	var name string
 	var value bool
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Update a profile",
+		Short: "Update a " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !cmd.Flags().Changed("read-only") {
 				return clierr.New(clierr.InvalidParams, "No update specified", "Use --read-only or --no-read-only")
@@ -601,11 +619,12 @@ func updateCmd(service string) *cobra.Command {
 	return cmd
 }
 
-func renameCmd(service string) *cobra.Command {
+func renameCmd(p *plugins.Plugin) *cobra.Command {
+	service := p.ID
 	var name, to string
 	cmd := &cobra.Command{
 		Use:   "rename",
-		Short: "Rename a profile",
+		Short: "Rename a " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			outcome, err := profile.Rename(service, name, to)
 			if err != nil {
@@ -625,11 +644,12 @@ func renameCmd(service string) *cobra.Command {
 	return cmd
 }
 
-func removeCmd(service string) *cobra.Command {
+func removeCmd(p *plugins.Plugin) *cobra.Command {
+	service := p.ID
 	var name string
 	cmd := &cobra.Command{
 		Use:   "remove",
-		Short: "Remove a profile",
+		Short: "Remove a " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ok, err := profile.Delete(service, name)
 			if err != nil {
@@ -774,6 +794,16 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 			return host.Reauth(context.Background(), reg, args[0], resolved, host.NewSetupContext(streams(c)), c.ErrOrStderr())
 		},
 	}
+	service := "Service name (" + known() + ")"
+	describeArgument(list, "service", "Limit to one service (e.g. gmail, slack)")
+	describeArgument(add, "service", service)
+	describeArgument(rename, "service", service)
+	describeArgument(rename, "name", "Current profile name")
+	describeArgument(rename, "new-name", "New profile name")
+	describeArgument(remove, "service", service)
+	describeArgument(remove, "name", "Profile name to remove")
+	describeArgument(reauth, "service", service)
+	describeArgument(reauth, "name", "Profile name (auto-resolves if exactly one exists)")
 	cmd.AddCommand(list, add, rename, remove, reauth)
 	return cmd
 }
@@ -823,13 +853,14 @@ func keyCmd() *cobra.Command {
 			return nil
 		},
 	}
+	describeArgument(create, "name", "Display name, e.g. the agent or machine it is for")
 	create.Flags().String("url", "", "Public base URL of this hub, embedded in the token")
 	_ = create.MarkFlagRequired("url")
 	keyScopeFlags(create.Flags())
 	create.Flags().Bool("read-only", false, "Force read-only on every profile the key can see")
 	create.Flags().Bool("can-manage-profiles", false, "Let the agent add, replace, rename and delete profiles from its machine")
-	setDefault(create.Flags(), "read-only", "false")
-	setDefault(create.Flags(), "can-manage-profiles", "false")
+	setDefault(create.Flags(), "read-only", false)
+	setDefault(create.Flags(), "can-manage-profiles", false)
 	list := &cobra.Command{
 		Use: "list", Short: "List keys (never the secrets)",
 		Example: `  agentio key list`,
@@ -904,6 +935,9 @@ func keyCmd() *cobra.Command {
 			fmt.Fprintf(c.OutOrStdout(), "Revoked %s\n", args[0])
 			return nil
 		},
+	}
+	for _, c := range []*cobra.Command{update, rotate, revoke} {
+		describeArgument(c, "id", "Key id from `agentio key list`")
 	}
 	cmd.AddCommand(create, list, update, rotate, revoke)
 	return cmd
@@ -1028,6 +1062,7 @@ func loginCmd() *cobra.Command {
 			return nil
 		},
 	}
+	describeArgument(cmd, "hub-url", "The hub, e.g. https://vault.example.com")
 	cmd.Flags().String("name", "", "How this machine introduces itself (default: hostname)")
 	addNegation(cmd.Flags(), "browser", "Print the approval URL instead of opening it")
 	return cmd

@@ -12,11 +12,12 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "rss",
-		DisplayName: "RSS",
-		Description: "Use when reading RSS feeds via the agentio CLI.",
-		Commands:    []plugins.CommandSpec{articlesCmd(), getCmd(), infoCmd()},
+		APIVersion:         plugins.APIVersion,
+		ID:                 "rss",
+		DisplayName:        "RSS",
+		Description:        "Use when reading RSS feeds via the agentio CLI.",
+		CommandDescription: "RSS feed operations",
+		Commands:           []plugins.CommandSpec{articlesCmd(), getCmd(), infoCmd()},
 	}
 }
 

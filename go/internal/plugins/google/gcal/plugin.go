@@ -14,16 +14,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gcal",
-		DisplayName: "Google Calendar",
-		Description: "Use when interacting with Google Calendar via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gcal",
+		DisplayName:        "Google Calendar",
+		Description:        "Use when interacting with Google Calendar via the agentio CLI.",
+		CommandDescription: "Google Calendar operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.SnakeSetup("gcal", "Google Calendar", "Could not fetch email from Calendar"),
-			Validate:       validate,
-			Reauthenticate: google.Reauthenticate("gcal", google.Snake),
-			Refresh:        google.Snake.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.SnakeSetup("gcal", "Google Calendar", "Could not fetch email from Calendar"),
+			Validate:           validate,
+			Reauthenticate:     google.Reauthenticate("gcal", google.Snake),
+			Refresh:            google.Snake.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			calendarsCmd(), eventsCmd(), getCmd(), createCmd(), updateCmd(),

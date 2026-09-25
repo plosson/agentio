@@ -11,16 +11,19 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "confluence",
-		DisplayName: "Confluence",
-		Description: "Use when interacting with Confluence via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "confluence",
+		DisplayName:        "Confluence",
+		Description:        "Use when interacting with Confluence via the agentio CLI.",
+		CommandDescription: "Confluence operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          app.Setup,
-			Validate:       validate,
-			Reauthenticate: app.Reauthenticate,
-			ListInfo:       atlassian.ListInfo,
-			Refresh:        atlassian.RefreshSpec(),
+			AddDescription:     "Add a new Confluence profile with OAuth authentication",
+			ProfileDescription: "Profile name (auto-detected from site URL if not provided)",
+			Setup:              app.Setup,
+			Validate:           validate,
+			Reauthenticate:     app.Reauthenticate,
+			ListInfo:           atlassian.ListInfo,
+			Refresh:            atlassian.RefreshSpec(),
 		},
 		Commands: []plugins.CommandSpec{
 			spacesCmd(), pagesCmd(), getCmd(), searchCmd(),

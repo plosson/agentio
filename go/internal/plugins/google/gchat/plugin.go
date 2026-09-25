@@ -17,17 +17,23 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gchat",
-		DisplayName: "Google Chat",
-		Description: "Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gchat",
+		DisplayName:        "Google Chat",
+		Description:        "Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.",
+		CommandDescription: "Google Chat operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
-			Reauthenticate: reauthenticate,
+			AddDescription:     "Add a new Google Chat profile (webhook or OAuth)",
+			ProfileDescription: "Profile name (required for webhook, auto-detected for OAuth)",
+			Setup:              setup,
+			Validate:           validate,
+			Reauthenticate:     reauthenticate,
 			// A webhook profile has no refreshToken, so Applies leaves it alone.
 			Refresh:  google.Camel.RefreshSpec(),
 			ListInfo: listInfo,
+		},
+		Groups: []plugins.GroupSpec{
+			{Path: "directory", Description: "Manage the cached workspace directory used to resolve user IDs"},
 		},
 		Commands: []plugins.CommandSpec{
 			sendCmd(), listCmd(), getCmd(), spacesCmd(), membersCmd(), userCmd(), directoryRefreshCmd(),

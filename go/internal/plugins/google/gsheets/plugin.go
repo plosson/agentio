@@ -14,16 +14,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gsheets",
-		DisplayName: "Google Sheets",
-		Description: "Use when interacting with Google Sheets via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gsheets",
+		DisplayName:        "Google Sheets",
+		Description:        "Use when interacting with Google Sheets via the agentio CLI.",
+		CommandDescription: "Google Sheets operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.Setup("gsheets", "Google Sheets"),
-			Validate:       google.ValidateDriveFiles(sheetMimeType),
-			Reauthenticate: google.Reauthenticate("gsheets", google.Camel),
-			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.Setup("gsheets", "Google Sheets"),
+			Validate:           google.ValidateDriveFiles(sheetMimeType),
+			Reauthenticate:     google.Reauthenticate("gsheets", google.Camel),
+			Refresh:            google.Camel.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			listCmd(), getCmd(), updateCmd(), appendCmd(), clearCmd(), formatCmd(),

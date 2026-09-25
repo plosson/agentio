@@ -82,7 +82,7 @@ func TestGitHubHelpListsTheBunLeaves(t *testing.T) {
 		}
 	}
 	_, out, _ = run(t, "github", "install", "--help")
-	if !strings.Contains(out, "install <repo>") || !strings.Contains(out, "--profile string") ||
+	if !strings.Contains(out, "Usage: agentio github install [options] <repo>\n") || !strings.Contains(out, "\n  repo              Repository in owner/repo format\n") || !strings.Contains(out, "\n  --profile <name>  Profile name (optional if only one profile exists)\n") ||
 		!strings.Contains(out, "agentio github install octocat/hello-world --profile work") || strings.Contains(out, "--json") {
 		t.Fatalf("install help:\n%s", out)
 	}

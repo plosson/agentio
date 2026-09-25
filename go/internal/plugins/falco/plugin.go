@@ -14,11 +14,21 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "falco",
-		DisplayName: "Falco",
-		Description: "Use when interacting with Falco accounting and Peppol documents via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "falco",
+		DisplayName:        "Falco",
+		Description:        "Use when interacting with Falco accounting and Peppol documents via the agentio CLI.",
+		CommandDescription: "Falco accounting and Peppol operations",
 		Profile: &plugins.ProfileSpec{
+			ProfileDescription: "Profile name (defaults to a slug of the organization)",
+			AddExamples: []string{
+				"# log in and pick an organization",
+				"agentio falco profile add",
+				"# name the profile yourself",
+				"agentio falco profile add --profile letschill",
+				"# a profile that cannot change payment status",
+				"agentio falco profile add --profile audit --read-only",
+			},
 			Setup:          setup,
 			Validate:       validate,
 			Reauthenticate: reauth,
@@ -31,6 +41,10 @@ func New() *plugins.Plugin {
 				IsStale:      stale,
 				Run:          refresh,
 			},
+		},
+		Groups: []plugins.GroupSpec{
+			{Path: "peppol", Description: "Inbound Peppol documents"},
+			{Path: "invoices", Description: "Outbound billing documents"},
 		},
 		Commands: []plugins.CommandSpec{
 			peppolListCmd(), peppolGetCmd(), peppolSyncCmd(), markPaidCmd(), importCmd(), invoicesSyncCmd(),

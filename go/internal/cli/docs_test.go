@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,7 +24,7 @@ import { generateSkill, listServices } from './src/commands/skill';
 const program = createProgram(new PluginRegistry(SERVICE_PLUGINS.filter((p) => p.id !== 'telegram')));
 const list = listServices(program);
 const skills = Object.fromEntries(list.map((s) => [s, generateSkill(program, s)]));
-await Bun.write(Bun.stdout, JSON.stringify({
+await Bun.write(process.env.OUT, JSON.stringify({
   version: program.version(),
   docs: renderDocs(program, {}),
   json: renderDocs(program, { format: 'json' }),
@@ -46,26 +45,8 @@ type bunDocs struct {
 
 func bunReferenceOutput(t *testing.T) bunDocs {
 	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Skip("bun is not installed")
-	}
-	root, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(bun, "-e", bunReference)
-	cmd.Dir = root
-	cmd.Env = []string{"HOME=" + t.TempDir(), "PATH=" + os.Getenv("PATH"), "TMPDIR=" + os.TempDir(), "NODE_ENV=test",
-		"HTTPS_PROXY=http://127.0.0.1:9", "HTTP_PROXY=http://127.0.0.1:9", "NO_PROXY=127.0.0.1,localhost"}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("bun: %v\n%s", err, stderr.String())
-	}
 	var ref bunDocs
-	if err := json.Unmarshal(out, &ref); err != nil {
+	if err := json.Unmarshal(runBun(t, bunReference), &ref); err != nil {
 		t.Fatal(err)
 	}
 	return ref

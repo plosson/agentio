@@ -161,9 +161,26 @@ func (r *Registry) add(p *Plugin) error {
 		}
 		paths[cmd.Path] = true
 	}
+	groups := map[string]bool{}
+	for _, g := range p.Groups {
+		if groups[g.Path] || paths[g.Path] || !groupsCommand(p.Commands, g.Path) || strings.TrimSpace(g.Description) == "" {
+			return fmt.Errorf("plugin %s has an invalid or duplicate group: %s", p.ID, g.Path)
+		}
+		groups[g.Path] = true
+	}
 	r.plugins = append(r.plugins, p)
 	r.byID[p.ID] = p
 	return nil
+}
+
+// groupsCommand reports whether a command's path is under group.
+func groupsCommand(commands []CommandSpec, group string) bool {
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd.Path, group+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // MustRegister adds a plugin or panics. The CLI calls this at startup.

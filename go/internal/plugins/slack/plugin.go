@@ -12,13 +12,16 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "slack",
-		DisplayName: "Slack",
-		Description: "Use when sending Slack messages via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "slack",
+		DisplayName:        "Slack",
+		Description:        "Use when sending Slack messages via the agentio CLI.",
+		CommandDescription: "Slack operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:    setup,
-			Validate: validate,
+			AddDescription:     "Add a new Slack profile (webhook)",
+			ProfileDescription: "Profile name (required)",
+			Setup:              setup,
+			Validate:           validate,
 			// A webhook URL does not expire: no refresh lifecycle, and the hub
 			// serves the whole credential map.
 			ListInfo:       listInfo,

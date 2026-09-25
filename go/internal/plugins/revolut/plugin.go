@@ -18,15 +18,17 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "revolut",
-		DisplayName: "Revolut",
-		Description: "Use when interacting with Revolut Business via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "revolut",
+		DisplayName:        "Revolut",
+		Description:        "Use when interacting with Revolut Business via the agentio CLI.",
+		CommandDescription: "Revolut Business operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
-			Reauthenticate: reauth,
-			ListInfo:       listInfo,
+			ProfileDescription: "Profile name (defaults to the environment)",
+			Setup:              setup,
+			Validate:           validate,
+			Reauthenticate:     reauth,
+			ListInfo:           listInfo,
 			SetupOptions: []plugins.OptionSpec{
 				{Flags: "--environment <env>", Description: "production or sandbox"},
 				{Flags: "--client-id <id>", Description: "Client ID issued by Revolut"},
@@ -41,6 +43,11 @@ func New() *plugins.Plugin {
 				IsStale:      stale,
 				Run:          refresh,
 			},
+		},
+		Groups: []plugins.GroupSpec{
+			{Path: "counterparties", Description: "Manage counterparties (payees)"},
+			{Path: "drafts", Description: "Manage the payment drafts that pay creates"},
+			{Path: "links", Description: "Inspect and cancel payout links raised in the Revolut Business app"},
 		},
 		Commands: []plugins.CommandSpec{
 			accountsCmd(), transactionsCmd(), transactionCmd(), expensesCmd(), expenseCmd(), receiptCmd(), payCmd(),

@@ -13,15 +13,17 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "github",
-		DisplayName: "GitHub",
-		Description: "Use when interacting with GitHub via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "github",
+		DisplayName:        "GitHub",
+		Description:        "Use when interacting with GitHub via the agentio CLI.",
+		CommandDescription: "GitHub operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
-			Reauthenticate: reauth,
-			ListInfo:       listInfo,
+			ProfileDescription: "Profile name (auto-detected from username if not provided)",
+			Setup:              setup,
+			Validate:           validate,
+			Reauthenticate:     reauth,
+			ListInfo:           listInfo,
 		},
 		Commands: []plugins.CommandSpec{},
 	}

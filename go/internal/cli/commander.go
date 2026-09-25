@@ -380,12 +380,25 @@ func unknownCommandError(cmd *cobra.Command, name string) string {
 }
 
 type argumentSpec struct {
-	name               string
+	name, description  string
 	required, variadic bool
 }
 
+// term is Commander's humanReadableArgName: <name>, [name], <name...>.
+func (a argumentSpec) term() string {
+	name := a.name
+	if a.variadic {
+		name += "..."
+	}
+	if a.required {
+		return "<" + name + ">"
+	}
+	return "[" + name + "]"
+}
+
 // arguments are the command's declared arguments, read from its Use line
-// (`get <message-id>`, `reauth <service> [name]`, `send [to...]`).
+// (`get <message-id>`, `reauth <service> [name]`, `send [to...]`), with the
+// descriptions describeArgument gave them.
 func arguments(cmd *cobra.Command) []argumentSpec {
 	var out []argumentSpec
 	for _, word := range strings.Fields(cmd.Use)[1:] {
@@ -394,9 +407,22 @@ func arguments(cmd *cobra.Command) []argumentSpec {
 		}
 		name := word[1 : len(word)-1]
 		variadic := strings.HasSuffix(name, "...")
-		out = append(out, argumentSpec{name: strings.TrimSuffix(name, "..."), required: word[0] == '<', variadic: variadic})
+		name = strings.TrimSuffix(name, "...")
+		out = append(out, argumentSpec{name: name, description: cmd.Annotations[argDescription+name], required: word[0] == '<', variadic: variadic})
 	}
 	return out
+}
+
+// visibleArguments is Help.visibleArguments: every argument when one of them
+// has a description, else none.
+func visibleArguments(cmd *cobra.Command) []argumentSpec {
+	args := arguments(cmd)
+	for _, arg := range args {
+		if arg.description != "" {
+			return args
+		}
+	}
+	return nil
 }
 
 // checkArguments is _checkNumberOfArguments.

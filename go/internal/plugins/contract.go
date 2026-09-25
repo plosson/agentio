@@ -588,6 +588,15 @@ type ProfileSpec struct {
 	RequireProfile bool
 	// ListInfo is appended to a profile's line in `profile list` (Bun getExtraInfo).
 	ListInfo func(credentials map[string]any) string
+	// AddDescription is the `<service> profile add` description; empty is
+	// "Add a new <DisplayName> profile".
+	AddDescription string
+	// ProfileDescription is the description of `<service> profile add
+	// --profile`; empty is "Profile name".
+	ProfileDescription string
+	// AddExamples are the examples of `<service> profile add`, as
+	// CommandSpec.Examples.
+	AddExamples []string
 }
 
 type Brand struct {
@@ -600,8 +609,23 @@ type Plugin struct {
 	APIVersion  int
 	ID          string
 	DisplayName string
+	// Description is the skill description (Bun plugin.description).
 	Description string
-	Brand       *Brand
-	Profile     *ProfileSpec
-	Commands    []CommandSpec
+	// CommandDescription is the service command's description in help (Bun:
+	// `program.command('gmail').description('Gmail operations')`); empty is
+	// Description, as Bun's declarative adapter does.
+	CommandDescription string
+	Brand              *Brand
+	Profile            *ProfileSpec
+	Commands           []CommandSpec
+	// Groups describe the command groups that Commands' paths create
+	// (`labels` of `labels list`).
+	Groups []GroupSpec
+}
+
+// GroupSpec is a command group: the words under the id, and its description
+// in help (Bun: `gmail.command('labels').description('Manage Gmail labels')`).
+type GroupSpec struct {
+	Path        string
+	Description string
 }

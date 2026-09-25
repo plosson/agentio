@@ -11,16 +11,21 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gtasks",
-		DisplayName: "Google Tasks",
-		Description: "Use when interacting with Google Tasks via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gtasks",
+		DisplayName:        "Google Tasks",
+		Description:        "Use when interacting with Google Tasks via the agentio CLI.",
+		CommandDescription: "Google Tasks operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.SnakeSetup("gtasks", "Google Tasks", "Could not fetch email"),
-			Validate:       validate,
-			Reauthenticate: google.Reauthenticate("gtasks", google.Snake),
-			Refresh:        google.Snake.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.SnakeSetup("gtasks", "Google Tasks", "Could not fetch email"),
+			Validate:           validate,
+			Reauthenticate:     google.Reauthenticate("gtasks", google.Snake),
+			Refresh:            google.Snake.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
+		},
+		Groups: []plugins.GroupSpec{
+			{Path: "lists", Description: "Manage task lists"},
 		},
 		Commands: []plugins.CommandSpec{
 			listsListCmd(), listsCreateCmd(), listsDeleteCmd(),

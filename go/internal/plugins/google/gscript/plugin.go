@@ -14,16 +14,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gscript",
-		DisplayName: "Google Apps Script",
-		Description: "Use when interacting with Google Apps Script via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gscript",
+		DisplayName:        "Google Apps Script",
+		Description:        "Use when interacting with Google Apps Script via the agentio CLI.",
+		CommandDescription: "Google Apps Script operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.Setup("gscript", "Google Apps Script"),
-			Validate:       google.ValidateDriveFiles(scriptMimeType),
-			Reauthenticate: google.Reauthenticate("gscript", google.Camel),
-			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.Setup("gscript", "Google Apps Script"),
+			Validate:           google.ValidateDriveFiles(scriptMimeType),
+			Reauthenticate:     google.Reauthenticate("gscript", google.Camel),
+			Refresh:            google.Camel.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			createCmd(), metadataCmd(), listCmd(), deleteCmd(), pullCmd(), pushCmd(), getCmd(), putCmd(),

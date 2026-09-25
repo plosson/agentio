@@ -14,16 +14,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gdocs",
-		DisplayName: "Google Docs",
-		Description: "Use when interacting with Google Docs via the agentio CLI - list, read, create.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gdocs",
+		DisplayName:        "Google Docs",
+		Description:        "Use when interacting with Google Docs via the agentio CLI - list, read, create.",
+		CommandDescription: "Google Docs operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          google.Setup("gdocs", "Google Docs"),
-			Validate:       google.ValidateDriveFiles(docMimeType),
-			Reauthenticate: google.Reauthenticate("gdocs", google.Camel),
-			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       google.EmailListInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              google.Setup("gdocs", "Google Docs"),
+			Validate:           google.ValidateDriveFiles(docMimeType),
+			Reauthenticate:     google.Reauthenticate("gdocs", google.Camel),
+			Refresh:            google.Camel.RefreshSpec(),
+			ListInfo:           google.EmailListInfo,
 		},
 		Commands: []plugins.CommandSpec{
 			getCmd(), createCmd(), listCmd(), structureCmd(), tabsCmd(), batchCmd(),

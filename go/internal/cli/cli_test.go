@@ -294,7 +294,8 @@ func TestProfileAddRequireProfile(t *testing.T) {
 		reg, err := plugins.NewRegistry(&plugins.Plugin{
 			APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
 			Profile: &plugins.ProfileSpec{
-				RequireProfile: require,
+				RequireProfile:     require,
+				ProfileDescription: "Profile name (required)",
 				Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
 					setups++
 					return &plugins.SetupResult{Credentials: map[string]any{"k": "v"}, SuggestedProfileName: "auto"}, nil
@@ -339,7 +340,7 @@ func TestProfileAddRequireProfile(t *testing.T) {
 		t.Fatalf("top-level profile add: code %d %s", code, errOut)
 	}
 	code, out, _ = exec("desk", "profile", "add", "--help")
-	if code != 0 || !strings.Contains(out, "Profile name (required)") {
+	if code != 0 || !strings.Contains(out, "\n  --profile <name>  Profile name (required)\n") {
 		t.Fatalf("help:\n%s", out)
 	}
 	// Without the hook --profile stays optional.

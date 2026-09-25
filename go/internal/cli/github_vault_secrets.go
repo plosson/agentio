@@ -85,6 +85,7 @@ func githubSecretCmd(reg *plugins.Registry, spec githubSecretSpec) *cobra.Comman
 			return spec.run(cmd, client, name, repo)
 		},
 	}
+	describeArgument(cmd, "repo", "Repository in owner/repo format")
 	cmd.Flags().StringVar(&profileFlag, "profile", "", "Profile name (optional if only one profile exists)")
 	return cmd
 }

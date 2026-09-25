@@ -19,23 +19,51 @@ import (
 // registration order, each option by its Commander flags string, description
 // and default, and the examples block addExamples attached.
 
-// optionDefault is a flag annotation: Commander's option.defaultValue as the
-// docs print it (`${value}`). Absent when Bun declares none or declares ”,
-// which the docs leave out; an empty array default prints as empty.
+// optionDefault is a flag annotation: Commander's option.defaultValue as JSON
+// (help prints JSON.stringify(value), the docs `${value}`). Absent when Bun
+// declares none.
 const optionDefault = "agentio-default"
 
 // hostOutput marks the --json the host adds to every service command. It is a
 // Go extra, so the reference Bun's tree generates does not list it.
 const hostOutput = "agentio-host-output"
 
-// argsUndescribed marks a command whose arguments have no description:
-// Commander's visibleArguments then shows none of them.
-const argsUndescribed = "agentio-args-undescribed"
-
+// commandOption is a Commander option as help and the docs show it.
 type commandOption struct {
-	Flags        string
-	Description  string
-	DefaultValue *string
+	Flags       string
+	Description string
+	// Default is option.defaultValue as JSON; "" when there is none.
+	Default string
+	// ShowsDefault is Help.optionDescription's rule: a <value> or [value]
+	// option, or a switch whose default is a boolean.
+	ShowsDefault bool
+}
+
+// DefaultValue is the default as the docs print it (`${value}`), nil when
+// there is none or it is ”.
+func (o commandOption) DefaultValue() *string {
+	if o.Default == "" || o.Default == `""` {
+		return nil
+	}
+	v, err := jsvalue.Parse([]byte(o.Default))
+	if err != nil {
+		return nil
+	}
+	s := jsvalue.String(v)
+	return &s
+}
+
+// helpDescription is Help.optionDescription: the description, then
+// `(default: <JSON>)` when the option shows its default.
+func (o commandOption) helpDescription() string {
+	if o.Default == "" || !o.ShowsDefault {
+		return o.Description
+	}
+	extra := "(default: " + o.Default + ")"
+	if o.Description == "" {
+		return extra
+	}
+	return o.Description + " " + extra
 }
 
 type commandInfo struct {
@@ -55,20 +83,16 @@ func collectCommands(cmd *cobra.Command, parentPath string) []commandInfo {
 			fullPath = parentPath + " " + sub.Name()
 		}
 		var args []string
-		if sub.Annotations[argsUndescribed] == "" {
-			for _, arg := range arguments(sub) {
-				name := arg.name
-				if arg.variadic {
-					name += "..."
-				}
-				if arg.required {
-					args = append(args, "<"+name+">")
-				} else {
-					args = append(args, "["+name+"]")
-				}
+		for _, arg := range visibleArguments(sub) {
+			args = append(args, arg.term())
+		}
+		var options []commandOption
+		for _, opt := range helpOptions(sub) {
+			// Bun's docs leave out any option whose long name has "help".
+			if !strings.Contains(longName(opt.Flags), "help") {
+				options = append(options, opt)
 			}
 		}
-		options := visibleOptions(sub)
 		if len(visibleCommands(sub)) == 0 || len(options) > 0 || len(args) > 0 {
 			info := commandInfo{FullPath: fullPath, Description: sub.Short, Arguments: args, Options: options}
 			if sub.Example != "" {
@@ -91,30 +115,51 @@ func visibleCommands(cmd *cobra.Command) []*cobra.Command {
 	return out
 }
 
-// visibleOptions are the command's own options in declaration order, without
-// hidden ones and, as in Bun, without any whose long name contains "help".
-func visibleOptions(cmd *cobra.Command) []commandOption {
+// commanderFlags calls visit for each of the command's own flags that is a
+// Commander option, in declaration order: not cobra's --help, not the
+// host's --json, and not the hidden x behind a lone `--no-x`.
+func commanderFlags(cmd *cobra.Command, visit func(f *pflag.Flag)) {
 	flags := cmd.Flags()
 	sorted := flags.SortFlags
 	flags.SortFlags = false
 	defer func() { flags.SortFlags = sorted }()
-	var out []commandOption
 	flags.VisitAll(func(f *pflag.Flag) {
-		if f.Hidden || strings.Contains(f.Name, "help") || len(f.Annotations[hostOutput]) > 0 {
+		if f.Name == "help" || len(f.Annotations[hostOutput]) > 0 || len(f.Annotations[negationOnly]) > 0 {
+			return
+		}
+		visit(f)
+	})
+}
+
+// helpOptions are the command's visible options (Help.visibleOptions
+// without the help option).
+func helpOptions(cmd *cobra.Command) []commandOption {
+	var out []commandOption
+	commanderFlags(cmd, func(f *pflag.Flag) {
+		if f.Hidden {
 			return
 		}
 		opt := commandOption{Flags: flagSpec(f), Description: f.Usage}
 		if def := f.Annotations[optionDefault]; len(def) > 0 {
-			opt.DefaultValue = &def[0]
+			opt.Default = def[0]
 		}
+		opt.ShowsDefault = optionKind(f) != "bool" || opt.Default == "true" || opt.Default == "false"
 		out = append(out, opt)
 	})
 	return out
 }
 
-// setDefault records the default Bun declares for a host command's option.
-func setDefault(flags *pflag.FlagSet, name, value string) {
-	_ = flags.SetAnnotation(name, optionDefault, []string{value})
+// hasOptions is Commander's cmd.options.length, hidden options included.
+func hasOptions(cmd *cobra.Command) bool {
+	found := false
+	commanderFlags(cmd, func(*pflag.Flag) { found = true })
+	return found
+}
+
+// setDefault records the default Bun declares for a command's option: a
+// string, bool or []any, as Commander holds it.
+func setDefault(flags *pflag.FlagSet, name string, value any) {
+	_ = flags.SetAnnotation(name, optionDefault, []string{string(jsvalue.Stringify(value))})
 }
 
 // examplesBlock is the text after "Examples:" in Bun's addExamples block:
@@ -184,8 +229,8 @@ func optionLine(opt commandOption) string {
 	if opt.Description != "" {
 		line += ": " + opt.Description
 	}
-	if opt.DefaultValue != nil {
-		line += " (default: " + *opt.DefaultValue + ")"
+	if def := opt.DefaultValue(); def != nil {
+		line += " (default: " + *def + ")"
 	}
 	return line
 }
@@ -222,8 +267,8 @@ func docsJSON(commands []commandInfo) string {
 			o := jsvalue.NewObject()
 			o.Set("flags", opt.Flags)
 			o.Set("description", opt.Description)
-			if opt.DefaultValue != nil {
-				o.Set("defaultValue", *opt.DefaultValue)
+			if def := opt.DefaultValue(); def != nil {
+				o.Set("defaultValue", *def)
 			}
 			options = append(options, o)
 		}
@@ -388,6 +433,7 @@ func skillCmd(reg *plugins.Registry) *cobra.Command {
 			return nil
 		},
 	}
+	describeArgument(cmd, "service", "Service name (e.g. gmail). Omit with --all or --list.")
 	cmd.Flags().Bool("all", false, "Write SKILL.md for every service in claude/skills/")
 	cmd.Flags().Bool("list", false, "List services with registered commands")
 	return cmd

@@ -13,16 +13,18 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "gdrive",
-		DisplayName: "Google Drive",
-		Description: "Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "gdrive",
+		DisplayName:        "Google Drive",
+		Description:        "Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.",
+		CommandDescription: "Google Drive operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:          setup,
-			Validate:       validate,
-			Reauthenticate: reauthenticate,
-			Refresh:        google.Camel.RefreshSpec(),
-			ListInfo:       listInfo,
+			ProfileDescription: "Profile name (auto-detected from email if not provided)",
+			Setup:              setup,
+			Validate:           validate,
+			Reauthenticate:     reauthenticate,
+			Refresh:            google.Camel.RefreshSpec(),
+			ListInfo:           listInfo,
 			SetupOptions: []plugins.OptionSpec{
 				{Flags: "--readonly", Description: "Create a read-only profile (skip access level prompt)"},
 				{Flags: "--full", Description: "Create a full access profile (skip access level prompt)"},

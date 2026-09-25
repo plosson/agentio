@@ -280,6 +280,7 @@ moved, written to, or deleted. Run 'agentio doctor' to see the active vault.`,
 			return nil
 		},
 	}
+	describeArgument(cmd, "path", "Path to the vault file")
 	cmd.Flags().StringVar(&pass, "passphrase", "", "Vault passphrase (visible in shell history and process list)")
 	cmd.Flags().BoolVar(&stdin, "passphrase-stdin", false, "Read the vault passphrase from stdin")
 	return cmd
@@ -584,6 +585,7 @@ AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
 			return nil
 		},
 	}
+	describeArgument(cmd, "file", "Path to the encrypted configuration file (optional if AGENTIO_CONFIG env var is set)")
 	cmd.Flags().StringVar(&key, "key", "", "Encryption key (64 hex characters). Falls back to AGENTIO_KEY env var")
 	cmd.Flags().BoolVar(&merge, "merge", false, "Merge with existing configuration instead of replacing")
 	cmd.Flags().StringVar(&pass, "passphrase", "", "Passphrase for the vault created when none exists yet (visible in shell history and process list)")

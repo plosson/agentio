@@ -12,14 +12,16 @@ import (
 
 func New() *plugins.Plugin {
 	return &plugins.Plugin{
-		APIVersion:  plugins.APIVersion,
-		ID:          "discourse",
-		DisplayName: "Discourse",
-		Description: "Use when interacting with Discourse forums via the agentio CLI.",
+		APIVersion:         plugins.APIVersion,
+		ID:                 "discourse",
+		DisplayName:        "Discourse",
+		Description:        "Use when interacting with Discourse forums via the agentio CLI.",
+		CommandDescription: "Discourse forum operations",
 		Profile: &plugins.ProfileSpec{
-			Setup:    setup,
-			Validate: validate,
-			ListInfo: listInfo,
+			ProfileDescription: "Profile name (auto-detected from username if not provided)",
+			Setup:              setup,
+			Validate:           validate,
+			ListInfo:           listInfo,
 		},
 		Commands: []plugins.CommandSpec{listCmd(), getCmd(), categoriesCmd()},
 	}
