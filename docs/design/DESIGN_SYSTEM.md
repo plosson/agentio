@@ -1,5 +1,8 @@
 # Design System
 
+> **System Utility Vault (shared):** The vault hub `/ui` and AgentIO Companion share one visual system — soft zinc, teal `#0F766E`, near-black/white primary pills. Source of truth: [`plosson/agentio-app` → `docs/design/`](https://github.com/plosson/agentio-app/tree/main/docs/design) (`tokens.css`, overview, components). The palette below documenting GitHub blue `#0969da` / IBM Plex as required brand is **deprecated** for `/ui`; implementers should follow the companion design docs and the CSS variables in `src/daemon/ui/index.html`.
+
+
 This document defines the design tokens, component patterns, and visual guidelines for building consistent user interfaces. Use this as the single source of truth when implementing UI components.
 
 ---
