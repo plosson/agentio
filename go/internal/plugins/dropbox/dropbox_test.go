@@ -1033,6 +1033,17 @@ func TestErrorMappingFollowsBun(t *testing.T) {
 	}
 }
 
+// Bun reads an error body with response.text(), which rejects when the
+// connection drops: the plain TypeError, not a message built from a fragment.
+func TestACutErrorBodyFailsLikeBun(t *testing.T) {
+	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 409) })
+	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	_, err := a.account()
+	if _, isAPI := err.(*apiError); isAPI || err == nil || err.Error() != plugins.BunSocketClosed {
+		t.Fatalf("%#v", err)
+	}
+}
+
 func TestNormalizePathAndHeaderEscaping(t *testing.T) {
 	for in, want := range map[string]string{
 		"": "", " / ": "", "Docs": "/Docs", "/Docs///": "/Docs", "//": "", "id:abc": "id:abc",

@@ -109,7 +109,10 @@ func (c *client) send(method, path string, headers [][2]string, body []byte) (*h
 		var resp *http.Response
 		if resp, err = c.fetch(c.ctx, req); err == nil {
 			defer resp.Body.Close()
-			raw, _ := io.ReadAll(resp.Body)
+			raw, err := plugins.ReadBody(resp.Body)
+			if err != nil {
+				return nil, nil, err
+			}
 			return resp, raw, nil
 		}
 	}

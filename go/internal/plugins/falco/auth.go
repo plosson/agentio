@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -143,7 +142,10 @@ func login(ctx context.Context, do fetchFunc, username, password string, twoFaCo
 		return loginResult{}, networkError(err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := plugins.ReadBody(resp.Body)
+	if err != nil {
+		return loginResult{}, err
+	}
 	text := jsvalue.DecodeUTF8(raw)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Never echo this body: on success it is the token payload itself.
@@ -200,13 +202,17 @@ func refreshToken(ctx context.Context, do fetchFunc, token string) (tokens, erro
 		return tokens{}, networkError(err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	// Bun reads an error body with .catch(() => ""), a success one with json().
+	raw, err := plugins.ReadBody(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return tokens{}, &apiError{
 			code:       "TOKEN_EXPIRED",
 			message:    fmt.Sprintf("Falco refresh failed (HTTP %d): %s", resp.StatusCode, jsvalue.Slice(jsvalue.DecodeUTF8(raw), 200)),
 			suggestion: "Run: agentio reauth",
 		}
+	}
+	if err != nil {
+		return tokens{}, err
 	}
 	parsed, err := jsvalue.Parse([]byte(jsvalue.DecodeUTF8(raw)))
 	if err != nil {

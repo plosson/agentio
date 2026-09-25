@@ -80,10 +80,13 @@ func orNull(v any) any {
 	return v
 }
 
+// response keeps a body read failure for the caller: Bun reads some bodies
+// with .catch(() => ""), so a failed read is an empty body, and others without.
 type response struct {
 	status      int
 	contentType string
 	body        []byte
+	readErr     error
 }
 
 func (r response) ok() bool { return r.status >= 200 && r.status < 300 }
@@ -107,8 +110,8 @@ func (c *client) send(method, url string, headers [][2]string, body []byte, what
 		return response{}, &apiError{code: "NETWORK_ERROR", message: fmt.Sprintf("Could not reach Falco while %s: %s", what, err.Error())}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	return response{status: resp.StatusCode, contentType: resp.Header.Get("Content-Type"), body: raw}, nil
+	raw, readErr := plugins.ReadBody(resp.Body)
+	return response{status: resp.StatusCode, contentType: resp.Header.Get("Content-Type"), body: raw, readErr: readErr}, nil
 }
 
 func (c *client) fail(status int, body, what string) error {
@@ -136,6 +139,9 @@ func (c *client) getJSON(pathAndQuery, what string) (any, error) {
 	resp, err := c.send(http.MethodGet, apiURL+pathAndQuery, nil, nil, what)
 	if err != nil {
 		return nil, err
+	}
+	if resp.readErr != nil {
+		return nil, resp.readErr
 	}
 	text := jsvalue.DecodeUTF8(resp.body)
 	if !resp.ok() {
@@ -297,6 +303,9 @@ func (c *client) downloadPeppolDocumentUbl(documentID string) ([]byte, error) {
 	if !resp.ok() {
 		return nil, c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
 	}
+	if resp.readErr != nil {
+		return nil, resp.readErr
+	}
 	contentType := resp.contentType
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -439,6 +448,9 @@ func (c *client) listBillingDocuments(t billingTypes) ([]*jsvalue.Object, error)
 	if err != nil {
 		return nil, err
 	}
+	if resp.readErr != nil {
+		return nil, resp.readErr
+	}
 	text := jsvalue.DecodeUTF8(resp.body)
 	if !resp.ok() {
 		return nil, c.fail(resp.status, text, what)
@@ -462,6 +474,9 @@ func (c *client) downloadBillingDocumentPdf(documentID string) ([]byte, error) {
 	}
 	if !resp.ok() {
 		return nil, c.fail(resp.status, jsvalue.DecodeUTF8(resp.body), what)
+	}
+	if resp.readErr != nil {
+		return nil, resp.readErr
 	}
 	return resp.body, nil
 }

@@ -1,10 +1,13 @@
 package plugins
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
@@ -198,5 +201,47 @@ func TestJSONPayloadMatchesBun(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("\n got %q\nwant %q", got, want)
+	}
+}
+
+// failingReader hands over some bytes, then fails.
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string { return "i/o timeout" }
+func (timeoutErr) Timeout() bool { return true }
+
+// A body read that fails part-way keeps nothing and fails as Bun's fetch does.
+func TestReadBodyRejectsLikeBunAndKeepsNothing(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{io.ErrUnexpectedEOF, BunSocketClosed},
+		{syscall.ECONNRESET, BunSocketClosed},
+		{context.DeadlineExceeded, "The operation timed out."},
+		{timeoutErr{}, "The operation timed out."},
+	}
+	for _, c := range cases {
+		raw, err := ReadBody(&failingReader{data: []byte("partial"), err: c.err})
+		if raw != nil || err == nil || err.Error() != c.want {
+			t.Errorf("%v: %q %v", c.err, raw, err)
+		}
+	}
+	if raw, err := ReadBody(strings.NewReader("whole")); err != nil || string(raw) != "whole" {
+		t.Fatalf("%q %v", raw, err)
 	}
 }

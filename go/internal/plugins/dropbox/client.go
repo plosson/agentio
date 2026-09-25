@@ -233,7 +233,10 @@ func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
 }
 
 func responseError(resp *http.Response, operation string) error {
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := plugins.ReadBody(resp.Body)
+	if err != nil {
+		return err
+	}
 	text := string(raw)
 	summary := text
 	var parsed struct {

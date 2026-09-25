@@ -1,9 +1,7 @@
 package falco
 
 import (
-	"encoding/xml"
 	"errors"
-	"io"
 	"regexp"
 	"strings"
 
@@ -56,94 +54,6 @@ type ublInvoice struct {
 var ublArrayTags = map[string]bool{
 	"InvoiceLine": true, "CreditNoteLine": true, "TaxSubtotal": true, "PaymentMeans": true,
 	"PartyIdentification": true, "AdditionalDocumentReference": true, "PartyTaxScheme": true,
-}
-
-// parseXMLTree returns the document as fast-xml-parser would: an object keyed
-// by root element name.
-func parseXMLTree(src string) (*jsvalue.Object, error) {
-	dec := xml.NewDecoder(strings.NewReader(src))
-	// Belgian invoices routinely carry accented names as entities; HTML named
-	// entities are decoded too, as with htmlEntities: true.
-	dec.Entity = xml.HTMLEntity
-	dec.Strict = true
-	doc := jsvalue.NewObject()
-	repeated := map[string]bool{}
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			return doc, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if start, ok := tok.(xml.StartElement); ok {
-			v, err := readElement(dec, start)
-			if err != nil {
-				return nil, err
-			}
-			addChild(doc, repeated, start.Name.Local, v)
-		}
-	}
-}
-
-// addChild stores a child element: a listed tag is always an array, and any
-// other tag becomes an array once it repeats.
-func addChild(parent *jsvalue.Object, repeated map[string]bool, name string, v any) {
-	existing, present := parent.Get(name)
-	switch {
-	case ublArrayTags[name]:
-		arr, _ := existing.([]any)
-		parent.Set(name, append(arr, v))
-	case !present:
-		parent.Set(name, v)
-	case repeated[name]:
-		parent.Set(name, append(existing.([]any), v))
-	default:
-		parent.Set(name, []any{existing, v})
-		repeated[name] = true
-	}
-}
-
-func readElement(dec *xml.Decoder, start xml.StartElement) (any, error) {
-	node := jsvalue.NewObject()
-	repeated := map[string]bool{}
-	hasChildren := false
-	for _, a := range start.Attr {
-		if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
-			continue
-		}
-		node.Set("@_"+a.Name.Local, a.Value)
-	}
-	var text strings.Builder
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			if err == io.EOF {
-				return nil, errors.New("unexpected end of XML")
-			}
-			return nil, err
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			v, err := readElement(dec, t)
-			if err != nil {
-				return nil, err
-			}
-			addChild(node, repeated, t.Name.Local, v)
-			hasChildren = true
-		case xml.CharData:
-			text.Write(t)
-		case xml.EndElement:
-			trimmed := jsvalue.Trim(text.String())
-			if !hasChildren && len(node.Keys()) == 0 {
-				return trimmed, nil
-			}
-			if trimmed != "" {
-				node.Set("#text", trimmed)
-			}
-			return node, nil
-		}
-	}
 }
 
 func child(node any, key string) any {
@@ -301,7 +211,7 @@ func readPayment(raw any) ublPayment {
 }
 
 func parseUbl(src string) (*ublInvoice, error) {
-	doc, err := parseXMLTree(src)
+	doc, err := parseFastXML(src, func(tag string) bool { return ublArrayTags[tag] })
 	if err != nil {
 		return nil, err
 	}

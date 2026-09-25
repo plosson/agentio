@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -167,6 +168,25 @@ func HTTPStatusToErrorCode(status int) ErrorCode {
 		return "RATE_LIMITED"
 	}
 	return "API_ERROR"
+}
+
+// BunSocketClosed is the TypeError Bun's fetch rejects a body read with when
+// the connection drops before the body is complete.
+const BunSocketClosed = "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+
+// ReadBody is `await response.arrayBuffer()` (or text(), json()) under Bun:
+// a body that cannot be read in full rejects with a plain error, and none of
+// it is kept. A timeout reads as AbortSignal.timeout's rejection.
+func ReadBody(body io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(body)
+	if err == nil {
+		return raw, nil
+	}
+	var timeout interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return nil, errors.New("The operation timed out.")
+	}
+	return nil, errors.New(BunSocketClosed)
 }
 
 // FailFunc is RunContext.Fail. Input checks take it so they also run from an

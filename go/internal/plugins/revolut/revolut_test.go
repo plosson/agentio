@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1580,5 +1582,54 @@ func TestFormatMatchesBun(t *testing.T) {
 	}
 	if raw, _ := v.MarshalJSON(); !strings.HasPrefix(string(raw), `[{"id":"acc-eur","name":"Main EUR","balance":1234.5,"currency":"EUR","state":"active"},{"id":"acc-gbp","balance":1.005,`) {
 		t.Fatalf("%s", raw)
+	}
+}
+
+// Bun's response.arrayBuffer() rejects when the connection drops mid-body, so
+// nothing is written and the plain TypeError reaches handleError.
+func TestACutDownloadFailsLikeBunAndWritesNothing(t *testing.T) {
+	testbox.Isolate(t)
+	newFake(t, func(w http.ResponseWriter, h hit) {
+		expense := map[string]any{"id": "exp-1", "state": "approved", "receipt_ids": []any{"rec-1"}}
+		switch {
+		case h.Path == "/expenses/exp-1":
+			writeJSON(w, 200, expense)
+		case strings.HasPrefix(h.Path, "/expenses?"):
+			writeJSON(w, 200, []any{expense})
+		default:
+			testbox.CutShort(t, w, 200)
+		}
+	})
+	dir := t.TempDir()
+	res, err := runCmd(t, "receipt", input(map[string]any{"expense-id": "exp-1"}, map[string]any{"output": dir}), nil)
+	if _, isCli := err.(*clierr.Error); isCli || err == nil || err.Error() != plugins.BunSocketClosed {
+		t.Fatalf("%#v", err)
+	}
+	if res != nil {
+		t.Fatalf("%q", render(t, "receipt", res))
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a truncated receipt was saved: %v", entries)
+	}
+	// The bulk export reports the receipt as failed and writes nothing.
+	var logged []string
+	_, err = runCmd(t, "expenses", input(nil, map[string]any{"receipts": dir}), func(run *plugins.RunContext) {
+		run.Log = func(parts ...any) { logged = append(logged, fmt.Sprint(parts...)) }
+	})
+	if err != nil || !slices.Contains(logged, "Failed to download receipt rec-1 of expense exp-1: "+plugins.BunSocketClosed) {
+		t.Fatalf("%v %q", err, logged)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a truncated receipt was saved: %v", entries)
+	}
+}
+
+// Bun reads the token response with response.text(), which rejects on a cut
+// connection: a plain error, not "unexpected token response".
+func TestACutTokenResponseFailsLikeBun(t *testing.T) {
+	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
+	_, err := postTokenRequest(context.Background(), defaultFetch, "production", jsvalue.NewSearchParams())
+	if _, isAPI := err.(*apiError); isAPI || err == nil || err.Error() != plugins.BunSocketClosed {
+		t.Fatalf("%#v", err)
 	}
 }

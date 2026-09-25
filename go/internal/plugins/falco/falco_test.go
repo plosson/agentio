@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -804,6 +805,76 @@ func TestTransportFailuresAreNetworkErrors(t *testing.T) {
 	}
 }
 
+// A connection cut mid-body: where Bun reads with text(), json() or
+// arrayBuffer() the plain TypeError surfaces; where it reads an error body with
+// .catch(() => "") the body is empty; where it never reads, nothing fails.
+func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
+	status := 200
+	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, status) })
+	ctx := context.Background()
+	plain := func(name string, err error) {
+		t.Helper()
+		if _, isAPI := err.(*apiError); isAPI || err == nil || err.Error() != plugins.BunSocketClosed {
+			t.Errorf("%s: %#v", name, err)
+		}
+	}
+	for _, s := range []int{200, 500} {
+		status = s
+		_, err := testClient().getUserMe()
+		plain(fmt.Sprintf("getJson %d", s), err)
+		_, err = testClient().listBillingDocuments(billingTypes{invoices: true})
+		plain(fmt.Sprintf("billing list %d", s), err)
+		_, err = login(ctx, defaultFetch, "a@b.c", "pw", nil)
+		plain(fmt.Sprintf("login %d", s), err)
+	}
+	status = 200
+	_, err := testClient().downloadPeppolDocumentUbl("doc-1")
+	plain("peppol download", err)
+	_, err = testClient().downloadBillingDocumentPdf("bill-1")
+	plain("billing download", err)
+	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	plain("refresh", err)
+	if err := testClient().setInvoicePaymentStatus("inv-1", "paid"); err != nil {
+		t.Errorf("an unread success body failed: %v", err)
+	}
+	if _, err := testClient().importPeppolDocumentToFalco("doc-1"); apiErr(t, err).message !=
+		"Falco returned an empty body while importing Peppol document doc-1 into the invoice register" {
+		t.Errorf("%#v", err)
+	}
+
+	status = 500
+	_, err = testClient().downloadPeppolDocumentUbl("doc-1")
+	if ae := apiErr(t, err); ae.message != "Falco request failed while downloading document doc-1 (HTTP 500)" {
+		t.Errorf("%#v", ae)
+	}
+	err = testClient().setPeppolDocumentPaymentStatus("doc-1", "paid")
+	if ae := apiErr(t, err); ae.message != "Falco request failed while updating Peppol payment status for doc-1 (HTTP 500)" {
+		t.Errorf("%#v", ae)
+	}
+	_, err = refreshToken(ctx, defaultFetch, "refresh-old")
+	if ae := apiErr(t, err); ae.code != "TOKEN_EXPIRED" || ae.message != "Falco refresh failed (HTTP 500): " {
+		t.Errorf("%#v", ae)
+	}
+}
+
+// peppol get writes nothing when the download is cut short.
+func TestACutPeppolDownloadWritesNothing(t *testing.T) {
+	reg := setupVault(t)
+	if err := profile.Save("falco", "acme", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
+	dir := t.TempDir()
+	_, err := exec(t, reg, "peppol get", plugins.CommandInput{Args: map[string]any{"id": "doc-1"},
+		Options: map[string]any{"output": dir, "extract-pdf": true}})
+	if err == nil || err.Error() != plugins.BunSocketClosed {
+		t.Fatalf("%v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a truncated download was saved: %v", entries)
+	}
+}
+
 // tests/plugins/falco/client.test.ts
 func TestClientErrorsFollowBun(t *testing.T) {
 	var status int
@@ -1307,6 +1378,45 @@ func TestUBLParsing(t *testing.T) {
 	}
 	if _, err := parseUbl(`<Order><ID>1</ID></Order>`); err == nil || err.Error() != "Not a UBL Invoice or CreditNote document" {
 		t.Fatal(err)
+	}
+}
+
+// Bun decodes the download as UTF-8 whatever the XML declaration says, and
+// fast-xml-parser does not validate: a bare &, an unknown entity, a control
+// character or a stray closing tag is kept or skipped, never an error. The
+// expected values are what Bun's parseUbl returns for the same bytes.
+func TestUBLParsingIsLenientLikeFastXMLParser(t *testing.T) {
+	invoice := func(seller string) string {
+		return `<Invoice xmlns:cac="urn:cac" xmlns:cbc="urn:cbc"><cbc:ID>INV-1</cbc:ID><cac:AccountingSupplierParty><cac:Party>` +
+			`<cac:PartyName><cbc:Name>` + seller + `</cbc:Name></cac:PartyName></cac:Party></cac:AccountingSupplierParty></Invoice>`
+	}
+	cases := []struct {
+		name          string
+		raw           []byte
+		number        string
+		seller        string
+		sellerMissing bool
+	}{
+		{"latin-1 declaration", []byte("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\r\n" + invoice("Caf\xe9")), "INV-1", "Caf�", false},
+		{"bare ampersand", []byte(invoice("Smith & Sons")), "INV-1", "Smith & Sons", false},
+		{"entities", []byte(invoice("Caf&eacute; &euro; &nbsp;x &foo; &#233; &#x1; &#0; &#xD800; &#1114112; &#12ab; &amp;lt;")),
+			"INV-1", "Caf&eacute; €  x &foo; é    &#1114112;  &lt;", false},
+		{"byte order mark", []byte("\xef\xbb\xbf<?xml version=\"1.0\"?>" + invoice("BOM")), "INV-1", "BOM", false},
+		{"line endings", []byte(invoice("Line1\r\nLine2\rLine3")), "INV-1", "Line1\nLine2\nLine3", false},
+		{"control characters", []byte(invoice("A\x01B\x00C")), "INV-1", "A\x01B\x00C", false},
+		{"stray closing tag", []byte(`<Invoice><ID>1</Wrong><Note>n</Note>`), "1", "", true},
+		{"mixed content", []byte(`<Invoice><ID> a <b/> c </ID></Invoice>`), "ac", "", true},
+		{"doctype entity", []byte(`<!DOCTYPE Invoice [<!ENTITY co "ACME">]><Invoice><ID>&co;</ID></Invoice>`), "ACME", "", true},
+	}
+	for _, c := range cases {
+		inv, err := parseUbl(jsvalue.DecodeUTF8(c.raw))
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if inv.number != c.number || (inv.seller.name == nil) != c.sellerMissing || deref(inv.seller.name, "") != c.seller {
+			t.Errorf("%s: number %q seller %q", c.name, inv.number, deref(inv.seller.name, "<nil>"))
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 // Package testbox points HOME at a temp directory and clears process caches
-// so a test cannot touch a real vault.
+// so a test cannot touch a real vault, and fakes the network failures tests need.
 package testbox
 
 import (

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -201,7 +202,10 @@ func HubCall(hubURL, path string, call Call) (json.RawMessage, int, error) {
 			"Check the network, and that the hub daemon is running")
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := plugins.ReadBody(resp.Body)
+	if err != nil {
+		return nil, 0, err
+	}
 	if resp.StatusCode >= 300 {
 		return nil, resp.StatusCode, hubError(resp.StatusCode, raw, hubURL, call.Method, path)
 	}
