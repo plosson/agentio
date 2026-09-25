@@ -203,7 +203,7 @@ func (o sendOptions) body() any {
 }
 
 func (a *api) sendViaWebhook(o sendOptions) (*sendResult, error) {
-	webhookURL, _ := a.Credentials["webhookUrl"].(string)
+	webhookURL, _ := a.Credentials.Value("webhookUrl").(string)
 	if jsvalue.Trim(webhookURL) == "" || !strings.HasPrefix(webhookURL, "https://") {
 		return nil, a.Fail("INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration")
 	}
@@ -875,11 +875,11 @@ func (a *api) resolveUsers(ids []string) {
 
 // directory is the workspace directory of an OAuth profile with an email.
 func (a *api) directory() *directory {
-	if a.Credentials["type"] != "oauth" {
+	if a.Credentials.Value("type") != "oauth" {
 		return nil
 	}
 	if a.dir == nil {
-		email, _ := a.Credentials["email"].(string)
+		email, _ := a.Credentials.Value("email").(string)
 		if email == "" {
 			return nil
 		}

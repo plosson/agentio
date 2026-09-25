@@ -21,6 +21,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian/atlassiantest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -161,7 +162,7 @@ func TestSetupRefusesWhenNoSiteOrNoTerminal(t *testing.T) {
 		t.Fatalf("non-tty: %#v", err)
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["confluence"]) != 0 {
+	if len(c.Credentials.Profiles("confluence")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -178,11 +179,11 @@ func TestReauthenticateKeepsUnknownFields(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
-	got, err := New().Profile.Reauthenticate(context.Background(), storedCreds(1), "p", sc)
+	got, err := New().Profile.Reauthenticate(context.Background(), testbox.Object(storedCreds(1)), "p", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["legacyField"] != "kept" || got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" || got["cloudId"] != "c-9" || got["siteUrl"] != "https://z.atlassian.net" {
+	if got.Value("legacyField") != "kept" || got.Value("accessToken") != "at-2" || got.Value("refreshToken") != "rt-2" || got.Value("cloudId") != "c-9" || got.Value("siteUrl") != "https://z.atlassian.net" {
 		t.Fatalf("%#v", got)
 	}
 }
@@ -248,11 +249,11 @@ func TestRefreshKeepsTheOldRefreshTokenWhenNoneIsReturned(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) {
 		writeJSON(w, 200, map[string]any{"access_token": "at-new", "expires_in": 10})
 	})
-	got, err := New().Profile.Refresh.Run(context.Background(), storedCreds(1))
+	got, err := New().Profile.Refresh.Run(context.Background(), testbox.Object(storedCreds(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["refreshToken"] != "rt-old" || got["accessToken"] != "at-new" || got["legacyField"] != "kept" {
+	if got.Value("refreshToken") != "rt-old" || got.Value("accessToken") != "at-new" || got.Value("legacyField") != "kept" {
 		t.Fatalf("%#v", got)
 	}
 }
@@ -341,7 +342,7 @@ func TestValidate(t *testing.T) {
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, `{"results":[]}`)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(1)), "acme", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != "https://acme.atlassian.net" {
 		t.Fatalf("%#v %v", res, err)
@@ -363,11 +364,11 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(1)
-	out := auth.RedactForRemote(reg, "confluence", creds)
-	if _, ok := out["refreshToken"]; ok {
+	out := auth.RedactForRemote(reg, "confluence", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok {
 		t.Fatal("refreshToken leaked to a remote caller")
 	}
-	if out["accessToken"] != "at-old" || out["cloudId"] != "cloud-1" || creds["refreshToken"] != "rt-old" {
+	if out.Value("accessToken") != "at-old" || out.Value("cloudId") != "cloud-1" || creds["refreshToken"] != "rt-old" {
 		t.Fatalf("%#v / %#v", out, creds)
 	}
 }
@@ -375,21 +376,21 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 func TestStaleFollowsTheBunComparison(t *testing.T) {
 	cases := []struct {
 		name  string
-		creds map[string]any
+		creds plugins.Credentials
 		want  bool
 	}{
-		{"missing expiry is never stale", map[string]any{"refreshToken": "r"}, false},
-		{"null expiry coerces to 0", map[string]any{"expiryDate": nil}, true},
-		{"inside the buffer", map[string]any{"expiryDate": json.Number("1400")}, true},
-		{"exactly at the buffer edge", map[string]any{"expiryDate": json.Number("1500")}, true},
-		{"beyond the buffer", map[string]any{"expiryDate": json.Number("1501")}, false},
+		{"missing expiry is never stale", testbox.Object(map[string]any{"refreshToken": "r"}), false},
+		{"null expiry coerces to 0", testbox.Object(map[string]any{"expiryDate": nil}), true},
+		{"inside the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1400")}), true},
+		{"exactly at the buffer edge", testbox.Object(map[string]any{"expiryDate": json.Number("1500")}), true},
+		{"beyond the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1501")}), false},
 	}
 	for _, c := range cases {
 		if got := New().Profile.Refresh.IsStale(c.creds, 1000, 500); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	if New().Profile.Refresh.Applies(map[string]any{"refreshToken": ""}) || New().Profile.Refresh.Applies(map[string]any{"refreshToken": 5}) || !New().Profile.Refresh.Applies(map[string]any{"refreshToken": "r"}) {
+	if New().Profile.Refresh.Applies(testbox.Object(map[string]any{"refreshToken": ""})) || !New().Profile.Refresh.Applies(testbox.Object(map[string]any{"refreshToken": 5})) || !New().Profile.Refresh.Applies(testbox.Object(map[string]any{"refreshToken": "r"})) {
 		t.Fatal("applies")
 	}
 }

@@ -44,7 +44,7 @@ func setupVault(t *testing.T) *plugins.Registry {
 func dbURL(t *testing.T, statements ...string) string {
 	t.Helper()
 	url := "sqlite://" + filepath.Join(t.TempDir(), "fixture.db")
-	c, err := newClient(map[string]any{"url": url})
+	c, err := newClient(testbox.Object(map[string]any{"url": url}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +85,14 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["sql"][name]
+	return testbox.Map(c.Credentials.Get("sql", name))
 }
 
 // query runs SqlClient.query on a URL and returns the rows as Bun's
 // JSON.stringify(rows) would print them.
 func query(t *testing.T, url, q string, readOnly bool) (string, error) {
 	t.Helper()
-	c, err := newClient(map[string]any{"url": url})
+	c, err := newClient(testbox.Object(map[string]any{"url": url}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestReadOnlyExecutionIsTheDatabasesDecision(t *testing.T) {
 	if got, err := query(t, url, "SELECT count(*) AS n FROM items", false); err != nil || got != `[{"n":1}]` {
 		t.Fatalf("%s %v", got, err)
 	}
-	c, _ := newClient(map[string]any{"url": url})
+	c, _ := newClient(testbox.Object(map[string]any{"url": url}))
 	defer c.close()
 	if _, err := c.query(context.Background(), "INSERT INTO items VALUES (2); SELECT 1", 1, true, fail); cliErr(t, err).Code != clierr.PermissionDenied {
 		t.Fatal("stacked statement ran")
@@ -396,7 +396,7 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	}
 	// Without --profile the display name is the suggested name.
 	res, err := setup(context.Background(), plugins.SetupOptions{}, withAnswers(":memory:"))
-	if err != nil || res.SuggestedProfileName != ":memory:" || res.Credentials["displayName"] != ":memory:" || res.Info != `Test with: agentio sql query "SELECT 1"` {
+	if err != nil || res.SuggestedProfileName != ":memory:" || res.Credentials.Value("displayName") != ":memory:" || res.Info != `Test with: agentio sql query "SELECT 1"` {
 		t.Fatalf("%#v %v", res, err)
 	}
 }
@@ -460,7 +460,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 		t.Fatal("closed stdin is no answer")
 	}
 	vc, _ := vault.Load()
-	if len(vc.Credentials["sql"]) != 0 || len(vc.Config.Profiles["sql"]) != 0 {
+	if len(vc.Credentials.Profiles("sql")) != 0 || len(vc.Config.Profiles.Get("sql")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -468,7 +468,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 func TestInteractiveSetupBuildsTheURL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "i.db")
 	res, err := setup(context.Background(), plugins.SetupOptions{Options: map[string]any{"interactive": true}}, withAnswers("3", "  "+path+" "))
-	if err != nil || res.Credentials["url"] != "sqlite://"+path || res.SuggestedProfileName != "localhost"+path {
+	if err != nil || res.Credentials.Value("url") != "sqlite://"+path || res.SuggestedProfileName != "localhost"+path {
 		t.Fatalf("%#v %v", res, err)
 	}
 	// Components are encodeURIComponent'd; an empty port takes the default.
@@ -476,7 +476,7 @@ func TestInteractiveSetupBuildsTheURL(t *testing.T) {
 	sc := withAnswers("1", "127.0.0.1", srv.port, "my db/x", "u@ser", "p:ss/w@rd")
 	res, err = setup(context.Background(), plugins.SetupOptions{Options: map[string]any{"interactive": true}}, sc)
 	want := "postgres://u%40ser:p%3Ass%2Fw%40rd@127.0.0.1:" + srv.port + "/my%20db%2Fx"
-	if err != nil || res.Credentials["url"] != want || res.Credentials["displayName"] != "u@ser@127.0.0.1/my%20db%2Fx" {
+	if err != nil || res.Credentials.Value("url") != want || res.Credentials.Value("displayName") != "u@ser@127.0.0.1/my%20db%2Fx" {
 		t.Fatalf("%#v %v", res, err)
 	}
 	if got := srv.startup(); got["user"] != "u@ser" || got["database"] != "my db/x" {
@@ -505,10 +505,10 @@ func TestReadOnlyProfileRunsTheQueryReadOnly(t *testing.T) {
 	reg := setupVault(t)
 	url := dbURL(t, "CREATE TABLE items (id INTEGER)", "INSERT INTO items VALUES (1)")
 	creds := map[string]any{"url": url, "displayName": "items"}
-	if err := profile.Save("sql", "ro", creds, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("sql", "ro", testbox.Object(creds), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("sql", "rw", creds, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("sql", "rw", testbox.Object(creds), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	p := reg.Find("sql")
@@ -547,7 +547,7 @@ func TestReadOnlyProfileRunsTheQueryReadOnly(t *testing.T) {
 
 func TestQueryInputErrorsMatchBun(t *testing.T) {
 	url := dbURL(t, "CREATE TABLE t (id INTEGER)", "INSERT INTO t VALUES (1)", "INSERT INTO t VALUES (2)", "INSERT INTO t VALUES (3)")
-	run := host.NewRunContext(map[string]any{"url": url}, "p", context.Background())
+	run := host.NewRunContext(testbox.Object(map[string]any{"url": url}), "p", context.Background())
 	for _, c := range []struct {
 		in       plugins.CommandInput
 		msg      string
@@ -606,16 +606,16 @@ func TestValidateAndListInfo(t *testing.T) {
 		{map[string]any{"url": "sqlite://" + filepath.Join(t.TempDir(), "x", "y.db"), "displayName": "d"}, false, "", "unable to open database file", " - d"},
 		{map[string]any{"url": "postgres://u:p@127.0.0.1:1/db", "displayName": ""}, false, "", "Failed to connect", ""},
 	} {
-		v, err := validate(context.Background(), host.NewRunContext(c.creds, "p", context.Background()))
+		v, err := validate(context.Background(), host.NewRunContext(testbox.Object(c.creds), "p", context.Background()))
 		if err != nil || v.Valid != c.valid || v.Info != c.info || v.Error != c.error {
 			t.Errorf("%#v: %#v %v", c.creds, v, err)
 		}
-		if got := listInfo(c.creds); got != c.list {
+		if got := listInfo(testbox.Object(c.creds)); got != c.list {
 			t.Errorf("%#v: list %q", c.creds, got)
 		}
 	}
 	// A URL new SQL() rejects throws out of validate, as createClient does.
-	if _, err := validate(context.Background(), host.NewRunContext(map[string]any{"url": "foo://x"}, "p", context.Background())); err == nil || !strings.HasPrefix(err.Error(), "Unsupported protocol: foo.") {
+	if _, err := validate(context.Background(), host.NewRunContext(testbox.Object(map[string]any{"url": "foo://x"}), "p", context.Background())); err == nil || !strings.HasPrefix(err.Error(), "Unsupported protocol: foo.") {
 		t.Fatal(err)
 	}
 }
@@ -626,15 +626,15 @@ func TestValidateAndListInfo(t *testing.T) {
 func TestStaticURLIsNeverRefreshedOrRedacted(t *testing.T) {
 	reg := setupVault(t)
 	creds := map[string]any{"url": "postgres://app:s3cret@db.example.com:5432/app", "displayName": "app@db.example.com/app", "legacy": "kept"}
-	if err := profile.Save("sql", "prod", creds, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("sql", "prod", testbox.Object(creds), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := auth.GetFresh(context.Background(), reg, "sql", "prod", auth.RefreshOptions{})
-	if err != nil || fresh.Refreshed || keys(fresh.Credentials) != "displayName,legacy,url" {
+	if err != nil || fresh.Refreshed || keys(testbox.Map(fresh.Credentials)) != "displayName,legacy,url" {
 		t.Fatalf("%#v %v", fresh, err)
 	}
-	out := auth.RedactForRemote(reg, "sql", creds)
-	if out["url"] != creds["url"] || keys(out) != "displayName,legacy,url" || creds["url"] != "postgres://app:s3cret@db.example.com:5432/app" {
+	out := auth.RedactForRemote(reg, "sql", testbox.Object(creds))
+	if out.Value("url") != creds["url"] || keys(testbox.Map(out)) != "displayName,legacy,url" || creds["url"] != "postgres://app:s3cret@db.example.com:5432/app" {
 		t.Fatalf("%#v", out)
 	}
 }

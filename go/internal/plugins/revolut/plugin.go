@@ -60,19 +60,19 @@ func New() *plugins.Plugin {
 
 // --- credential lifecycle -------------------------------------------------------
 
-func applies(creds map[string]any) bool {
+func applies(creds plugins.Credentials) bool {
 	return creds != nil && truthy(credential(creds, "refreshToken"))
 }
 
 // stale is `expiryDate === undefined || now + bufferMs >= expiryDate`.
 // Access tokens live 40 minutes.
-func stale(creds map[string]any, nowMs, bufferMs int64) bool {
+func stale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
 	expiry := credential(creds, "expiryDate")
 	return expiry == undefined || float64(nowMs+bufferMs) >= num(expiry)
 }
 
 // refresh keeps the refresh token: Revolut does not rotate it.
-func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
+func refresh(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
 	t, err := refreshRevolutToken(ctx, plugins.Fetch, creds)
 	if err != nil {
 		return nil, err
@@ -81,7 +81,7 @@ func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 }
 
 // listInfo is getExtraInfo: " - <environment>".
-func listInfo(creds map[string]any) string {
+func listInfo(creds plugins.Credentials) string {
 	if creds == nil {
 		return ""
 	}
@@ -204,12 +204,12 @@ func runSetup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.Set
 	if err != nil {
 		return nil, err
 	}
-	creds := withTokens(map[string]any{
-		"environment": environment,
-		"clientId":    clientID,
-		"privateKey":  privateKey,
-		"redirectUri": redirectURI,
-	}, t, false, time.Now().UnixMilli())
+	creds := withTokens(jsvalue.ObjectOf(
+		"environment", environment,
+		"clientId", clientID,
+		"privateKey", privateKey,
+		"redirectUri", redirectURI,
+	), t, false, time.Now().UnixMilli())
 
 	setup.Log("Validating access...")
 	validation := newClient(ctx, creds, setup.Fetch).validate()
@@ -222,7 +222,7 @@ func runSetup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.Set
 }
 
 // reauth runs the consent flow again with the stored client configuration.
-func reauth(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func reauth(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	replacement, err := runReauth(ctx, creds, profileName, setup)
 	if err != nil {
 		return nil, failed(setup.Fail, err)
@@ -230,7 +230,7 @@ func reauth(ctx context.Context, creds map[string]any, profileName string, setup
 	return replacement, nil
 }
 
-func runReauth(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func runReauth(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	if creds == nil {
 		return nil, &apiError{code: "AUTH_FAILED", message: "Revolut client configuration is missing"}
 	}

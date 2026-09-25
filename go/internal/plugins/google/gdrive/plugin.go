@@ -75,8 +75,8 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 		return nil, google.EmailFailure(setup, err)
 	}
 	creds := google.Camel.Merge(nil, tokens)
-	creds["email"] = email
-	creds["accessLevel"] = accessLevel
+	creds.Set("email", email)
+	creds.Set("accessLevel", accessLevel)
 	access := "Read-only"
 	if accessLevel == "full" {
 		access = "Full (read & write)"
@@ -90,8 +90,8 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 
 // reauthenticate keeps the profile's access level (readonly when missing) and
 // asks for that level's scopes again.
-func reauthenticate(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
-	accessLevel, _ := creds["accessLevel"].(string)
+func reauthenticate(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
+	accessLevel, _ := creds.Value("accessLevel").(string)
 	if accessLevel == "" {
 		accessLevel = "readonly"
 	}
@@ -106,8 +106,8 @@ func reauthenticate(ctx context.Context, creds map[string]any, profileName strin
 	}
 	setup.Log(fmt.Sprintf("  Done (%s, %s)", email, accessLevel))
 	out := google.Camel.Merge(creds, tokens)
-	out["email"] = email
-	out["accessLevel"] = accessLevel
+	out.Set("email", email)
+	out.Set("accessLevel", accessLevel)
 	return out, nil
 }
 
@@ -120,20 +120,20 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	if _, err := svc.Files.List().PageSize(1).Context(ctx).Do(); err != nil {
 		return google.ValidationFailure(err), nil
 	}
-	email, _ := run.Credentials["email"].(string)
+	email, _ := run.Credentials.Value("email").(string)
 	return plugins.ValidationResult{Valid: true, Info: email}, nil
 }
 
 // listInfo is Bun getExtraInfo: ` - ${email} (${access})`.
-func listInfo(creds map[string]any) string {
+func listInfo(creds plugins.Credentials) string {
 	if creds == nil {
 		return ""
 	}
 	access := "read-only"
-	if creds["accessLevel"] == "full" {
+	if creds.Value("accessLevel") == "full" {
 		access = "full"
 	}
-	email, ok := creds["email"]
+	email, ok := creds.Get("email")
 	if !ok {
 		email = "undefined"
 	}

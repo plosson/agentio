@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/github"
 	"github.com/plosson/agentio/go/internal/profile"
@@ -156,14 +156,8 @@ func generateExportData() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	raw, err := json.Marshal(map[string]any{
-		"version":     1,
-		"config":      contents.Config,
-		"credentials": contents.Credentials,
-	})
-	if err != nil {
-		return "", "", err
-	}
+	// Bun: JSON.stringify({ version: 1, config, credentials }).
+	raw := jsvalue.Stringify(jsvalue.ObjectOf("version", 1, "config", contents.Config, "credentials", contents.Credentials))
 	enc, err := vault.Encrypt(string(raw), key)
 	if err != nil {
 		return "", "", err

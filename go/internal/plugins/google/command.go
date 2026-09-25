@@ -8,8 +8,8 @@ import (
 
 // EmailListInfo is the Bun getExtraInfo every Google product shows in
 // `profile list`: " - <email>" when the profile has one.
-func EmailListInfo(creds map[string]any) string {
-	if email, _ := creds["email"].(string); email != "" {
+func EmailListInfo(creds plugins.Credentials) string {
+	if email, _ := creds.Value("email").(string); email != "" {
 		return " - " + email
 	}
 	return ""

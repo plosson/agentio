@@ -22,6 +22,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -44,7 +45,7 @@ func storedCreds(expiry int64) map[string]any {
 func runDirect(t *testing.T, ctx context.Context, path string, in plugins.CommandInput) (any, error, []string) {
 	t.Helper()
 	var logs []string
-	run := host.NewRunContext(storedCreds(time.Now().Add(time.Hour).UnixMilli()), "acme", ctx)
+	run := host.NewRunContext(testbox.Object(storedCreds(time.Now().Add(time.Hour).UnixMilli())), "acme", ctx)
 	run.Log = func(parts ...any) {
 		for _, p := range parts {
 			logs = append(logs, p.(string))
@@ -243,7 +244,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	}
 	err := host.AddProfile(fake.Ctx(), New(), plugins.SetupOptions{}, sc, io.Discard)
 	wantErr(t, err, clierr.AuthFailed, "Could not fetch email from Gmail", "Try again or specify --profile manually")
-	if c, _ := vault.Load(); len(c.Credentials["gmail"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gmail")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -465,7 +466,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"emailAddress": "me@example.com"}
 	if v, err := New().Profile.Validate(fake.Ctx(), run); err != nil || !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v %v", v, err)
@@ -490,8 +491,8 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(5)
-	out := auth.RedactForRemote(reg, "gmail", creds)
-	if _, ok := out["refresh_token"]; ok || out["access_token"] != "at-old" || out["email"] != "me@example.com" {
+	out := auth.RedactForRemote(reg, "gmail", testbox.Object(creds))
+	if _, ok := out.Get("refresh_token"); ok || out.Value("access_token") != "at-old" || out.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refresh_token"] != "rt-old" {
@@ -500,7 +501,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 }
 
 func TestListInfoAndReauthenticate(t *testing.T) {
-	if google.EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || google.EmailListInfo(map[string]any{}) != "" {
+	if google.EmailListInfo(testbox.Object(map[string]any{"email": "me@example.com"})) != " - me@example.com" || google.EmailListInfo(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("list info")
 	}
 	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
@@ -516,11 +517,11 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := New().Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
+	got, err := New().Profile.Reauthenticate(fake.Ctx(), testbox.Object(storedCreds(1)), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["access_token"] != "at-2" || got["refresh_token"] != "rt-2" || got["email"] != "me@example.com" {
+	if got.Value("access_token") != "at-2" || got.Value("refresh_token") != "rt-2" || got.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", got)
 	}
 	if strings.Join(logs, "|") != "\nRe-authenticating gmail / work...|  Done (me@example.com)" {

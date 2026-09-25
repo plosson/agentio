@@ -11,6 +11,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
@@ -52,7 +53,7 @@ func initVault(t *testing.T) {
 
 func store(t *testing.T, creds map[string]any) {
 	t.Helper()
-	if err := profile.Save("acme", "ada", creds, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "ada", testbox.Object(creds), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -62,25 +63,22 @@ func TestRefreshPersistsBeforeReturnAndRotatesOnce(t *testing.T) {
 	var calls atomic.Int32
 	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
-		Applies:      func(c map[string]any) bool { s, _ := c["refreshToken"].(string); return s != "" },
-		IsStale: func(c map[string]any, now, buffer int64) bool {
-			exp, _ := vault.AsInt64(c["expiryDate"])
+		Applies:      func(c plugins.Credentials) bool { s, _ := c.Value("refreshToken").(string); return s != "" },
+		IsStale: func(c plugins.Credentials, now, buffer int64) bool {
+			exp, _ := vault.AsInt64(c.Value("expiryDate"))
 			return now+buffer >= exp
 		},
-		Run: func(_ context.Context, c map[string]any) (map[string]any, error) {
+		Run: func(_ context.Context, c plugins.Credentials) (plugins.Credentials, error) {
 			calls.Add(1)
 			time.Sleep(40 * time.Millisecond)
-			tok, _ := c["refreshToken"].(string)
+			tok, _ := c.Value("refreshToken").(string)
 			if tok == "bad" {
 				return nil, errBoom
 			}
-			out := map[string]any{}
-			for k, v := range c {
-				out[k] = v
-			}
-			out["accessToken"] = "fresh"
-			out["refreshToken"] = "rot:" + tok
-			out["expiryDate"] = int64(time.Now().Add(time.Hour).UnixMilli())
+			out := jsvalue.Spread(c)
+			out.Set("accessToken", "fresh")
+			out.Set("refreshToken", "rot:"+tok)
+			out.Set("expiryDate", int64(time.Now().Add(time.Hour).UnixMilli()))
 			return out, nil
 		},
 	})
@@ -109,7 +107,7 @@ func TestRefreshPersistsBeforeReturnAndRotatesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["refreshToken"] != "rot:rt" || got["accessToken"] != "fresh" {
+	if got.Value("refreshToken") != "rot:rt" || got.Value("accessToken") != "fresh" {
 		t.Fatalf("vault was not updated before return: %#v", got)
 	}
 	// A fresh token is left alone. A wider hub buffer still refreshes it when
@@ -131,9 +129,9 @@ func TestFailedRefreshDoesNotPersist(t *testing.T) {
 	initVault(t)
 	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
-		Applies:      func(map[string]any) bool { return true },
-		IsStale:      func(map[string]any, int64, int64) bool { return true },
-		Run:          func(context.Context, map[string]any) (map[string]any, error) { return nil, errBoom },
+		Applies:      func(plugins.Credentials) bool { return true },
+		IsStale:      func(plugins.Credentials, int64, int64) bool { return true },
+		Run:          func(context.Context, plugins.Credentials) (plugins.Credentials, error) { return nil, errBoom },
 	})
 	store(t, map[string]any{"accessToken": "old", "refreshToken": "rt"})
 	_, err := auth.GetFresh(context.Background(), reg, "acme", "ada", auth.RefreshOptions{Force: true})
@@ -142,7 +140,7 @@ func TestFailedRefreshDoesNotPersist(t *testing.T) {
 		t.Fatalf("err = %#v", err)
 	}
 	got, _ := auth.GetCredentials("acme", "ada")
-	if got["accessToken"] != "old" {
+	if got.Value("accessToken") != "old" {
 		t.Fatalf("failed refresh wrote %#v", got)
 	}
 	_, err = auth.GetFresh(context.Background(), reg, "acme", "missing", auth.RefreshOptions{})
@@ -155,19 +153,19 @@ func TestFailedRefreshDoesNotPersist(t *testing.T) {
 func TestRedactCopiesAndStripsOnlyDeclaredFields(t *testing.T) {
 	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
-		Applies:      func(map[string]any) bool { return false },
-		IsStale:      func(map[string]any, int64, int64) bool { return false },
-		Run:          func(context.Context, map[string]any) (map[string]any, error) { return nil, nil },
+		Applies:      func(plugins.Credentials) bool { return false },
+		IsStale:      func(plugins.Credentials, int64, int64) bool { return false },
+		Run:          func(context.Context, plugins.Credentials) (plugins.Credentials, error) { return nil, nil },
 	})
 	original := map[string]any{"accessToken": "a", "refreshToken": "r", "account": "ada"}
-	out := auth.RedactForRemote(reg, "acme", original)
-	if _, ok := out["refreshToken"]; ok {
+	out := auth.RedactForRemote(reg, "acme", testbox.Object(original))
+	if _, ok := out.Get("refreshToken"); ok {
 		t.Fatal("secret field survived redaction")
 	}
 	if original["refreshToken"] != "r" {
 		t.Fatal("redact mutated the caller's map")
 	}
-	if out["accessToken"] != "a" {
+	if out.Value("accessToken") != "a" {
 		t.Fatal("non-secret dropped")
 	}
 	bare, _ := plugins.NewRegistry(&plugins.Plugin{
@@ -178,7 +176,7 @@ func TestRedactCopiesAndStripsOnlyDeclaredFields(t *testing.T) {
 		}},
 	})
 	static := map[string]any{"token": "whole"}
-	if got := auth.RedactForRemote(bare, "ping", static); got["token"] != "whole" {
+	if got := auth.RedactForRemote(bare, "ping", testbox.Object(static)); got.Value("token") != "whole" {
 		t.Fatalf("static service was stripped: %#v", got)
 	}
 }
@@ -201,9 +199,9 @@ func TestRefreshReasonIsBunsFetchError(t *testing.T) {
 	ln.Close()
 	reg := newReg(t, &plugins.RefreshSpec{
 		SecretFields: []string{"refreshToken"},
-		Applies:      func(map[string]any) bool { return true },
-		IsStale:      func(map[string]any, int64, int64) bool { return true },
-		Run: func(ctx context.Context, _ map[string]any) (map[string]any, error) {
+		Applies:      func(plugins.Credentials) bool { return true },
+		IsStale:      func(plugins.Credentials, int64, int64) bool { return true },
+		Run: func(ctx context.Context, _ plugins.Credentials) (plugins.Credentials, error) {
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, closed, nil)
 			_, err := plugins.NewHTTPClient(0).Do(req)
 			return nil, err

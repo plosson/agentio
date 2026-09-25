@@ -34,7 +34,7 @@ type Client struct {
 
 // NewClient builds a client from a command's fresh credentials.
 func NewClient(ctx context.Context, run *plugins.RunContext) *Client {
-	return newClient(ctx, str(run.Credentials, "accessToken"), run.Fetch, run.Fail)
+	return newClient(ctx, run.Credentials.StrValue("accessToken"), run.Fetch, run.Fail)
 }
 
 func newClient(ctx context.Context, token string, fetch fetchFunc, fail failFunc) *Client {

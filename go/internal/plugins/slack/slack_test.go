@@ -99,7 +99,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["slack"][name]
+	return testbox.Map(c.Credentials.Get("slack", name))
 }
 
 func keys(m map[string]any) string {
@@ -112,7 +112,7 @@ func keys(m map[string]any) string {
 }
 
 // runSend runs `slack send` with a RunContext whose fetch goes to the fake.
-func runSend(t *testing.T, f *fakeHook, creds map[string]any, in plugins.CommandInput) (any, error) {
+func runSend(t *testing.T, f *fakeHook, creds plugins.Credentials, in plugins.CommandInput) (any, error) {
 	t.Helper()
 	if in.Args == nil {
 		in.Args = map[string]any{}
@@ -293,7 +293,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 		}
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["slack"]) != 0 || len(c.Config.Profiles["slack"]) != 0 {
+	if len(c.Credentials.Profiles("slack")) != 0 || len(c.Config.Profiles.Get("slack")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -320,21 +320,21 @@ func TestStaticWebhookIsNeverRefreshedOrRedacted(t *testing.T) {
 	reg := setupVault(t)
 	creds := storedCreds()
 	creds["legacyField"] = "kept"
-	if err := profile.Save("slack", "alerts", creds, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("slack", "alerts", testbox.Object(creds), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := auth.GetFresh(context.Background(), reg, "slack", "alerts", auth.RefreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Credentials["webhookUrl"] != hookURL || fresh.Credentials["legacyField"] != "kept" {
+	if fresh.Credentials.Value("webhookUrl") != hookURL || fresh.Credentials.Value("legacyField") != "kept" {
 		t.Fatalf("%#v", fresh.Credentials)
 	}
 	if stored := loadCreds(t, "alerts"); keys(stored) != "channelName,legacyField,type,webhookUrl" {
 		t.Fatalf("vault changed: %#v", stored)
 	}
-	out := auth.RedactForRemote(reg, "slack", creds)
-	if out["webhookUrl"] != hookURL || out["channelName"] != "alerts" || out["type"] != "webhook" || creds["webhookUrl"] != hookURL {
+	out := auth.RedactForRemote(reg, "slack", testbox.Object(creds))
+	if out.Value("webhookUrl") != hookURL || out.Value("channelName") != "alerts" || out.Value("type") != "webhook" || creds["webhookUrl"] != hookURL {
 		t.Fatalf("%#v", out)
 	}
 }
@@ -346,7 +346,7 @@ func TestReadOnlyProfileRefusesSend(t *testing.T) {
 	fake := newFake(t)
 	// A stored URL at the fake: a send that got through would reach it.
 	creds := map[string]any{"type": "webhook", "webhookUrl": strings.Replace(fake.url, "http://", "https://", 1) + "/hook"}
-	if err := profile.Save("slack", "ops", creds, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("slack", "ops", testbox.Object(creds), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	p := reg.Find("slack")
@@ -374,7 +374,7 @@ func TestReadOnlyProfileRefusesSend(t *testing.T) {
 		t.Fatalf("%d requests reached the webhook", n)
 	}
 	// What a read-only profile may still do: validate, and be listed.
-	run := host.NewRunContext(loadCreds(t, "ops"), "ops", context.Background())
+	run := host.NewRunContext(testbox.Object(loadCreds(t, "ops")), "ops", context.Background())
 	if v, err := validate(context.Background(), run); err != nil || !v.Valid || v.Info != "webhook" {
 		t.Fatalf("%#v %v", v, err)
 	}
@@ -390,12 +390,12 @@ func TestValidateAndListInfo(t *testing.T) {
 		{map[string]any{"channelName": ""}, "webhook", " - webhook"},
 		{map[string]any{}, "webhook", " - webhook"},
 	} {
-		run := host.NewRunContext(c.creds, "p", context.Background())
+		run := host.NewRunContext(testbox.Object(c.creds), "p", context.Background())
 		v, err := validate(context.Background(), run)
 		if err != nil || !v.Valid || v.Info != c.info || v.Error != "" {
 			t.Errorf("%#v: %#v %v", c.creds, v, err)
 		}
-		if got := listInfo(c.creds); got != c.list {
+		if got := listInfo(testbox.Object(c.creds)); got != c.list {
 			t.Errorf("%#v: list %q", c.creds, got)
 		}
 	}
@@ -430,7 +430,7 @@ func TestSendPostsTheBunBody(t *testing.T) {
 	}
 	for _, c := range cases {
 		fake := newFake(t)
-		res, err := runSend(t, fake, storedCreds(), c.in)
+		res, err := runSend(t, fake, testbox.Object(storedCreds()), c.in)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -495,7 +495,7 @@ func TestSendInputErrorsMatchBun(t *testing.T) {
 	fake := newFake(t)
 	spec := sendCmd()
 	for _, c := range cases {
-		res, err := runSend(t, fake, storedCreds(), c.in)
+		res, err := runSend(t, fake, testbox.Object(storedCreds()), c.in)
 		ce := cliErr(t, err)
 		if res != nil || string(ce.Code) != c.code || ce.Message != c.msg || ce.Suggestion != c.suggestion {
 			t.Errorf("%s: %#v %#v", c.name, res, ce)
@@ -533,7 +533,7 @@ func TestSendCredentialAndWebhookErrorsMatchBun(t *testing.T) {
 		{"http url", map[string]any{"type": "webhook", "webhookUrl": "http://hooks.slack.com/x"}, "INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration"},
 		{"padded url", map[string]any{"type": "webhook", "webhookUrl": " https://hooks.slack.com/x"}, "INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration"},
 	} {
-		res, err := runSend(t, fake, c.creds, text)
+		res, err := runSend(t, fake, testbox.Object(c.creds), text)
 		ce := cliErr(t, err)
 		if res != nil || string(ce.Code) != c.code || ce.Message != c.msg || ce.Suggestion != c.suggestion {
 			t.Errorf("%s: %#v", c.name, ce)
@@ -558,7 +558,7 @@ func TestSendCredentialAndWebhookErrorsMatchBun(t *testing.T) {
 		fake.mu.Lock()
 		fake.status, fake.reply = c.status, c.reply
 		fake.mu.Unlock()
-		res, err := runSend(t, fake, storedCreds(), text)
+		res, err := runSend(t, fake, testbox.Object(storedCreds()), text)
 		ce := cliErr(t, err)
 		want := "Failed to send message via webhook: " + strconv.Itoa(c.status) + " " + c.reply
 		if res != nil || string(ce.Code) != c.code || ce.Message != want || ce.Suggestion != "Check that the webhook URL is valid and the app has permission to post" {
@@ -566,7 +566,7 @@ func TestSendCredentialAndWebhookErrorsMatchBun(t *testing.T) {
 		}
 	}
 	// A request that never got an answer is NETWORK_ERROR.
-	run := host.NewRunContext(storedCreds(), "alerts", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds()), "alerts", context.Background())
 	run.Fetch = func(context.Context, *http.Request) (*http.Response, error) {
 		return nil, errors.New("dial tcp: connection refused")
 	}

@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
-
-	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 // ProfileValue is one config.profiles entry. Older vaults stored a bare
@@ -18,7 +15,7 @@ type ProfileValue struct {
 
 	bare          bool
 	readOnlyFalse bool
-	extra         map[string]json.RawMessage
+	kept          members
 }
 
 // StatesReadOnly is whether the entry has a readOnly member, true or false
@@ -39,7 +36,7 @@ func (p ProfileValue) MarshalJSON() ([]byte, error) {
 	if p.ReadOnly || p.readOnlyFalse {
 		obj.ReadOnly = &p.ReadOnly
 	}
-	return marshalKeeping(obj, p.extra)
+	return marshalKeeping(obj, p.kept)
 }
 
 func (p *ProfileValue) UnmarshalJSON(b []byte) error {
@@ -53,7 +50,7 @@ func (p *ProfileValue) UnmarshalJSON(b []byte) error {
 		return json.Unmarshal(b, &p.Name)
 	}
 	var obj profileObject
-	extra, err := unmarshalKeeping(b, &obj)
+	kept, err := unmarshalKeeping(b, &obj)
 	if err != nil {
 		return err
 	}
@@ -63,7 +60,7 @@ func (p *ProfileValue) UnmarshalJSON(b []byte) error {
 	p.Name = obj.Name
 	p.ReadOnly = obj.ReadOnly != nil && *obj.ReadOnly
 	p.readOnlyFalse = obj.ReadOnly != nil && !*obj.ReadOnly
-	p.extra = extra
+	p.kept = kept
 	return nil
 }
 
@@ -121,15 +118,15 @@ type APIKey struct {
 	CreatedAt         string `json:"createdAt"`
 	LastUsedAt        string `json:"lastUsedAt,omitempty"`
 
-	extra map[string]json.RawMessage
+	kept members
 }
 
 type plainAPIKey APIKey
 
-func (k APIKey) MarshalJSON() ([]byte, error) { return marshalKeeping(plainAPIKey(k), k.extra) }
+func (k APIKey) MarshalJSON() ([]byte, error) { return marshalKeeping(plainAPIKey(k), k.kept) }
 
 func (k *APIKey) UnmarshalJSON(b []byte) (err error) {
-	k.extra, err = unmarshalKeeping(b, (*plainAPIKey)(k))
+	k.kept, err = unmarshalKeeping(b, (*plainAPIKey)(k))
 	return err
 }
 
@@ -145,53 +142,19 @@ func (k APIKey) Manage() bool {
 
 // Config keeps keys Go does not model, such as the MCP OAuth state in "server".
 type Config struct {
-	Profiles map[string][]ProfileValue `json:"profiles"`
-	APIKeys  []APIKey                  `json:"apiKeys,omitempty"`
+	Profiles Profiles `json:"profiles"`
+	APIKeys  []APIKey `json:"apiKeys,omitempty"`
 
-	extra    map[string]json.RawMessage
-	services []string // the profiles keys in stored order
+	kept members
 }
 
 type plainConfig Config
 
-func (c Config) MarshalJSON() ([]byte, error) { return marshalKeeping(plainConfig(c), c.extra) }
+func (c Config) MarshalJSON() ([]byte, error) { return marshalKeeping(plainConfig(c), c.kept) }
 
 func (c *Config) UnmarshalJSON(b []byte) (err error) {
-	if c.extra, err = unmarshalKeeping(b, (*plainConfig)(c)); err != nil {
-		return err
-	}
-	var members struct {
-		Profiles json.RawMessage `json:"profiles"`
-	}
-	if json.Unmarshal(b, &members) == nil {
-		if v, err := jsvalue.Parse(members.Profiles); err == nil {
-			if obj, ok := v.(*jsvalue.Object); ok {
-				c.services = obj.Keys()
-			}
-		}
-	}
-	return nil
-}
-
-// Services are the services with a profiles entry, in the order Bun lists
-// them (Object.entries): as stored, then any added since, sorted.
-func (c Config) Services() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, s := range c.services {
-		if _, ok := c.Profiles[s]; ok && !seen[s] {
-			out = append(out, s)
-			seen[s] = true
-		}
-	}
-	var added []string
-	for s := range c.Profiles {
-		if !seen[s] {
-			added = append(added, s)
-		}
-	}
-	sort.Strings(added)
-	return append(out, added...)
+	c.kept, err = unmarshalKeeping(b, (*plainConfig)(c))
+	return err
 }
 
 // Contents is the decrypted vault document. Top-level keys Go does not model
@@ -201,25 +164,21 @@ type Contents struct {
 	Config      Config      `json:"config"`
 	Credentials Credentials `json:"credentials"`
 
-	extra map[string]json.RawMessage
+	kept members
 }
 
 type plainContents Contents
 
-func (c Contents) MarshalJSON() ([]byte, error) { return marshalKeeping(plainContents(c), c.extra) }
+func (c Contents) MarshalJSON() ([]byte, error) { return marshalKeeping(plainContents(c), c.kept) }
 
 func (c *Contents) UnmarshalJSON(b []byte) (err error) {
-	c.extra, err = unmarshalKeeping(b, (*plainContents)(c))
+	c.kept, err = unmarshalKeeping(b, (*plainContents)(c))
 	return err
 }
 
 func (c *Contents) normalize() {
-	if c.Config.Profiles == nil {
-		c.Config.Profiles = map[string][]ProfileValue{}
-	}
-	if c.Credentials == nil {
-		c.Credentials = map[string]map[string]map[string]any{}
-	}
+	c.Config.Profiles.init()
+	c.Credentials.init()
 }
 
 func decodeContents(raw []byte) (*Contents, error) {
@@ -235,24 +194,6 @@ func EmptyContents() *Contents {
 	c := &Contents{Version: CurrentVersion}
 	c.normalize()
 	return c
-}
-
-// CloneMap deep-copies a credential object so callers cannot alias the cache.
-func CloneMap(in map[string]any) (map[string]any, error) {
-	if in == nil {
-		return nil, nil
-	}
-	b, err := json.Marshal(in)
-	if err != nil {
-		return nil, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	var out map[string]any
-	if err := dec.Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // AsInt64 reads a JSON number stored in a credential map.

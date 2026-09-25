@@ -44,14 +44,14 @@ func newDesk(t *testing.T) *desk {
 			},
 			Refresh: &plugins.RefreshSpec{
 				SecretFields: []string{"token"},
-				Applies:      func(map[string]any) bool { return true },
-				IsStale:      func(c map[string]any, _, _ int64) bool { return c["token"] == "stale" },
-				Run: func(_ context.Context, c map[string]any) (map[string]any, error) {
+				Applies:      func(plugins.Credentials) bool { return true },
+				IsStale:      func(c plugins.Credentials, _, _ int64) bool { return c.Value("token") == "stale" },
+				Run: func(_ context.Context, c plugins.Credentials) (plugins.Credentials, error) {
 					d.refreshes++
 					if d.refreshErr != nil {
 						return nil, d.refreshErr
 					}
-					return map[string]any{"token": "renewed"}, nil
+					return testbox.Object(map[string]any{"token": "renewed"}), nil
 				},
 			},
 		},
@@ -90,7 +90,7 @@ func (d *desk) save(t *testing.T, name, token string, readOnly bool) {
 	if readOnly {
 		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
 	}
-	if err := profile.Save("desk", name, map[string]any{"token": token}, opts); err != nil {
+	if err := profile.Save("desk", name, testbox.Object(map[string]any{"token": token}), opts); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -137,7 +137,7 @@ func TestPrepareRejectsBadInputBeforeTheProfile(t *testing.T) {
 		t.Fatalf("Prepare called %d times for 5 runs", d.prepares)
 	}
 	creds, _ := vault.Load()
-	if creds.Credentials["desk"]["a"]["token"] != "stale" {
+	if testbox.Map(creds.Credentials.Get("desk", "a"))["token"] != "stale" {
 		t.Fatal("bad input persisted a refresh")
 	}
 }
@@ -191,7 +191,7 @@ func TestReadOnlyRefusalComesAfterTheRefresh(t *testing.T) {
 	_, err := d.exec(map[string]any{"title": "x"})
 	wantCode(t, err, clierr.TokenExpired, "refresh fails")
 	creds, _ := vault.Load()
-	if creds.Credentials["desk"]["ro"]["token"] != "stale" {
+	if testbox.Map(creds.Credentials.Get("desk", "ro"))["token"] != "stale" {
 		t.Fatal("failed refresh changed the stored token")
 	}
 
@@ -202,8 +202,8 @@ func TestReadOnlyRefusalComesAfterTheRefresh(t *testing.T) {
 		t.Fatalf("refusal %q", msg)
 	}
 	creds, _ = vault.Load()
-	if creds.Credentials["desk"]["ro"]["token"] != "renewed" {
-		t.Fatalf("refresh before the refusal was not persisted: %#v", creds.Credentials["desk"]["ro"])
+	if testbox.Map(creds.Credentials.Get("desk", "ro"))["token"] != "renewed" {
+		t.Fatalf("refresh before the refusal was not persisted: %#v", testbox.Map(creds.Credentials.Get("desk", "ro")))
 	}
 	if d.refreshes != 2 || len(d.runs) != 0 {
 		t.Fatalf("refreshes %d, runs %d", d.refreshes, len(d.runs))
@@ -216,7 +216,7 @@ func TestReadOnlyRefusalComesAfterTheRefresh(t *testing.T) {
 func TestInvokeRunsPrepareThenRun(t *testing.T) {
 	d := newDesk(t)
 	spec := command(d.p, "make")
-	run := NewRunContext(map[string]any{}, "", context.Background())
+	run := NewRunContext(testbox.Object(map[string]any{}), "", context.Background())
 	if _, err := Invoke(context.Background(), spec, plugins.CommandInput{Options: map[string]any{}}, run); err == nil || len(d.runs) != 0 {
 		t.Fatalf("bad input: %v runs %d", err, len(d.runs))
 	}

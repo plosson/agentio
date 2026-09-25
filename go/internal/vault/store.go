@@ -241,15 +241,7 @@ func Update(fn func(*Contents) error) error {
 	if err := fn(next); err != nil {
 		return err
 	}
-	before, err := json.Marshal(cur)
-	if err != nil {
-		return err
-	}
-	after, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	if bytes.Equal(before, after) {
+	if bytes.Equal(Plaintext(cur), Plaintext(next)) {
 		return nil
 	}
 	return writeAt(next, path)
@@ -276,11 +268,7 @@ func writeAt(contents *Contents, path string) error {
 			"Vault is locked — passphrase not found",
 			"Run `agentio vault set <path>` to re-store the passphrase, or set the AGENTIO_PASSPHRASE env var.")
 	}
-	raw, err := json.Marshal(contents)
-	if err != nil {
-		return err
-	}
-	encoded, err := Encrypt(string(raw), pw)
+	encoded, err := Encrypt(string(Plaintext(contents)), pw)
 	if err != nil {
 		return err
 	}
@@ -412,16 +400,16 @@ func ResetVault() error {
 	return nil
 }
 
+// Plaintext is the vault document as Bun writes it, JSON.stringify(contents):
+// every object in its order, strings escaped as JavaScript escapes them.
+func Plaintext(c *Contents) []byte { return jsvalue.Stringify(c) }
+
 func clone(c *Contents) (*Contents, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
 	}
-	out, err := decodeContents(b)
-	if err == nil {
-		out.Config.services = append([]string(nil), c.Config.Services()...)
-	}
-	return out, err
+	return decodeContents(b)
 }
 
 func itoa(n int) string {

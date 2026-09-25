@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -24,13 +25,11 @@ func statusVault(t *testing.T) {
 		if err := json.Unmarshal([]byte(`["x"]`), &custom); err != nil {
 			return err
 		}
-		c.Config.Profiles["board"] = board
-		c.Config.Profiles["custom"] = custom
-		c.Credentials["board"] = map[string]map[string]any{
-			"desk": {"token": "t", "workspace": "W"},
-			"old":  {"token": "expired"},
-		}
-		c.Credentials["custom"] = map[string]map[string]any{"x": {"k": "v"}}
+		c.Config.Profiles.Set("board", board)
+		c.Config.Profiles.Set("custom", custom)
+		c.Credentials.Put("board", "desk", testbox.Object(map[string]any{"token": "t", "workspace": "W"}))
+		c.Credentials.Put("board", "old", testbox.Object(map[string]any{"token": "expired"}))
+		c.Credentials.Put("custom", "x", testbox.Object(map[string]any{"k": "v"}))
 		return nil
 	})
 	if err != nil {

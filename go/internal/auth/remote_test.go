@@ -43,7 +43,7 @@ func TestRemoteCredentialsPostsNoBody(t *testing.T) {
 	t.Setenv("AGENTIO_TOKEN", token)
 	auth.Reset()
 	creds, err := auth.RemoteCredentials("acme", "ada")
-	if err != nil || creds["a"] != "b" {
+	if err != nil || creds.Value("a") != "b" {
 		t.Fatalf("%#v %v", creds, err)
 	}
 	if gotBody != "" || gotType != "" || gotLength != 0 {

@@ -22,6 +22,7 @@ import (
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -247,7 +248,7 @@ func TestSetupAccessLevelFromPromptAndFlags(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.Credentials["accessLevel"] != c.level || scopes != c.scopes || res.SuggestedProfileName != "user@example.com" {
+			if res.Credentials.Value("accessLevel") != c.level || scopes != c.scopes || res.SuggestedProfileName != "user@example.com" {
 				t.Fatalf("%#v %q", res.Credentials, scopes)
 			}
 			asked := strings.Contains(strings.Join(logs, "|"), "Access level options:")
@@ -281,7 +282,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	if ce.Code != clierr.AuthFailed || ce.Message != "Failed to fetch user email: No email returned from userinfo endpoint" || ce.Suggestion != "Ensure the account has an email address" {
 		t.Fatalf("%#v", ce)
 	}
-	if c, _ := vault.Load(); len(c.Credentials["gdrive"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gdrive")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -526,7 +527,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(freshExpiry, "full"), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(storedCreds(freshExpiry, "full")), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -548,8 +549,8 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(5, "full")
-	out := auth.RedactForRemote(reg, "gdrive", creds)
-	if _, ok := out["refreshToken"]; ok || out["accessToken"] != "at-old" || out["accessLevel"] != "full" || out["expiryDate"] != int64(5) {
+	out := auth.RedactForRemote(reg, "gdrive", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok || out.Value("accessToken") != "at-old" || out.Value("accessLevel") != "full" || out.Value("expiryDate") != int64(5) {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refreshToken"] != "rt-old" {
@@ -564,7 +565,7 @@ func TestListInfo(t *testing.T) {
 		{"email": "me@example.com"}:                            " - me@example.com (read-only)",
 		{}:                                                     " - undefined (read-only)",
 	} {
-		if got := listInfo(*creds); got != want {
+		if got := listInfo(testbox.Object(*creds)); got != want {
 			t.Errorf("%v: %q", *creds, got)
 		}
 	}
@@ -592,13 +593,13 @@ func TestReauthenticateKeepsTheAccessLevel(t *testing.T) {
 		var logs []string
 		prev := storedCreds(1, c.stored)
 		prev["extra"] = "kept"
-		got, err := New().Profile.Reauthenticate(fake.Ctx(), prev, "work", oauthSetup(t, "", &scopes, &logs))
+		got, err := New().Profile.Reauthenticate(fake.Ctx(), testbox.Object(prev), "work", oauthSetup(t, "", &scopes, &logs))
 		if err != nil {
 			t.Fatal(err)
 		}
 		// No refresh token in the response: Bun's spread of undefined drops the old one.
-		if _, ok := got["refreshToken"]; ok || got["accessToken"] != "at-2" || got["email"] != "new@example.com" ||
-			got["accessLevel"] != c.level || got["extra"] != "kept" || scopes != c.scopes {
+		if _, ok := testbox.Map(got)["refreshToken"]; ok || got.Value("accessToken") != "at-2" || got.Value("email") != "new@example.com" ||
+			got.Value("accessLevel") != c.level || got.Value("extra") != "kept" || scopes != c.scopes {
 			t.Fatalf("%q: %#v %q", c.stored, got, scopes)
 		}
 		if prev["refreshToken"] != "rt-old" {

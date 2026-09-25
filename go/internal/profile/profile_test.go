@@ -43,11 +43,11 @@ func decode(raw []byte) (*vault.Contents, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, err
 	}
-	if c.Config.Profiles == nil {
-		c.Config.Profiles = map[string][]vault.ProfileValue{}
+	if c.Config.Profiles.Len() == 0 {
+		c.Config.Profiles = vault.NewProfiles()
 	}
-	if c.Credentials == nil {
-		c.Credentials = map[string]map[string]map[string]any{}
+	if len(c.Credentials.Services()) == 0 {
+		c.Credentials = vault.NewCredentials()
 	}
 	return &c, nil
 }
@@ -55,10 +55,10 @@ func decode(raw []byte) (*vault.Contents, error) {
 func TestReplaceKeepsReadOnlyUnlessStated(t *testing.T) {
 	initVault(t)
 	creds := map[string]any{"token": "one"}
-	if err := Save("board", "desk", creds, SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := Save("board", "desk", testbox.Object(creds), SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Save("board", "desk", map[string]any{"token": "two"}, SaveOptions{}); err != nil {
+	if err := Save("board", "desk", testbox.Object(map[string]any{"token": "two"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	ro, err := IsReadOnly("board", "desk")
@@ -69,10 +69,10 @@ func TestReplaceKeepsReadOnlyUnlessStated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Credentials["board"]["desk"]["token"] != "two" {
-		t.Fatalf("credentials not replaced: %#v", got.Credentials["board"]["desk"])
+	if testbox.Map(got.Credentials.Get("board", "desk"))["token"] != "two" {
+		t.Fatalf("credentials not replaced: %#v", testbox.Map(got.Credentials.Get("board", "desk")))
 	}
-	if err := Save("board", "desk", map[string]any{"token": "three"}, SaveOptions{ReadOnlySet: true, ReadOnly: false}); err != nil {
+	if err := Save("board", "desk", testbox.Object(map[string]any{"token": "three"}), SaveOptions{ReadOnlySet: true, ReadOnly: false}); err != nil {
 		t.Fatal(err)
 	}
 	ro, _ = IsReadOnly("board", "desk")
@@ -88,7 +88,7 @@ func TestNames(t *testing.T) {
 			t.Fatalf("accepted %q", bad)
 		}
 	}
-	if err := Save("acme", "ada", map[string]any{"n": "1"}, SaveOptions{}); err != nil {
+	if err := Save("acme", "ada", testbox.Object(map[string]any{"n": "1"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	name, err := ChooseName("acme", "", "ada", false)
@@ -107,7 +107,7 @@ func TestNames(t *testing.T) {
 	if _, err := ChooseName("acme", "explicit/nope", "ada", false); err != nil {
 		t.Fatal(err)
 	}
-	err = Save("acme", "explicit/nope", map[string]any{"n": "1"}, SaveOptions{})
+	err = Save("acme", "explicit/nope", testbox.Object(map[string]any{"n": "1"}), SaveOptions{})
 	if err == nil {
 		t.Fatal("slash name was stored")
 	}
@@ -115,7 +115,7 @@ func TestNames(t *testing.T) {
 
 func TestRenameMovesCredentialsAndScopes(t *testing.T) {
 	initVault(t)
-	if err := Save("acme", "ada", map[string]any{"token": "secret"}, SaveOptions{}); err != nil {
+	if err := Save("acme", "ada", testbox.Object(map[string]any{"token": "secret"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	issued, err := CreateKey(KeyInput{Name: "agent", AllowedProfiles: []string{"acme/ada"}, ReadOnly: false, CanManageProfiles: false}, "http://127.0.0.1:7890")
@@ -130,7 +130,7 @@ func TestRenameMovesCredentialsAndScopes(t *testing.T) {
 	if err != nil || outcome != WriteOK {
 		t.Fatalf("same-name rename %s %v", outcome, err)
 	}
-	if err := Save("acme", "bea", map[string]any{"token": "other"}, SaveOptions{}); err != nil {
+	if err := Save("acme", "bea", testbox.Object(map[string]any{"token": "other"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	outcome, err = Rename("acme", "ada", "bea")
@@ -149,11 +149,11 @@ func TestRenameMovesCredentialsAndScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := c.Credentials["acme"]["ada"]; ok {
+	if _, ok := c.Credentials.Raw("acme", "ada"); ok {
 		t.Fatal("old credential key survived")
 	}
-	if c.Credentials["acme"]["ada2"]["token"] != "secret" {
-		t.Fatalf("credential did not follow the rename: %#v", c.Credentials["acme"])
+	if testbox.Map(c.Credentials.Get("acme", "ada2"))["token"] != "secret" {
+		t.Fatalf("credential did not follow the rename: %#v", c.Credentials.Profiles("acme"))
 	}
 	keys, _ := ListKeys()
 	var limited, starred KeyView
@@ -189,26 +189,26 @@ func TestRenameMovesCredentialsAndScopes(t *testing.T) {
 
 func TestKeyedWriteRefusesUnreachableName(t *testing.T) {
 	initVault(t)
-	if err := Save("acme", "ada", map[string]any{"token": "t"}, SaveOptions{}); err != nil {
+	if err := Save("acme", "ada", testbox.Object(map[string]any{"token": "t"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	issued, err := CreateKey(KeyInput{Name: "narrow", AllowedProfiles: []string{"acme/ada"}, CanManageProfiles: true}, "http://127.0.0.1:9")
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := SaveForKey(issued.Key.ID, "acme", "other", map[string]any{"token": "n"}, SaveOptions{})
+	outcome, err := SaveForKey(issued.Key.ID, "acme", "other", testbox.Object(map[string]any{"token": "n"}), SaveOptions{})
 	if err != nil || outcome != WriteOK {
 		t.Fatalf("new name should be granted, got %s %v", outcome, err)
 	}
-	if err := Save("board", "hidden", map[string]any{"token": "h"}, SaveOptions{}); err != nil {
+	if err := Save("board", "hidden", testbox.Object(map[string]any{"token": "h"}), SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	outcome, err = SaveForKey(issued.Key.ID, "board", "hidden", map[string]any{"token": "x"}, SaveOptions{})
+	outcome, err = SaveForKey(issued.Key.ID, "board", "hidden", testbox.Object(map[string]any{"token": "x"}), SaveOptions{})
 	if err != nil || outcome != WriteDenied {
 		t.Fatalf("replace of an unreachable profile = %s %v", outcome, err)
 	}
 	c, _ := vault.Load()
-	if c.Credentials["board"]["hidden"]["token"] != "h" {
+	if testbox.Map(c.Credentials.Get("board", "hidden"))["token"] != "h" {
 		t.Fatal("denied write changed credentials")
 	}
 }

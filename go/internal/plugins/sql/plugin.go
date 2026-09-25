@@ -38,8 +38,8 @@ func New() *plugins.Plugin {
 }
 
 // listInfo is Bun getExtraInfo.
-func listInfo(creds map[string]any) string {
-	if name := creds["displayName"]; jsvalue.Truthy(name) {
+func listInfo(creds plugins.Credentials) string {
+	if name := creds.Value("displayName"); jsvalue.Truthy(name) {
 		return " - " + jsvalue.String(name)
 	}
 	return ""
@@ -138,7 +138,7 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	}
 
 	setup.Log("\nValidating connection...")
-	c, err := newClient(map[string]any{"url": url})
+	c, err := newClient(jsvalue.ObjectOf("url", url))
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	displayName := extractDisplayName(url)
 	setup.Log(fmt.Sprintf("\nConnected to: %s\n", displayName))
 	return &plugins.SetupResult{
-		Credentials:          map[string]any{"url": url, "displayName": displayName},
+		Credentials:          jsvalue.ObjectOf("url", url, "displayName", displayName),
 		SuggestedProfileName: displayName,
 		Info:                 `Test with: agentio sql query "SELECT 1"`,
 	}, nil

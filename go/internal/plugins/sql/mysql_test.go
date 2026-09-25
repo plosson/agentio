@@ -13,6 +13,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/testbox"
 )
 
 // myCol is a column definition the fake server sends.
@@ -297,7 +298,7 @@ func TestMySQLQueriesTheTextProtocol(t *testing.T) {
 		}
 		return nil
 	}
-	c, err := newClient(map[string]any{"url": "mysql://root:pw@127.0.0.1:" + srv.port + "/shop", "displayName": "root@127.0.0.1/shop"})
+	c, err := newClient(testbox.Object(map[string]any{"url": "mysql://root:pw@127.0.0.1:" + srv.port + "/shop", "displayName": "root@127.0.0.1/shop"}))
 	if err != nil {
 		t.Fatal(err)
 	}

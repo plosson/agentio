@@ -105,7 +105,7 @@ func ValidateDriveFiles(mimeType string) func(context.Context, *plugins.RunConte
 		if _, err := svc.Files.List().PageSize(1).Q("mimeType='" + mimeType + "'").Context(ctx).Do(); err != nil {
 			return ValidationFailure(err), nil
 		}
-		email, _ := run.Credentials["email"].(string)
+		email, _ := run.Credentials.Value("email").(string)
 		return plugins.ValidationResult{Valid: true, Info: email}, nil
 	}
 }

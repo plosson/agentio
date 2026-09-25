@@ -32,8 +32,8 @@ func New() *plugins.Plugin {
 }
 
 // channel is `credentials.channelName` when truthy, as Bun interpolates it.
-func channel(creds map[string]any) (string, bool) {
-	name := creds["channelName"]
+func channel(creds plugins.Credentials) (string, bool) {
+	name := creds.Value("channelName")
 	if !jsvalue.Truthy(name) {
 		return "", false
 	}
@@ -41,7 +41,7 @@ func channel(creds map[string]any) (string, bool) {
 }
 
 // listInfo is Bun getExtraInfo.
-func listInfo(creds map[string]any) string {
+func listInfo(creds plugins.Credentials) string {
 	if name, ok := channel(creds); ok {
 		return " - #" + name
 	}
@@ -82,10 +82,11 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 	}
 
 	channelName := ask(setup, "? Channel name (optional, for display): ")
-	creds := map[string]any{"type": "webhook", "webhookUrl": webhookURL}
+	// Bun: `{ type: 'webhook', webhookUrl, channelName: channelName || undefined }`.
+	creds := jsvalue.ObjectOf("type", "webhook", "webhookUrl", webhookURL, "channelName", jsvalue.Undefined)
 	suggested := "webhook"
 	if channelName != "" {
-		creds["channelName"] = channelName
+		creds.Set("channelName", channelName)
 		suggested = channelName
 	}
 	return &plugins.SetupResult{

@@ -13,19 +13,6 @@ func (n jsonNum) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(int64(n), 10)), nil
 }
 
-func copyMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func str(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
-}
-
 // asInt64 reads an expiry after a vault round trip (json.Number) or from a
 // map that has not been serialized yet.
 func asInt64(v any) (int64, bool) {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -40,34 +41,33 @@ type Tokens struct {
 }
 
 // Read returns the token fields stored under k.
-func (k Keys) Read(creds map[string]any) Tokens {
-	expiry, _ := asInt64(creds[k.ExpiryDate])
+func (k Keys) Read(creds plugins.Credentials) Tokens {
+	expiry, _ := asInt64(creds.Value(k.ExpiryDate))
 	return Tokens{
-		AccessToken:  str(creds, k.AccessToken),
-		RefreshToken: str(creds, k.RefreshToken),
+		AccessToken:  creds.StrValue(k.AccessToken),
+		RefreshToken: creds.StrValue(k.RefreshToken),
 		ExpiryDate:   expiry,
-		TokenType:    str(creds, k.TokenType),
-		Scope:        str(creds, k.Scope),
+		TokenType:    creds.StrValue(k.TokenType),
+		Scope:        creds.StrValue(k.Scope),
 	}
 }
 
-// Merge is Bun `{ ...prev, ...tokens }` under k. prev is not modified. An
-// absent token field is removed, as a spread undefined is dropped by
-// JSON.stringify.
-func (k Keys) Merge(prev map[string]any, t Tokens) map[string]any {
-	out := make(map[string]any, len(prev)+5)
-	for key, v := range prev {
-		out[key] = v
-	}
-	out[k.AccessToken] = t.AccessToken
-	setOrDelete(out, k.RefreshToken, t.RefreshToken)
+// Merge is Bun `{ ...prev, ...tokens }` under k, the order every Google
+// setup, refresh and reauth builds: prev's keys where they are, then the
+// token fields in the order access, refresh, expiry, type, scope, a new one
+// last. An absent field is undefined: it keeps no place, and JSON.stringify
+// drops it. prev is not modified; nil is `{}`.
+func (k Keys) Merge(prev plugins.Credentials, t Tokens) plugins.Credentials {
+	out := jsvalue.Spread(prev)
+	out.Set(k.AccessToken, t.AccessToken)
+	out.Set(k.RefreshToken, orUndefined(t.RefreshToken))
 	if t.ExpiryDate != 0 {
-		out[k.ExpiryDate] = jsonNum(t.ExpiryDate)
+		out.Set(k.ExpiryDate, jsonNum(t.ExpiryDate))
 	} else {
-		delete(out, k.ExpiryDate)
+		out.Set(k.ExpiryDate, jsvalue.Undefined)
 	}
-	setOrDelete(out, k.TokenType, t.TokenType)
-	setOrDelete(out, k.Scope, t.Scope)
+	out.Set(k.TokenType, orUndefined(t.TokenType))
+	out.Set(k.Scope, orUndefined(t.Scope))
 	return out
 }
 
@@ -83,14 +83,14 @@ func (k Keys) RefreshSpec() *plugins.RefreshSpec {
 
 // Applies is Bun `!!credentials.refresh_token` (or refreshToken). A gchat
 // webhook profile has none and is left alone.
-func (k Keys) Applies(creds map[string]any) bool {
-	return str(creds, k.RefreshToken) != ""
+func (k Keys) Applies(creds plugins.Credentials) bool {
+	return creds.StrValue(k.RefreshToken) != ""
 }
 
 // IsStale is Bun `expiry !== undefined && now + bufferMs >= expiry`. A stored
 // null coerces to 0 in JavaScript, so it counts as expired.
-func (k Keys) IsStale(creds map[string]any, nowMs, bufferMs int64) bool {
-	raw, present := creds[k.ExpiryDate]
+func (k Keys) IsStale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
+	raw, present := creds.Get(k.ExpiryDate)
 	if !present {
 		return false
 	}
@@ -103,7 +103,7 @@ func (k Keys) IsStale(creds map[string]any, nowMs, bufferMs int64) bool {
 
 // Refresh is Bun refreshGoogleAccessToken merged over the stored map. It
 // returns the replacement and does not persist it.
-func (k Keys) Refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
+func (k Keys) Refresh(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
 	next, err := refreshTokens(ctx, k.Read(creds))
 	if err != nil {
 		return nil, err
@@ -119,17 +119,12 @@ func (n jsonNum) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(int64(n), 10)), nil
 }
 
-func setOrDelete(m map[string]any, key, value string) {
+// orUndefined is Bun `value || undefined` for a string field.
+func orUndefined(value string) any {
 	if value == "" {
-		delete(m, key)
-		return
+		return jsvalue.Undefined
 	}
-	m[key] = value
-}
-
-func str(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
+	return value
 }
 
 // asInt64 reads an expiry after a vault round trip (json.Number) or from a

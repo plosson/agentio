@@ -20,6 +20,7 @@ import (
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -199,7 +200,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	if ce.Code != clierr.AuthFailed || ce.Message != "Failed to fetch user email: No email returned from userinfo endpoint" || ce.Suggestion != "Ensure the account has an email address" {
 		t.Fatalf("%#v", ce)
 	}
-	if c, _ := vault.Load(); len(c.Credentials["gscript"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gscript")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -402,7 +403,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -424,8 +425,8 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(5)
-	out := auth.RedactForRemote(reg, "gscript", creds)
-	if _, ok := out["refreshToken"]; ok || out["accessToken"] != "at-old" || out["email"] != "me@example.com" || out["expiryDate"] != int64(5) {
+	out := auth.RedactForRemote(reg, "gscript", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok || out.Value("accessToken") != "at-old" || out.Value("email") != "me@example.com" || out.Value("expiryDate") != int64(5) {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refreshToken"] != "rt-old" {
@@ -435,7 +436,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 
 func TestListInfoAndReauthenticate(t *testing.T) {
 	p := New()
-	if p.Profile.ListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || p.Profile.ListInfo(map[string]any{}) != "" {
+	if p.Profile.ListInfo(testbox.Object(map[string]any{"email": "me@example.com"})) != " - me@example.com" || p.Profile.ListInfo(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("list info")
 	}
 	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
@@ -454,14 +455,14 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 		}
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := p.Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
+	got, err := p.Profile.Reauthenticate(fake.Ctx(), testbox.Object(storedCreds(1)), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" || got["email"] != "me@example.com" {
+	if got.Value("accessToken") != "at-2" || got.Value("refreshToken") != "rt-2" || got.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", got)
 	}
-	if _, ok := got["access_token"]; ok {
+	if _, ok := got.Get("access_token"); ok {
 		t.Fatalf("snake_case key %#v", got)
 	}
 	if strings.Join(logs, "|") != "\nRe-authenticating gscript / work...|  Done (me@example.com)" {

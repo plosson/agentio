@@ -181,7 +181,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["revolut"][name]
+	return testbox.Map(c.Credentials.Get("revolut", name))
 }
 
 func spec(t *testing.T, path string) *plugins.CommandSpec {
@@ -226,7 +226,7 @@ func execCmd(t *testing.T, reg *plugins.Registry, path string, in plugins.Comman
 // runCmd runs a handler directly with the given credentials.
 func runCmd(t *testing.T, path string, in plugins.CommandInput, configure func(*plugins.RunContext)) (any, error) {
 	t.Helper()
-	run := host.NewRunContext(storedCreds(t, farFuture()), "biz", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(t, farFuture())), "biz", context.Background())
 	run.Confirm = func(q string) (bool, error) { t.Fatalf("unexpected prompt %q", q); return false, nil }
 	if configure != nil {
 		configure(run)
@@ -556,7 +556,7 @@ func TestSetupRefusalsMatchBunAndWriteNothing(t *testing.T) {
 		t.Fatalf("refusals before the exchange must not call Revolut: %s", got)
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["revolut"]) != 0 {
+	if len(c.Credentials.Profiles("revolut")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -572,12 +572,12 @@ func TestReauthenticateKeepsTheConfigurationAndReplacesTokens(t *testing.T) {
 	})
 	var opened []string
 	sc := setupContext(map[string]string{"? Paste the redirect URL (or just the code): ": "code-2"}, &opened)
-	got, err := reauth(context.Background(), storedCreds(t, int64(1)), "biz", sc)
+	got, err := reauth(context.Background(), testbox.Object(storedCreds(t, int64(1))), "biz", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["legacyField"] != "kept" || got["clientId"] != "client-1" || got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" ||
-		got["privateKey"] != storedCreds(t, 0)["privateKey"] {
+	if got.Value("legacyField") != "kept" || got.Value("clientId") != "client-1" || got.Value("accessToken") != "at-2" || got.Value("refreshToken") != "rt-2" ||
+		got.Value("privateKey") != storedCreds(t, 0)["privateKey"] {
 		t.Fatalf("%#v", got)
 	}
 	if len(opened) != 1 || opened[0] != "https://sandbox-business.revolut.com/app-confirm?client_id=client-1&redirect_uri=https%3A%2F%2FExample.test%3A8443%2Fcb&response_type=code" {
@@ -598,7 +598,7 @@ func TestReauthenticateKeepsTheConfigurationAndReplacesTokens(t *testing.T) {
 func TestStaleTokenRefreshesOnceAndKeepsTheRefreshToken(t *testing.T) {
 	reg := setupVault(t)
 	key, _ := throwawayKey(t)
-	if err := profile.Save("revolut", "biz", storedCreds(t, int64(1)), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("revolut", "biz", testbox.Object(storedCreds(t, int64(1))), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -660,22 +660,22 @@ func TestStaleTokenRefreshesOnceAndKeepsTheRefreshToken(t *testing.T) {
 
 func TestRefreshWithoutAnAccessTokenDropsTheKeyAndStoresNullExpiry(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { writeJSON(w, 200, map[string]any{"token_type": "bearer"}) })
-	got, err := refresh(context.Background(), storedCreds(t, int64(1)))
+	got, err := refresh(context.Background(), testbox.Object(storedCreds(t, int64(1))))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// `{...credentials, accessToken: undefined, expiryDate: NaN}` stored by Bun.
-	if _, has := got["accessToken"]; has {
-		t.Fatalf("accessToken kept: %#v", got["accessToken"])
+	if _, has := testbox.Map(got)["accessToken"]; has {
+		t.Fatalf("accessToken kept: %#v", got.Value("accessToken"))
 	}
-	if v, has := got["expiryDate"]; !has || v != nil {
+	if v, has := got.Get("expiryDate"); !has || v != nil {
 		t.Fatalf("expiryDate %#v", v)
 	}
 }
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("revolut", "biz", storedCreds(t, int64(1)), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("revolut", "biz", testbox.Object(storedCreds(t, int64(1))), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -706,7 +706,7 @@ func TestABrokenKeyFailsTheRefreshWithBunsReason(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { t.Errorf("no request may be sent: %s", h.Path) })
 	creds := storedCreds(t, int64(1))
 	creds["privateKey"] = "pem"
-	_, err := refresh(context.Background(), creds)
+	_, err := refresh(context.Background(), testbox.Object(creds))
 	if err == nil || err.Error() != "Failed to sign the client assertion: error:0900006e:PEM routines:OPENSSL_internal:NO_START_LINE" {
 		t.Fatalf("%v", err)
 	}
@@ -734,30 +734,30 @@ func TestAnECKeySignsLikeNode(t *testing.T) {
 func TestStaleFollowsTheBunComparison(t *testing.T) {
 	cases := []struct {
 		name  string
-		creds map[string]any
+		creds plugins.Credentials
 		want  bool
 	}{
-		{"missing expiry is stale", map[string]any{"refreshToken": "r"}, true},
-		{"null expiry coerces to 0", map[string]any{"expiryDate": nil}, true},
-		{"inside the buffer", map[string]any{"expiryDate": json.Number("1400")}, true},
-		{"exactly at the buffer edge", map[string]any{"expiryDate": json.Number("1500")}, true},
-		{"beyond the buffer", map[string]any{"expiryDate": json.Number("1501")}, false},
-		{"a numeric string is compared as a number", map[string]any{"expiryDate": "1501"}, false},
-		{"a string is NaN, never stale", map[string]any{"expiryDate": "soon"}, false},
+		{"missing expiry is stale", testbox.Object(map[string]any{"refreshToken": "r"}), true},
+		{"null expiry coerces to 0", testbox.Object(map[string]any{"expiryDate": nil}), true},
+		{"inside the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1400")}), true},
+		{"exactly at the buffer edge", testbox.Object(map[string]any{"expiryDate": json.Number("1500")}), true},
+		{"beyond the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1501")}), false},
+		{"a numeric string is compared as a number", testbox.Object(map[string]any{"expiryDate": "1501"}), false},
+		{"a string is NaN, never stale", testbox.Object(map[string]any{"expiryDate": "soon"}), false},
 	}
 	for _, c := range cases {
 		if got := stale(c.creds, 1000, 500); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	if applies(map[string]any{"refreshToken": ""}) || applies(map[string]any{}) || applies(nil) || !applies(map[string]any{"refreshToken": "r"}) {
+	if applies(testbox.Object(map[string]any{"refreshToken": ""})) || applies(testbox.Object(map[string]any{})) || applies(nil) || !applies(testbox.Object(map[string]any{"refreshToken": "r"})) {
 		t.Fatal("applies")
 	}
 }
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("revolut", "ro", storedCreds(t, farFuture()), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("revolut", "ro", testbox.Object(storedCreds(t, farFuture())), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { writeJSON(w, 200, accountsJSON()) })
@@ -821,7 +821,7 @@ func TestValidate(t *testing.T) {
 		}
 		writeJSON(w, 200, accountsJSON())
 	})
-	run := host.NewRunContext(storedCreds(t, int64(1)), "biz", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(t, int64(1))), "biz", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != "sandbox - 3 account(s): EUR, GBP" {
 		t.Fatalf("%#v %v", res, err)
@@ -847,19 +847,19 @@ func TestRemoteRedactionDropsTheRefreshTokenAndThePrivateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(t, int64(1))
-	out := auth.RedactForRemote(reg, "revolut", creds)
+	out := auth.RedactForRemote(reg, "revolut", testbox.Object(creds))
 	for _, secret := range []string{"refreshToken", "privateKey"} {
-		if _, ok := out[secret]; ok {
+		if _, ok := out.Get(secret); ok {
 			t.Fatalf("%s leaked to a remote caller", secret)
 		}
 		if _, ok := creds[secret]; !ok {
 			t.Fatalf("%s removed from the caller's map", secret)
 		}
 	}
-	if out["accessToken"] != "at-old" || out["clientId"] != "client-1" || out["environment"] != "sandbox" {
+	if out.Value("accessToken") != "at-old" || out.Value("clientId") != "client-1" || out.Value("environment") != "sandbox" {
 		t.Fatalf("%#v", out)
 	}
-	if listInfo(map[string]any{"environment": "sandbox"}) != " - sandbox" || listInfo(map[string]any{}) != " - undefined" || listInfo(nil) != "" {
+	if listInfo(testbox.Object(map[string]any{"environment": "sandbox"})) != " - sandbox" || listInfo(testbox.Object(map[string]any{})) != " - undefined" || listInfo(nil) != "" {
 		t.Fatal("listInfo")
 	}
 }
@@ -870,7 +870,7 @@ func TestCreateTransferSendsSourceAndTargetAccountIDs(t *testing.T) {
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
 		writeJSON(w, 200, map[string]any{"id": "tx-3", "state": "completed", "created_at": "2026-09-06T10:00:00Z", "completed_at": "2026-09-06T10:00:01Z"})
 	})
-	c := newClient(context.Background(), storedCreds(t, 0), nil)
+	c := newClient(context.Background(), testbox.Object(storedCreds(t, 0)), nil)
 	res, err := c.createTransfer(transferInput{requestID: "req-3", sourceAccountID: "acc-1", targetAccountID: "acc-2", amount: 500, currency: "EUR", reference: "Top up"})
 	if err != nil {
 		t.Fatal(err)
@@ -888,7 +888,7 @@ func TestCreateTransferSendsSourceAndTargetAccountIDs(t *testing.T) {
 func TestPaymentDrafts(t *testing.T) {
 	var reply any
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { writeJSON(w, 200, reply) })
-	c := newClient(context.Background(), storedCreds(t, 0), nil)
+	c := newClient(context.Background(), testbox.Object(storedCreds(t, 0)), nil)
 
 	// The single payment is wrapped in a payments array; the draft ID comes back.
 	reply = map[string]any{"id": "draft-1"}
@@ -939,7 +939,7 @@ func TestPayoutLinks(t *testing.T) {
 			"reference": "Expenses", "url": "https://pay.example.test/p/abc",
 		}})
 	})
-	c := newClient(context.Background(), storedCreds(t, 0), nil)
+	c := newClient(context.Background(), testbox.Object(storedCreds(t, 0)), nil)
 	links, err := c.listPayoutLinks("", 10)
 	if err != nil || fake.recorded()[0].Path != "/payout-links?limit=10" {
 		t.Fatalf("%v %s", err, fake.calls())
@@ -962,7 +962,7 @@ func TestPayoutLinks(t *testing.T) {
 func TestExpenses(t *testing.T) {
 	var reply any
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { writeJSON(w, 200, reply) })
-	c := newClient(context.Background(), storedCreds(t, 0), nil)
+	c := newClient(context.Background(), testbox.Object(storedCreds(t, 0)), nil)
 	cases := []struct {
 		name  string
 		reply any
@@ -1017,7 +1017,7 @@ func TestReceipts(t *testing.T) {
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
 	})
-	c := newClient(context.Background(), storedCreds(t, 0), nil)
+	c := newClient(context.Background(), testbox.Object(storedCreds(t, 0)), nil)
 	cases := []struct {
 		name    string
 		headers map[string]string

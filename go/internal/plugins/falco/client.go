@@ -58,14 +58,14 @@ type client struct {
 	organizationID string
 }
 
-func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *client {
+func newClient(ctx context.Context, creds plugins.Credentials, fetch fetchFunc) *client {
 	if fetch == nil {
 		fetch = plugins.Fetch
 	}
 	// The host refreshes before handing credentials over, so an access token is
 	// present in practice; an empty one simply fails the first call as 401.
-	token, _ := creds["accessToken"].(string)
-	return &client{ctx: ctx, fetch: fetch, accessToken: token, organizationID: jsvalue.String(orNull(creds["organizationId"]))}
+	token, _ := creds.Value("accessToken").(string)
+	return &client{ctx: ctx, fetch: fetch, accessToken: token, organizationID: jsvalue.String(orNull(creds.Value("organizationId")))}
 }
 
 // orNull keeps String(undefined) out of a URL: a missing id reads as "undefined".

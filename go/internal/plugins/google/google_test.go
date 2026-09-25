@@ -20,6 +20,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/testbox"
 	calendar "google.golang.org/api/calendar/v3"
 	"google.golang.org/api/googleapi"
 )
@@ -101,27 +102,27 @@ func setupContext(code string) *plugins.SetupContext {
 func TestBothKeyCasingsApplyAndUseTheirOwnExpiry(t *testing.T) {
 	snake := map[string]any{"access_token": "a", "refresh_token": "r", "expiry_date": int64(10_000), "token_type": "Bearer"}
 	camel := map[string]any{"accessToken": "a", "refreshToken": "r", "expiryDate": json.Number("10000"), "tokenType": "Bearer"}
-	if !Snake.Applies(snake) || !Snake.IsStale(snake, 4_000, 6_000) {
+	if !Snake.Applies(testbox.Object(snake)) || !Snake.IsStale(testbox.Object(snake), 4_000, 6_000) {
 		t.Fatal("snake")
 	}
-	if !Camel.Applies(camel) || Camel.IsStale(camel, 3_999, 6_000) || !Camel.IsStale(camel, 4_000, 6_000) {
+	if !Camel.Applies(testbox.Object(camel)) || Camel.IsStale(testbox.Object(camel), 3_999, 6_000) || !Camel.IsStale(testbox.Object(camel), 4_000, 6_000) {
 		t.Fatal("camel")
 	}
 	// The wrong casing is not a Google token for that product.
-	if Snake.Applies(camel) || Camel.Applies(snake) {
+	if Snake.Applies(testbox.Object(camel)) || Camel.Applies(testbox.Object(snake)) {
 		t.Fatal("a lifecycle applied to the other casing")
 	}
-	if Camel.Applies(map[string]any{"type": "webhook", "webhookUrl": "https://example.com/hook"}) {
+	if Camel.Applies(testbox.Object(map[string]any{"type": "webhook", "webhookUrl": "https://example.com/hook"})) {
 		t.Fatal("webhook profile applies")
 	}
-	if Snake.Applies(map[string]any{"refresh_token": ""}) || Snake.Applies(map[string]any{"refresh_token": 5}) {
+	if Snake.Applies(testbox.Object(map[string]any{"refresh_token": ""})) || Snake.Applies(testbox.Object(map[string]any{"refresh_token": 5})) {
 		t.Fatal("empty or non-string refresh token applies")
 	}
 	// No expiry never refreshes; a stored null is JavaScript 0 and always does.
-	if Snake.IsStale(map[string]any{"refresh_token": "r"}, 1<<60, 0) {
+	if Snake.IsStale(testbox.Object(map[string]any{"refresh_token": "r"}), 1<<60, 0) {
 		t.Fatal("missing expiry is stale")
 	}
-	if !Snake.IsStale(map[string]any{"expiry_date": nil}, 0, 0) {
+	if !Snake.IsStale(testbox.Object(map[string]any{"expiry_date": nil}), 0, 0) {
 		t.Fatal("null expiry is not stale")
 	}
 }
@@ -148,12 +149,12 @@ func TestRedactionDropsTheRightRefreshFieldPerCasing(t *testing.T) {
 	}
 	snake := map[string]any{"access_token": "a", "refresh_token": "r", "email": "me@example.com"}
 	camel := map[string]any{"accessToken": "a", "refreshToken": "r", "refresh_token": "not-a-google-field-here"}
-	gotSnake := auth.RedactForRemote(reg, "gmail", snake)
-	gotCamel := auth.RedactForRemote(reg, "gdocs", camel)
-	if _, ok := gotSnake["refresh_token"]; ok || gotSnake["access_token"] != "a" || gotSnake["email"] != "me@example.com" {
+	gotSnake := auth.RedactForRemote(reg, "gmail", testbox.Object(snake))
+	gotCamel := auth.RedactForRemote(reg, "gdocs", testbox.Object(camel))
+	if _, ok := gotSnake.Get("refresh_token"); ok || gotSnake.Value("access_token") != "a" || gotSnake.Value("email") != "me@example.com" {
 		t.Fatalf("snake %#v", gotSnake)
 	}
-	if _, ok := gotCamel["refreshToken"]; ok || gotCamel["accessToken"] != "a" || gotCamel["refresh_token"] == nil {
+	if _, ok := gotCamel.Get("refreshToken"); ok || gotCamel.Value("accessToken") != "a" || gotCamel.Value("refresh_token") == nil {
 		t.Fatalf("camel %#v", gotCamel)
 	}
 	if snake["refresh_token"] != "r" || camel["refreshToken"] != "r" {
@@ -196,33 +197,33 @@ func TestReauthenticateMergesEachCasingAndSendsTheBunTokenRequest(t *testing.T) 
 		}
 	})
 	before := time.Now().UnixMilli()
-	snake, err := Reauthenticate("gslides", Snake)(fake.ctx(), map[string]any{
+	snake, err := Reauthenticate("gslides", Snake)(fake.ctx(), testbox.Object(map[string]any{
 		"access_token": "old", "refresh_token": "old-refresh", "token_type": "Bearer", "custom": true,
-	}, "work", setupContext("code-1"))
+	}), "work", setupContext("code-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	camel, err := Reauthenticate("gscript", Camel)(fake.ctx(), map[string]any{
+	camel, err := Reauthenticate("gscript", Camel)(fake.ctx(), testbox.Object(map[string]any{
 		"accessToken": "old", "refreshToken": "old-refresh", "tokenType": "Bearer", "custom": true,
-	}, "work", setupContext("code-2"))
+	}), "work", setupContext("code-2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snake["access_token"] != "access-new" || snake["refresh_token"] != "refresh-new" || snake["email"] != "user@example.com" || snake["custom"] != true || snake["scope"] != "scope" {
+	if snake.Value("access_token") != "access-new" || snake.Value("refresh_token") != "refresh-new" || snake.Value("email") != "user@example.com" || snake.Value("custom") != true || snake.Value("scope") != "scope" {
 		t.Fatalf("snake %#v", snake)
 	}
-	if camel["accessToken"] != "access-new" || camel["refreshToken"] != "refresh-new" || camel["email"] != "user@example.com" || camel["custom"] != true || camel["tokenType"] != "Bearer" {
+	if camel.Value("accessToken") != "access-new" || camel.Value("refreshToken") != "refresh-new" || camel.Value("email") != "user@example.com" || camel.Value("custom") != true || camel.Value("tokenType") != "Bearer" {
 		t.Fatalf("camel %#v", camel)
 	}
-	if _, leaked := camel["access_token"]; leaked {
+	if _, leaked := camel.Get("access_token"); leaked {
 		t.Fatalf("camel got a snake key %#v", camel)
 	}
-	exp, _ := asInt64(snake["expiry_date"])
+	exp, _ := asInt64(snake.Value("expiry_date"))
 	if exp < before+3600_000 || exp > time.Now().UnixMilli()+3600_000 {
 		t.Fatalf("expiry %d", exp)
 	}
 	raw, _ := json.Marshal(camel)
-	if !strings.Contains(string(raw), `"expiryDate":`+jsonText(camel["expiryDate"])) || strings.Contains(string(raw), `"expiryDate":"`) {
+	if !strings.Contains(string(raw), `"expiryDate":`+jsonText(camel.Value("expiryDate"))) || strings.Contains(string(raw), `"expiryDate":"`) {
 		t.Fatalf("expiry is not a JSON number: %s", raw)
 	}
 	form := fake.forms[0]
@@ -250,18 +251,18 @@ func TestReauthenticateWithoutARefreshTokenDropsTheOldOne(t *testing.T) {
 		}
 		writeJSON(w, 200, map[string]any{"email": "user@example.com"})
 	})
-	got, err := Reauthenticate("gcal", Snake)(fake.ctx(), map[string]any{
+	got, err := Reauthenticate("gcal", Snake)(fake.ctx(), testbox.Object(map[string]any{
 		"access_token": "old", "refresh_token": "old-refresh", "expiry_date": int64(5), "scope": "old-scope",
-	}, "p", setupContext("c"))
+	}), "p", setupContext("c"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"refresh_token", "expiry_date", "scope"} {
-		if _, ok := got[k]; ok {
+		if _, ok := testbox.Map(got)[k]; ok {
 			t.Fatalf("%s kept: %#v", k, got)
 		}
 	}
-	if got["token_type"] != "Bearer" {
+	if got.Value("token_type") != "Bearer" {
 		t.Fatalf("token_type %#v", got)
 	}
 }
@@ -275,11 +276,11 @@ func TestRefreshKeepsTheStoredRefreshTokenAndScope(t *testing.T) {
 	})
 	stored := map[string]any{"accessToken": "old", "refreshToken": "rt-old", "expiryDate": json.Number("1"), "tokenType": "Bearer", "scope": "s-old", "email": "me@example.com", "accessLevel": "full"}
 	body = map[string]any{"access_token": "at-new", "refresh_token": "rt-rotated", "expires_in": 60, "token_type": "Bearer"}
-	got, err := Camel.Refresh(fake.ctx(), stored)
+	got, err := Camel.Refresh(fake.ctx(), testbox.Object(stored))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["accessToken"] != "at-new" || got["refreshToken"] != "rt-old" || got["scope"] != "s-old" || got["email"] != "me@example.com" || got["accessLevel"] != "full" {
+	if got.Value("accessToken") != "at-new" || got.Value("refreshToken") != "rt-old" || got.Value("scope") != "s-old" || got.Value("email") != "me@example.com" || got.Value("accessLevel") != "full" {
 		t.Fatalf("%#v", got)
 	}
 	if stored["accessToken"] != "old" {
@@ -291,11 +292,11 @@ func TestRefreshKeepsTheStoredRefreshTokenAndScope(t *testing.T) {
 	}
 	// A new scope wins; no expires_in drops the expiry; no token_type is Bearer.
 	body = map[string]any{"access_token": "at-2", "scope": "s-new"}
-	got, err = Snake.Refresh(fake.ctx(), map[string]any{"access_token": "a", "refresh_token": "rt", "expiry_date": int64(9), "token_type": "bearer", "scope": "s-old"})
+	got, err = Snake.Refresh(fake.ctx(), testbox.Object(map[string]any{"access_token": "a", "refresh_token": "rt", "expiry_date": int64(9), "token_type": "bearer", "scope": "s-old"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := got["expiry_date"]; ok || got["scope"] != "s-new" || got["token_type"] != "Bearer" || got["refresh_token"] != "rt" {
+	if _, ok := testbox.Map(got)["expiry_date"]; ok || got.Value("scope") != "s-new" || got.Value("token_type") != "Bearer" || got.Value("refresh_token") != "rt" {
 		t.Fatalf("%#v", got)
 	}
 }
@@ -311,11 +312,11 @@ func TestRefreshFailureHasGoogleAuthLibrarysMessage(t *testing.T) {
 	})
 	creds := map[string]any{"access_token": "a", "refresh_token": "rt"}
 	status, body = 400, `{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}`
-	if _, err := Snake.Refresh(fake.ctx(), creds); err == nil || err.Error() != "invalid_grant" {
+	if _, err := Snake.Refresh(fake.ctx(), testbox.Object(creds)); err == nil || err.Error() != "invalid_grant" {
 		t.Fatalf("%v", err)
 	}
 	status, body = 400, `{"error": "invalid_grant", "error_description": "reauth related error (invalid_rapt)", "error_subtype": "invalid_rapt"}`
-	if _, err := Snake.Refresh(fake.ctx(), creds); err == nil || err.Error() != `{"error":"invalid_grant","error_description":"reauth related error (invalid_rapt)","error_subtype":"invalid_rapt"}` {
+	if _, err := Snake.Refresh(fake.ctx(), testbox.Object(creds)); err == nil || err.Error() != `{"error":"invalid_grant","error_description":"reauth related error (invalid_rapt)","error_subtype":"invalid_rapt"}` {
 		t.Fatalf("%v", err)
 	}
 	if len(*waits) != 0 {
@@ -324,13 +325,13 @@ func TestRefreshFailureHasGoogleAuthLibrarysMessage(t *testing.T) {
 	// The token POST is retried on 5xx, three times, as RETRY_CONFIG does.
 	status, body = 503, `{"error": "backend_error"}`
 	n := fake.count()
-	if _, err := Snake.Refresh(fake.ctx(), creds); err == nil || err.Error() != "backend_error" {
+	if _, err := Snake.Refresh(fake.ctx(), testbox.Object(creds)); err == nil || err.Error() != "backend_error" {
 		t.Fatalf("%v", err)
 	}
 	if fake.count()-n != 4 || len(*waits) != 3 || (*waits)[0] != 100*time.Millisecond || (*waits)[1] != 500*time.Millisecond || (*waits)[2] != 1500*time.Millisecond {
 		t.Fatalf("%d requests, waits %v", fake.count()-n, *waits)
 	}
-	if _, err := Snake.Refresh(fake.ctx(), map[string]any{"access_token": "a"}); err == nil || err.Error() != "no refresh token stored" {
+	if _, err := Snake.Refresh(fake.ctx(), testbox.Object(map[string]any{"access_token": "a"})); err == nil || err.Error() != "no refresh token stored" {
 		t.Fatalf("%v", err)
 	}
 }
@@ -350,7 +351,7 @@ func TestNewServiceUsesTheStoredTokenWhileItIsFresh(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "me@example.com"})
 	})
 	run := &plugins.RunContext{
-		Credentials: map[string]any{"access_token": "at-stored", "refresh_token": "rt", "expiry_date": time.Now().Add(time.Hour).UnixMilli(), "token_type": "mac"},
+		Credentials: testbox.Object(map[string]any{"access_token": "at-stored", "refresh_token": "rt", "expiry_date": time.Now().Add(time.Hour).UnixMilli(), "token_type": "mac"}),
 		Fetch:       plugins.Fetch,
 	}
 	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
@@ -433,7 +434,7 @@ func TestTheClientRefreshesAsOAuth2ClientDoes(t *testing.T) {
 			for k, v := range c.creds {
 				creds[k] = v
 			}
-			svc, err := NewService(fake.ctx(), &plugins.RunContext{Credentials: creds, Fetch: plugins.Fetch}, Snake, calendar.NewService)
+			svc, err := NewService(fake.ctx(), &plugins.RunContext{Credentials: testbox.Object(creds), Fetch: plugins.Fetch}, Snake, calendar.NewService)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -464,7 +465,7 @@ func TestPatchIsNotRetriedAndErrorsKeepGaxiosFields(t *testing.T) {
 	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 		writeJSON(w, 500, map[string]any{"error": map[string]any{"code": 500, "message": "Backend Error", "errors": []any{map[string]any{"message": "inner"}}}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "a"}, Fetch: plugins.Fetch}
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"accessToken": "a"}), Fetch: plugins.Fetch}
 	svc, err := NewService(fake.ctx(), run, Camel, calendar.NewService)
 	if err != nil {
 		t.Fatal(err)
@@ -600,7 +601,7 @@ func TestCallJSONSendsTheBodyVerbatimAndMapsErrors(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}(fake.srv.Config.Handler)
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at-stored"}, Fetch: plugins.Fetch}
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"accessToken": "at-stored"}), Fetch: plugins.Fetch}
 	base := fake.srv.URL + "/api/"
 	body := `[{"updateTextStyle":{"textStyle":{"bold":false},"fields":"bold","unknownField":1}}]`
 	v, err := CallJSON(context.Background(), run, Camel, "POST", base, "v1/docs/d1:batchUpdate", []byte(body))
@@ -642,7 +643,7 @@ func TestDriveServiceUsesCamelTokensAndPageSizeCapsLikeMathMin(t *testing.T) {
 	})
 	run := &plugins.RunContext{
 		// A Snake key must not be read by a Drive client.
-		Credentials: map[string]any{"accessToken": "at-camel", "access_token": "at-snake", "tokenType": "Bearer"},
+		Credentials: testbox.Object(map[string]any{"accessToken": "at-camel", "access_token": "at-snake", "tokenType": "Bearer"}),
 		Fetch:       plugins.Fetch,
 	}
 	svc, err := DriveService(fake.ctx(), run)
@@ -683,10 +684,10 @@ func TestSetupStoresCamelKeysAndNamesTheProduct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Credentials["accessToken"] != "at-1" || res.Credentials["refreshToken"] != "rt-1" || res.Credentials["email"] != "user@example.com" {
+	if res.Credentials.Value("accessToken") != "at-1" || res.Credentials.Value("refreshToken") != "rt-1" || res.Credentials.Value("email") != "user@example.com" {
 		t.Fatalf("%#v", res.Credentials)
 	}
-	if _, ok := res.Credentials["access_token"]; ok {
+	if ok := res.Credentials.Has("access_token"); ok {
 		t.Fatal("snake_case key")
 	}
 	if res.SuggestedProfileName != "user@example.com" || res.Info != "Email: user@example.com\nTest with: agentio gslides list" {
@@ -711,7 +712,7 @@ func TestSetupStoresCamelKeysAndNamesTheProduct(t *testing.T) {
 		strings.Join(failed, "") != "AUTH_FAILED|Failed to fetch user email: Failed to fetch user info: 500|Ensure the account has an email address" {
 		t.Fatalf("%v %q", err, failed)
 	}
-	if EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || EmailListInfo(map[string]any{"email": 1}) != "" {
+	if EmailListInfo(testbox.Object(map[string]any{"email": "me@example.com"})) != " - me@example.com" || EmailListInfo(testbox.Object(map[string]any{"email": 1})) != "" {
 		t.Fatal("list info")
 	}
 }
@@ -730,7 +731,7 @@ func TestDriveFilesListFormatAndValidate(t *testing.T) {
 			map[string]any{"id": "p2", "owners": []any{}, "webViewLink": "https://example.com/p2"},
 		}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"accessToken": "at", "email": "me@example.com"}, Fetch: plugins.Fetch}
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"accessToken": "at", "email": "me@example.com"}), Fetch: plugins.Fetch}
 	svc, err := DriveService(fake.ctx(), run)
 	if err != nil {
 		t.Fatal(err)
@@ -816,7 +817,7 @@ func TestMaxResultsCapsLikeMathMin(t *testing.T) {
 	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
 		writeJSON(w, 200, map[string]any{"items": []any{}})
 	})
-	run := &plugins.RunContext{Credentials: map[string]any{"access_token": "at"}, Fetch: plugins.Fetch}
+	run := &plugins.RunContext{Credentials: testbox.Object(map[string]any{"access_token": "at"}), Fetch: plugins.Fetch}
 	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
 	if err != nil {
 		t.Fatal(err)

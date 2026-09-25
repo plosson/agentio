@@ -133,20 +133,15 @@ type api struct {
 	categories map[string]any
 }
 
-func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
+func newAPI(ctx context.Context, creds plugins.Credentials, fetch fetchFunc) *api {
 	return &api{
-		baseURL:    strings.TrimSuffix(str(creds, "baseUrl"), "/"),
-		apiKey:     str(creds, "apiKey"),
-		username:   str(creds, "username"),
+		baseURL:    strings.TrimSuffix(creds.StrValue("baseUrl"), "/"),
+		apiKey:     creds.StrValue("apiKey"),
+		username:   creds.StrValue("username"),
 		ctx:        ctx,
 		fetch:      fetch,
 		categories: map[string]any{},
 	}
-}
-
-func str(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
 }
 
 func networkError(err error) *apiError {

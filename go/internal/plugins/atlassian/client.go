@@ -26,7 +26,7 @@ type Client struct {
 // NewClient is a Client on the command's fresh credentials.
 func NewClient(ctx context.Context, run *plugins.RunContext, errorPrefix string) Client {
 	return Client{
-		Access:      Str(run.Credentials, "accessToken"),
+		Access:      run.Credentials.StrValue("accessToken"),
 		Ctx:         ctx,
 		Fetch:       run.Fetch,
 		Fail:        run.Fail,

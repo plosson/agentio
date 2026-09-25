@@ -27,8 +27,8 @@ func New() *plugins.Plugin {
 	}
 }
 
-func listInfo(creds map[string]any) string {
-	if base := str(creds, "baseUrl"); base != "" {
+func listInfo(creds plugins.Credentials) string {
+	if base := creds.StrValue("baseUrl"); base != "" {
 		return " - " + base
 	}
 	return ""
@@ -169,7 +169,7 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 	}
 
 	setup.Log("\nValidating credentials...")
-	creds := map[string]any{"baseUrl": normalized, "apiKey": apiKey, "username": username}
+	creds := jsvalue.ObjectOf("baseUrl", normalized, "apiKey", apiKey, "username", username)
 	if _, err := newAPI(ctx, creds, setup.Fetch).getCategories(); err != nil {
 		ae, ok := err.(*apiError)
 		if !ok {

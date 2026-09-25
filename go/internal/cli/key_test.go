@@ -7,6 +7,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/profile"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -19,7 +20,7 @@ func TestKeyCommandsAreBuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range [][2]string{{"acme", "ada"}, {"board", "desk"}} {
-		if err := profile.Save(ref[0], ref[1], map[string]any{"x": "y"}, profile.SaveOptions{}); err != nil {
+		if err := profile.Save(ref[0], ref[1], testbox.Object(map[string]any{"x": "y"}), profile.SaveOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}

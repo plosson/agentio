@@ -45,28 +45,24 @@ func profiled(t *testing.T) {
 	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "main", map[string]any{"account": "a", "refreshToken": "r"}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "main", testbox.Object(map[string]any{"account": "a", "refreshToken": "r"}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := vault.Update(func(c *vault.Contents) error {
-		c.Config.Profiles["board"] = []vault.ProfileValue{{Name: "one"}, {Name: "two"}}
+		c.Config.Profiles.Set("board", []vault.ProfileValue{{Name: "one"}, {Name: "two"}})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func profileCount(t *testing.T) int {
+func storedProfileCount(t *testing.T) int {
 	t.Helper()
 	c, err := vault.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
-	for _, list := range c.Config.Profiles {
-		n += len(list)
-	}
-	return n
+	return profileCount(c)
 }
 
 const clearQuestion = "This will delete all profiles, credentials, and API keys. Are you sure? (y/n): "
@@ -81,7 +77,7 @@ func TestVaultClearAsksAndReadsAPipedAnswer(t *testing.T) {
 			if code != 0 || out != "Configuration cleared\n" || errOut != clearQuestion {
 				t.Fatalf("%q %s: code %d stdout %q stderr %q", answer, name, code, out, errOut)
 			}
-			if n := profileCount(t); n != 0 {
+			if n := storedProfileCount(t); n != 0 {
 				t.Fatalf("%q %s: %d profiles left", answer, name, n)
 			}
 		}
@@ -92,7 +88,7 @@ func TestVaultClearAsksAndReadsAPipedAnswer(t *testing.T) {
 		if code != 0 || out != "" || errOut != clearQuestion+"Aborted\n" {
 			t.Fatalf("%q: code %d stdout %q stderr %q", answer, code, out, errOut)
 		}
-		if n := profileCount(t); n != 3 {
+		if n := storedProfileCount(t); n != 3 {
 			t.Fatalf("%q: vault changed, %d profiles", answer, n)
 		}
 	}

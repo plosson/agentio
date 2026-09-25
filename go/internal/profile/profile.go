@@ -8,6 +8,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -80,7 +81,7 @@ func entries(service string) ([]vault.ProfileValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	list := c.Config.Profiles[service]
+	list := c.Config.Profiles.Get(service)
 	if list == nil {
 		return []vault.ProfileValue{}, nil
 	}
@@ -174,9 +175,9 @@ func List(service string) ([]Ref, error) {
 		if err != nil {
 			return nil, err
 		}
-		for svc, list := range c.Config.Profiles {
+		for _, svc := range c.Config.Profiles.Services() {
 			refs := []Ref{}
-			for _, p := range list {
+			for _, p := range c.Config.Profiles.Get(svc) {
 				refs = append(refs, Ref{Service: svc, Name: p.Name, ReadOnly: p.ReadOnly, ReadOnlyStated: p.StatesReadOnly()})
 			}
 			byService[svc] = refs
@@ -260,7 +261,7 @@ type SaveOptions struct {
 	ReadOnly    bool
 }
 
-func Save(service, name string, credentials map[string]any, opt SaveOptions) error {
+func Save(service, name string, credentials *jsvalue.Object, opt SaveOptions) error {
 	if auth.IsRemote() {
 		var flag *bool
 		if opt.ReadOnlySet {
@@ -269,7 +270,7 @@ func Save(service, name string, credentials map[string]any, opt SaveOptions) err
 		return auth.RemoteSaveProfile(service, name, credentials, flag)
 	}
 	return vault.Update(func(c *vault.Contents) error {
-		index := findIndex(c.Config.Profiles[service], name)
+		index := findIndex(c.Config.Profiles.Get(service), name)
 		return put(c, service, name, credentials, kept(c, service, index, opt))
 	})
 }
@@ -281,10 +282,13 @@ func kept(c *vault.Contents, service string, index int, opt SaveOptions) SaveOpt
 	if opt.ReadOnlySet {
 		return opt
 	}
-	return SaveOptions{ReadOnlySet: true, ReadOnly: c.Config.Profiles[service][index].ReadOnly}
+	return SaveOptions{ReadOnlySet: true, ReadOnly: c.Config.Profiles.Get(service)[index].ReadOnly}
 }
 
-func put(c *vault.Contents, service, name string, credentials map[string]any, opt SaveOptions) error {
+// put is Bun's putProfile: the entry is built afresh (`{ name, readOnly? }`),
+// replacing one in place or going last, and the credential object is stored
+// as the plugin built it.
+func put(c *vault.Contents, service, name string, credentials *jsvalue.Object, opt SaveOptions) error {
 	if err := ValidateName(name); err != nil {
 		return err
 	}
@@ -292,22 +296,13 @@ func put(c *vault.Contents, service, name string, credentials map[string]any, op
 	if opt.ReadOnly {
 		entry.ReadOnly = true
 	}
-	list := c.Config.Profiles[service]
-	index := findIndex(list, name)
-	if index == -1 {
-		c.Config.Profiles[service] = append(list, entry)
+	list := c.Config.Profiles.Get(service)
+	if index := findIndex(list, name); index == -1 {
+		c.Config.Profiles.Set(service, append(list, entry))
 	} else {
 		list[index] = entry
-		c.Config.Profiles[service] = list
 	}
-	if c.Credentials[service] == nil {
-		c.Credentials[service] = map[string]map[string]any{}
-	}
-	cloned, err := vault.CloneMap(credentials)
-	if err != nil {
-		return err
-	}
-	c.Credentials[service][name] = cloned
+	c.Credentials.Put(service, name, credentials)
 	return nil
 }
 
@@ -346,22 +341,20 @@ func move(c *vault.Contents, service, from, to string) WriteOutcome {
 		// by using a sentinel via a side channel. Validate before calling move.
 		return WriteOutcome("invalid")
 	}
-	index := findIndex(c.Config.Profiles[service], from)
+	list := c.Config.Profiles.Get(service)
+	index := findIndex(list, from)
 	if index == -1 {
 		return WriteAbsent
 	}
-	if from != to && findIndex(c.Config.Profiles[service], to) != -1 {
+	if from != to && findIndex(list, to) != -1 {
 		return WriteTaken
 	}
-	entry := c.Config.Profiles[service][index]
-	entry.Name = to
-	c.Config.Profiles[service][index] = entry
-	if stored, ok := c.Credentials[service][from]; ok && from != to {
-		if c.Credentials[service] == nil {
-			c.Credentials[service] = map[string]map[string]any{}
-		}
-		c.Credentials[service][to] = stored
-		delete(c.Credentials[service], from)
+	list[index].Name = to
+	// Bun: putCredentials(to, stored), then delete from. The moved object goes
+	// last among the service's credentials (or where stray ones for `to` were).
+	if stored, ok := c.Credentials.Raw(service, from); ok && from != to {
+		c.Credentials.SetRaw(service, to, stored)
+		c.Credentials.Delete(service, from)
 	}
 	renameScopes(c, service, from, to)
 	return WriteOK
@@ -386,16 +379,14 @@ func Delete(service, name string) (bool, error) {
 }
 
 func remove(c *vault.Contents, service, name string) bool {
-	index := findIndex(c.Config.Profiles[service], name)
+	list := c.Config.Profiles.Get(service)
+	index := findIndex(list, name)
 	removed := index != -1
 	if removed {
-		list := c.Config.Profiles[service]
-		c.Config.Profiles[service] = append(list[:index], list[index+1:]...)
+		c.Config.Profiles.Set(service, append(list[:index], list[index+1:]...))
 		pruneScopes(c)
 	}
-	if c.Credentials[service] != nil {
-		delete(c.Credentials[service], name)
-	}
+	c.Credentials.Delete(service, name)
 	return removed
 }
 
@@ -405,13 +396,12 @@ func SetReadOnly(service, name string, readOnly bool) (bool, error) {
 	}
 	var found bool
 	err := vault.Update(func(c *vault.Contents) error {
-		index := findIndex(c.Config.Profiles[service], name)
+		list := c.Config.Profiles.Get(service)
+		index := findIndex(list, name)
 		if index == -1 {
 			return nil
 		}
-		entry := c.Config.Profiles[service][index]
-		entry.ReadOnly = readOnly
-		c.Config.Profiles[service][index] = entry
+		list[index].ReadOnly = readOnly
 		found = true
 		return nil
 	})
@@ -443,10 +433,10 @@ func WriteFailure(outcome WriteOutcome, service, name, to string) *clierr.Error 
 
 // SaveForKey adds a profile for a remote key, or replaces one it already reaches.
 // A new name is granted to the key in the same write.
-func SaveForKey(keyID, service, name string, credentials map[string]any, opt SaveOptions) (WriteOutcome, error) {
+func SaveForKey(keyID, service, name string, credentials *jsvalue.Object, opt SaveOptions) (WriteOutcome, error) {
 	var outcome WriteOutcome = WriteOK
 	err := vault.Update(func(c *vault.Contents) error {
-		index := findIndex(c.Config.Profiles[service], name)
+		index := findIndex(c.Config.Profiles.Get(service), name)
 		if index != -1 && !reaches(c, keyID, service, name) {
 			outcome = WriteDenied
 			return nil
@@ -464,7 +454,7 @@ func SaveForKey(keyID, service, name string, credentials map[string]any, opt Sav
 func DeleteForKey(keyID, service, name string) (WriteOutcome, error) {
 	var outcome WriteOutcome
 	err := vault.Update(func(c *vault.Contents) error {
-		if findIndex(c.Config.Profiles[service], name) == -1 {
+		if findIndex(c.Config.Profiles.Get(service), name) == -1 {
 			outcome = WriteAbsent
 			return nil
 		}
@@ -482,7 +472,7 @@ func DeleteForKey(keyID, service, name string) (WriteOutcome, error) {
 func RenameForKey(keyID, service, from, to string) (WriteOutcome, error) {
 	var outcome WriteOutcome
 	err := vault.Update(func(c *vault.Contents) error {
-		if findIndex(c.Config.Profiles[service], from) == -1 {
+		if findIndex(c.Config.Profiles.Get(service), from) == -1 {
 			outcome = WriteAbsent
 			return nil
 		}

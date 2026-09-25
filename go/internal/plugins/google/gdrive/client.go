@@ -209,7 +209,7 @@ func apiFrom(ctx context.Context, run *plugins.RunContext) (*api, error) {
 	if err != nil {
 		return nil, err
 	}
-	level, _ := run.Credentials["accessLevel"].(string)
+	level, _ := run.Credentials.Value("accessLevel").(string)
 	return &api{API: google.API{Ctx: ctx, RunContext: run, ErrorMessage: errorMessage}, svc: svc, accessLevel: level}, nil
 }
 

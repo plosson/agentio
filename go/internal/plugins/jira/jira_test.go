@@ -21,6 +21,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian/atlassiantest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -188,8 +189,8 @@ func TestSetupFailuresWriteNothing(t *testing.T) {
 		t.Fatalf("exchange: %v", err)
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["jira"]) != 0 || out.Len() != 0 {
-		t.Fatalf("failed setup wrote %v / %q", c.Credentials["jira"], out.String())
+	if len(c.Credentials.Profiles("jira")) != 0 || out.Len() != 0 {
+		t.Fatalf("failed setup wrote %v / %q", c.Credentials.Profiles("jira"), out.String())
 	}
 }
 
@@ -210,12 +211,12 @@ func TestReauthenticateReturnsTheReplacement(t *testing.T) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:9999/callback"}, nil
 	}
 	creds := storedCreds(10_000)
-	got, err := New().Profile.Reauthenticate(context.Background(), creds, "work", sc)
+	got, err := New().Profile.Reauthenticate(context.Background(), testbox.Object(creds), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["accessToken"] != "access-new" || got["refreshToken"] != "refresh-new" || got["cloudId"] != "cloud-new" ||
-		got["siteUrl"] != "https://new.atlassian.net" || got["legacyField"] != "kept" || len(got) != 6 {
+	if got.Value("accessToken") != "access-new" || got.Value("refreshToken") != "refresh-new" || got.Value("cloudId") != "cloud-new" ||
+		got.Value("siteUrl") != "https://new.atlassian.net" || got.Value("legacyField") != "kept" || got.Len() != 6 {
 		t.Fatalf("%#v", got)
 	}
 	if creds["accessToken"] != "at-old" || creds["cloudId"] != "cloud-1" {
@@ -230,18 +231,18 @@ func TestReauthenticateReturnsTheReplacement(t *testing.T) {
 func TestLifecycleFollowsBun(t *testing.T) {
 	spec := New().Profile.Refresh
 	creds := storedCreds(10_000)
-	if !spec.Applies(creds) || spec.Applies(map[string]any{"accessToken": "static"}) || spec.Applies(nil) ||
-		spec.Applies(map[string]any{"refreshToken": ""}) || spec.Applies(map[string]any{"refreshToken": 5}) {
+	if !spec.Applies(testbox.Object(creds)) || spec.Applies(testbox.Object(map[string]any{"accessToken": "static"})) || spec.Applies(nil) ||
+		spec.Applies(testbox.Object(map[string]any{"refreshToken": ""})) || !spec.Applies(testbox.Object(map[string]any{"refreshToken": 5})) {
 		t.Fatal("applies")
 	}
-	if !spec.IsStale(creds, 4_000, 6_000) || spec.IsStale(creds, 3_999, 6_000) {
+	if !spec.IsStale(testbox.Object(creds), 4_000, 6_000) || spec.IsStale(testbox.Object(creds), 3_999, 6_000) {
 		t.Fatal("buffer edge")
 	}
 	delete(creds, "expiryDate")
-	if spec.IsStale(creds, 4_000, 6_000) {
+	if spec.IsStale(testbox.Object(creds), 4_000, 6_000) {
 		t.Fatal("missing expiry is never stale")
 	}
-	if !spec.IsStale(map[string]any{"expiryDate": nil}, 0, 0) || !spec.IsStale(map[string]any{"expiryDate": json.Number("10000")}, 4_000, 6_000) {
+	if !spec.IsStale(testbox.Object(map[string]any{"expiryDate": nil}), 0, 0) || !spec.IsStale(testbox.Object(map[string]any{"expiryDate": json.Number("10000")}), 4_000, 6_000) {
 		t.Fatal("null coerces to 0; json.Number is read")
 	}
 	if len(spec.SecretFields) != 1 || spec.SecretFields[0] != "refreshToken" {
@@ -256,11 +257,11 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(10_000)
-	out := auth.RedactForRemote(reg, "jira", creds)
-	if _, ok := out["refreshToken"]; ok || len(out) != 5 {
+	out := auth.RedactForRemote(reg, "jira", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok || out.Len() != 5 {
 		t.Fatalf("redacted %#v", out)
 	}
-	if out["accessToken"] != "at-old" || out["cloudId"] != "cloud-1" || out["siteUrl"] != "https://acme.atlassian.net" || creds["refreshToken"] != "rt-old" {
+	if out.Value("accessToken") != "at-old" || out.Value("cloudId") != "cloud-1" || out.Value("siteUrl") != "https://acme.atlassian.net" || creds["refreshToken"] != "rt-old" {
 		t.Fatalf("%#v / %#v", out, creds)
 	}
 }
@@ -325,11 +326,11 @@ func TestRefreshKeepsTheOldRefreshTokenWhenNoneIsReturned(t *testing.T) {
 	atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) {
 		writeJSON(w, 200, map[string]any{"access_token": "at-new", "refresh_token": "", "expires_in": 10})
 	})
-	got, err := New().Profile.Refresh.Run(context.Background(), storedCreds(1))
+	got, err := New().Profile.Refresh.Run(context.Background(), testbox.Object(storedCreds(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["refreshToken"] != "rt-old" || got["accessToken"] != "at-new" || got["legacyField"] != "kept" {
+	if got.Value("refreshToken") != "rt-old" || got.Value("accessToken") != "at-new" || got.Value("legacyField") != "kept" {
 		t.Fatalf("%#v", got)
 	}
 }
@@ -407,7 +408,7 @@ func TestValidate(t *testing.T) {
 	projects := func(w http.ResponseWriter) { atlassiantest.WriteRaw(w, 200, `{"values":[]}`) }
 	var handle func(w http.ResponseWriter, h hit)
 	fake := atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) { handle(w, h) })
-	run := host.NewRunContext(storedCreds(1), "acme", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(1)), "acme", context.Background())
 	check := func(name string, wantValid bool, want string) {
 		t.Helper()
 		res, err := validate(context.Background(), run)
@@ -725,7 +726,7 @@ func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
 
 func TestProfileListInfoAndNoProfile(t *testing.T) {
 	info := New().Profile.ListInfo
-	if info(storedCreds(1)) != " - https://acme.atlassian.net" || info(map[string]any{}) != "" {
+	if info(testbox.Object(storedCreds(1))) != " - https://acme.atlassian.net" || info(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("list info")
 	}
 	reg := product.SetupVault(t)
@@ -770,7 +771,7 @@ func TestSiteChoiceOffATerminalIsRefused(t *testing.T) {
 	if piped.Len() != 2 {
 		t.Fatal("the piped answer was read")
 	}
-	if c, _ := vault.Load(); len(c.Config.Profiles["jira"]) != 0 {
+	if c, _ := vault.Load(); len(c.Config.Profiles.Get("jira")) != 0 {
 		t.Fatal("a profile was saved")
 	}
 }

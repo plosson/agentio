@@ -543,8 +543,8 @@ func Prune(c *vault.Contents) { pruneScopes(c) }
 
 func pruneScopes(c *vault.Contents) {
 	known := map[string]bool{}
-	for service, list := range c.Config.Profiles {
-		for _, p := range list {
+	for _, service := range c.Config.Profiles.Services() {
+		for _, p := range c.Config.Profiles.Get(service) {
 			known[RefOf(service, p.Name)] = true
 		}
 	}

@@ -57,16 +57,16 @@ func TestKeepaliveLinesAreBunsDaemonLog(t *testing.T) {
 	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "ada", map[string]any{
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{
 		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
-	}, profile.SaveOptions{}); err != nil {
+	}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// Bun's hasStored is `!!store[service]?.[name]`: a stored null is nothing
 	// stored, so the pass skips it rather than failing it.
 	if err := vault.Update(func(c *vault.Contents) error {
-		c.Config.Profiles["acme"] = append(c.Config.Profiles["acme"], vault.ProfileValue{Name: "nul"}, vault.ProfileValue{Name: "none"})
-		c.Credentials["acme"]["nul"] = nil
+		c.Config.Profiles.Set("acme", append(c.Config.Profiles.Get("acme"), vault.ProfileValue{Name: "nul"}, vault.ProfileValue{Name: "none"}))
+		c.Credentials.SetRaw("acme", "nul", nil)
 		return nil
 	}); err != nil {
 		t.Fatal(err)

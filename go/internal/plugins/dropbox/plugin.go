@@ -38,8 +38,8 @@ func New() *plugins.Plugin {
 	}
 }
 
-func listInfo(creds map[string]any) string {
-	if email := str(creds, "email"); email != "" {
+func listInfo(creds plugins.Credentials) string {
+	if email := creds.StrValue("email"); email != "" {
 		return " - " + email
 	}
 	return ""

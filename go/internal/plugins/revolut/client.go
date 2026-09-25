@@ -75,7 +75,7 @@ type client struct {
 	accessToken any
 }
 
-func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *client {
+func newClient(ctx context.Context, creds plugins.Credentials, fetch fetchFunc) *client {
 	if fetch == nil {
 		fetch = plugins.Fetch
 	}
@@ -84,8 +84,8 @@ func newClient(ctx context.Context, creds map[string]any, fetch fetchFunc) *clie
 }
 
 // credential is `credentials.<key>`: undefined when the key is absent.
-func credential(creds map[string]any, key string) any {
-	if v, ok := creds[key]; ok {
+func credential(creds plugins.Credentials, key string) any {
+	if v, ok := creds.Get(key); ok {
 		return v
 	}
 	return undefined

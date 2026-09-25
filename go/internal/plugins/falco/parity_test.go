@@ -313,9 +313,9 @@ func seedVault(t *testing.T) {
 	stale["legacy"] = "kept"
 	for _, p := range []struct {
 		name  string
-		creds map[string]any
+		creds plugins.Credentials
 		ro    bool
-	}{{"acme", base(4102444800000, "at-live"), false}, {"stale", stale, false}, {"ro", base(4102444800000, "at-live"), true}} {
+	}{{"acme", testbox.Object(base(4102444800000, "at-live")), false}, {"stale", testbox.Object(stale), false}, {"ro", testbox.Object(base(4102444800000, "at-live")), true}} {
 		opts := profile.SaveOptions{}
 		if p.ro {
 			opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
@@ -477,7 +477,7 @@ func TestCLIMatchesTheBunCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored := c.Credentials["falco"]["stale"]
+	stored := testbox.Map(c.Credentials.Get("falco", "stale"))
 	now := time.Now().UnixMilli()
 	exp, _ := stored["expiryDate"].(json.Number).Int64()
 	rexp, _ := stored["refreshExpiryDate"].(json.Number).Int64()

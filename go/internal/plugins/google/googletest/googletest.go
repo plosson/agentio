@@ -206,7 +206,7 @@ func (p Product) SaveProfile(t *testing.T, name string, creds map[string]any, re
 	if readOnly {
 		opts = profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}
 	}
-	if err := profile.Save(p.id(), name, creds, opts); err != nil {
+	if err := profile.Save(p.id(), name, testbox.Object(creds), opts); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -218,7 +218,7 @@ func (p Product) LoadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials[p.id()][name]
+	return testbox.Map(c.Credentials.Get(p.id(), name))
 }
 
 // Spec is the product's command at path.

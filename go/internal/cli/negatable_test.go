@@ -9,6 +9,7 @@ import (
 
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -89,7 +90,7 @@ func TestProfileUpdateReadOnlyLastFlagWins(t *testing.T) {
 	if code, _, errOut := run(t, "vault", "init", "--passphrase", "test-pass-123", "--no-migrate"); code != 0 {
 		t.Fatal(errOut)
 	}
-	if err := profile.Save("acme", "ada", map[string]any{"account": "ada"}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{"account": "ada"}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	steps := []struct {

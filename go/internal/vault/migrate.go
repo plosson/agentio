@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
@@ -34,7 +33,7 @@ func DetectLegacy() (hasConfig, hasTokens bool) {
 
 type MigrateResult struct {
 	Config          Config
-	Credentials     map[string]map[string]map[string]any
+	Credentials     Credentials
 	TokensRecovered bool
 }
 
@@ -51,13 +50,11 @@ func ReadLegacy() (*MigrateResult, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, clierr.New(clierr.ConfigError, "Failed to read legacy config.json: "+err.Error(), "Fix or remove the file, then run setup again")
 	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string][]ProfileValue{}
-	}
-	result := &MigrateResult{Config: cfg, Credentials: map[string]map[string]map[string]any{}}
+	cfg.Profiles.init()
+	result := &MigrateResult{Config: cfg, Credentials: NewCredentials()}
 	if b, err := os.ReadFile(tokPath); err == nil {
 		if creds := tryDecryptLegacy(string(b)); creds != nil {
-			result.Credentials = creds
+			result.Credentials = *creds
 			result.TokensRecovered = true
 		}
 	}
@@ -80,7 +77,7 @@ func ArchiveLegacy() error {
 	return nil
 }
 
-func tryDecryptLegacy(raw string) map[string]map[string]map[string]any {
+func tryDecryptLegacy(raw string) *Credentials {
 	var blob struct {
 		IV   string `json:"iv"`
 		Tag  string `json:"tag"`
@@ -112,13 +109,11 @@ func tryDecryptLegacy(raw string) map[string]map[string]map[string]any {
 	if err != nil {
 		return nil
 	}
-	dec := json.NewDecoder(bytes.NewReader(plain))
-	dec.UseNumber()
-	var creds map[string]map[string]map[string]any
-	if err := dec.Decode(&creds); err != nil {
+	var creds Credentials
+	if err := json.Unmarshal(plain, &creds); err != nil || creds.obj == nil {
 		return nil
 	}
-	return creds
+	return &creds
 }
 
 func legacyKey() ([]byte, error) {

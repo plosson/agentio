@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -20,15 +21,14 @@ func RefreshSpec() *plugins.RefreshSpec {
 }
 
 // Applies is Bun `!!credentials.refreshToken`.
-func Applies(creds map[string]any) bool {
-	token, ok := creds["refreshToken"].(string)
-	return ok && token != ""
+func Applies(creds plugins.Credentials) bool {
+	return jsvalue.Truthy(creds.Value("refreshToken"))
 }
 
 // IsStale is Bun's `expiryDate !== undefined && now + bufferMs >= expiryDate`.
 // A stored null coerces to 0 in JavaScript, so it counts as expired.
-func IsStale(creds map[string]any, nowMs, bufferMs int64) bool {
-	raw, present := creds["expiryDate"]
+func IsStale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
+	raw, present := creds.Get("expiryDate")
 	if !present {
 		return false
 	}
@@ -42,14 +42,15 @@ func IsStale(creds map[string]any, nowMs, bufferMs int64) bool {
 	return nowMs+bufferMs >= expiry
 }
 
-// Refresh is Bun refresh<Product>Token merged over the stored map: the new
-// access token and expiry, the rotated refresh token or the stored one.
-func Refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
+// Refresh is Bun's lifecycle refresh, `{ ...credentials, accessToken,
+// refreshToken, expiryDate }`: the new access token and expiry, the rotated
+// refresh token or the stored one, each in its stored place.
+func Refresh(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
 	clientSecret, err := secret()
 	if err != nil {
 		return nil, err
 	}
-	old := Str(creds, "refreshToken")
+	old := creds.Value("refreshToken")
 	next, err := requestToken(ctx, plugins.Fetch, map[string]any{
 		"grant_type":    "refresh_token",
 		"client_id":     ClientID,
@@ -59,25 +60,19 @@ func Refresh(ctx context.Context, creds map[string]any) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	out := copyMap(creds)
-	out["accessToken"] = next.accessToken
-	out["refreshToken"] = next.refreshToken
-	out["expiryDate"] = jsonNum(time.Now().UnixMilli() + next.expiresIn*1000)
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", next.accessToken)
+	out.Set("refreshToken", next.refreshToken)
+	out.Set("expiryDate", jsonNum(time.Now().UnixMilli()+next.expiresIn*1000))
 	return out, nil
 }
 
 // ListInfo is the Bun getExtraInfo: " - <siteUrl>" when the profile has one.
-func ListInfo(creds map[string]any) string {
-	if site := Str(creds, "siteUrl"); site != "" {
+func ListInfo(creds plugins.Credentials) string {
+	if site := creds.StrValue("siteUrl"); site != "" {
 		return " - " + site
 	}
 	return ""
-}
-
-// Str is creds[key] when it is a string, else "".
-func Str(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
 }
 
 // jsonNum is a credential expiry written as a JSON number. A plain string
@@ -86,14 +81,6 @@ type jsonNum int64
 
 func (n jsonNum) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(int64(n), 10)), nil
-}
-
-func copyMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 // asInt64 reads an expiry after a vault round trip (json.Number) or from a

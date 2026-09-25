@@ -19,6 +19,7 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -201,7 +202,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	if ce.Code != clierr.AuthFailed || ce.Message != "Could not fetch email from Calendar" || ce.Suggestion != "Try again or specify --profile manually" {
 		t.Fatalf("%#v", ce)
 	}
-	if c, _ := vault.Load(); len(c.Credentials["gcal"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gcal")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -364,7 +365,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"id": "me@example.com"}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -390,8 +391,8 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(5)
-	out := auth.RedactForRemote(reg, "gcal", creds)
-	if _, ok := out["refresh_token"]; ok || out["access_token"] != "at-old" || out["email"] != "me@example.com" || out["expiry_date"] != int64(5) {
+	out := auth.RedactForRemote(reg, "gcal", testbox.Object(creds))
+	if _, ok := out.Get("refresh_token"); ok || out.Value("access_token") != "at-old" || out.Value("email") != "me@example.com" || out.Value("expiry_date") != int64(5) {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refresh_token"] != "rt-old" {
@@ -400,7 +401,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 }
 
 func TestListInfoAndReauthenticate(t *testing.T) {
-	if google.EmailListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || google.EmailListInfo(map[string]any{}) != "" {
+	if google.EmailListInfo(testbox.Object(map[string]any{"email": "me@example.com"})) != " - me@example.com" || google.EmailListInfo(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("list info")
 	}
 	fake := googletest.NewFakeAt(t, "/calendar/v3/", func(w http.ResponseWriter, h googletest.Hit) {
@@ -420,15 +421,15 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := New().Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
+	got, err := New().Profile.Reauthenticate(fake.Ctx(), testbox.Object(storedCreds(1)), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["access_token"] != "at-2" || got["refresh_token"] != "rt-2" || got["email"] != "me@example.com" {
+	if got.Value("access_token") != "at-2" || got.Value("refresh_token") != "rt-2" || got.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", got)
 	}
 	// No scope in the response: Bun spreads scope: undefined over the old one.
-	if _, ok := got["scope"]; ok {
+	if _, ok := testbox.Map(got)["scope"]; ok {
 		t.Fatalf("scope kept %#v", got)
 	}
 	if strings.Join(logs, "|") != "\nRe-authenticating gcal / work...|  Done (me@example.com)" {
@@ -796,7 +797,7 @@ func TestEventJSONKeepsBunsShape(t *testing.T) {
 			"reminders":{"useDefault":false,"overrides":[{"method":"popup","minutes":0}]},"creator":{"email":"c@example.com"},
 			"conferenceData":{"conferenceId":"x"},"unknownField":1}`)
 	})
-	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}

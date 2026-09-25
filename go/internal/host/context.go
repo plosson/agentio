@@ -89,7 +89,7 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 
 func logStderr(parts ...any) { fmt.Fprintln(os.Stderr, parts...) }
 
-func NewRunContext(creds map[string]any, profileName string, ctx context.Context) *plugins.RunContext {
+func NewRunContext(creds plugins.Credentials, profileName string, ctx context.Context) *plugins.RunContext {
 	if ctx == nil {
 		ctx = context.Background()
 	}

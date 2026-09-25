@@ -176,7 +176,7 @@ type clientConfig struct {
 	redirectURI string
 }
 
-func configOf(creds map[string]any) clientConfig {
+func configOf(creds plugins.Credentials) clientConfig {
 	return clientConfig{
 		environment: credential(creds, "environment"),
 		clientID:    credential(creds, "clientId"),
@@ -260,7 +260,7 @@ func exchangeCodeForTokens(ctx context.Context, do fetchFunc, code string, cfg c
 
 // refreshRevolutToken mints a new access token. Revolut does not rotate
 // refresh tokens, so the caller keeps the existing one.
-func refreshRevolutToken(ctx context.Context, do fetchFunc, creds map[string]any) (tokens, error) {
+func refreshRevolutToken(ctx context.Context, do fetchFunc, creds plugins.Credentials) (tokens, error) {
 	form, err := tokenForm("refresh_token", "refresh_token", text(credential(creds, "refreshToken")), configOf(creds))
 	if err != nil {
 		return tokens{}, err
@@ -273,23 +273,20 @@ func refreshRevolutToken(ctx context.Context, do fetchFunc, creds map[string]any
 }
 
 // withTokens is `{ ...credentials, accessToken, [refreshToken,] expiryDate }`;
-// an undefined value drops the key, as JSON.stringify does when Bun stores it.
-func withTokens(creds map[string]any, t tokens, keepRefresh bool, nowMs int64) map[string]any {
-	out := make(map[string]any, len(creds)+3)
-	for k, v := range creds {
-		out[k] = v
-	}
+// an undefined value keeps no place, as JSON.stringify drops it when Bun
+// stores it.
+func withTokens(creds plugins.Credentials, t tokens, keepRefresh bool, nowMs int64) plugins.Credentials {
+	out := jsvalue.Spread(creds)
 	set := func(key string, v any) {
 		if v == undefined {
-			delete(out, key)
-		} else {
-			out[key] = v
+			v = jsvalue.Undefined
 		}
+		out.Set(key, v)
 	}
 	set("accessToken", t.accessToken)
 	if !keepRefresh {
 		set("refreshToken", t.refreshToken)
 	}
-	out["expiryDate"] = jsNumber(float64(nowMs) + num(t.expiresIn)*1000)
+	out.Set("expiryDate", jsNumber(float64(nowMs)+num(t.expiresIn)*1000))
 	return out
 }

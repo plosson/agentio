@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 func valid() *Plugin {
@@ -131,7 +133,7 @@ func TestDuplicateID(t *testing.T) {
 }
 
 func nopSetup(context.Context, SetupOptions, *SetupContext) (*SetupResult, error) {
-	return &SetupResult{Credentials: map[string]any{"t": "1"}, SuggestedProfileName: "a"}, nil
+	return &SetupResult{Credentials: jsvalue.ObjectOf("t", "1"), SuggestedProfileName: "a"}, nil
 }
 
 func nopValidate(context.Context, *RunContext) (ValidationResult, error) {

@@ -76,7 +76,7 @@ func TestUIStatusKeepsAnExplicitReadOnlyFalse(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"name":"cy","readOnly":false}`), &entry); err != nil {
 			return err
 		}
-		contents.Config.Profiles["acme"] = append(contents.Config.Profiles["acme"], entry)
+		contents.Config.Profiles.Set("acme", append(contents.Config.Profiles.Get("acme"), entry))
 		return nil
 	})
 	if err != nil {

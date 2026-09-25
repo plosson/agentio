@@ -29,16 +29,16 @@ type client struct {
 
 // newClient is new SqlClient(credentials): new SQL(url) throws here for a
 // connection string it cannot use.
-func newClient(credentials map[string]any) (*client, error) {
-	url := jsvalue.String(credentials["url"])
-	if _, ok := credentials["url"].(string); !ok {
+func newClient(credentials plugins.Credentials) (*client, error) {
+	url := jsvalue.String(credentials.Value("url"))
+	if _, ok := credentials.Value("url").(string); !ok {
 		url = ""
 	}
 	conn, err := parseConnection(url)
 	if err != nil {
 		return nil, err
 	}
-	c := &client{displayName: credentials["displayName"]}
+	c := &client{displayName: credentials.Value("displayName")}
 	switch conn.adapter {
 	case adapterSQLite:
 		c.db = openSQLite(conn.sqlite)

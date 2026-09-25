@@ -9,7 +9,6 @@ import (
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/vault"
 )
 
 const (
@@ -21,7 +20,7 @@ const (
 )
 
 type Fresh struct {
-	Credentials map[string]any
+	Credentials *jsvalue.Object
 	Refreshed   bool
 }
 
@@ -85,7 +84,7 @@ func GetFresh(ctx context.Context, reg *plugins.Registry, service, profileName s
 		if !wanted {
 			return Fresh{Credentials: stored, Refreshed: false}, nil
 		}
-		fresh, err := spec.Run(ctx, stored)
+		fresh, err := spec.Run(ctx, stored.Clone())
 		if err != nil {
 			reason := plugins.FetchFailure(err).Error()
 			return Fresh{}, clierr.New(clierr.TokenExpired,
@@ -103,35 +102,19 @@ func GetFresh(ctx context.Context, reg *plugins.Registry, service, profileName s
 	})
 }
 
-// ForRemote is the credential object the hub hands out: RedactForRemote, in
-// the object's stored key order (vault.Ordered), as Bun sends it.
-func ForRemote(reg *plugins.Registry, service string, credentials map[string]any) *jsvalue.Object {
-	kept := RedactForRemote(reg, service, credentials)
-	ordered := vault.Ordered(credentials)
-	out := jsvalue.NewObject()
-	for _, k := range ordered.Keys() {
-		if _, ok := kept[k]; ok {
-			v, _ := ordered.Get(k)
-			out.Set(k, v)
-		}
-	}
-	return out
-}
-
-// RedactForRemote strips refresh material. A service with no refresher is a
-// transparent vault: the hub hands the whole object over. The returned map is
-// a shallow copy so the caller's object is left intact.
-func RedactForRemote(reg *plugins.Registry, service string, credentials map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range credentials {
-		out[k] = v
-	}
+// RedactForRemote is Bun's redactForRemote, the object the hub hands out:
+// `{ ...credentials }` without the refresher's secret fields, so the
+// members keep their order. A service with no refresher is a transparent
+// vault: the hub hands the whole object over. The caller's object is left
+// intact.
+func RedactForRemote(reg *plugins.Registry, service string, credentials *jsvalue.Object) *jsvalue.Object {
+	out := jsvalue.Spread(credentials)
 	spec := reg.RefreshOf(service)
 	if spec == nil {
 		return out
 	}
 	for _, field := range spec.SecretFields {
-		delete(out, field)
+		out.Delete(field)
 	}
 	return out
 }

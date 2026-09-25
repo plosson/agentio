@@ -30,8 +30,8 @@ type api struct {
 func apiFrom(ctx context.Context, run *plugins.RunContext) api {
 	return api{
 		Client:  atlassian.NewClient(ctx, run, "Confluence API error"),
-		cloudID: atlassian.Str(run.Credentials, "cloudId"),
-		siteURL: atlassian.Str(run.Credentials, "siteUrl"),
+		cloudID: run.Credentials.StrValue("cloudId"),
+		siteURL: run.Credentials.StrValue("siteUrl"),
 	}
 }
 

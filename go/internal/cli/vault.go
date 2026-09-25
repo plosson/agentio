@@ -165,8 +165,8 @@ func nudgeFirstService(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	for _, list := range contents.Config.Profiles {
-		if len(list) > 0 {
+	for _, service := range contents.Config.Profiles.Services() {
+		if len(contents.Config.Profiles.Get(service)) > 0 {
 			return nil
 		}
 	}
@@ -204,10 +204,7 @@ func vaultStatus() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "Profiles: unreadable (wrong or missing passphrase)")
 				return nil
 			}
-			n := 0
-			for _, list := range contents.Config.Profiles {
-				n += len(list)
-			}
+			n := profileCount(contents)
 			fmt.Fprintf(cmd.OutOrStdout(), "Profiles: %d\n", n)
 			return nil
 		},
@@ -272,10 +269,7 @@ moved, written to, or deleted. Run 'agentio doctor' to see the active vault.`,
 					fmt.Fprintf(cmd.OutOrStdout(), "Previous: %s (left on disk)\n", previous)
 				}
 			}
-			n := 0
-			for _, list := range contents.Config.Profiles {
-				n += len(list)
-			}
+			n := profileCount(contents)
 			fmt.Fprintf(cmd.OutOrStdout(), "%d profile(s) available\n", n)
 			return nil
 		},
@@ -402,8 +396,8 @@ func vaultExport() *cobra.Command {
 				return err
 			}
 			var profiles []selection
-			for _, service := range contents.Config.Services() {
-				for _, entry := range contents.Config.Profiles[service] {
+			for _, service := range contents.Config.Profiles.Services() {
+				for _, entry := range contents.Config.Profiles.Get(service) {
 					profiles = append(profiles, selection{service, entry.Name})
 				}
 			}
@@ -535,33 +529,38 @@ AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
 				if err := vault.ValidatePassphrase(passphrase); err != nil {
 					return err
 				}
-				if err := createVault(cmd, vault.DefaultVaultPath(), passphrase, imported); err != nil {
+				// Bun: `{ version, config: exportData.config, credentials: exportData.credentials }`.
+				fresh := &vault.Contents{Version: vault.CurrentVersion, Config: imported.Config, Credentials: imported.Credentials}
+				if err := createVault(cmd, vault.DefaultVaultPath(), passphrase, fresh); err != nil {
 					return err
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Configuration imported successfully")
 				return nil
 			}
 			if merge {
+				// Bun: add what is missing, never overwrite; each service
+				// `??= []` / `??= {}`, so a new one goes last.
 				err = vault.Update(func(cur *vault.Contents) error {
-					for service, list := range imported.Config.Profiles {
-						have := map[string]bool{}
-						for _, p := range cur.Config.Profiles[service] {
-							have[p.Name] = true
+					for _, service := range imported.Config.Profiles.Services() {
+						list := imported.Config.Profiles.Get(service)
+						if list == nil {
+							continue
+						}
+						current := cur.Config.Profiles.Get(service)
+						if current == nil {
+							current = []vault.ProfileValue{}
 						}
 						for _, entry := range list {
-							if !have[entry.Name] {
-								cur.Config.Profiles[service] = append(cur.Config.Profiles[service], entry)
+							if findEntry(current, entry.Name) == -1 {
+								current = append(current, entry)
 							}
 						}
+						cur.Config.Profiles.Set(service, current)
 					}
-					for service, creds := range imported.Credentials {
-						if cur.Credentials[service] == nil {
-							cur.Credentials[service] = map[string]map[string]any{}
-						}
-						for name, c := range creds {
-							if _, ok := cur.Credentials[service][name]; !ok {
-								cur.Credentials[service][name] = c
-							}
+					for _, service := range imported.Credentials.Services() {
+						for _, name := range imported.Credentials.Profiles(service) {
+							c, _ := imported.Credentials.Raw(service, name)
+							cur.Credentials.AddMissing(service, name, c)
 						}
 					}
 					return nil
@@ -615,8 +614,8 @@ func vaultClear() *cobra.Command {
 				}
 			}
 			if err := vault.Update(func(cur *vault.Contents) error {
-				cur.Config = vault.Config{Profiles: map[string][]vault.ProfileValue{}}
-				cur.Credentials = map[string]map[string]map[string]any{}
+				cur.Config = vault.Config{Profiles: vault.NewProfiles()}
+				cur.Credentials = vault.NewCredentials()
 				return nil
 			}); err != nil {
 				return err
@@ -691,6 +690,25 @@ func isAbs(path string) bool { return filepath.IsAbs(path) }
 
 func joinPath(a, b string) string { return filepath.Join(a, b) }
 
+// profileCount is the number of profile entries across services.
+func profileCount(c *vault.Contents) int {
+	n := 0
+	for _, service := range c.Config.Profiles.Services() {
+		n += len(c.Config.Profiles.Get(service))
+	}
+	return n
+}
+
+// findEntry is the index of the entry named name, -1 when none is.
+func findEntry(list []vault.ProfileValue, name string) int {
+	for i, p := range list {
+		if p.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 // selection is one profile picked for export.
 type selection struct{ service, name string }
 
@@ -703,14 +721,15 @@ func exportBlob(c *vault.Contents, selected []selection) string {
 		names, _ := profiles.Get(sel.service)
 		list, _ := names.([]any)
 		profiles.Set(sel.service, append(list, sel.name))
-		if creds := c.Credentials[sel.service][sel.name]; creds != nil {
+		if c.Credentials.Has(sel.service, sel.name) {
 			byName, _ := credentials.Get(sel.service)
 			obj, _ := byName.(*jsvalue.Object)
 			if obj == nil {
 				obj = jsvalue.NewObject()
 				credentials.Set(sel.service, obj)
 			}
-			obj.Set(sel.name, vault.Ordered(creds))
+			stored, _ := c.Credentials.Raw(sel.service, sel.name)
+			obj.Set(sel.name, stored)
 		}
 	}
 	config := jsvalue.NewObject()
@@ -753,11 +772,11 @@ func decodeExport(plain string) (*vault.Contents, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, clierr.New(clierr.InvalidParams, "Export is not valid JSON", "")
 	}
-	if c.Config.Profiles == nil {
-		c.Config.Profiles = map[string][]vault.ProfileValue{}
+	if c.Config.Profiles.Len() == 0 {
+		c.Config.Profiles = vault.NewProfiles()
 	}
-	if c.Credentials == nil {
-		c.Credentials = map[string]map[string]map[string]any{}
+	if len(c.Credentials.Services()) == 0 {
+		c.Credentials = vault.NewCredentials()
 	}
 	return &c, nil
 }

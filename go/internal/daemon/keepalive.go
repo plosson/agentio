@@ -115,7 +115,7 @@ func walk(ctx context.Context, reg *plugins.Registry) (PassResult, error) {
 		return result, err
 	}
 	for _, ref := range refs {
-		if !auth.HasStored(stored, ref.Service, ref.Name) {
+		if !stored.Has(ref.Service, ref.Name) {
 			result.Skipped++
 			continue
 		}

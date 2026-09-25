@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/plosson/agentio/go/internal/profile"
+	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -92,10 +93,10 @@ func TestGitHubInstallSealsAnExportOfTheWholeVault(t *testing.T) {
 	githubVault(t)
 	pub, priv, _ := box.GenerateKey(rand.Reader)
 	hits, mu := fakeGitHubAPI(t, pub)
-	if err := profile.Save("github", "octocat", map[string]any{"accessToken": "gho_1", "username": "octocat", "email": nil}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("github", "octocat", testbox.Object(map[string]any{"accessToken": "gho_1", "username": "octocat", "email": nil}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "ro-one", map[string]any{"account": "ada"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("acme", "ro-one", testbox.Object(map[string]any{"account": "ada"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut := run(t, "github", "install", "octocat/hello")
@@ -161,8 +162,8 @@ func TestGitHubUninstallDeletesBothSecrets(t *testing.T) {
 	githubVault(t)
 	pub, _, _ := box.GenerateKey(rand.Reader)
 	hits, mu := fakeGitHubAPI(t, pub)
-	_ = profile.Save("github", "octocat", map[string]any{"accessToken": "gho_1"}, profile.SaveOptions{})
-	_ = profile.Save("github", "work", map[string]any{"accessToken": "gho_2"}, profile.SaveOptions{})
+	_ = profile.Save("github", "octocat", testbox.Object(map[string]any{"accessToken": "gho_1"}), profile.SaveOptions{})
+	_ = profile.Save("github", "work", testbox.Object(map[string]any{"accessToken": "gho_2"}), profile.SaveOptions{})
 	code, out, errOut := run(t, "github", "uninstall", "octocat/hello", "--profile", "work")
 	if code != 0 || out != "\nRemoved AGENTIO_KEY and AGENTIO_CONFIG from octocat/hello\n" ||
 		errOut != "Using GitHub profile: work\nRemoving secrets from: octocat/hello\n\nDeleting AGENTIO_KEY...\nDeleting AGENTIO_CONFIG...\n" {
@@ -185,7 +186,7 @@ func TestGitHubSecretCommandsRefuseBeforeCallingGitHub(t *testing.T) {
 	if code != 3 || errOut != "Error [PROFILE_NOT_FOUND]: No github profile configured\nSuggestion: Run: agentio github profile add\n" {
 		t.Fatalf("code %d %q", code, errOut)
 	}
-	_ = profile.Save("github", "ro", map[string]any{"accessToken": "gho_1"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true})
+	_ = profile.Save("github", "ro", testbox.Object(map[string]any{"accessToken": "gho_1"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true})
 	for _, c := range []struct{ cmd, op string }{{"install", "install secrets"}, {"uninstall", "uninstall secrets"}} {
 		code, out, errOut := run(t, "github", c.cmd, "octocat/hello")
 		want := "Error [PERMISSION_DENIED]: Cannot " + c.op + ": profile \"ro\" is read-only\n" +
@@ -214,7 +215,7 @@ func TestGitHubSecretCommandsRefuseBeforeCallingGitHub(t *testing.T) {
 
 func TestGitHubInstallReportsTheAPIError(t *testing.T) {
 	githubVault(t)
-	_ = profile.Save("github", "octocat", map[string]any{"accessToken": "gho_1"}, profile.SaveOptions{})
+	_ = profile.Save("github", "octocat", testbox.Object(map[string]any{"accessToken": "gho_1"}), profile.SaveOptions{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		_, _ = w.Write([]byte(`{"message":"Not Found"}`))

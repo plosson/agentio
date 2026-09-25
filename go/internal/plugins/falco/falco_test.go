@@ -150,7 +150,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["falco"][name]
+	return testbox.Map(c.Credentials.Get("falco", name))
 }
 
 func spec(t *testing.T, path string) *plugins.CommandSpec {
@@ -196,7 +196,7 @@ func apiErr(t *testing.T, err error) *apiError {
 }
 
 func testClient() *client {
-	return newClient(context.Background(), storedCreds(farFuture()), nil)
+	return newClient(context.Background(), testbox.Object(storedCreds(farFuture())), nil)
 }
 
 const meJSON = `{"id":"user-1","email":"pierre@example.com","firstName":"Pierre","lastName":"Losson","language":"fr","organizations":[{"id":"org-1","name":"Acme BV","vatNumber":"BE0123456789"}]}`
@@ -399,7 +399,7 @@ func TestSetupWithOneOrganizationAsksNoQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SuggestedProfileName != "acme-bv" || res.Credentials["organizationId"] != "org-1" {
+	if res.SuggestedProfileName != "acme-bv" || res.Credentials.Value("organizationId") != "org-1" {
 		t.Fatalf("%#v", res)
 	}
 }
@@ -468,7 +468,7 @@ func TestSetupRefusalsMatchBunAndWriteNothing(t *testing.T) {
 		}
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["falco"]) != 0 {
+	if len(c.Credentials.Profiles("falco")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -489,15 +489,15 @@ func TestReauthenticateKeepsTheProfileAndRevokesTheOldTokenLast(t *testing.T) {
 	var logged []string
 	sc := setupContext(map[string][]string{"? Password: ": {"pw"}}, &logged)
 	before := time.Now().UnixMilli()
-	out, err := reauth(context.Background(), storedCreds(1), "acme", sc)
+	out, err := reauth(context.Background(), testbox.Object(storedCreds(1)), "acme", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out["accessToken"] != "access-abc" || out["refreshToken"] != "refresh-xyz" || out["organizationName"] != "Acme Renamed" ||
-		out["legacyField"] != "kept" || out["userEmail"] != "pierre@example.com" || out["organizationId"] != "org-1" {
+	if out.Value("accessToken") != "access-abc" || out.Value("refreshToken") != "refresh-xyz" || out.Value("organizationName") != "Acme Renamed" ||
+		out.Value("legacyField") != "kept" || out.Value("userEmail") != "pierre@example.com" || out.Value("organizationId") != "org-1" {
 		t.Fatalf("%#v", out)
 	}
-	if exp := out["expiryDate"].(jsNum); int64(exp) < before+600_000 {
+	if exp := out.Value("expiryDate").(jsNum); int64(exp) < before+600_000 {
 		t.Fatalf("expiry %v", exp)
 	}
 	var paths []string
@@ -518,7 +518,7 @@ func TestReauthenticateKeepsTheProfileAndRevokesTheOldTokenLast(t *testing.T) {
 	// A membership that is gone fails, and the old token is not revoked.
 	me = strings.Replace(meJSON, `"id":"org-1"`, `"id":"org-9"`, 1)
 	n := len(fake.recorded())
-	_, err = reauth(context.Background(), storedCreds(1), "acme", setupContext(map[string][]string{"? Password: ": {"pw"}}, nil))
+	_, err = reauth(context.Background(), testbox.Object(storedCreds(1)), "acme", setupContext(map[string][]string{"? Password: ": {"pw"}}, nil))
 	if ce := cliErr(t, err); ce.Code != clierr.AuthFailed ||
 		ce.Message != "Could not use this profile: pierre@example.com is no longer a member of organization org-1" {
 		t.Fatalf("%#v", ce)
@@ -528,7 +528,7 @@ func TestReauthenticateKeepsTheProfileAndRevokesTheOldTokenLast(t *testing.T) {
 			t.Fatal("revoked after a failed reauth")
 		}
 	}
-	_, err = reauth(context.Background(), storedCreds(1), "acme", setupContext(map[string][]string{"? Password: ": {""}}, nil))
+	_, err = reauth(context.Background(), testbox.Object(storedCreds(1)), "acme", setupContext(map[string][]string{"? Password: ": {""}}, nil))
 	if ce := cliErr(t, err); ce.Code != clierr.AuthFailed || ce.Message != "A password is required" {
 		t.Fatalf("%#v", ce)
 	}
@@ -541,7 +541,7 @@ func TestReauthenticateKeepsTheProfileAndRevokesTheOldTokenLast(t *testing.T) {
 
 func TestStaleTokenRefreshesOnceAndPersistsTheRotatedToken(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "acme", storedCreds(1), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "acme", testbox.Object(storedCreds(1)), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -606,7 +606,7 @@ func TestStaleTokenRefreshesOnceAndPersistsTheRotatedToken(t *testing.T) {
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "acme", storedCreds(1), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "acme", testbox.Object(storedCreds(1)), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -633,7 +633,7 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 	// A refresh token past its own expiry is not sent at all.
 	expired := storedCreds(1)
 	expired["refreshExpiryDate"] = int64(1000)
-	if err := profile.Save("falco", "old", expired, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "old", testbox.Object(expired), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = exec(t, reg, "peppol list", plugins.CommandInput{Options: map[string]any{"profile": "old"}})
@@ -648,7 +648,7 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "ro", storedCreds(farFuture()), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("falco", "ro", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -697,7 +697,7 @@ func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 // an empty --output fails in mkdir, before any API call.
 func TestGivenEmptySinceAndOutputAreNotAbsent(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "rw", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "rw", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { reply(w, 200, `[]`) })
@@ -731,7 +731,7 @@ func TestValidate(t *testing.T) {
 	me := meJSON
 	status := 200
 	fake := newFake(t, func(w http.ResponseWriter, h hit) { reply(w, status, me) })
-	run := host.NewRunContext(storedCreds(1), "acme", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(1)), "acme", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != "pierre@example.com — Acme BV" {
 		t.Fatalf("%#v %v", res, err)
@@ -758,11 +758,11 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(1)
-	out := auth.RedactForRemote(reg, "falco", creds)
-	if _, ok := out["refreshToken"]; ok {
+	out := auth.RedactForRemote(reg, "falco", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok {
 		t.Fatal("refreshToken leaked to a remote caller")
 	}
-	if out["accessToken"] != "at-old" || out["organizationId"] != "org-1" || creds["refreshToken"] != "rt-old" {
+	if out.Value("accessToken") != "at-old" || out.Value("organizationId") != "org-1" || creds["refreshToken"] != "rt-old" {
 		t.Fatalf("%#v / %#v", out, creds)
 	}
 }
@@ -770,27 +770,27 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 func TestStaleAndAppliesFollowBun(t *testing.T) {
 	cases := []struct {
 		name  string
-		creds map[string]any
+		creds plugins.Credentials
 		want  bool
 	}{
-		{"missing expiry has never been exchanged", map[string]any{"refreshToken": "r"}, true},
-		{"null expiry coerces to 0", map[string]any{"expiryDate": nil}, true},
-		{"inside the buffer", map[string]any{"expiryDate": json.Number("1400")}, true},
-		{"exactly at the buffer edge", map[string]any{"expiryDate": json.Number("1500")}, true},
-		{"beyond the buffer", map[string]any{"expiryDate": json.Number("1501")}, false},
-		{"a numeric string coerces", map[string]any{"expiryDate": "1501"}, false},
-		{"a word is NaN, never stale", map[string]any{"expiryDate": "soon"}, false},
+		{"missing expiry has never been exchanged", testbox.Object(map[string]any{"refreshToken": "r"}), true},
+		{"null expiry coerces to 0", testbox.Object(map[string]any{"expiryDate": nil}), true},
+		{"inside the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1400")}), true},
+		{"exactly at the buffer edge", testbox.Object(map[string]any{"expiryDate": json.Number("1500")}), true},
+		{"beyond the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1501")}), false},
+		{"a numeric string coerces", testbox.Object(map[string]any{"expiryDate": "1501"}), false},
+		{"a word is NaN, never stale", testbox.Object(map[string]any{"expiryDate": "soon"}), false},
 	}
 	for _, c := range cases {
 		if got := stale(c.creds, 1000, 500); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	if applies(map[string]any{"refreshToken": ""}) || applies(map[string]any{}) || !applies(map[string]any{"refreshToken": "r"}) {
+	if applies(testbox.Object(map[string]any{"refreshToken": ""})) || applies(testbox.Object(map[string]any{})) || !applies(testbox.Object(map[string]any{"refreshToken": "r"})) {
 		t.Fatal("applies")
 	}
-	if listInfo(storedCreds(1)) != " - pierre@example.com (Acme BV)" ||
-		listInfo(map[string]any{"userEmail": "a@b", "organizationId": "org-9"}) != " - a@b (org-9)" || listInfo(nil) != "" {
+	if listInfo(testbox.Object(storedCreds(1))) != " - pierre@example.com (Acme BV)" ||
+		listInfo(testbox.Object(map[string]any{"userEmail": "a@b", "organizationId": "org-9"})) != " - a@b (org-9)" || listInfo(nil) != "" {
 		t.Fatal("listInfo")
 	}
 }
@@ -926,7 +926,7 @@ func TestACutBodyFailsWhereBunReadsIt(t *testing.T) {
 // peppol get writes nothing when the download is cut short.
 func TestACutPeppolDownloadWritesNothing(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "acme", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "acme", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
@@ -1110,7 +1110,7 @@ func TestClientRequestsFollowBun(t *testing.T) {
 // as Bun wrote before it threw.
 func TestGetToStdoutKeepsTheXMLWhenThePDFFails(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("falco", "acme", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("falco", "acme", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	xml := "\ufeff<Invoice><ID>1</ID><AccountingSupplierParty><Party><PartyName><Name>Ωmega</Name></PartyName></Party></AccountingSupplierParty></Invoice>"

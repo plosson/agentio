@@ -90,18 +90,15 @@ func requireTokens(raw any) (tokens, error) {
 
 // applyTokens is the `{ ...credentials, accessToken, expiryDate, refreshToken,
 // refreshExpiryDate }` spread shared by refresh and reauthentication.
-func applyTokens(creds map[string]any, t tokens, nowMs int64) map[string]any {
-	out := make(map[string]any, len(creds)+4)
-	for k, v := range creds {
-		out[k] = v
-	}
+func applyTokens(creds plugins.Credentials, t tokens, nowMs int64) plugins.Credentials {
+	out := jsvalue.Spread(creds)
 	now := float64(nowMs)
-	out["accessToken"] = t.accessToken
-	out["expiryDate"] = jsNum(now + t.expiresIn*1000)
+	out.Set("accessToken", t.accessToken)
+	out.Set("expiryDate", jsNum(now+t.expiresIn*1000))
 	// Falco rotates the refresh token on every exchange; losing this write
 	// loses the session.
-	out["refreshToken"] = t.refreshToken
-	out["refreshExpiryDate"] = jsNum(now + t.refreshTokenExpiresIn*1000)
+	out.Set("refreshToken", t.refreshToken)
+	out.Set("refreshExpiryDate", jsNum(now+t.refreshTokenExpiresIn*1000))
 	return out
 }
 
@@ -243,26 +240,26 @@ func revoke(ctx context.Context, do fetchFunc, token any) {
 
 // --- credential lifecycle -------------------------------------------------------
 
-func applies(creds map[string]any) bool {
-	return jsvalue.Truthy(creds["refreshToken"])
+func applies(creds plugins.Credentials) bool {
+	return jsvalue.Truthy(creds.Value("refreshToken"))
 }
 
 // stale is `expiryDate === undefined || now + bufferMs >= expiryDate`. Falco
 // access tokens live well under an hour, and a missing expiry means one was
 // never exchanged.
-func stale(creds map[string]any, nowMs, bufferMs int64) bool {
-	raw, present := creds["expiryDate"]
+func stale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
+	raw, present := creds.Get("expiryDate")
 	if !present {
 		return true
 	}
 	return float64(nowMs+bufferMs) >= toNumber(raw)
 }
 
-func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
-	if raw, present := creds["refreshExpiryDate"]; present && float64(time.Now().UnixMilli()) >= toNumber(raw) {
+func refresh(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
+	if raw, present := creds.Get("refreshExpiryDate"); present && float64(time.Now().UnixMilli()) >= toNumber(raw) {
 		return nil, &apiError{code: "TOKEN_EXPIRED", message: "The Falco refresh token has expired", suggestion: "Run: agentio reauth"}
 	}
-	t, err := refreshToken(ctx, plugins.Fetch, jsvalue.String(orNull(creds["refreshToken"])))
+	t, err := refreshToken(ctx, plugins.Fetch, jsvalue.String(orNull(creds.Value("refreshToken"))))
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +338,7 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 	now := time.Now().UnixMilli()
 	// A client scoped to no organization can still read /user/me, which is
 	// what supplies the organization list.
-	bootstrap := applyTokens(map[string]any{"organizationId": "", "userId": "", "userEmail": email}, t, now)
+	bootstrap := applyTokens(jsvalue.ObjectOf("organizationId", "", "userId", "", "userEmail", email), t, now)
 	me, err := newClient(ctx, bootstrap, setup.Fetch).getUserMe()
 	if err != nil {
 		return nil, failed(setup.Fail, err)
@@ -362,24 +359,21 @@ func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupCont
 	}
 	org := me.organizations[choice]
 
-	creds := applyTokens(map[string]any{}, t, now)
-	creds["organizationId"] = org.id
-	creds["organizationName"] = org.name
-	putIfPresent(creds, "userId", me.raw, "id")
-	putIfPresent(creds, "userEmail", me.raw, "email")
+	creds := jsvalue.ObjectOf(
+		"refreshToken", t.refreshToken,
+		"refreshExpiryDate", jsNum(float64(now)+t.refreshTokenExpiresIn*1000),
+		"accessToken", t.accessToken,
+		"expiryDate", jsNum(float64(now)+t.expiresIn*1000),
+		"organizationId", org.id,
+		"organizationName", org.name,
+		"userId", jsvalue.Member(me.raw, "id"),
+		"userEmail", jsvalue.Member(me.raw, "email"),
+	)
 	return &plugins.SetupResult{
 		Credentials:          creds,
 		SuggestedProfileName: slugifyOrganization(org.name),
 		Info:                 fmt.Sprintf("%s %s <%s>\nOrganization: %s (%s)", me.firstName, me.lastName, me.email, org.name, org.id),
 	}, nil
-}
-
-// putIfPresent copies a field the way an object literal does: JSON.stringify
-// drops an undefined value, so an absent field is not stored.
-func putIfPresent(dst map[string]any, key string, src *jsvalue.Object, field string) {
-	if v, ok := src.Get(field); ok {
-		dst[key] = v
-	}
 }
 
 var (
@@ -414,13 +408,13 @@ func slugifyOrganization(name string) string {
 // reauth is reauthenticateFalco. The organization is already known, so this
 // asks only for the password (and a 2FA code when Falco wants one) and keeps
 // everything else about the profile as it was.
-func reauth(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func reauth(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	if creds == nil {
 		return nil, setup.Fail("AUTH_FAILED",
 			fmt.Sprintf("Profile \"%s\" has no stored Falco credentials", profileName),
 			"Run: agentio falco profile add --profile "+profileName)
 	}
-	email := jsvalue.String(orNull(creds["userEmail"]))
+	email := jsvalue.String(orNull(creds.Value("userEmail")))
 	setup.Log(fmt.Sprintf("\nRe-authenticating falco / %s (%s)", profileName, email))
 	password := promptPassword(setup, "? Password: ")
 	if password == "" {
@@ -445,25 +439,25 @@ func reauth(ctx context.Context, creds map[string]any, profileName string, setup
 	}
 	for _, org := range me.organizations {
 		if org.id == c.organizationID {
-			replacement["organizationName"] = org.name
+			replacement.Set("organizationName", org.name)
 			break
 		}
 	}
 	// The replacement works, so the superseded token is orphaned. Revoked only
 	// after validation, so a failed reauth leaves the old one usable.
-	revoke(ctx, setup.Fetch, creds["refreshToken"])
+	revoke(ctx, setup.Fetch, creds.Value("refreshToken"))
 	setup.Log(fmt.Sprintf("  Done (%s)", validation.Info))
 	return replacement, nil
 }
 
 // listInfo is getExtraInfo: " - <email> (<organization name or id>)".
-func listInfo(creds map[string]any) string {
+func listInfo(creds plugins.Credentials) string {
 	if creds == nil {
 		return ""
 	}
-	org := creds["organizationName"]
+	org := creds.Value("organizationName")
 	if org == nil {
-		org = orNull(creds["organizationId"])
+		org = orNull(creds.Value("organizationId"))
 	}
-	return fmt.Sprintf(" - %s (%s)", jsvalue.String(orNull(creds["userEmail"])), jsvalue.String(org))
+	return fmt.Sprintf(" - %s (%s)", jsvalue.String(orNull(creds.Value("userEmail"))), jsvalue.String(org))
 }

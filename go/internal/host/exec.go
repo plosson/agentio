@@ -45,7 +45,7 @@ func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec
 	if err != nil || done {
 		return prepared, err
 	}
-	creds := map[string]any{}
+	creds := jsvalue.NewObject()
 	profileName := ""
 	readOnly := false
 	if p.Profile != nil {

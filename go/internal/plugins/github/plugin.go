@@ -29,29 +29,27 @@ func New() *plugins.Plugin {
 	}
 }
 
-func str(m map[string]any, key string) string {
-	s, _ := m[key].(string)
-	return s
-}
-
 // listInfo is Bun getExtraInfo: ` (username)` when the username is truthy.
-func listInfo(creds map[string]any) string {
-	if v := creds["username"]; jsvalue.Truthy(v) {
+func listInfo(creds plugins.Credentials) string {
+	if v := creds.Value("username"); jsvalue.Truthy(v) {
 		return " (" + jsvalue.String(v) + ")"
 	}
 	return ""
 }
 
-// withUser sets username and email from /user. An absent email is dropped, as
-// JSON.stringify drops an undefined field.
-func withUser(creds map[string]any, u user) map[string]any {
-	creds["username"] = u.login
+// withUser is Bun's `{ ...creds, accessToken, username: ”, email: null }`
+// completed from /user: username and email set in those places. An absent
+// email is undefined, which JSON.stringify drops.
+func withUser(creds plugins.Credentials, token string, u user) plugins.Credentials {
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", token)
+	out.Set("username", u.login)
 	if u.hasEmail {
-		creds["email"] = u.email
+		out.Set("email", u.email)
 	} else {
-		delete(creds, "email")
+		out.Set("email", jsvalue.Undefined)
 	}
-	return creds
+	return out
 }
 
 func setup(ctx context.Context, _ plugins.SetupOptions, sc *plugins.SetupContext) (*plugins.SetupResult, error) {
@@ -66,7 +64,7 @@ func setup(ctx context.Context, _ plugins.SetupOptions, sc *plugins.SetupContext
 	if err != nil {
 		return nil, err
 	}
-	creds := withUser(map[string]any{"accessToken": token}, u)
+	creds := withUser(nil, token, u)
 	email := ""
 	if jsvalue.Truthy(u.email) {
 		email = fmt.Sprintf(" (%s)", jsvalue.String(u.email))
@@ -79,7 +77,7 @@ func setup(ctx context.Context, _ plugins.SetupOptions, sc *plugins.SetupContext
 	}, nil
 }
 
-func reauth(ctx context.Context, creds map[string]any, profileName string, sc *plugins.SetupContext) (map[string]any, error) {
+func reauth(ctx context.Context, creds plugins.Credentials, profileName string, sc *plugins.SetupContext) (plugins.Credentials, error) {
 	sc.Log(fmt.Sprintf("\nRe-authenticating github / %s...", profileName))
 	token, err := performOAuth(ctx, sc)
 	if err != nil {
@@ -90,12 +88,7 @@ func reauth(ctx context.Context, creds map[string]any, profileName string, sc *p
 		return nil, err
 	}
 	sc.Log(fmt.Sprintf("  Done (%s)", u.login))
-	out := make(map[string]any, len(creds)+3)
-	for k, v := range creds {
-		out[k] = v
-	}
-	out["accessToken"] = token
-	return withUser(out, u), nil
+	return withUser(creds, token, u), nil
 }
 
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {

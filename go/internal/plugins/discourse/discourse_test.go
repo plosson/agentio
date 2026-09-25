@@ -147,7 +147,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["discourse"][name]
+	return testbox.Map(c.Credentials.Get("discourse", name))
 }
 
 func spec(t *testing.T, path string) *plugins.CommandSpec {
@@ -328,7 +328,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 		}
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["discourse"]) != 0 {
+	if len(c.Credentials.Profiles("discourse")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -337,7 +337,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 func TestReadOnlyProfileRunsEveryCommand(t *testing.T) {
 	reg := setupVault(t)
 	fake := newFake(t, forumHandler)
-	if err := profile.Save("discourse", "ro", storedCreds(fake.url), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("discourse", "ro", testbox.Object(storedCreds(fake.url)), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -360,14 +360,14 @@ func TestReadOnlyProfileRunsEveryCommand(t *testing.T) {
 func TestStaticCredentialsReachTheCommandUnchanged(t *testing.T) {
 	reg := setupVault(t)
 	fake := newFake(t, forumHandler)
-	if err := profile.Save("discourse", "meta", storedCreds(fake.url+"/"), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("discourse", "meta", testbox.Object(storedCreds(fake.url+"/")), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := auth.GetFresh(context.Background(), reg, "discourse", "meta", auth.RefreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Credentials["apiKey"] != "key-1" || fresh.Credentials["legacyField"] != "kept" {
+	if fresh.Credentials.Value("apiKey") != "key-1" || fresh.Credentials.Value("legacyField") != "kept" {
 		t.Fatalf("%#v", fresh.Credentials)
 	}
 	if len(fake.recorded()) != 0 {
@@ -395,7 +395,7 @@ func TestValidate(t *testing.T) {
 		}
 		writeJSON(w, status, map[string]any{"errors": []any{"You are not permitted to view the requested resource."}})
 	})
-	run := host.NewRunContext(storedCreds(fake.url+"/"), "meta", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(fake.url+"/")), "meta", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != fake.url {
 		t.Fatalf("%#v %v", res, err)
@@ -414,8 +414,8 @@ func TestRemoteRedactionKeepsTheStaticKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds("https://forum.example.com")
-	out := auth.RedactForRemote(reg, "discourse", creds)
-	if out["apiKey"] != "key-1" || out["username"] != "alice" || out["baseUrl"] != "https://forum.example.com" || creds["apiKey"] != "key-1" {
+	out := auth.RedactForRemote(reg, "discourse", testbox.Object(creds))
+	if out.Value("apiKey") != "key-1" || out.Value("username") != "alice" || out.Value("baseUrl") != "https://forum.example.com" || creds["apiKey"] != "key-1" {
 		t.Fatalf("%#v", out)
 	}
 }
@@ -423,7 +423,7 @@ func TestRemoteRedactionKeepsTheStaticKey(t *testing.T) {
 func TestCommandsSendTheBunRequests(t *testing.T) {
 	reg := setupVault(t)
 	fake := newFake(t, forumHandler)
-	if err := profile.Save("discourse", "meta", storedCreds(fake.url), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("discourse", "meta", testbox.Object(storedCreds(fake.url)), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -457,7 +457,7 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 func TestErrorsMatchBun(t *testing.T) {
 	reg := setupVault(t)
 	fake := newFake(t, forumHandler)
-	if err := profile.Save("discourse", "meta", storedCreds(fake.url), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("discourse", "meta", testbox.Object(storedCreds(fake.url)), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	check := func(label string, err error, code, msg string) {
@@ -518,7 +518,7 @@ func parsed(t *testing.T, raw string) any {
 }
 
 func TestFormatMatchesBun(t *testing.T) {
-	a := newAPI(context.Background(), storedCreds(""), nil)
+	a := newAPI(context.Background(), testbox.Object(storedCreds("")), nil)
 	a.categories[cacheKey(json.Number("7"))] = "Support Desk"
 	long := "<b>" + strings.Repeat("é", 99) + "</b>"
 	var cats []any
@@ -645,7 +645,7 @@ func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, body)
 			})
-			if err := profile.Save("discourse", "meta", storedCreds(fake.url), profile.SaveOptions{}); err != nil {
+			if err := profile.Save("discourse", "meta", testbox.Object(storedCreds(fake.url)), profile.SaveOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			res, err := exec(t, reg, c.path, c.in)
@@ -668,7 +668,7 @@ func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
 func TestJSONShapeUsesTheBunFields(t *testing.T) {
 	reg := setupVault(t)
 	fake := newFake(t, forumHandler)
-	if err := profile.Save("discourse", "meta", storedCreds(fake.url), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("discourse", "meta", testbox.Object(storedCreds(fake.url)), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := exec(t, reg, "list", plugins.CommandInput{Options: map[string]any{"page": "0"}})

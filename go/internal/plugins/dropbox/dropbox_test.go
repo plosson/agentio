@@ -169,7 +169,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["dropbox"][name]
+	return testbox.Map(c.Credentials.Get("dropbox", name))
 }
 
 func spec(t *testing.T, path string) *plugins.CommandSpec {
@@ -417,7 +417,7 @@ func TestSetupRefusalsMatchBunAndWriteNothing(t *testing.T) {
 		t.Fatalf("%d requests; refusals before the exchange must not call Dropbox", n)
 	}
 	c, _ := vault.Load()
-	if len(c.Credentials["dropbox"]) != 0 {
+	if len(c.Credentials.Profiles("dropbox")) != 0 {
 		t.Fatal("failed setup wrote the vault")
 	}
 }
@@ -433,17 +433,17 @@ func TestReauthenticateKeepsUnknownFieldsAndNeedsTheAppKey(t *testing.T) {
 		writeJSON(w, 200, acct)
 	})
 	sc := setupContext(map[string]string{"? Paste the authorisation code: ": "c"}, nil)
-	got, err := reauth(context.Background(), storedCreds(int64(1)), "p", sc)
+	got, err := reauth(context.Background(), testbox.Object(storedCreds(int64(1))), "p", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["legacyField"] != "kept" || got["appKey"] != "app-1" || got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" ||
-		got["email"] != "new@example.com" || got["accountId"] != "dbid:AA1" {
+	if got.Value("legacyField") != "kept" || got.Value("appKey") != "app-1" || got.Value("accessToken") != "at-2" || got.Value("refreshToken") != "rt-2" ||
+		got.Value("email") != "new@example.com" || got.Value("accountId") != "dbid:AA1" {
 		t.Fatalf("%#v", got)
 	}
 	creds := storedCreds(int64(1))
 	delete(creds, "appKey")
-	_, err = reauth(context.Background(), creds, "p", sc)
+	_, err = reauth(context.Background(), testbox.Object(creds), "p", sc)
 	if ce := cliErr(t, err); ce.Code != clierr.AuthFailed || ce.Message != "Dropbox app key is missing" {
 		t.Fatalf("%#v", ce)
 	}
@@ -451,7 +451,7 @@ func TestReauthenticateKeepsUnknownFieldsAndNeedsTheAppKey(t *testing.T) {
 
 func TestStaleTokenRefreshesOnceAndKeepsTheRefreshToken(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("dropbox", "acme", storedCreds(int64(1)), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("dropbox", "acme", testbox.Object(storedCreds(int64(1))), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -511,7 +511,7 @@ func TestStaleTokenRefreshesOnceAndKeepsTheRefreshToken(t *testing.T) {
 
 func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("dropbox", "acme", storedCreds(int64(1)), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("dropbox", "acme", testbox.Object(storedCreds(int64(1))), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -540,7 +540,7 @@ func TestFailedRefreshLeavesTheVaultAndReportsTokenExpired(t *testing.T) {
 
 func TestReadOnlyProfileRefusesWritesButRunsReads(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("dropbox", "ro", storedCreds(farFuture()), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("dropbox", "ro", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFake(t, func(w http.ResponseWriter, h hit) {
@@ -592,7 +592,7 @@ func TestValidate(t *testing.T) {
 		}
 		writeJSON(w, 200, accountJSON())
 	})
-	run := host.NewRunContext(storedCreds(int64(1)), "acme", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(int64(1))), "acme", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != "ada@example.com (basic)" {
 		t.Fatalf("%#v %v", res, err)
@@ -613,11 +613,11 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(int64(1))
-	out := auth.RedactForRemote(reg, "dropbox", creds)
-	if _, ok := out["refreshToken"]; ok {
+	out := auth.RedactForRemote(reg, "dropbox", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok {
 		t.Fatal("refreshToken leaked to a remote caller")
 	}
-	if out["accessToken"] != "at-old" || out["appKey"] != "app-1" || creds["refreshToken"] != "rt-old" {
+	if out.Value("accessToken") != "at-old" || out.Value("appKey") != "app-1" || creds["refreshToken"] != "rt-old" {
 		t.Fatalf("%#v / %#v", out, creds)
 	}
 }
@@ -625,30 +625,30 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 func TestStaleFollowsTheBunComparison(t *testing.T) {
 	cases := []struct {
 		name  string
-		creds map[string]any
+		creds plugins.Credentials
 		want  bool
 	}{
-		{"missing expiry is stale (unlike Atlassian)", map[string]any{"refreshToken": "r"}, true},
-		{"null expiry coerces to 0", map[string]any{"expiryDate": nil}, true},
-		{"inside the buffer", map[string]any{"expiryDate": json.Number("1400")}, true},
-		{"exactly at the buffer edge", map[string]any{"expiryDate": json.Number("1500")}, true},
-		{"beyond the buffer", map[string]any{"expiryDate": json.Number("1501")}, false},
-		{"a string is NaN, never stale", map[string]any{"expiryDate": "soon"}, false},
+		{"missing expiry is stale (unlike Atlassian)", testbox.Object(map[string]any{"refreshToken": "r"}), true},
+		{"null expiry coerces to 0", testbox.Object(map[string]any{"expiryDate": nil}), true},
+		{"inside the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1400")}), true},
+		{"exactly at the buffer edge", testbox.Object(map[string]any{"expiryDate": json.Number("1500")}), true},
+		{"beyond the buffer", testbox.Object(map[string]any{"expiryDate": json.Number("1501")}), false},
+		{"a string is NaN, never stale", testbox.Object(map[string]any{"expiryDate": "soon"}), false},
 	}
 	for _, c := range cases {
 		if got := stale(c.creds, 1000, 500); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	if applies(map[string]any{"refreshToken": ""}) || applies(map[string]any{}) || applies(map[string]any{"refreshToken": nil}) ||
-		!applies(map[string]any{"refreshToken": "r"}) {
+	if applies(testbox.Object(map[string]any{"refreshToken": ""})) || applies(testbox.Object(map[string]any{})) || applies(testbox.Object(map[string]any{"refreshToken": nil})) ||
+		!applies(testbox.Object(map[string]any{"refreshToken": "r"})) {
 		t.Fatal("applies")
 	}
 }
 
 func TestCommandsSendTheBunRequests(t *testing.T) {
 	reg := setupVault(t)
-	if err := profile.Save("dropbox", "acme", storedCreds(farFuture()), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("dropbox", "acme", testbox.Object(storedCreds(farFuture())), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	listCalls := 0
@@ -805,7 +805,7 @@ func TestSharedLinkRethrowsWhenNoExistingLinkIsListed(t *testing.T) {
 		}
 		writeJSON(w, 409, map[string]any{"error_summary": "shared_link_already_exists/.."})
 	})
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 	_, err := a.sharedLink("/x")
 	ae, ok := err.(*apiError)
 	if !ok || ae.message != "Dropbox sharing/create_shared_link_with_settings failed (409): shared_link_already_exists/.." || ae.code != "API_ERROR" {
@@ -825,7 +825,7 @@ func TestDeleteAsksFirstAndACancelSendsNothing(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"metadata": map[string]any{".tag": "folder", "path_display": "/Old"}})
 	})
 	// An answer that cannot be read neither deletes nor prints "Cancelled".
-	run := host.NewRunContext(storedCreds(int64(1)), "acme", context.Background())
+	run := host.NewRunContext(testbox.Object(storedCreds(int64(1))), "acme", context.Background())
 	run.Confirm = func(string) (bool, error) { return false, errors.New("read failed") }
 	run.Log = func(parts ...any) { t.Fatalf("logged %v on a failed read", parts) }
 	res, err := spec(t, "delete").Run(context.Background(), plugins.CommandInput{
@@ -837,7 +837,7 @@ func TestDeleteAsksFirstAndACancelSendsNothing(t *testing.T) {
 	for _, answer := range []bool{false, true} {
 		var asked []string
 		var logged []string
-		run := host.NewRunContext(storedCreds(int64(1)), "acme", context.Background())
+		run := host.NewRunContext(testbox.Object(storedCreds(int64(1))), "acme", context.Background())
 		run.Confirm = func(q string) (bool, error) { asked = append(asked, q); return answer, nil }
 		run.Log = func(parts ...any) { logged = append(logged, parts[0].(string)) }
 		res, err := spec(t, "delete").Run(context.Background(), plugins.CommandInput{
@@ -880,7 +880,7 @@ func TestDownloadWritesTheFileOrAZip(t *testing.T) {
 	})
 	dir := t.TempDir()
 	t.Chdir(dir)
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 
 	r, err := a.download("résumé.pdf", "")
 	if err != nil {
@@ -940,7 +940,7 @@ func TestUploadPicksTheDestinationAndChunksLargeFiles(t *testing.T) {
 	dir := t.TempDir()
 	local := filepath.Join(dir, "f.txt")
 	_ = os.WriteFile(local, []byte("hello"), 0o600)
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 
 	for dest, remote := range map[string]string{"": "/f.txt", "/": "/f.txt", "/Docs/": "/Docs/f.txt", " Docs/ ": "/Docs/f.txt", "/Docs/g.txt": "/Docs/g.txt"} {
 		if _, err := a.upload(local, dest, dest == "/Docs/g.txt"); err != nil {
@@ -1033,7 +1033,7 @@ func TestErrorMappingFollowsBun(t *testing.T) {
 		w.WriteHeader(cases[current].status)
 		_, _ = io.WriteString(w, cases[current].body)
 	})
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 	for i, c := range cases {
 		current = i
 		_, err := a.account()
@@ -1048,7 +1048,7 @@ func TestErrorMappingFollowsBun(t *testing.T) {
 // connection drops: the plain TypeError, not a message built from a fragment.
 func TestACutErrorBodyFailsLikeBun(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 409) })
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 	_, err := a.account()
 	if _, isAPI := err.(*apiError); isAPI {
 		t.Fatalf("%#v", err)
@@ -1059,7 +1059,7 @@ func TestACutErrorBodyFailsLikeBun(t *testing.T) {
 // A success body is read with response.json(), which rejects the same way.
 func TestACutSuccessBodyFailsLikeBun(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { testbox.CutShort(t, w, 200) })
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 	_, err := a.account()
 	testbox.WantSocketClosed(t, err)
 }
@@ -1126,7 +1126,7 @@ func TestFormatMatchesBun(t *testing.T) {
 	if got := formatUploaded(uploadResult{Path: "/p", Size: 0}); got != "Uploaded: /p\n  Size: 0 B" {
 		t.Fatalf("%q", got)
 	}
-	if listInfo(map[string]any{"email": "a@x"}) != " - a@x" || listInfo(map[string]any{}) != "" {
+	if listInfo(testbox.Object(map[string]any{"email": "a@x"})) != " - a@x" || listInfo(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("listInfo")
 	}
 }
@@ -1141,7 +1141,7 @@ func jsonEqual(a, b any) bool {
 // `text ? JSON.parse(text) : undefined`).
 func TestASuccessBodyThatIsNotJSONFailsLikeBun(t *testing.T) {
 	newFake(t, func(w http.ResponseWriter, h hit) { _, _ = io.WriteString(w, `{"account_id":`) })
-	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	a := newAPI(context.Background(), testbox.Object(storedCreds(int64(1))), host.NewRunContext(nil, "", nil).Fetch)
 	if _, err := a.account(); err == nil || err.Error() != "JSON Parse error: Unexpected EOF" {
 		t.Fatalf("%v", err)
 	}

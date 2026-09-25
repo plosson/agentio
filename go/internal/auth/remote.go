@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/vault"
 )
@@ -318,11 +319,14 @@ func RemoteCanManage() (*bool, error) {
 	return l.CanManageProfiles, nil
 }
 
-func RemoteSaveProfile(service, name string, credentials map[string]any, readOnly *bool) error {
-	body := map[string]any{"credentials": credentials}
+// RemoteSaveProfile is Bun's remoteSaveProfile: `{ readOnly?, credentials }`,
+// the credential object in its order, so the hub stores what the plugin built.
+func RemoteSaveProfile(service, name string, credentials *jsvalue.Object, readOnly *bool) error {
+	body := jsvalue.NewObject()
 	if readOnly != nil {
-		body["readOnly"] = *readOnly
+		body.Set("readOnly", *readOnly)
 	}
+	body.Set("credentials", credentials)
 	_, err := hubRequest(profileRoute(service, name), http.MethodPut, body)
 	if err == nil {
 		h, _ := Hub()
@@ -350,7 +354,7 @@ func absentAsOutcome(raw json.RawMessage, err error) (string, error) {
 	return "", err
 }
 
-func RemoteCredentials(service, name string) (map[string]any, error) {
+func RemoteCredentials(service, name string) (*jsvalue.Object, error) {
 	raw, err := hubRequest(profileRoute(service, name)+"/credentials", http.MethodPost, nil)
 	if err != nil {
 		if ce, ok := err.(*clierr.Error); ok && ce.Code == clierr.NotFound {
@@ -359,11 +363,9 @@ func RemoteCredentials(service, name string) (map[string]any, error) {
 		return nil, err
 	}
 	var body struct {
-		Credentials map[string]any `json:"credentials"`
+		Credentials *jsvalue.Object `json:"credentials"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if err := dec.Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
 	return body.Credentials, nil

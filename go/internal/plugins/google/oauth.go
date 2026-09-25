@@ -224,8 +224,8 @@ func FetchUserEmail(ctx context.Context, fetch func(context.Context, *http.Reque
 // a new OAuth flow for service, merged over the stored map under keys, with
 // the account email. A product with its own rule (gchat webhooks, gdrive access
 // level) composes PerformOAuth, FetchUserEmail and Keys.Merge itself.
-func Reauthenticate(service string, keys Keys) func(context.Context, map[string]any, string, *plugins.SetupContext) (map[string]any, error) {
-	return func(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func Reauthenticate(service string, keys Keys) func(context.Context, plugins.Credentials, string, *plugins.SetupContext) (plugins.Credentials, error) {
+	return func(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 		setup.Log(fmt.Sprintf("\nRe-authenticating %s / %s...", service, profileName))
 		tokens, err := PerformOAuth(ctx, setup, service)
 		if err != nil {
@@ -237,7 +237,7 @@ func Reauthenticate(service string, keys Keys) func(context.Context, map[string]
 		}
 		setup.Log(fmt.Sprintf("  Done (%s)", email))
 		out := keys.Merge(creds, tokens)
-		out["email"] = email
+		out.Set("email", email)
 		return out, nil
 	}
 }
@@ -281,7 +281,7 @@ func oauthSetup(service, displayName string, keys Keys, emailFailure func(*plugi
 			return nil, emailFailure(setup, err)
 		}
 		creds := keys.Merge(nil, tokens)
-		creds["email"] = email
+		creds.Set("email", email)
 		return &plugins.SetupResult{Credentials: creds, SuggestedProfileName: email, Info: info(email)}, nil
 	}
 }

@@ -43,9 +43,9 @@ func vaultUp(t *testing.T) *plugins.Registry {
 // against the refresh is TestReadOnlyRefusalComesAfterTheRefresh.
 func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 	r := vaultUp(t)
-	if err := profile.Save("acme", "ada", map[string]any{
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{
 		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(9_000_000_000_000),
-	}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	p := r.Find("acme")
@@ -62,7 +62,7 @@ func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 		t.Fatal("gate mutated the profile")
 	}
 	creds, _ := vault.Load()
-	if creds.Credentials["acme"]["ada"]["accessToken"] != "old" {
+	if testbox.Map(creds.Credentials.Get("acme", "ada"))["accessToken"] != "old" {
 		t.Fatal("refused write changed a fresh token")
 	}
 	// Omitted access is read, so a read-only profile can still run it.
@@ -80,10 +80,10 @@ func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 func TestStdinAndProfileSelection(t *testing.T) {
 	r := vaultUp(t)
 	p := r.Find("acme")
-	if err := profile.Save("acme", "ada", freshCreds("ada"), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "ada", testbox.Object(freshCreds("ada")), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "bea", freshCreds("bea"), profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "bea", testbox.Object(freshCreds("bea")), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Execute(context.Background(), r, p, command(p, "whoami"), plugins.CommandInput{Options: map[string]any{}})
@@ -153,7 +153,7 @@ func TestSetupPersistsThroughTheHost(t *testing.T) {
 		t.Fatal(ro, err)
 	}
 	c, _ := vault.Load()
-	if c.Credentials["board"]["desk"]["token"] != "tok" {
+	if testbox.Map(c.Credentials.Get("board", "desk"))["token"] != "tok" {
 		t.Fatalf("%#v", c.Credentials)
 	}
 }
@@ -206,7 +206,7 @@ func TestReadOnlyRefusalNamesTheOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("desk", "ro", testbox.Object(map[string]any{"token": "t"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	p := r.Find("desk")
@@ -377,7 +377,7 @@ func TestAccessForDecidesTheGateFromTheInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("desk", "ro", testbox.Object(map[string]any{"token": "t"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	p := r.Find("desk")
@@ -430,7 +430,7 @@ func TestOperationForNamesTheRefusalFromTheInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("desk", "ro", map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("desk", "ro", testbox.Object(map[string]any{"token": "t"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	p := r.Find("desk")
@@ -533,9 +533,9 @@ func TestRunContextConfirmsShareStdin(t *testing.T) {
 func TestRunContextCarriesTheReadOnlyFlag(t *testing.T) {
 	r := vaultUp(t)
 	for name, ro := range map[string]bool{"ro": true, "rw": false} {
-		if err := profile.Save("acme", name, map[string]any{
+		if err := profile.Save("acme", name, testbox.Object(map[string]any{
 			"account": name, "accessToken": "tok", "refreshToken": "rt", "expiryDate": int64(9_000_000_000_000),
-		}, profile.SaveOptions{ReadOnlySet: ro, ReadOnly: ro}); err != nil {
+		}), profile.SaveOptions{ReadOnlySet: ro, ReadOnly: ro}); err != nil {
 			t.Fatal(err)
 		}
 	}

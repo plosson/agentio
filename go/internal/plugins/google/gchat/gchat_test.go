@@ -289,7 +289,7 @@ func TestSetupOAuthFailuresSaveNothing(t *testing.T) {
 			t.Errorf("%#v", ce)
 		}
 	}
-	if c, _ := vault.Load(); len(c.Credentials["gchat"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gchat")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -357,7 +357,7 @@ func TestSetupWebhookPostsATestMessage(t *testing.T) {
 			t.Errorf("%v: %#v", c.answers, ce)
 		}
 	}
-	if c, _ := vault.Load(); c.Credentials["gchat"]["bad"] != nil {
+	if c, _ := vault.Load(); testbox.Map(c.Credentials.Get("gchat", "bad")) != nil {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -424,7 +424,7 @@ func TestWebhookProfileIsNeverRefreshed(t *testing.T) {
 	reg := product.SetupVault(t)
 	product.SaveProfile(t, "hook", webhookCreds("https://chat.example.com/hook"), false)
 	fresh, err := auth.GetFresh(context.Background(), reg, "gchat", "hook", auth.RefreshOptions{Force: true})
-	if err != nil || fresh.Refreshed || fresh.Credentials["type"] != "webhook" {
+	if err != nil || fresh.Refreshed || fresh.Credentials.Value("type") != "webhook" {
 		t.Fatalf("%#v %v", fresh, err)
 	}
 }
@@ -504,18 +504,18 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	v, err := New().Profile.Validate(fake.Ctx(), host.NewRunContext(webhookCreds("https://x.example.com"), "hook", fake.Ctx()))
+	v, err := New().Profile.Validate(fake.Ctx(), host.NewRunContext(testbox.Object(webhookCreds("https://x.example.com")), "hook", fake.Ctx()))
 	if err != nil || !v.Valid || v.Info != "webhook" || len(fake.Recorded()) != 0 {
 		t.Fatalf("webhook %#v %v", v, err)
 	}
-	run := host.NewRunContext(oauthCreds(freshExpiry), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(oauthCreds(freshExpiry)), "acme", fake.Ctx())
 	status, body = 200, map[string]any{}
 	if v, _ := New().Profile.Validate(fake.Ctx(), run); !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v", v)
 	}
 	noEmail := oauthCreds(freshExpiry)
 	delete(noEmail, "email")
-	if v, _ := New().Profile.Validate(fake.Ctx(), host.NewRunContext(noEmail, "acme", fake.Ctx())); !v.Valid || v.Info != "oauth" {
+	if v, _ := New().Profile.Validate(fake.Ctx(), host.NewRunContext(testbox.Object(noEmail), "acme", fake.Ctx())); !v.Valid || v.Info != "oauth" {
 		t.Fatalf("%#v", v)
 	}
 	status, body = 401, map[string]any{"error": map[string]any{"code": 401, "message": "Request had invalid authentication credentials."}}
@@ -534,21 +534,21 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := oauthCreds(5)
-	out := auth.RedactForRemote(reg, "gchat", creds)
-	if _, ok := out["refreshToken"]; ok || out["accessToken"] != "at-old" || out["type"] != "oauth" || out["expiryDate"] != int64(5) {
+	out := auth.RedactForRemote(reg, "gchat", testbox.Object(creds))
+	if _, ok := out.Get("refreshToken"); ok || out.Value("accessToken") != "at-old" || out.Value("type") != "oauth" || out.Value("expiryDate") != int64(5) {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refreshToken"] != "rt-old" {
 		t.Fatal("redaction changed the caller's map")
 	}
-	hook := auth.RedactForRemote(reg, "gchat", webhookCreds("https://x.example.com"))
-	if hook["webhookUrl"] != "https://x.example.com" {
+	hook := auth.RedactForRemote(reg, "gchat", testbox.Object(webhookCreds("https://x.example.com")))
+	if hook.Value("webhookUrl") != "https://x.example.com" {
 		t.Fatalf("%#v", hook)
 	}
 }
 
 func TestListInfoAndReauthenticate(t *testing.T) {
-	if listInfo(webhookCreds("u")) != " - webhook" || listInfo(oauthCreds(1)) != " - oauth" || listInfo(map[string]any{}) != " - oauth" {
+	if listInfo(testbox.Object(webhookCreds("u"))) != " - webhook" || listInfo(testbox.Object(oauthCreds(1))) != " - oauth" || listInfo(testbox.Object(map[string]any{})) != " - oauth" {
 		t.Fatal("list info")
 	}
 	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
@@ -561,7 +561,7 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	var logs []string
 	sc := setupContext(&logs)
 	hook := webhookCreds("https://x.example.com")
-	got, err := New().Profile.Reauthenticate(fake.Ctx(), hook, "hook", sc)
+	got, err := New().Profile.Reauthenticate(fake.Ctx(), testbox.Object(hook), "hook", sc)
 	if err != nil || googletest.JSONText(got) != googletest.JSONText(hook) || len(fake.Recorded()) != 0 {
 		t.Fatalf("%#v %v", got, err)
 	}
@@ -571,14 +571,14 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	logs = nil
 	legacy := oauthCreds(1)
 	delete(legacy, "type")
-	got, err = New().Profile.Reauthenticate(fake.Ctx(), legacy, "work", sc)
+	got, err = New().Profile.Reauthenticate(fake.Ctx(), testbox.Object(legacy), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["type"] != "oauth" || got["accessToken"] != "at-2" || got["refreshToken"] != "rt-2" || got["email"] != "me@example.com" {
+	if got.Value("type") != "oauth" || got.Value("accessToken") != "at-2" || got.Value("refreshToken") != "rt-2" || got.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", got)
 	}
-	if _, ok := got["scope"]; ok {
+	if _, ok := testbox.Map(got)["scope"]; ok {
 		t.Fatalf("scope kept %#v", got)
 	}
 	if strings.Join(logs, "|") != "\nRe-authenticating gchat / work...|  Done (me@example.com)" {
@@ -1294,7 +1294,7 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 		t.Fatalf("mode %v", info.Mode())
 	}
 	// Inside the TTL, resolving an email reads the cache only.
-	a, err := apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(testbox.Object(freshOAuth()), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1307,7 +1307,7 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 	deleted := person("1", "", "")
 	deleted["metadata"] = map[string]any{"deleted": true}
 	incremental = []any{deleted, person("4", "Dan", "d@example.com")}
-	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
+	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(testbox.Object(freshOAuth()), "acme", fake.Ctx()))
 	if id, err := a.resolveUserResourceName("d@example.com"); err != nil || id != "users/4" {
 		t.Fatalf("%q %v", id, err)
 	}
@@ -1320,7 +1320,7 @@ func TestDirectoryRefreshTTLAndIncrementalSync(t *testing.T) {
 	// A rejected sync token falls back to a full fetch.
 	clock = clock.Add(25 * time.Hour)
 	incrementalStatus = 410
-	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(freshOAuth(), "acme", fake.Ctx()))
+	a, _ = apiFrom(fake.Ctx(), host.NewRunContext(testbox.Object(freshOAuth()), "acme", fake.Ctx()))
 	if id, err := a.resolveUserResourceName("a@example.com"); err != nil || id != "users/1" || len(dirHits) != 6 {
 		t.Fatalf("%q %v %d", id, err, len(dirHits))
 	}

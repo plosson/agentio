@@ -10,15 +10,15 @@ type keepingDoc struct {
 	Name  string `json:"name"`
 	Added string `json:"added,omitempty"`
 
-	extra map[string]json.RawMessage
+	kept members
 }
 
 type plainKeepingDoc keepingDoc
 
-func (d keepingDoc) MarshalJSON() ([]byte, error) { return marshalKeeping(plainKeepingDoc(d), d.extra) }
+func (d keepingDoc) MarshalJSON() ([]byte, error) { return marshalKeeping(plainKeepingDoc(d), d.kept) }
 
 func (d *keepingDoc) UnmarshalJSON(b []byte) (err error) {
-	d.extra, err = unmarshalKeeping(b, (*plainKeepingDoc)(d))
+	d.kept, err = unmarshalKeeping(b, (*plainKeepingDoc)(d))
 	return err
 }
 
@@ -45,18 +45,18 @@ func TestClearedOmitemptyFieldDoesNotComeBack(t *testing.T) {
 // A known member must win over an extra of the same name, and a reused
 // target must not keep values the input does not have.
 func TestKeepingDoesNotLeakOldOrShadowedValues(t *testing.T) {
-	d := keepingDoc{Name: "old", Added: "old", extra: map[string]json.RawMessage{"name": json.RawMessage(`"shadow"`)}}
+	d := keepingDoc{Name: "old", Added: "old", kept: members{extra: map[string]json.RawMessage{"name": json.RawMessage(`"shadow"`)}}}
 	b, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(b); got != `{"added":"old","name":"old"}` {
+	if got := string(b); got != `{"name":"old","added":"old"}` {
 		t.Fatalf("got %s", got)
 	}
 	if err := json.Unmarshal([]byte(`{"name":"new"}`), &d); err != nil {
 		t.Fatal(err)
 	}
-	if d.Added != "" || d.extra != nil || d.Name != "new" {
+	if d.Added != "" || d.kept.extra != nil || d.Name != "new" {
 		t.Fatalf("stale state after reload: %+v", d)
 	}
 }
@@ -70,19 +70,18 @@ func TestKeepingRejectsNonObjectsAndBadMembers(t *testing.T) {
 	}
 }
 
-// Credential numbers must survive exactly, at any depth.
-func TestContentsKeepsNumbersExact(t *testing.T) {
+// Numbers are written as Bun writes them: JSON.parse then JSON.stringify,
+// at any depth, so a number beyond 2^53 is rounded, 0.1000 is 0.1 and an
+// out-of-range one is null. Every member keeps its stored place; a member Go
+// adds (config) goes last.
+func TestContentsWritesNumbersAsBun(t *testing.T) {
 	in := `{"version":1,"credentials":{"s":{"p":{"n":12345678901234567890,"f":0.1000}}},"x":{"n":1e400}}`
 	c, err := decodeContents([]byte(in))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := json.Marshal(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The credential keeps its stored key order, as Bun writes it.
-	want := `{"config":{"profiles":{}},"credentials":{"s":{"p":{"n":12345678901234567890,"f":0.1000}}},"version":1,"x":{"n":1e400}}`
+	b := Plaintext(c)
+	want := `{"version":1,"credentials":{"s":{"p":{"n":12345678901234567000,"f":0.1}}},"x":{"n":null},"config":{"profiles":{}}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}

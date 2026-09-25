@@ -129,19 +129,30 @@ func exchangeCode(ctx context.Context, do fetchFunc, code, appKey, verifier stri
 	return data, nil
 }
 
-// setTokens writes the access token and expiry the way Bun spreads them: a
-// missing access_token drops the key, a missing expires_in is NaN, stored as null.
-func setTokens(creds map[string]any, data tokenResponse) {
-	if data.AccessToken != nil {
-		creds["accessToken"] = *data.AccessToken
-	} else {
-		delete(creds, "accessToken")
+// accessToken is Bun's `accessToken: data.access_token`: undefined, which
+// JSON.stringify drops, when the response has none.
+func accessToken(data tokenResponse) any {
+	if data.AccessToken == nil {
+		return jsvalue.Undefined
 	}
-	if data.ExpiresIn != nil {
-		creds["expiryDate"] = jsonNum(time.Now().UnixMilli() + int64(*data.ExpiresIn*1000))
-	} else {
-		creds["expiryDate"] = nil
+	return *data.AccessToken
+}
+
+// expiryDate is Bun's `Date.now() + data.expires_in * 1000`: NaN, stored as
+// null, when the response has no expires_in.
+func expiryDate(data tokenResponse) any {
+	if data.ExpiresIn == nil {
+		return nil
 	}
+	return jsonNum(time.Now().UnixMilli() + int64(*data.ExpiresIn*1000))
+}
+
+// accountID is Bun's `data.account_id`, undefined when absent.
+func accountID(data tokenResponse) any {
+	if data.AccountID == "" {
+		return jsvalue.Undefined
+	}
+	return data.AccountID
 }
 
 // ask is Bun's prompt(): the answer is trimmed and a closed stdin reads as empty.
@@ -197,20 +208,22 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	if err != nil {
 		return nil, failed(setup.Fail, err)
 	}
-	creds := map[string]any{"appKey": appKey, "refreshToken": tokens.RefreshToken}
-	setTokens(creds, tokens)
-	if tokens.AccountID != "" {
-		creds["accountId"] = tokens.AccountID
-	}
+	creds := jsvalue.ObjectOf(
+		"appKey", appKey,
+		"accessToken", accessToken(tokens),
+		"refreshToken", tokens.RefreshToken,
+		"expiryDate", expiryDate(tokens),
+		"accountId", accountID(tokens),
+	)
 
 	setup.Log("Validating access...")
 	acct, err := newAPI(ctx, creds, setup.Fetch).account()
 	if err != nil {
 		return nil, failed(setup.Fail, err)
 	}
-	creds["email"] = acct.Email
-	creds["name"] = acct.Name
-	creds["accountId"] = acct.AccountID
+	creds.Set("email", acct.Email)
+	creds.Set("name", acct.Name)
+	creds.Set("accountId", acct.AccountID)
 	return &plugins.SetupResult{
 		Credentials:          creds,
 		SuggestedProfileName: acct.Email,
@@ -218,8 +231,8 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	}, nil
 }
 
-func reauth(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
-	appKey := str(creds, "appKey")
+func reauth(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
+	appKey := creds.StrValue("appKey")
 	if appKey == "" {
 		return nil, setup.Fail("AUTH_FAILED", "Dropbox app key is missing", "")
 	}
@@ -234,31 +247,34 @@ func reauth(ctx context.Context, creds map[string]any, profileName string, setup
 	if err != nil {
 		return nil, failed(setup.Fail, err)
 	}
-	out := copyMap(creds)
-	setTokens(out, tokens)
-	out["refreshToken"] = tokens.RefreshToken
-	if tokens.AccountID != "" {
-		out["accountId"] = tokens.AccountID
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", accessToken(tokens))
+	out.Set("refreshToken", tokens.RefreshToken)
+	out.Set("expiryDate", expiryDate(tokens))
+	if id := accountID(tokens); id != jsvalue.Undefined {
+		out.Set("accountId", id)
+	} else {
+		out.Set("accountId", jsvalue.Member(creds, "accountId"))
 	}
 	acct, err := newAPI(ctx, out, setup.Fetch).account()
 	if err != nil {
 		return nil, failed(setup.Fail, err)
 	}
 	setup.Log(fmt.Sprintf("  Done (%s)", acct.Email))
-	out["accountId"] = acct.AccountID
-	out["email"] = acct.Email
-	out["name"] = acct.Name
+	out.Set("accountId", acct.AccountID)
+	out.Set("email", acct.Email)
+	out.Set("name", acct.Name)
 	return out, nil
 }
 
-func applies(creds map[string]any) bool {
-	return truthy(creds["refreshToken"])
+func applies(creds plugins.Credentials) bool {
+	return truthy(creds.Value("refreshToken"))
 }
 
 // stale is Bun's `expiryDate === undefined || now + bufferMs >= expiryDate`.
 // A missing expiry is stale; a stored null coerces to 0, so it is stale too.
-func stale(creds map[string]any, nowMs, bufferMs int64) bool {
-	raw, present := creds["expiryDate"]
+func stale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
+	raw, present := creds.Get("expiryDate")
 	if !present || raw == nil {
 		return true
 	}
@@ -270,16 +286,17 @@ func stale(creds map[string]any, nowMs, bufferMs int64) bool {
 }
 
 // refresh keeps the refresh token: Dropbox does not rotate it.
-func refresh(ctx context.Context, creds map[string]any) (map[string]any, error) {
+func refresh(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
 	data, err := postTokenRequest(ctx, plugins.Fetch, formEncode(
 		"grant_type", "refresh_token",
-		"refresh_token", str(creds, "refreshToken"),
-		"client_id", str(creds, "appKey"),
+		"refresh_token", creds.StrValue("refreshToken"),
+		"client_id", creds.StrValue("appKey"),
 	))
 	if err != nil {
 		return nil, err
 	}
-	out := copyMap(creds)
-	setTokens(out, data)
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", accessToken(data))
+	out.Set("expiryDate", expiryDate(data))
 	return out, nil
 }

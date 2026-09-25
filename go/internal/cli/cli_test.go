@@ -113,9 +113,9 @@ func TestCommandUsesFreshCredentialsAndRefusesReadOnlyWrites(t *testing.T) {
 	if code == 0 || !strings.Contains(errOut, "already configured") {
 		t.Fatalf("second init code %d %s", code, errOut)
 	}
-	if err := profile.Save("acme", "ada", map[string]any{
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{
 		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
-	}, profile.SaveOptions{}); err != nil {
+	}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut := run(t, "acme", "whoami", "--json")
@@ -126,8 +126,8 @@ func TestCommandUsesFreshCredentialsAndRefusesReadOnlyWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Credentials["acme"]["ada"]["refreshToken"] != "rot:rt" {
-		t.Fatalf("command did not persist refresh: %#v", stored.Credentials["acme"]["ada"])
+	if testbox.Map(stored.Credentials.Get("acme", "ada"))["refreshToken"] != "rot:rt" {
+		t.Fatalf("command did not persist refresh: %#v", testbox.Map(stored.Credentials.Get("acme", "ada")))
 	}
 	if _, err := profile.SetReadOnly("acme", "ada", true); err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func TestExportDropsReadOnlyAndImportDoesNotInventIt(t *testing.T) {
 	if code, _, errOut := run(t, "vault", "init", "--passphrase", "test-pass-123", "--no-migrate"); code != 0 {
 		t.Fatal(errOut)
 	}
-	if err := profile.Save("board", "desk", map[string]any{"token": "sek", "workspace": "desk"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("board", "desk", testbox.Object(map[string]any{"token": "sek", "workspace": "desk"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	code, out, errOut := run(t, "vault", "export", "--all", "--key", strings.Repeat("ab", 32))
@@ -188,7 +188,7 @@ func TestExportDropsReadOnlyAndImportDoesNotInventIt(t *testing.T) {
 		t.Fatalf("imported profile read-only = %v %v", ro, err)
 	}
 	c, _ := vault.Load()
-	if c.Credentials["board"]["desk"]["token"] != "sek" {
+	if testbox.Map(c.Credentials.Get("board", "desk"))["token"] != "sek" {
 		t.Fatalf("%#v", c.Credentials)
 	}
 }
@@ -207,8 +207,8 @@ func TestProfileListAppendsTheServiceListInfo(t *testing.T) {
 			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
 				return plugins.ValidationResult{Valid: true}, nil
 			},
-			ListInfo: func(c map[string]any) string {
-				if site, _ := c["site"].(string); site != "" {
+			ListInfo: func(c plugins.Credentials) string {
+				if site, _ := c.Value("site").(string); site != "" {
 					return " - " + site
 				}
 				return ""
@@ -222,10 +222,10 @@ func TestProfileListAppendsTheServiceListInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("desk", "a", map[string]any{"site": "https://a.example"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
+	if err := profile.Save("desk", "a", testbox.Object(map[string]any{"site": "https://a.example"}), profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("desk", "b", map[string]any{}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("desk", "b", testbox.Object(map[string]any{}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
@@ -251,7 +251,7 @@ func TestProfileAddPassesServiceSetupOptions(t *testing.T) {
 			},
 			Setup: func(_ context.Context, opts plugins.SetupOptions, _ *plugins.SetupContext) (*plugins.SetupResult, error) {
 				got = opts
-				return &plugins.SetupResult{Credentials: map[string]any{"k": "v"}, SuggestedProfileName: "auto"}, nil
+				return &plugins.SetupResult{Credentials: testbox.Object(map[string]any{"k": "v"}), SuggestedProfileName: "auto"}, nil
 			},
 			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
 				return plugins.ValidationResult{Valid: true}, nil
@@ -298,7 +298,7 @@ func TestProfileAddRequireProfile(t *testing.T) {
 				ProfileDescription: "Profile name (required)",
 				Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
 					setups++
-					return &plugins.SetupResult{Credentials: map[string]any{"k": "v"}, SuggestedProfileName: "auto"}, nil
+					return &plugins.SetupResult{Credentials: testbox.Object(map[string]any{"k": "v"}), SuggestedProfileName: "auto"}, nil
 				},
 				Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
 					return plugins.ValidationResult{Valid: true}, nil

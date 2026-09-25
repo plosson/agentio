@@ -229,8 +229,8 @@ type api struct {
 	fetch  fetchFunc
 }
 
-func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
-	return &api{access: str(creds, "accessToken"), ctx: ctx, fetch: fetch}
+func newAPI(ctx context.Context, creds plugins.Credentials, fetch fetchFunc) *api {
+	return &api{access: creds.StrValue("accessToken"), ctx: ctx, fetch: fetch}
 }
 
 func responseError(resp *http.Response, operation string) error {

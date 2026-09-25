@@ -106,8 +106,8 @@ func TestLoadSaveKeepsWhatGoDoesNotModel(t *testing.T) {
 func TestUpdateChangesOnlyWhatItTouches(t *testing.T) {
 	path := seedForeign(t, foreignVault)
 	if err := vault.Update(func(c *vault.Contents) error {
-		c.Credentials["ping"] = map[string]map[string]any{"p": {"k": "v"}}
-		c.Config.Profiles["ping"] = append(c.Config.Profiles["ping"], vault.ProfileValue{Name: "p"})
+		c.Credentials.Put("ping", "p", testbox.Object(map[string]any{"k": "v"}))
+		c.Config.Profiles.Set("ping", append(c.Config.Profiles.Get("ping"), vault.ProfileValue{Name: "p"}))
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -150,8 +150,8 @@ await updateVault((v) => { Object.assign(v, JSON.parse(process.env.FOREIGN)); })
 `)
 	vault.Reset()
 	if err := vault.Update(func(c *vault.Contents) error {
-		c.Credentials["acme"]["go"] = map[string]any{"from": "go"}
-		c.Config.Profiles["acme"] = append(c.Config.Profiles["acme"], vault.ProfileValue{Name: "go"})
+		c.Credentials.Put("acme", "go", testbox.Object(map[string]any{"from": "go"}))
+		c.Config.Profiles.Set("acme", append(c.Config.Profiles.Get("acme"), vault.ProfileValue{Name: "go"}))
 		return nil
 	}); err != nil {
 		t.Fatal(err)

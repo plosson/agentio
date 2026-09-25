@@ -214,7 +214,7 @@ func TestSetupFailsWithBunsMessageWhenTheEmailIsMissing(t *testing.T) {
 	if ce.Code != clierr.AuthFailed || ce.Message != "Could not fetch email" || ce.Suggestion != "Try again or specify --profile manually" {
 		t.Fatalf("%#v", ce)
 	}
-	if c, _ := vault.Load(); len(c.Credentials["gtasks"]) != 0 {
+	if c, _ := vault.Load(); len(c.Credentials.Profiles("gtasks")) != 0 {
 		t.Fatal("a failed setup saved a profile")
 	}
 }
@@ -374,7 +374,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
+	run := host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"items": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "tasks access ok" {
@@ -396,8 +396,8 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := storedCreds(5)
-	out := auth.RedactForRemote(reg, "gtasks", creds)
-	if _, ok := out["refresh_token"]; ok || out["access_token"] != "at-old" || out["email"] != "me@example.com" || out["expiry_date"] != int64(5) {
+	out := auth.RedactForRemote(reg, "gtasks", testbox.Object(creds))
+	if _, ok := out.Get("refresh_token"); ok || out.Value("access_token") != "at-old" || out.Value("email") != "me@example.com" || out.Value("expiry_date") != int64(5) {
 		t.Fatalf("%#v", out)
 	}
 	if creds["refresh_token"] != "rt-old" {
@@ -407,7 +407,7 @@ func TestRemoteRedactionDropsTheRefreshTokenOnly(t *testing.T) {
 
 func TestListInfoAndReauthenticate(t *testing.T) {
 	p := New()
-	if p.Profile.ListInfo(map[string]any{"email": "me@example.com"}) != " - me@example.com" || p.Profile.ListInfo(map[string]any{}) != "" {
+	if p.Profile.ListInfo(testbox.Object(map[string]any{"email": "me@example.com"})) != " - me@example.com" || p.Profile.ListInfo(testbox.Object(map[string]any{})) != "" {
 		t.Fatal("list info")
 	}
 	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
@@ -427,11 +427,11 @@ func TestListInfoAndReauthenticate(t *testing.T) {
 	sc.OAuth = func(context.Context, plugins.OAuthSetupOptions) (plugins.OAuthSetupResult, error) {
 		return plugins.OAuthSetupResult{Code: "c", RedirectURI: "http://localhost:3000/callback"}, nil
 	}
-	got, err := p.Profile.Reauthenticate(fake.Ctx(), storedCreds(1), "work", sc)
+	got, err := p.Profile.Reauthenticate(fake.Ctx(), testbox.Object(storedCreds(1)), "work", sc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["access_token"] != "at-2" || got["refresh_token"] != "rt-2" || got["email"] != "me@example.com" {
+	if got.Value("access_token") != "at-2" || got.Value("refresh_token") != "rt-2" || got.Value("email") != "me@example.com" {
 		t.Fatalf("%#v", got)
 	}
 	if strings.Join(logs, "|") != "\nRe-authenticating gtasks / work...|  Done (me@example.com)" {
@@ -693,7 +693,7 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"items":[{"id":"L1","title":"A","kind":"tasks#taskList","etag":"e"},{}]}`)
 	})
-	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(testbox.Object(storedCreds(freshExpiry)), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}

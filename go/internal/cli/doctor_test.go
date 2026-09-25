@@ -61,9 +61,9 @@ func doctorVault(t *testing.T) {
 		var gmail, custom []vault.ProfileValue
 		_ = json.Unmarshal([]byte(`["a",{"name":"b","readOnly":true}]`), &gmail)
 		_ = json.Unmarshal([]byte(`["x"]`), &custom)
-		c.Config.Profiles["gmail"] = gmail
-		c.Config.Profiles["custom"] = custom
-		c.Config.Profiles["slack"] = []vault.ProfileValue{}
+		c.Config.Profiles.Set("gmail", gmail)
+		c.Config.Profiles.Set("custom", custom)
+		c.Config.Profiles.Set("slack", []vault.ProfileValue{})
 		return nil
 	})
 	if err != nil {

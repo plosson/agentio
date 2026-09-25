@@ -12,9 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
-
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/testbox"
 )
 
 // fakePostgres is an in-process PostgreSQL wire endpoint: it accepts any
@@ -249,7 +249,7 @@ func TestPostgresQueriesTheSimpleProtocol(t *testing.T) {
 		return nil
 	}
 	creds := map[string]any{"url": srv.url("/app?application_name=agentio"), "displayName": "tester@127.0.0.1/app"}
-	c, err := newClient(creds)
+	c, err := newClient(testbox.Object(creds))
 	if err != nil {
 		t.Fatal(err)
 	}

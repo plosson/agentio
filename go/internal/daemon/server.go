@@ -16,6 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
@@ -318,7 +319,7 @@ func (s *Server) credentials(w http.ResponseWriter, key *profile.KeyView, ref pr
 	audit(key, "credentials", ref, nil, fresh.Refreshed)
 	writeJSON(w, http.StatusOK, object{
 		{"service", ref.Service}, {"name", ref.Name}, {"readOnly", readOnly}, {"refreshed", fresh.Refreshed},
-		{"credentials", auth.ForRemote(s.Registry, ref.Service, fresh.Credentials)},
+		{"credentials", auth.RedactForRemote(s.Registry, ref.Service, fresh.Credentials)},
 	})
 }
 
@@ -334,13 +335,17 @@ func (s *Server) saveProfile(w http.ResponseWriter, r *http.Request, key *profil
 		writeErr(w, err)
 		return
 	}
-	var body map[string]any
-	if err := readJSON(r, &body); err != nil {
+	var raw json.RawMessage
+	if err := readJSON(r, &raw); err != nil {
 		writeErr(w, err)
 		return
 	}
+	// Parsed as JSON.parse does, so the credential object is stored in the
+	// order the client built it.
+	parsed, _ := jsvalue.Parse(raw)
+	body, _ := parsed.(*jsvalue.Object)
 	opt := profile.SaveOptions{}
-	if raw, ok := body["readOnly"]; ok {
+	if raw, ok := body.Get("readOnly"); ok {
 		b, err := profile.ValidateFlag("readOnly", raw)
 		if err != nil {
 			writeErr(w, err)
@@ -349,8 +354,8 @@ func (s *Server) saveProfile(w http.ResponseWriter, r *http.Request, key *profil
 		opt.ReadOnlySet = true
 		opt.ReadOnly = b
 	}
-	creds, _ := body["credentials"].(map[string]any)
-	if len(creds) == 0 {
+	creds, _ := body.Value("credentials").(*jsvalue.Object)
+	if creds.Len() == 0 {
 		writeErr(w, clierr.New(clierr.InvalidParams, "credentials must be a non-empty object", ""))
 		return
 	}

@@ -51,8 +51,15 @@ func (o SetupOptions) Flag(name string) bool {
 	return b
 }
 
+// Credentials is a credential object as Bun holds it: its keys keep the
+// order the producing code gave them (an object literal, a spread, an
+// assignment), and a stored one keeps the order it was stored in, since the
+// vault is written with JSON.stringify. Build one with jsvalue.ObjectOf and
+// read it with Str, Value, Get and Has.
+type Credentials = *jsvalue.Object
+
 type SetupResult struct {
-	Credentials          map[string]any
+	Credentials          Credentials
 	SuggestedProfileName string
 	Info                 string
 }
@@ -97,7 +104,7 @@ type Choice struct {
 
 // RunContext is what a command handler receives. Credentials are already fresh.
 type RunContext struct {
-	Credentials map[string]any
+	Credentials Credentials
 	Profile     string
 	Signal      context.Context
 	Fetch       func(ctx context.Context, req *http.Request) (*http.Response, error)
@@ -567,18 +574,23 @@ type ExitStatus struct {
 
 func (e *ExitStatus) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
 
-// RefreshSpec is profile.refresh. Run must not persist; the host does.
+// RefreshSpec is profile.refresh. Run must not persist; the host does. Run
+// receives a copy of the stored object and returns the whole replacement,
+// keys in the order Bun's refresh builds them (`{ ...credentials, … }` keeps
+// the stored order and appends what is new).
 type RefreshSpec struct {
 	SecretFields []string
-	Applies      func(credentials map[string]any) bool
-	IsStale      func(credentials map[string]any, nowMs int64, bufferMs int64) bool
-	Run          func(ctx context.Context, credentials map[string]any) (map[string]any, error)
+	Applies      func(credentials Credentials) bool
+	IsStale      func(credentials Credentials, nowMs int64, bufferMs int64) bool
+	Run          func(ctx context.Context, credentials Credentials) (Credentials, error)
 }
 
 type ProfileSpec struct {
-	Setup          func(ctx context.Context, opts SetupOptions, setup *SetupContext) (*SetupResult, error)
-	Validate       func(ctx context.Context, run *RunContext) (ValidationResult, error)
-	Reauthenticate func(ctx context.Context, credentials map[string]any, profileName string, setup *SetupContext) (map[string]any, error)
+	Setup    func(ctx context.Context, opts SetupOptions, setup *SetupContext) (*SetupResult, error)
+	Validate func(ctx context.Context, run *RunContext) (ValidationResult, error)
+	// Reauthenticate returns the replacement for the stored object, which it
+	// receives as a copy (nil when nothing is stored).
+	Reauthenticate func(ctx context.Context, credentials Credentials, profileName string, setup *SetupContext) (Credentials, error)
 	Refresh        *RefreshSpec
 	// SetupOptions are extra `<service> profile add` flags (Bun: dropbox --app-key).
 	SetupOptions []OptionSpec
@@ -587,7 +599,7 @@ type ProfileSpec struct {
 	// `profile add <service>` keeps it optional, as in Bun.
 	RequireProfile bool
 	// ListInfo is appended to a profile's line in `profile list` (Bun getExtraInfo).
-	ListInfo func(credentials map[string]any) string
+	ListInfo func(credentials Credentials) string
 	// AddDescription is the `<service> profile add` description; empty is
 	// "Add a new <DisplayName> profile".
 	AddDescription string

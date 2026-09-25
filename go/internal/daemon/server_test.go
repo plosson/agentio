@@ -40,9 +40,9 @@ func setup(t *testing.T) (*httptest.Server, *plugins.Registry, profile.IssuedKey
 	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "ada", map[string]any{
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{
 		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
-	}, profile.SaveOptions{}); err != nil {
+	}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	reg, err := plugins.NewRegistry(acme.New(), ping.New())
@@ -118,7 +118,7 @@ func TestCredentialsAreRefreshedThenRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored["refreshToken"] != "rot:rt" {
+	if stored.Value("refreshToken") != "rot:rt" {
 		t.Fatalf("hub did not persist the rotation: %#v", stored)
 	}
 }
@@ -129,7 +129,7 @@ func TestProfileNamesAreDecodedExactlyOnce(t *testing.T) {
 	srv, _, issued := setup(t)
 	names := []string{"50%off", "a%41", "aA", "sp ace", "%zz"}
 	for _, name := range names {
-		if err := profile.Save("acme", name, map[string]any{"account": name}, profile.SaveOptions{}); err != nil {
+		if err := profile.Save("acme", name, testbox.Object(map[string]any{"account": name}), profile.SaveOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestBadTokensAreLimitedAndAMissingPluginIsNotABadToken(t *testing.T) {
 	if res.StatusCode != 429 {
 		t.Fatalf("sixth bad token = %d", res.StatusCode)
 	}
-	if err := profile.Save("ping", "any", map[string]any{"x": "1"}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("ping", "any", testbox.Object(map[string]any{"x": "1"}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/v1/profiles/ping/any/credentials", strings.NewReader("{}"))
@@ -320,21 +320,21 @@ func TestRemoteClientReceivesRedactedCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creds["accessToken"] != "fresh:old" {
+	if creds.Value("accessToken") != "fresh:old" {
 		t.Fatalf("remote client got %#v", creds)
 	}
-	if _, ok := creds["refreshToken"]; ok {
+	if _, ok := creds.Get("refreshToken"); ok {
 		t.Fatal("remote client received the refresh token")
 	}
 	t.Setenv("AGENTIO_TOKEN", "")
 	auth.Reset()
-	if err := profile.Save("acme", "bare", map[string]any{"account": "bare"}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "bare", testbox.Object(map[string]any{"account": "bare"}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTIO_TOKEN", issued.Token)
 	auth.Reset()
 	if err := vault.Update(func(c *vault.Contents) error {
-		delete(c.Credentials["acme"], "bare")
+		c.Credentials.Delete("acme", "bare")
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -351,17 +351,17 @@ func TestKeepaliveSkipsEmptyAndRefreshesStale(t *testing.T) {
 	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "empty", map[string]any{}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("acme", "empty", testbox.Object(map[string]any{}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// empty map is stored, so it is not skipped. A profile entry with no
 	// credential key is skipped. Delete the credential key only.
 	if err := vault.Update(func(c *vault.Contents) error {
-		delete(c.Credentials["acme"], "empty")
-		c.Config.Profiles["acme"] = append(c.Config.Profiles["acme"], vault.ProfileValue{Name: "stale"})
-		c.Credentials["acme"]["stale"] = map[string]any{
+		c.Credentials.Delete("acme", "empty")
+		c.Config.Profiles.Set("acme", append(c.Config.Profiles.Get("acme"), vault.ProfileValue{Name: "stale"}))
+		c.Credentials.Put("acme", "stale", testbox.Object(map[string]any{
 			"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
-		}
+		}))
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -434,9 +434,9 @@ func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
 	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
 		t.Fatal(err)
 	}
-	if err := profile.Save("acme", "ada", map[string]any{
+	if err := profile.Save("acme", "ada", testbox.Object(map[string]any{
 		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
-	}, profile.SaveOptions{}); err != nil {
+	}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	logs := &lockedLog{}
@@ -466,8 +466,8 @@ func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
 	p := acme.New()
 	run := p.Profile.Refresh.Run
 	// Always stale, so every pass reaches the refresher and parks there.
-	p.Profile.Refresh.IsStale = func(map[string]any, int64, int64) bool { return true }
-	p.Profile.Refresh.Run = func(ctx context.Context, creds map[string]any) (map[string]any, error) {
+	p.Profile.Refresh.IsStale = func(plugins.Credentials, int64, int64) bool { return true }
+	p.Profile.Refresh.Run = func(ctx context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
 		entered <- struct{}{}
 		<-release
 		return run(ctx, creds)

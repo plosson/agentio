@@ -41,11 +41,11 @@ func New() *plugins.Plugin {
 	}
 }
 
-func isWebhook(creds map[string]any) bool {
-	return creds["type"] == "webhook"
+func isWebhook(creds plugins.Credentials) bool {
+	return creds.Value("type") == "webhook"
 }
 
-func listInfo(creds map[string]any) string {
+func listInfo(creds plugins.Credentials) string {
 	if isWebhook(creds) {
 		return " - webhook"
 	}
@@ -98,7 +98,7 @@ func setupWebhook(ctx context.Context, suggested string, setup *plugins.SetupCon
 		suggested = "webhook"
 	}
 	return &plugins.SetupResult{
-		Credentials:          map[string]any{"type": "webhook", "webhookUrl": webhookURL},
+		Credentials:          jsvalue.ObjectOf("type", "webhook", "webhookUrl", webhookURL),
 		SuggestedProfileName: suggested,
 		Info:                 "Webhook profile\nTest with: agentio gchat send \"Hello from agentio\"",
 	}, nil
@@ -115,8 +115,8 @@ func setupOAuth(ctx context.Context, setup *plugins.SetupContext) (*plugins.Setu
 	if err != nil {
 		return nil, google.EmailFailure(setup, err)
 	}
-	creds := google.Camel.Merge(map[string]any{"type": "oauth"}, tokens)
-	creds["email"] = email
+	creds := google.Camel.Merge(jsvalue.ObjectOf("type", "oauth"), tokens)
+	creds.Set("email", email)
 	// The token must work with the Chat API, which needs a Workspace account.
 	svc, err := chatService(ctx, &plugins.RunContext{Credentials: creds, Fetch: setup.Fetch})
 	if err == nil {
@@ -134,18 +134,16 @@ func setupOAuth(ctx context.Context, setup *plugins.SetupContext) (*plugins.Setu
 }
 
 // reauthenticate skips a webhook profile (it does not expire) and otherwise
-// is the shared camelCase reauthentication, marked as an OAuth profile.
-func reauthenticate(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+// is the shared camelCase reauthentication over the stored object marked as
+// an OAuth profile: Bun `{ ...existing, type: 'oauth', accessToken, …, email }`.
+func reauthenticate(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	if isWebhook(creds) {
 		setup.Log(fmt.Sprintf("\nSkipping gchat / %s: webhook profiles don't expire. Run 'agentio gchat profile add' to update.", profileName))
 		return creds, nil
 	}
-	out, err := google.Reauthenticate("gchat", google.Camel)(ctx, creds, profileName, setup)
-	if err != nil {
-		return nil, err
-	}
-	out["type"] = "oauth"
-	return out, nil
+	base := jsvalue.Spread(creds)
+	base.Set("type", "oauth")
+	return google.Reauthenticate("gchat", google.Camel)(ctx, base, profileName, setup)
 }
 
 // validate is GChatClient.validate: a webhook cannot be checked without
@@ -161,7 +159,7 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	if err != nil {
 		return google.ValidationFailure(err), nil
 	}
-	info, _ := run.Credentials["email"].(string)
+	info, _ := run.Credentials.Value("email").(string)
 	if info == "" {
 		info = "oauth"
 	}

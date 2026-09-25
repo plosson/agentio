@@ -53,8 +53,11 @@ type App struct {
 type fetchFunc func(context.Context, *http.Request) (*http.Response, error)
 
 type tokenResult struct {
-	accessToken  string
-	refreshToken string
+	accessToken string
+	// refreshToken is the value Bun keeps: data.refresh_token as sent
+	// (undefined when absent) on a code exchange, `data.refresh_token ||
+	// refreshToken` on a refresh.
+	refreshToken any
 	expiresIn    int64
 }
 
@@ -68,7 +71,7 @@ type site struct {
 
 type oauthResult struct {
 	accessToken  string
-	refreshToken string
+	refreshToken any
 	expiryDate   int64
 	cloudID      string
 	siteURL      string
@@ -98,7 +101,9 @@ func (a App) authorizeURL(redirect, state string) string {
 	return authURL + "?" + q.Encode()
 }
 
-func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, previousRefresh, failPrefix string) (tokenResult, error) {
+// requestToken posts payload to the token endpoint. previousRefresh is the
+// stored refresh token on a refresh, nil on a code exchange.
+func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, previousRefresh any, failPrefix string) (tokenResult, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return tokenResult{}, err
@@ -121,19 +126,24 @@ func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, pre
 		return tokenResult{}, fmt.Errorf("%s: %s", failPrefix, string(body))
 	}
 	var parsed struct {
-		AccessToken  string  `json:"access_token"`
-		RefreshToken *string `json:"refresh_token"`
-		ExpiresIn    float64 `json:"expires_in"`
+		AccessToken  string          `json:"access_token"`
+		RefreshToken json.RawMessage `json:"refresh_token"`
+		ExpiresIn    float64         `json:"expires_in"`
 	}
 	if null, err := plugins.DecodeJSON(resp.StatusCode, body, &parsed); err != nil {
 		return tokenResult{}, err
 	} else if null {
 		return tokenResult{}, jsvalue.TypeError(nil, "data.access_token")
 	}
-	// Atlassian omits the refresh token when it is not rotating. Bun keeps the previous one.
-	rt := previousRefresh
-	if parsed.RefreshToken != nil && *parsed.RefreshToken != "" {
-		rt = *parsed.RefreshToken
+	// Atlassian omits the refresh token when it is not rotating. Bun keeps the
+	// previous one on a refresh, and stores what was sent on a code exchange.
+	var sent any = jsvalue.Undefined
+	if parsed.RefreshToken != nil {
+		sent, _ = jsvalue.Parse(parsed.RefreshToken)
+	}
+	rt := sent
+	if previousRefresh != nil && !jsvalue.Truthy(sent) {
+		rt = previousRefresh
 	}
 	return tokenResult{
 		accessToken:  parsed.AccessToken,
@@ -205,7 +215,7 @@ func (a App) performOAuth(ctx context.Context, setup *plugins.SetupContext) (oau
 		"client_secret": clientSecret,
 		"code":          flow.Code,
 		"redirect_uri":  flow.RedirectURI,
-	}, "", "Failed to exchange code for tokens")
+	}, nil, "Failed to exchange code for tokens")
 	if err != nil {
 		return oauthResult{}, err
 	}
@@ -240,13 +250,15 @@ func siteHostname(raw string) (string, error) {
 	return parsed.Hostname(), nil
 }
 
-func credentialMap(prev map[string]any, result oauthResult) map[string]any {
-	out := copyMap(prev)
-	out["accessToken"] = result.accessToken
-	out["refreshToken"] = result.refreshToken
-	out["expiryDate"] = jsonNum(result.expiryDate)
-	out["cloudId"] = result.cloudID
-	out["siteUrl"] = result.siteURL
+// credentials is Bun's `{ ...prev, accessToken, refreshToken, expiryDate,
+// cloudId, siteUrl }`, the setup literal when prev is nil.
+func credentials(prev plugins.Credentials, result oauthResult) plugins.Credentials {
+	out := jsvalue.Spread(prev)
+	out.Set("accessToken", result.accessToken)
+	out.Set("refreshToken", result.refreshToken)
+	out.Set("expiryDate", jsonNum(result.expiryDate))
+	out.Set("cloudId", result.cloudID)
+	out.Set("siteUrl", result.siteURL)
 	return out
 }
 
@@ -264,7 +276,7 @@ func (a App) Setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.S
 		return nil, err
 	}
 	return &plugins.SetupResult{
-		Credentials:          credentialMap(nil, result),
+		Credentials:          credentials(nil, result),
 		SuggestedProfileName: host,
 		Info:                 a.SetupInfo,
 	}, nil
@@ -272,12 +284,12 @@ func (a App) Setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.S
 
 // Reauthenticate is the product's Bun profile.reauthenticate: a new OAuth
 // flow merged over the stored map, unknown fields kept.
-func (a App) Reauthenticate(ctx context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func (a App) Reauthenticate(ctx context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	setup.Log(fmt.Sprintf("\nRe-authenticating %s / %s...", a.ID, profileName))
 	result, err := a.performOAuth(ctx, setup)
 	if err != nil {
 		return nil, err
 	}
 	setup.Log(fmt.Sprintf("  Done (%s)", result.siteURL))
-	return credentialMap(creds, result), nil
+	return credentials(creds, result), nil
 }

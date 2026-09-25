@@ -5,6 +5,7 @@ package board
 import (
 	"context"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -40,15 +41,15 @@ func setup(_ context.Context, _ plugins.SetupOptions, setup *plugins.SetupContex
 		workspace = "default"
 	}
 	return &plugins.SetupResult{
-		Credentials:          map[string]any{"token": token, "workspace": workspace},
+		Credentials:          jsvalue.ObjectOf("token", token, "workspace", workspace),
 		SuggestedProfileName: workspace,
 		Info:                 "Workspace: " + workspace,
 	}, nil
 }
 
 func validate(_ context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
-	token, _ := run.Credentials["token"].(string)
-	workspace, _ := run.Credentials["workspace"].(string)
+	token, _ := run.Credentials.Value("token").(string)
+	workspace, _ := run.Credentials.Value("workspace").(string)
 	if token == "" || token == "expired" {
 		return plugins.ValidationResult{Valid: false, Error: "token rejected"}, nil
 	}
@@ -60,7 +61,7 @@ func cardsList() plugins.CommandSpec {
 		Path: "cards list", Description: "List cards in the workspace",
 		Access: "read", Examples: []string{"agentio board cards list"},
 		Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return map[string]any{"workspace": run.Credentials["workspace"], "cards": []string{}}, nil
+			return map[string]any{"workspace": run.Credentials.Value("workspace"), "cards": []string{}}, nil
 		},
 	}
 }
@@ -73,7 +74,7 @@ func cardsCreate() plugins.CommandSpec {
 		Examples:  []string{"agentio board cards create Hello"},
 		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			title, _ := in.Args["title"].(string)
-			return map[string]any{"created": title, "token": run.Credentials["token"]}, nil
+			return map[string]any{"created": title, "token": run.Credentials.Value("token")}, nil
 		},
 	}
 }

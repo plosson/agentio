@@ -22,10 +22,10 @@ type sendResult struct {
 
 // send is SlackClient.send for the one credential type Bun knows.
 func send(ctx context.Context, run *plugins.RunContext, m message) (*sendResult, error) {
-	if run.Credentials["type"] != "webhook" {
+	if run.Credentials.Value("type") != "webhook" {
 		return nil, run.Fail("INVALID_PARAMS", "Unknown credentials type", "")
 	}
-	webhookURL, _ := run.Credentials["webhookUrl"].(string)
+	webhookURL, _ := run.Credentials.Value("webhookUrl").(string)
 	if jsvalue.Trim(webhookURL) == "" || !strings.HasPrefix(webhookURL, "https://") {
 		return nil, run.Fail("INVALID_PARAMS", "Invalid webhook URL - must be HTTPS", "Check the webhook URL configuration")
 	}

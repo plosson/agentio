@@ -111,7 +111,7 @@ func loadCreds(t *testing.T, name string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c.Credentials["github"][name]
+	return testbox.Map(c.Credentials.Get("github", name))
 }
 
 func cliErr(t *testing.T, err error) *clierr.Error {
@@ -228,7 +228,7 @@ func TestSetupKeepsANullEmailAndHonoursReadOnly(t *testing.T) {
 	newFake(t, userHandler(map[string]any{"login": "octocat", "email": nil}))
 	// tests/config/profile-store.test.ts: a read-only add beside an existing
 	// octocat profile is named octocat-readonly.
-	if err := profile.Save("github", "octocat", map[string]any{"accessToken": "gho_rw"}, profile.SaveOptions{}); err != nil {
+	if err := profile.Save("github", "octocat", testbox.Object(map[string]any{"accessToken": "gho_rw"}), profile.SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	var log, out bytes.Buffer
@@ -287,7 +287,7 @@ func TestSetupFailuresMatchBunAndWriteNothing(t *testing.T) {
 				t.Fatalf("error kind %#v", err)
 			}
 			v, _ := vault.Load()
-			if len(v.Credentials["github"]) != 0 || len(v.Config.Profiles["github"]) != 0 {
+			if len(v.Credentials.Profiles("github")) != 0 || len(v.Config.Profiles.Get("github")) != 0 {
 				t.Fatalf("a failed setup wrote the vault: %#v", v.Credentials)
 			}
 		})
@@ -300,14 +300,14 @@ func TestReauthenticateKeepsUnknownFieldsAndReplacesTheUser(t *testing.T) {
 	newFake(t, userHandler(map[string]any{"login": "hubber"}))
 	var log bytes.Buffer
 	old := map[string]any{"accessToken": "gho_old", "username": "octocat", "email": "octo@example.com", "legacyField": "kept"}
-	got, err := New().Profile.Reauthenticate(context.Background(), old, "work", setupContext(&log, nil))
+	got, err := New().Profile.Reauthenticate(context.Background(), testbox.Object(old), "work", setupContext(&log, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["accessToken"] != "gho_new" || got["username"] != "hubber" || got["legacyField"] != "kept" {
+	if got.Value("accessToken") != "gho_new" || got.Value("username") != "hubber" || got.Value("legacyField") != "kept" {
 		t.Fatalf("%#v", got)
 	}
-	if _, ok := got["email"]; ok {
+	if _, ok := testbox.Map(got)["email"]; ok {
 		t.Fatalf("absent email must be dropped: %#v", got)
 	}
 	if old["accessToken"] != "gho_old" {
@@ -327,7 +327,7 @@ func TestValidate(t *testing.T) {
 		}
 		writeJSON(w, 200, map[string]any{"login": "octocat", "email": nil})
 	})
-	run := host.NewRunContext(map[string]any{"accessToken": "gho_1", "username": "octocat", "email": nil}, "octocat", context.Background())
+	run := host.NewRunContext(testbox.Object(map[string]any{"accessToken": "gho_1", "username": "octocat", "email": nil}), "octocat", context.Background())
 	res, err := validate(context.Background(), run)
 	if err != nil || !res.Valid || res.Info != "octocat" {
 		t.Fatalf("%#v %v", res, err)
@@ -348,25 +348,25 @@ func TestStaticTokenGoesToRemoteCallersWhole(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := map[string]any{"accessToken": "gho_1", "username": "octocat", "email": nil}
-	out := auth.RedactForRemote(reg, "github", creds)
-	if out["accessToken"] != "gho_1" || out["username"] != "octocat" || len(out) != 3 {
+	out := auth.RedactForRemote(reg, "github", testbox.Object(creds))
+	if out.Value("accessToken") != "gho_1" || out.Value("username") != "octocat" || out.Len() != 3 {
 		t.Fatalf("%#v", out)
 	}
 }
 
 func TestListInfo(t *testing.T) {
-	if got := listInfo(map[string]any{"username": "octocat"}); got != " (octocat)" {
+	if got := listInfo(testbox.Object(map[string]any{"username": "octocat"})); got != " (octocat)" {
 		t.Fatalf("%q", got)
 	}
 	for _, c := range []map[string]any{{}, {"username": ""}, {"username": nil}} {
-		if got := listInfo(c); got != "" {
+		if got := listInfo(testbox.Object(c)); got != "" {
 			t.Fatalf("%#v -> %q", c, got)
 		}
 	}
 }
 
 func testClient() *Client {
-	run := host.NewRunContext(map[string]any{"accessToken": "gho_1"}, "octocat", context.Background())
+	run := host.NewRunContext(testbox.Object(map[string]any{"accessToken": "gho_1"}), "octocat", context.Background())
 	return NewClient(context.Background(), run)
 }
 

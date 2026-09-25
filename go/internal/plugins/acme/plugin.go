@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/obscure"
 	"github.com/plosson/agentio/go/internal/plugincache"
 	"github.com/plosson/agentio/go/internal/plugins"
@@ -73,10 +74,10 @@ func setup(ctx context.Context, opts plugins.SetupOptions, setup *plugins.SetupC
 	}
 	access, refreshTok, expiry := parseCode(oauth.Code)
 	return &plugins.SetupResult{
-		Credentials: map[string]any{
-			"account": account, "accessToken": access, "refreshToken": refreshTok,
-			"expiryDate": jsonNumber(expiry),
-		},
+		Credentials: jsvalue.ObjectOf(
+			"account", account, "accessToken", access, "refreshToken", refreshTok,
+			"expiryDate", jsonNumber(expiry),
+		),
 		SuggestedProfileName: account,
 		Info:                 "Account: " + account,
 	}, nil
@@ -98,64 +99,55 @@ func parseCode(code string) (access, refreshTok string, expiry int64) {
 	return access, refreshTok, expiry
 }
 
-func applies(creds map[string]any) bool {
-	s, ok := creds["refreshToken"].(string)
+func applies(creds plugins.Credentials) bool {
+	s, ok := creds.Value("refreshToken").(string)
 	return ok && s != ""
 }
 
-func stale(creds map[string]any, nowMs, bufferMs int64) bool {
-	expiry, ok := vault.AsInt64(creds["expiryDate"])
+func stale(creds plugins.Credentials, nowMs, bufferMs int64) bool {
+	expiry, ok := vault.AsInt64(creds.Value("expiryDate"))
 	if !ok {
 		return false
 	}
 	return nowMs+bufferMs >= expiry
 }
 
-func refresh(_ context.Context, creds map[string]any) (map[string]any, error) {
-	tok, _ := creds["refreshToken"].(string)
+func refresh(_ context.Context, creds plugins.Credentials) (plugins.Credentials, error) {
+	tok, _ := creds.Value("refreshToken").(string)
 	if strings.HasPrefix(tok, "bad:") {
 		return nil, fmt.Errorf("provider rejected refresh")
 	}
-	access, _ := creds["accessToken"].(string)
-	out := map[string]any{}
-	for k, v := range creds {
-		out[k] = v
-	}
-	out["accessToken"] = "fresh:" + access
-	out["refreshToken"] = "rot:" + tok
-	out["expiryDate"] = jsonNumber(time.Now().Add(time.Hour).UnixMilli())
+	access, _ := creds.Value("accessToken").(string)
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", "fresh:"+access)
+	out.Set("refreshToken", "rot:"+tok)
+	out.Set("expiryDate", jsonNumber(time.Now().Add(time.Hour).UnixMilli()))
 	return out, nil
 }
 
-func reauth(_ context.Context, creds map[string]any, profileName string, setup *plugins.SetupContext) (map[string]any, error) {
+func reauth(_ context.Context, creds plugins.Credentials, profileName string, setup *plugins.SetupContext) (plugins.Credentials, error) {
 	setup.Log("Re-authenticating acme /", profileName)
 	token, err := setup.Prompt("Refresh token", true)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{}
-	for k, v := range creds {
-		out[k] = v
-	}
-	if out == nil {
-		out = map[string]any{}
-	}
-	out["accessToken"] = "reauth"
-	out["refreshToken"] = token
-	out["expiryDate"] = jsonNumber(time.Now().Add(time.Hour).UnixMilli())
+	out := jsvalue.Spread(creds)
+	out.Set("accessToken", "reauth")
+	out.Set("refreshToken", token)
+	out.Set("expiryDate", jsonNumber(time.Now().Add(time.Hour).UnixMilli()))
 	return out, nil
 }
 
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {
-	account, _ := run.Credentials["account"].(string)
-	access, _ := run.Credentials["accessToken"].(string)
+	account, _ := run.Credentials.Value("account").(string)
+	access, _ := run.Credentials.Value("accessToken").(string)
 	if account == "" {
 		return plugins.ValidationResult{Valid: false, Error: "missing account"}, nil
 	}
 	if access == "bad" {
 		return plugins.ValidationResult{Valid: false, Error: "token rejected"}, nil
 	}
-	if ep, ok := run.Credentials["endpoint"].(string); ok && ep != "" {
+	if ep, ok := run.Credentials.Value("endpoint").(string); ok && ep != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ep, nil)
 		if err != nil {
 			return plugins.ValidationResult{Valid: false, Error: err.Error()}, nil
@@ -178,7 +170,7 @@ func whoami() plugins.CommandSpec {
 		Access: "read", Examples: []string{"agentio acme whoami"},
 		Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			return map[string]any{
-				"account": run.Credentials["account"], "accessToken": run.Credentials["accessToken"], "profile": run.Profile,
+				"account": run.Credentials.Value("account"), "accessToken": run.Credentials.Value("accessToken"), "profile": run.Profile,
 			}, nil
 		},
 		Format: func(v any) string {
@@ -203,7 +195,7 @@ func itemsList() plugins.CommandSpec {
 				}
 				limit = n
 			}
-			account, _ := run.Credentials["account"].(string)
+			account, _ := run.Credentials.Value("account").(string)
 			var items []string
 			for i := 0; i < limit && i < 3; i++ {
 				items = append(items, fmt.Sprintf("%s-%d", account, i+1))
@@ -239,7 +231,7 @@ func notesPut() plugins.CommandSpec {
 		Examples: []string{"echo hello | agentio acme notes put"},
 		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			text, _ := plugins.Piped(in)
-			account, _ := run.Credentials["account"].(string)
+			account, _ := run.Credentials.Value("account").(string)
 			if err := plugincache.Write(ServiceID, account, "note", map[string]string{"text": text}); err != nil {
 				return nil, err
 			}

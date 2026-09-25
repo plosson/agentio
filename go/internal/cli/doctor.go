@@ -95,10 +95,7 @@ func checkProfiles() check {
 	if err != nil {
 		return check{name: "Profiles", status: "error", detail: "cannot read config"}
 	}
-	total := 0
-	for _, entries := range contents.Config.Profiles {
-		total += len(entries)
-	}
+	total := profileCount(contents)
 	if total == 0 {
 		return check{name: "Profiles", status: "warn", detail: "no services configured",
 			fix: "agentio <service> profile add (e.g. gmail, slack, telegram)"}
