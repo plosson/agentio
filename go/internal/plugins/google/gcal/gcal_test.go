@@ -49,15 +49,15 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			"--limit <n>=10 --from <datetime> --to <datetime> --today --tomorrow --days <n> --query <q>", "read", "", ""},
 		"get": {"event", "<calendar-id> <event-id>", "", "read", "", ""},
 		"create": {"", "[calendar-id]",
-			"--summary <title> --from <datetime> --to <datetime> --description <text> --location <place> --all-day --attendee <email>* --rrule <rule>* --reminder <spec>* --color <id> --visibility <v> --show-as <v> --send-updates <mode>=all --with-meet",
+			"--summary <title>! --from <datetime>! --to <datetime>! --description <text> --location <place> --all-day --attendee <email>* --rrule <rule>* --reminder <spec>* --color <id> --visibility <v> --show-as <v> --send-updates <mode>=all --with-meet",
 			"write", "create event", "text"},
 		"update": {"", "<calendar-id> <event-id>",
 			"--summary <title> --from <datetime> --to <datetime> --description <text> --location <place> --all-day --attendee <email>* --add-attendee <email>* --color <id> --visibility <v> --show-as <v> --send-updates <mode>=all",
 			"write", "update event", "text"},
 		"delete":   {"", "<calendar-id> <event-id>", "--send-updates <mode>=all", "write", "delete event", ""},
 		"search":   {"", "<query>", "--calendar <id>=primary --limit <n>=25 --from <datetime> --to <datetime>", "read", "", ""},
-		"respond":  {"", "<calendar-id> <event-id>", "--status <status> --comment <text>", "write", "respond to event", ""},
-		"freebusy": {"", "<calendar-ids>", "--from <datetime> --to <datetime>", "read", "", ""},
+		"respond":  {"", "<calendar-id> <event-id>", "--status <status>! --comment <text>", "write", "respond to event", ""},
+		"freebusy": {"", "<calendar-ids>", "--from <datetime>! --to <datetime>!", "read", "", ""},
 	}
 	p := New()
 	if p.ID != "gcal" || p.DisplayName != "Google Calendar" || p.Description != "Use when interacting with Google Calendar via the agentio CLI." {
@@ -89,6 +89,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

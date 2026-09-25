@@ -46,7 +46,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"pages":    {Flags: "--space <key> --space-id <id> --parent <id> --limit <number>=25", Access: "read"},
 		"get":      {Args: "<page-id>", Flags: "--format <format>=storage", Access: "read"},
 		"search":   {Flags: "--cql <query> --space <key> --type <type> --text <text> --limit <number>=25", Access: "read"},
-		"create":   {Flags: "--title <title> --space <key> --space-id <id> --parent <id> --content <text>", Access: "write", Operation: "create page", Input: "text"},
+		"create":   {Flags: "--title <title>! --space <key> --space-id <id> --parent <id> --content <text>", Access: "write", Operation: "create page", Input: "text"},
 		"update":   {Args: "<page-id>", Flags: "--title <title> --content <text>", Access: "write", Operation: "update page", Input: "text"},
 		"comments": {Args: "<page-id>", Access: "read"},
 		"comment":  {Args: "<page-id> [body]", Access: "write", Operation: "add comment", Input: "text"},
@@ -627,4 +627,32 @@ func jsonEqual(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return bytes.Equal(x, y)
+}
+
+// A failed call returns no value: the CLI prints a value returned with an
+// error, and Bun printed nothing before throwing (no empty page, no "No
+// spaces found").
+func TestFailedCallReturnsNoValue(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(atlassiantest.Far()), false)
+	newFake(t, func(w http.ResponseWriter, _ hit) { writeJSON(w, 500, map[string]any{"message": "boom"}) })
+	page := map[string]any{"page-id": "1"}
+	for _, c := range []struct {
+		path string
+		in   plugins.CommandInput
+	}{
+		{"spaces", plugins.CommandInput{Options: map[string]any{"limit": "50"}}},
+		{"pages", plugins.CommandInput{Options: map[string]any{"limit": "25", "space": "ENG"}}},
+		{"get", plugins.CommandInput{Args: page, Options: map[string]any{"format": "storage"}}},
+		{"search", plugins.CommandInput{Options: map[string]any{"limit": "25", "text": "x"}}},
+		{"create", plugins.CommandInput{Options: map[string]any{"title": "T", "space-id": "9", "content": "x"}}},
+		{"update", plugins.CommandInput{Args: page, Options: map[string]any{"content": "x"}}},
+		{"comments", plugins.CommandInput{Args: page}},
+		{"comment", plugins.CommandInput{Args: map[string]any{"page-id": "1", "body": "x"}}},
+	} {
+		v, err := product.Exec(t, reg, c.path, c.in)
+		if err == nil || v != nil {
+			t.Errorf("%s: value %#v with error %v", c.path, v, err)
+		}
+	}
 }

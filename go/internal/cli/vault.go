@@ -5,12 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/cobra"
@@ -75,8 +76,9 @@ func vaultInit() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Vault created at %s\n", vault.NormalizeVaultPath(vaultPath))
 			fmt.Fprintln(cmd.OutOrStdout(), "\nNext: configure a service. Examples:")
-			fmt.Fprintln(cmd.OutOrStdout(), "  agentio acme profile add")
-			fmt.Fprintln(cmd.OutOrStdout(), "  agentio board profile add")
+			fmt.Fprintln(cmd.OutOrStdout(), "  agentio gmail profile add")
+			fmt.Fprintln(cmd.OutOrStdout(), "  agentio slack profile add")
+			fmt.Fprintln(cmd.OutOrStdout(), "Run `agentio --help` to see all available services.")
 			return nil
 		},
 	}
@@ -126,7 +128,6 @@ func vaultSet() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <path>",
 		Short: "Point agentio at an existing vault file",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vaultPath := vault.NormalizeVaultPath(args[0])
 			if !strings.HasPrefix(vaultPath, "/") {
@@ -326,7 +327,6 @@ func vaultImport() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import [file]",
 		Short: "Import configuration and credentials",
-		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			encKey := key
 			if encKey == "" {
@@ -452,26 +452,52 @@ func vaultClear() *cobra.Command {
 	return cmd
 }
 
-func resolvePassphrase(cmd *cobra.Command, flag string, fromStdin, _ bool) (string, error) {
+// resolvePassphrase is Bun resolvePassphrase (src/vault/passphrase-input.ts):
+// --passphrase-stdin, --passphrase, AGENTIO_PASSPHRASE verbatim, then a
+// prompt on a terminal. create prompts for a new passphrase twice.
+func resolvePassphrase(cmd *cobra.Command, flag string, fromStdin, create bool) (string, error) {
 	if flag != "" && fromStdin {
 		return "", clierr.New(clierr.InvalidParams, "--passphrase and --passphrase-stdin are mutually exclusive", "")
 	}
 	if fromStdin {
-		b, err := io.ReadAll(cmd.InOrStdin())
+		raw, _, err := host.ReadStdin(cmd.InOrStdin())
 		if err != nil {
 			return "", err
 		}
-		return strings.TrimRight(string(b), "\r\n"), nil
+		// readStdin(): Buffer#toString('utf-8'), then String#trim.
+		if piped := jsvalue.Trim(jsvalue.BufferString([]byte(raw))); piped != "" {
+			return piped, nil
+		}
+		return "", clierr.New(clierr.InvalidParams, "No passphrase received on stdin",
+			`Pipe it in, e.g. printf %s "$PW" | agentio vault set <path> --passphrase-stdin`)
 	}
 	if flag != "" {
 		return flag, nil
 	}
-	if v := strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE")); v != "" {
+	if v := os.Getenv("AGENTIO_PASSPHRASE"); v != "" {
 		return v, nil
 	}
-	return "", clierr.New(clierr.InvalidParams,
-		"Passphrase required",
-		"Pass --passphrase, --passphrase-stdin, or set AGENTIO_PASSPHRASE")
+	if !host.IsTerminal(cmd.InOrStdin()) {
+		return "", clierr.New(clierr.InvalidParams,
+			"A passphrase is required and no terminal is available to prompt",
+			"Use --passphrase-stdin, --passphrase <value>, or set AGENTIO_PASSPHRASE")
+	}
+	setup := host.NewSetupContext(streams(cmd))
+	if !create {
+		return setup.Prompt("Vault passphrase:", true)
+	}
+	pass, err := setup.Prompt(fmt.Sprintf("Create a passphrase (min %d chars):", vault.MinPassphraseLen), true)
+	if err != nil {
+		return "", err
+	}
+	again, err := setup.Prompt("Confirm passphrase:", true)
+	if err != nil {
+		return "", err
+	}
+	if pass != again {
+		return "", clierr.New(clierr.InvalidParams, "Passphrases do not match", "")
+	}
+	return pass, nil
 }
 
 func randRead(b []byte) (int, error) { return rand.Read(b) }

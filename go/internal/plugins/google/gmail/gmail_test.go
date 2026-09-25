@@ -96,7 +96,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	want := map[string]row{
 		"list":           {"", "--limit <n>=10 --query <query> --label <label>*", "read", "", ""},
 		"get":            {"<message-id>", "--format <format>=text --body-only", "read", "", ""},
-		"search":         {"", "--query <query> --limit <n>=10 --ids-only", "read", "", ""},
+		"search":         {"", "--query <query>! --limit <n>=10 --ids-only", "read", "", ""},
 		"send":           {"", compose, "write", "send email", "text"},
 		"draft":          {"[draft-id]", compose, "write", "create draft", "text"},
 		"draft delete":   {"<draft-id...>", "", "write", "delete draft", ""},
@@ -148,6 +148,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

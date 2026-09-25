@@ -486,7 +486,7 @@ func exportCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Options: []plugins.OptionSpec{
-			{Flags: "--output <path>", Description: "Output file path"},
+			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--format <fmt>", Description: "Export format: xlsx, pdf, csv, ods, tsv", DefaultValue: "xlsx"},
 		},
 		Examples: []string{
@@ -499,7 +499,6 @@ func exportCmd() plugins.CommandSpec {
 			"",
 			"Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.",
 		},
-		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {

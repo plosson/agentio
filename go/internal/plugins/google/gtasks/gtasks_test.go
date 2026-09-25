@@ -52,7 +52,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			"--limit <n>=20 --show-completed=true --no-show-completed --show-hidden --due-min <datetime> --due-max <datetime>", "read", "", "", false, false},
 		"get": {"", "<tasklist-id> <task-id>", "", "read", "", "", false, false},
 		"add": {"", "<tasklist-id>",
-			"--title <title> --notes <text> --due <date> --parent <task-id> --previous <task-id>", "write", "create task", "text", false, true},
+			"--title <title>! --notes <text> --due <date> --parent <task-id> --previous <task-id>", "write", "create task", "text", false, false},
 		"update": {"", "<tasklist-id> <task-id>",
 			"--title <title> --notes <text> --due <date> --status <status>", "write", "update task", "text", false, true},
 		"done":   {"complete", "<tasklist-id> <task-id>", "", "write", "complete task", "", false, false},
@@ -91,6 +91,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			switch d := o.DefaultValue.(type) {
 			case string:
 				f += "=" + d

@@ -261,11 +261,11 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"expenses":     {"", "--from <date> --to <date> --count <number>=100 --receipts <dir> --format <format>=text", "read", ""},
 		"expense":      {"<id>", format, "read", ""},
 		"receipt":      {"<expense-id>", "--receipt <id> --output <dir>=.", "read", ""},
-		"pay": {"", "--from <account-id> --to <id> --amount <number> --currency <code> --reference <text> --to-account <id> --to-card <id> " +
+		"pay": {"", "--from <account-id>! --to <id>! --amount <number>! --currency <code>! --reference <text> --to-account <id> --to-card <id> " +
 			"--title <text> --on <date> --charge-bearer <who> --reason-code <code> --request-id <id> --force " + format, "write", "move money"},
 		"counterparties list": {"", format, "read", ""},
 		"counterparties get":  {"<id>", format, "read", ""},
-		"counterparties add": {"", "--company-name <name> --first-name <name> --last-name <name> --bank-country <code> --currency <code> --iban <iban> " +
+		"counterparties add": {"", "--company-name <name> --first-name <name> --last-name <name> --bank-country <code>! --currency <code>! --iban <iban> " +
 			"--bic <bic> --account-no <number> --sort-code <code> --routing-number <number> --email <email> --phone <phone>", "write", "add a counterparty"},
 		"counterparties delete": {"<id>", "--force", "write", "delete a counterparty"},
 		"drafts list":           {"", "--source <source>=api " + format, "read", ""},
@@ -310,6 +310,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

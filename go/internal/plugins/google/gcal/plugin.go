@@ -52,9 +52,6 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 // createReminders, checkUpdate, respondStatus and freebusyIDs are Bun's
 // checks before getGCalClient; each returns what the command then uses.
 func createReminders(in plugins.CommandInput, fail plugins.FailFunc) ([]*calendar.EventReminder, error) {
-	if err := plugins.RequireOptions(in, fail, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
-		return nil, err
-	}
 	return parseReminders(in.List("reminder"), fail)
 }
 
@@ -66,9 +63,6 @@ func checkUpdate(in plugins.CommandInput, fail plugins.FailFunc) error {
 }
 
 func respondStatus(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	if err := plugins.RequireOptions(in, fail, "--status <status>"); err != nil {
-		return "", err
-	}
 	status := strings.ToLower(in.Option("status"))
 	switch status {
 	case "accepted", "declined", "tentative":
@@ -78,9 +72,6 @@ func respondStatus(in plugins.CommandInput, fail plugins.FailFunc) (string, erro
 }
 
 func freebusyIDs(in plugins.CommandInput, fail plugins.FailFunc) ([]string, error) {
-	if err := plugins.RequireOptions(in, fail, "--from <datetime>", "--to <datetime>"); err != nil {
-		return nil, err
-	}
 	var ids []string
 	for _, id := range strings.Split(in.Arg("calendar-ids"), ",") {
 		if id = jsvalue.Trim(id); id != "" {
@@ -221,9 +212,9 @@ func createCmd() plugins.CommandSpec {
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-id", Description: "Calendar ID (default: primary)"}},
 		Options: []plugins.OptionSpec{
-			{Flags: "--summary <title>", Description: "Event title/summary"},
-			{Flags: "--from <datetime>", Description: "Start time (RFC3339 or YYYY-MM-DD for all-day)"},
-			{Flags: "--to <datetime>", Description: "End time (RFC3339 or YYYY-MM-DD for all-day)"},
+			{Flags: "--summary <title>", Required: true, Description: "Event title/summary"},
+			{Flags: "--from <datetime>", Required: true, Description: "Start time (RFC3339 or YYYY-MM-DD for all-day)"},
+			{Flags: "--to <datetime>", Required: true, Description: "End time (RFC3339 or YYYY-MM-DD for all-day)"},
 			{Flags: "--description <text>", Description: "Event description (or pipe via stdin)"},
 			{Flags: "--location <place>", Description: "Event location"},
 			{Flags: "--all-day", Description: "Create as all-day event"},
@@ -440,7 +431,7 @@ func respondCmd() plugins.CommandSpec {
 			{Name: "event-id", Description: "Event ID", Required: true},
 		},
 		Options: []plugins.OptionSpec{
-			{Flags: "--status <status>", Description: "Response: accepted, declined, tentative"},
+			{Flags: "--status <status>", Required: true, Description: "Response: accepted, declined, tentative"},
 			{Flags: "--comment <text>", Description: "Optional comment"},
 		},
 		Examples: []string{
@@ -474,8 +465,8 @@ func freebusyCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-ids", Description: "Comma-separated calendar IDs", Required: true}},
 		Options: []plugins.OptionSpec{
-			{Flags: "--from <datetime>", Description: "Start time (RFC3339)"},
-			{Flags: "--to <datetime>", Description: "End time (RFC3339)"},
+			{Flags: "--from <datetime>", Required: true, Description: "Start time (RFC3339)"},
+			{Flags: "--to <datetime>", Required: true, Description: "End time (RFC3339)"},
 		},
 		Examples: []string{
 			"# your own busy slots over a day",

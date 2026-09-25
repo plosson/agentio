@@ -1,5 +1,4 @@
 // Package cli is the agentio command line. Services are declarative plugins.
-// The three built-in plugins (acme, board, ping) are fakes that exercise the host.
 package cli
 
 import (
@@ -11,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/plosson/agentio/go/internal/auth"
@@ -18,8 +18,6 @@ import (
 	"github.com/plosson/agentio/go/internal/daemon"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/plugins"
-	"github.com/plosson/agentio/go/internal/plugins/acme"
-	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
 	"github.com/plosson/agentio/go/internal/plugins/dropbox"
@@ -35,7 +33,6 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/google/gslides"
 	"github.com/plosson/agentio/go/internal/plugins/google/gtasks"
 	"github.com/plosson/agentio/go/internal/plugins/jira"
-	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/plugins/revolut"
 	"github.com/plosson/agentio/go/internal/plugins/rss"
 	"github.com/plosson/agentio/go/internal/plugins/slack"
@@ -46,31 +43,35 @@ import (
 	"github.com/spf13/pflag"
 )
 
-const Version = "0.0.0-foundation"
+// Version is the package.json version, set at build time
+// (-ldflags "-X github.com/plosson/agentio/go/internal/cli.Version=…").
+var Version = "0.0.0-dev"
 
 func init() {
-	plugins.Default.MustRegister(acme.New())
-	plugins.Default.MustRegister(board.New())
-	plugins.Default.MustRegister(ping.New())
-	plugins.Default.MustRegister(confluence.New())
-	plugins.Default.MustRegister(discourse.New())
-	plugins.Default.MustRegister(dropbox.New())
-	plugins.Default.MustRegister(falco.New())
-	plugins.Default.MustRegister(gcal.New())
-	plugins.Default.MustRegister(gchat.New())
-	plugins.Default.MustRegister(gdocs.New())
-	plugins.Default.MustRegister(gdrive.New())
-	plugins.Default.MustRegister(github.New())
-	plugins.Default.MustRegister(gmail.New())
-	plugins.Default.MustRegister(gsheets.New())
-	plugins.Default.MustRegister(gslides.New())
-	plugins.Default.MustRegister(gscript.New())
-	plugins.Default.MustRegister(gtasks.New())
-	plugins.Default.MustRegister(jira.New())
-	plugins.Default.MustRegister(revolut.New())
-	plugins.Default.MustRegister(rss.New())
-	plugins.Default.MustRegister(slack.New())
-	plugins.Default.MustRegister(sqlplugin.New())
+	registerServices(plugins.Default)
+}
+
+// registerServices adds the services in Bun's SERVICE_PLUGINS order.
+func registerServices(reg *plugins.Registry) {
+	reg.MustRegister(confluence.New())
+	reg.MustRegister(discourse.New())
+	reg.MustRegister(dropbox.New())
+	reg.MustRegister(falco.New())
+	reg.MustRegister(gcal.New())
+	reg.MustRegister(gchat.New())
+	reg.MustRegister(gdocs.New())
+	reg.MustRegister(gdrive.New())
+	reg.MustRegister(github.New())
+	reg.MustRegister(gmail.New())
+	reg.MustRegister(gsheets.New())
+	reg.MustRegister(gslides.New())
+	reg.MustRegister(gscript.New())
+	reg.MustRegister(gtasks.New())
+	reg.MustRegister(jira.New())
+	reg.MustRegister(revolut.New())
+	reg.MustRegister(rss.New())
+	reg.MustRegister(slack.New())
+	reg.MustRegister(sqlplugin.New())
 }
 
 func Main(args []string) int {
@@ -82,7 +83,26 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetIn(stdin)
-	root.SetArgs(optionalValues(root, defaultSubcommands(root, args)))
+	line := commanderParse(root, args)
+	switch {
+	case line.version:
+		fmt.Fprintln(stdout, Version)
+		return 0
+	case line.err != "":
+		fmt.Fprintln(stderr, line.err)
+		return 1
+	case line.help != nil:
+		if line.helpErr {
+			root.SetOut(stderr)
+		}
+		root.SetArgs(append(commandWords(line.help), "--help"))
+		_ = root.Execute()
+		if line.helpErr {
+			return 1
+		}
+		return 0
+	}
+	root.SetArgs(line.argv)
 	err := root.Execute()
 	if err == nil {
 		return 0
@@ -99,7 +119,9 @@ func Execute(reg *plugins.Registry, args []string, stdout, stderr io.Writer, std
 		}
 		return clierr.ExitCode(ce.Code)
 	}
-	fmt.Fprintf(stderr, "Error: %s\n", err.Error())
+	// Bun's handleError prints error.message: a failed send is fetch's bare
+	// error, not Go's `Get "…":` wrapping.
+	fmt.Fprintf(stderr, "Error: %s\n", plugins.FetchFailure(err).Error())
 	return 1
 }
 
@@ -111,7 +133,11 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	root.Version = Version
+	root.Flags().BoolP("version", "V", false, "output the version number")
+	// commanderParse dispatches the line, so cobra's own `completion` and root
+	// `help` commands are never reached; Bun's root has neither.
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetHelpCommand(&cobra.Command{Use: "no-help", Hidden: true})
 	root.SilenceErrors = true
 	root.SilenceUsage = true
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
@@ -137,10 +163,9 @@ var (
 	managed   = map[string]bool{"add": true, "rename": true, "remove": true}
 )
 
+// gate is Bun's preAction hook. It runs for the root too: bare `agentio`
+// is the root action, which Bun gates on the vault.
 func gate(cmd *cobra.Command, _ *plugins.Registry) error {
-	if cmd.Parent() == nil {
-		return nil
-	}
 	top := topName(cmd)
 	name := cmd.Name()
 	parent := ""
@@ -221,24 +246,6 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		if len(spec.Examples) > 0 {
 			leaf.Example = strings.Join(spec.Examples, "\n")
 		}
-		req := 0
-		variadic := false
-		for _, arg := range spec.Arguments {
-			if arg.Required {
-				req++
-			}
-			if arg.Variadic {
-				variadic = true
-			}
-		}
-		switch {
-		case variadic:
-			leaf.Args = cobra.MinimumNArgs(req)
-		case len(spec.Arguments) == req:
-			leaf.Args = cobra.ExactArgs(req)
-		default:
-			leaf.Args = cobra.RangeArgs(req, len(spec.Arguments))
-		}
 		declareOptions(leaf.Flags(), spec.Options)
 		if p.Profile != nil {
 			leaf.Flags().String("profile", "", "Profile name (optional if only one profile exists)")
@@ -270,16 +277,23 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 				}
 				in.Options[f.Name] = flagValue(c.Flags(), f)
 			})
-			if specCopy.Input == "text" || specCopy.Input == "json" {
+			switch specCopy.Input {
+			case "text":
+				// Read when the command asks: Bun's commands read stdin only
+				// when the value it stands in for is missing.
+				stdin := c.InOrStdin()
+				in.ReadStdin = sync.OnceValues(func() (string, bool) {
+					raw, present, err := host.ReadStdin(stdin)
+					return raw, present && err == nil
+				})
+			case "json":
 				raw, present, err := host.ReadStdin(c.InOrStdin())
 				if err != nil {
 					return err
 				}
-				stdin, err := host.ParseStdin(&specCopy, raw, present)
-				if err != nil {
+				if in.Stdin, err = host.ParseStdin(&specCopy, raw, present); err != nil {
 					return err
 				}
-				in.Stdin = stdin
 			}
 			result, err := host.Execute(context.Background(), reg, pluginCopy, &specCopy, in)
 			asJSON := false
@@ -309,7 +323,8 @@ const optionalBare = "true"
 
 // declareOptions adds plugin OptionSpecs as flags: a <value> flag is a string
 // (a []string when repeatable), a [value] flag is a string that may be given
-// bare, anything else (or a bool default) is a switch.
+// bare, anything else (or a bool default) is a switch. The Bun flags string
+// and requiredOption stay on the flag for commanderParse.
 func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 	for _, opt := range opts {
 		fname := longName(opt.Flags)
@@ -324,6 +339,10 @@ func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 		} else {
 			def, _ := opt.DefaultValue.(string)
 			flags.String(fname, def, opt.Description)
+		}
+		_ = flags.SetAnnotation(fname, flagSpecs, []string{opt.Flags})
+		if opt.Required {
+			_ = flags.SetAnnotation(fname, cobra.BashCompOneRequiredFlag, []string{"true"})
 		}
 	}
 }
@@ -376,89 +395,8 @@ func isOptionalValue(flags string) bool {
 	return strings.Contains(flags, "[") && !strings.Contains(flags, "<")
 }
 
-// optionalValues gives a [value] flag Commander's parsing: `--json card.json`
-// takes card.json as the value unless it starts with "-". pflag only takes a
-// value after "=", so the pair is joined before cobra parses the line.
-func optionalValues(root *cobra.Command, args []string) []string {
-	leaf, _, err := root.Find(args)
-	if err != nil || leaf == nil {
-		return args
-	}
-	optional := map[string]bool{}
-	leaf.Flags().VisitAll(func(f *pflag.Flag) {
-		if f.NoOptDefVal == optionalBare && f.Value.Type() == "string" {
-			optional["--"+f.Name] = true
-		}
-	})
-	if len(optional) == 0 {
-		return args
-	}
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			return append(out, args[i:]...)
-		}
-		if optional[a] && i+1 < len(args) && !(len(args[i+1]) > 1 && args[i+1][0] == '-') {
-			out = append(out, a+"="+args[i+1])
-			i++
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
-}
-
 // defaultCommand is the group annotation naming its CommandSpec.Default child.
 const defaultCommand = "agentio-default-command"
-
-// defaultSubcommands gives a group with a Default command Commander's
-// dispatch: `gtasks lists --limit 5` runs `gtasks lists list --limit 5`.
-// Asking the group itself for help still shows the group, as in Commander.
-func defaultSubcommands(root *cobra.Command, args []string) []string {
-	group, _, err := root.Find(args)
-	if err != nil || group == nil || group.Annotations[defaultCommand] == "" {
-		return args
-	}
-	for _, a := range args {
-		if a == "--" {
-			break
-		}
-		if a == "-h" || a == "--help" {
-			return args
-		}
-	}
-	// Find the argument that named the group: walk the command words from
-	// the root, skipping flags, and insert the default right after it.
-	var chain []*cobra.Command
-	for c := group; c != root && c != nil; c = c.Parent() {
-		chain = append([]*cobra.Command{c}, chain...)
-	}
-	at := -1
-	for i, a := range args {
-		if len(chain) == 0 {
-			break
-		}
-		if a == "--" {
-			return args
-		}
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
-		if chain[0].Name() != a && !chain[0].HasAlias(a) {
-			return args
-		}
-		chain = chain[1:]
-		at = i
-	}
-	if len(chain) != 0 || at < 0 {
-		return args
-	}
-	out := make([]string, 0, len(args)+1)
-	out = append(out, args[:at+1]...)
-	out = append(out, group.Annotations[defaultCommand])
-	return append(out, args[at+1:]...)
-}
 
 func nested(root *cobra.Command, path string) *cobra.Command {
 	cur := root
@@ -500,10 +438,6 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		Use:   "add",
 		Short: "Add a new " + p.DisplayName + " profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Commander's requiredOption: only an absent flag fails; a given "" is present.
-			if p.Profile.RequireProfile && !cmd.Flags().Changed("profile") {
-				return clierr.New(clierr.InvalidParams, "required option '--profile <name>' not specified", "")
-			}
 			opts := plugins.SetupOptions{Profile: profileName, ReadOnly: readOnly, Options: optionValues(cmd.Flags(), p.Profile.SetupOptions)}
 			return host.AddProfile(context.Background(), p, opts, host.NewSetupContext(streams(cmd)), cmd.OutOrStdout())
 		},
@@ -513,6 +447,9 @@ func serviceProfile(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 		profileUsage = "Profile name (required)"
 	}
 	add.Flags().StringVar(&profileName, "profile", "", profileUsage)
+	if p.Profile.RequireProfile {
+		_ = add.MarkFlagRequired("profile")
+	}
 	declareOptions(add.Flags(), p.Profile.SetupOptions)
 	add.Flags().BoolVar(&readOnly, "read-only", false, "Create as read-only profile (blocks write operations)")
 	list := &cobra.Command{
@@ -655,7 +592,6 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	list := &cobra.Command{
 		Use:   "list [service]",
 		Short: "List configured profiles",
-		Args:  cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			service := ""
 			if len(args) == 1 {
@@ -693,7 +629,6 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	add := &cobra.Command{
 		Use:   "add <service>",
 		Short: "Add a profile for a service",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := assertKnown(args[0]); err != nil {
 				return err
@@ -706,7 +641,6 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	rename := &cobra.Command{
 		Use:   "rename <service> <name> <new-name>",
 		Short: "Rename a profile, keeping its credentials and key access",
-		Args:  cobra.ExactArgs(3),
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := assertKnown(args[0]); err != nil {
 				return err
@@ -725,7 +659,6 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	remove := &cobra.Command{
 		Use:   "remove <service> <name>",
 		Short: "Remove a profile",
-		Args:  cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := assertKnown(args[0]); err != nil {
 				return err
@@ -744,7 +677,6 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	reauth := &cobra.Command{
 		Use:   "reauth <service> [name]",
 		Short: "Re-authenticate an expired or invalid profile",
-		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := assertKnown(args[0]); err != nil {
 				return err
@@ -836,7 +768,7 @@ func keyCmd() *cobra.Command {
 	}
 	var id string
 	revoke := &cobra.Command{
-		Use: "revoke <id>", Short: "Revoke an API key", Args: cobra.ExactArgs(1),
+		Use: "revoke <id>", Short: "Revoke an API key",
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := profile.RevokeKey(args[0]); err != nil {
 				return err
@@ -846,7 +778,7 @@ func keyCmd() *cobra.Command {
 		},
 	}
 	rotate := &cobra.Command{
-		Use: "rotate <id>", Short: "Rotate an API key secret", Args: cobra.ExactArgs(1),
+		Use: "rotate <id>", Short: "Rotate an API key secret",
 		RunE: func(c *cobra.Command, args []string) error {
 			if hubURL == "" {
 				hubURL = "http://127.0.0.1:7890"
@@ -861,7 +793,7 @@ func keyCmd() *cobra.Command {
 	}
 	rotate.Flags().StringVar(&hubURL, "url", "http://127.0.0.1:7890", "Hub URL embedded in the token")
 	update := &cobra.Command{
-		Use: "update <id>", Short: "Update an API key", Args: cobra.ExactArgs(1),
+		Use: "update <id>", Short: "Update an API key",
 		RunE: func(c *cobra.Command, args []string) error {
 			patch := profile.KeyInput{}
 			if c.Flags().Changed("name") {
@@ -927,7 +859,7 @@ func daemonCmd(reg *plugins.Registry) *cobra.Command {
 }
 
 func passFromEnv() (string, string) {
-	v := strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE"))
+	v := os.Getenv("AGENTIO_PASSPHRASE")
 	if v == "" {
 		return "", ""
 	}
@@ -938,7 +870,6 @@ func loginCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login <hub>",
 		Short: "Log in to a vault hub and store the token",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			origin, err := profile.ValidateHubURL(args[0])
 			if err != nil {
@@ -1115,7 +1046,6 @@ func skillCmd(reg *plugins.Registry) *cobra.Command {
 	return &cobra.Command{
 		Use:   "skill <service>",
 		Short: "Print a SKILL.md for one service",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			p := reg.Find(args[0])
 			if p == nil {

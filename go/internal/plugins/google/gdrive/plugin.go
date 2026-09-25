@@ -242,7 +242,7 @@ func searchCmd() plugins.CommandSpec {
 		Description: "Search for files",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--query <text>", Description: "Search text (searches name and content)"},
+			{Flags: "--query <text>", Required: true, Description: "Search text (searches name and content)"},
 			{Flags: "--limit <n>", Description: "Number of results", DefaultValue: "20"},
 			{Flags: "--type <mime>", Description: "Filter by MIME type"},
 			{Flags: "--folder <id>", Description: "Search within folder"},
@@ -255,7 +255,6 @@ func searchCmd() plugins.CommandSpec {
 			"# restrict to a folder, return more results",
 			`agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50`,
 		},
-		Prepare: plugins.Required("--query <text>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {
@@ -275,7 +274,7 @@ func downloadCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
-			{Flags: "--output <path>", Description: "Output file path"},
+			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--export <format>", Description: "Export format for Google Workspace files (pdf, docx, xlsx, csv, pptx, txt, etc.)"},
 		},
 		Examples: []string{
@@ -290,7 +289,6 @@ func downloadCmd() plugins.CommandSpec {
 			"Export formats: Docs -> pdf|docx|odt|txt|html|rtf, Sheets -> xlsx|csv|pdf|ods|tsv,",
 			"Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.",
 		},
-		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {

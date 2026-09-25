@@ -238,7 +238,7 @@ func notesPut() plugins.CommandSpec {
 		Access: "write", Input: "text",
 		Examples: []string{"echo hello | agentio acme notes put"},
 		Run: func(_ context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			text, _ := in.Stdin.(string)
+			text, _ := plugins.Piped(in)
 			account, _ := run.Credentials["account"].(string)
 			if err := plugincache.Write(ServiceID, account, "note", map[string]string{"text": text}); err != nil {
 				return nil, err

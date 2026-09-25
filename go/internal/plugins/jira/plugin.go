@@ -4,7 +4,6 @@ package jira
 import (
 	"context"
 
-	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 )
@@ -136,8 +135,7 @@ func commentBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error)
 	if body := in.Arg("body"); body != "" {
 		return body, nil
 	}
-	piped, _ := in.Stdin.(string)
-	if body := jsvalue.Trim(jsvalue.BufferString([]byte(piped))); body != "" {
+	if body := plugins.Stdin(in); body != "" {
 		return body, nil
 	}
 	return "", fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")

@@ -278,6 +278,9 @@ func (p Product) CheckCommands(t *testing.T, want map[string]Row) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

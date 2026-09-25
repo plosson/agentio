@@ -3,8 +3,9 @@
 A Go port of the agentio host: the encrypted vault, profiles, credential
 refresh, the declarative plugin contract, and the local credential hub.
 
-No real service is included. Three fake plugins exercise the host. The Bun CLI
-on `main` is unchanged.
+It registers the Bun services (telegram excepted). The fake plugins `acme`,
+`board` and `ping` are test fixtures: only tests register them. The Bun CLI on
+`main` is unchanged.
 
 ## Build
 
@@ -15,7 +16,9 @@ go build -o agentio ./cmd/agentio
 ```
 
 `go run ./cmd/agentio` works the same way. This binary is not the `agentio` on
-your PATH.
+your PATH. It reports version `0.0.0-dev`; `bun run build:go` (from the
+repository root) builds `dist/agentio-go` with the `package.json` version, as
+`build:native` does for Bun.
 
 ## Do not point it at a real vault
 
@@ -29,32 +32,13 @@ Try it under an empty home:
 export HOME=$(mktemp -d)
 export AGENTIO_PASSPHRASE='test-pass-123'
 go run ./cmd/agentio vault init --passphrase "$AGENTIO_PASSPHRASE"
-go run ./cmd/agentio ping once
+go run ./cmd/agentio rss info https://example.com/feed.xml
 ```
 
 `--help`, `docs`, `plugin list`, and `skill` only print text. Other commands
 open whatever vault that home points at. `logout` deletes the token file.
 `vault reset --force`, `vault clear --force`, `vault import`, `vault
 passphrase`, and `vault set` rewrite the vault.
-
-## Fake services
-
-| Command | What it is |
-| --- | --- |
-| `ping` | No stored credentials. `ping once` prints `pong`. |
-| `board` | A static API token. The hub returns the whole credential. |
-| `acme` | Short-lived tokens. The host refreshes and redacts the refresh token. |
-
-```bash
-go run ./cmd/agentio plugin list
-go run ./cmd/agentio acme profile add
-go run ./cmd/agentio acme whoami --json
-go run ./cmd/agentio status
-```
-
-`acme profile add` asks for an account name, then for an authorization code.
-Paste `old|rt|1` to store access token `old`, refresh token `rt`, and an
-expiry already in the past. The next command refreshes it.
 
 ## Hub
 

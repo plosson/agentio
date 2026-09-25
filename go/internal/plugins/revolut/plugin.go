@@ -614,9 +614,6 @@ type payInput struct {
 }
 
 func payInputOf(in plugins.CommandInput, fail plugins.FailFunc) (payInput, error) {
-	if err := plugins.RequireOptions(in, fail, "--from <account-id>", "--to <id>", "--amount <number>", "--currency <code>"); err != nil {
-		return payInput{}, err
-	}
 	if on := in.Option("on"); on != "" && !isoDate.MatchString(on) {
 		return payInput{}, fail("INVALID_PARAMS", fmt.Sprintf(`--on must be a date as YYYY-MM-DD, got "%s"`, on), "")
 	}
@@ -661,10 +658,10 @@ func payCmd() plugins.CommandSpec {
 		Prepare:     plugins.Parse(payInputOf),
 		Operation:   "move money",
 		Options: []plugins.OptionSpec{
-			{Flags: "--from <account-id>", Description: "Your account to pay from"},
-			{Flags: "--to <id>", Description: "Counterparty ID, or one of your own account IDs to move money internally"},
-			{Flags: "--amount <number>", Description: "Amount to send"},
-			{Flags: "--currency <code>", Description: "Currency, ISO 4217 (e.g. EUR)"},
+			{Flags: "--from <account-id>", Required: true, Description: "Your account to pay from"},
+			{Flags: "--to <id>", Required: true, Description: "Counterparty ID, or one of your own account IDs to move money internally"},
+			{Flags: "--amount <number>", Required: true, Description: "Amount to send"},
+			{Flags: "--currency <code>", Required: true, Description: "Currency, ISO 4217 (e.g. EUR)"},
 			{Flags: "--reference <text>", Description: "Reference shown to you and the recipient (required for a counterparty)"},
 			{Flags: "--to-account <id>", Description: "Counterparty's receiving account (when it has more than one)"},
 			{Flags: "--to-card <id>", Description: "Counterparty's card, for a card transfer"},
@@ -831,9 +828,6 @@ func counterpartiesGetCmd() plugins.CommandSpec {
 
 // counterpartyCheck is Bun counterparties add before getRevolutClient.
 func counterpartyCheck(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if err := plugins.RequireOptions(in, fail, "--bank-country <code>", "--currency <code>"); err != nil {
-		return err
-	}
 	if in.Option("company-name") == "" && (in.Option("first-name") == "" || in.Option("last-name") == "") {
 		return fail("INVALID_PARAMS", "A counterparty needs a name", "Pass --company-name, or both --first-name and --last-name")
 	}
@@ -854,8 +848,8 @@ func counterpartiesAddCmd() plugins.CommandSpec {
 			{Flags: "--company-name <name>", Description: "Company name (use instead of --first-name/--last-name)"},
 			{Flags: "--first-name <name>", Description: "Individual first name"},
 			{Flags: "--last-name <name>", Description: "Individual last name"},
-			{Flags: "--bank-country <code>", Description: "Bank country, ISO 3166-1 alpha-2 (e.g. BE)"},
-			{Flags: "--currency <code>", Description: "Account currency (e.g. EUR)"},
+			{Flags: "--bank-country <code>", Required: true, Description: "Bank country, ISO 3166-1 alpha-2 (e.g. BE)"},
+			{Flags: "--currency <code>", Required: true, Description: "Account currency (e.g. EUR)"},
 			{Flags: "--iban <iban>", Description: "IBAN"},
 			{Flags: "--bic <bic>", Description: "BIC/SWIFT"},
 			{Flags: "--account-no <number>", Description: "Account number (non-IBAN)"},

@@ -228,7 +228,7 @@ func putSource(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 		}
 		return jsvalue.BufferString(raw), nil
 	}
-	if _, ok := in.Stdin.(string); !ok {
+	if _, ok := plugins.Piped(in); !ok {
 		return "", fail("INVALID_PARAMS", "No content provided", "Pass --source <text>, --from <path>, or pipe content via stdin")
 	}
 	return plugins.Stdin(in), nil

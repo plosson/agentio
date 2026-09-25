@@ -198,7 +198,7 @@ func HubCall(hubURL, path string, call Call) (json.RawMessage, int, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, clierr.New(clierr.NetworkError,
-			fmt.Sprintf("Cannot reach the vault hub at %s: %s", hubURL, err.Error()),
+			fmt.Sprintf("Cannot reach the vault hub at %s: %s", hubURL, plugins.FetchFailure(err).Error()),
 			"Check the network, and that the hub daemon is running")
 	}
 	defer resp.Body.Close()

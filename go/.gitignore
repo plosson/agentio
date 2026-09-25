@@ -1,0 +1,2 @@
+# Local build output of `go build ./cmd/agentio`
+/agentio

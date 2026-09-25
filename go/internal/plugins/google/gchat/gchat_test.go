@@ -88,10 +88,10 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	}
 	want := map[string]row{
 		"send":              {"[message]", "--space <id> --thread <id> --json [file] --attachment <path>*", "write", "send message", "text"},
-		"list":              {"", "--space <id> --limit <n>=10 --thread <id> --since <date> --until <date> --format <format>=text", "read", "", ""},
-		"get":               {"<message-id>", "--space <id> --format <format>=text", "read", "", ""},
+		"list":              {"", "--space <id>! --limit <n>=10 --thread <id> --since <date> --until <date> --format <format>=text", "read", "", ""},
+		"get":               {"<message-id>", "--space <id>! --format <format>=text", "read", "", ""},
 		"spaces":            {"", "--filter <text> --with <user>", "read", "", ""},
-		"members":           {"", "--space <id-or-name>", "read", "", ""},
+		"members":           {"", "--space <id-or-name>!", "read", "", ""},
 		"user":              {"<user-id>", "", "read", "", ""},
 		"directory refresh": {"", "", "read", "", ""},
 	}
@@ -125,6 +125,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

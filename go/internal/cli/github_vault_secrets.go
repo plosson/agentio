@@ -64,7 +64,6 @@ func githubSecretCmd(reg *plugins.Registry, spec githubSecretSpec) *cobra.Comman
 		Use:     spec.use,
 		Short:   spec.short,
 		Example: spec.example,
-		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := args[0]
 			if err := assertRepo(repo); err != nil {

@@ -62,7 +62,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"metadata": {"<spreadsheet-id-or-url>", "", "read", "", true, false},
 		"create":   {"<title>", "--sheets <names>", "write", "create spreadsheet", true, false},
 		"copy":     {"<spreadsheet-id-or-url> <title>", "--parent <folder-id>", "write", "copy spreadsheet", true, false},
-		"export":   {"<spreadsheet-id-or-url>", "--output <path> --format <fmt>=xlsx", "read", "", false, true},
+		"export":   {"<spreadsheet-id-or-url>", "--output <path>! --format <fmt>=xlsx", "read", "", false, false},
 	}
 	p := New()
 	if p.ID != "gsheets" || p.DisplayName != "Google Sheets" || p.Description != "Use when interacting with Google Sheets via the agentio CLI." {
@@ -97,6 +97,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

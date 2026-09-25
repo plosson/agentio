@@ -48,7 +48,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		format, prepare, verbatim      bool
 	}
 	want := map[string]row{
-		"create":   {"", "--title <title> --parent <containerId>", "write", "create script project", "", true, true, false},
+		"create":   {"", "--title <title>! --parent <containerId>", "write", "create script project", "", true, false, false},
 		"metadata": {"<id>", "", "read", "", "", true, false, false},
 		"list":     {"", "--parent <containerId> --limit <n>=25", "read", "", "", true, false, false},
 		"delete":   {"<id>", "--force", "write", "delete script project", "", false, false, false},
@@ -86,6 +86,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

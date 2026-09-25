@@ -11,9 +11,9 @@
 //     Bun clients' error shapes: APIError, NotFoundOr, StatusError, Failed)
 //     beside the google.golang.org/api services it builds with NewService or
 //     DriveService. CallJSON serves the calls those services cannot make.
-//   - Commands: the generic input helpers (Stdin, OptionOrStdin,
-//     RequireOptions, Result, and the Prepare adapters Parse, Check,
-//     Required) live in package plugins. BatchRequests (a batch command's
+//   - Commands: the generic input helpers (Stdin, OptionOrStdin, Result,
+//     and the Prepare adapters Parse and Check) live in package plugins; a
+//     required option is OptionSpec.Required. BatchRequests (a batch command's
 //     Prepare, through Parse) and the Drive helpers
 //     (ListDriveFiles, ExportDriveFile, CopyDriveFile, ValidateDriveFiles)
 //     cover what several products share.

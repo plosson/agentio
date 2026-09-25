@@ -50,9 +50,6 @@ type syncInput struct {
 }
 
 func peppolSyncInput(in plugins.CommandInput, fail plugins.FailFunc) (syncInput, error) {
-	if err := plugins.RequireOptions(in, fail, "--output <dir>"); err != nil {
-		return syncInput{}, err
-	}
 	since, err := requireIsoDate(in, fail, "since")
 	return syncInput{output: in.Option("output"), since: since}, err
 }

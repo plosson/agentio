@@ -84,12 +84,9 @@ func getCmd() plugins.CommandSpec {
 	}
 }
 
-// createContent is Bun's check before getGDocsClient: the required --title,
-// then the content, which it returns.
+// createContent is Bun's check before getGDocsClient: the content, which it
+// returns.
 func createContent(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
-		return "", err
-	}
 	content, _ := plugins.OptionOrStdin(in, "content", true)
 	if content == "" {
 		return "", fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
@@ -106,7 +103,7 @@ func createCmd() plugins.CommandSpec {
 		Operation:   "create document",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
-			{Flags: "--title <title>", Description: "Document title"},
+			{Flags: "--title <title>", Required: true, Description: "Document title"},
 			{Flags: "--content <text>", Description: "Markdown content (or pipe via stdin)"},
 			{Flags: "--folder <folder-id>", Description: "Folder ID to create the document in"},
 		},

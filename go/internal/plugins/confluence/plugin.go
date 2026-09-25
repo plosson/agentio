@@ -4,7 +4,6 @@ package confluence
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
@@ -48,20 +47,18 @@ var app = atlassian.App{
 	SetupInfo: "Test with: agentio confluence spaces",
 }
 
-func piped(content string, stdin any) string {
-	if content != "" {
-		return content
+// piped is Bun's `value || await readStdin()`: stdin is read only when the
+// value is empty.
+func piped(value string, in plugins.CommandInput) string {
+	if value != "" {
+		return value
 	}
-	text, _ := stdin.(string)
-	return strings.TrimSpace(text)
+	return plugins.Stdin(in)
 }
 
 // createBody, bodyInput and commentBody are Bun's checks before
 // getConfluenceClient; each returns the body the command sends.
 func createBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
-		return "", err
-	}
 	if in.Option("space") == "" && in.Option("space-id") == "" {
 		return "", fail("INVALID_PARAMS", "--space or --space-id is required", "")
 	}
@@ -69,7 +66,7 @@ func createBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) 
 }
 
 func bodyInput(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	body := piped(in.Option("content"), in.Stdin)
+	body := piped(in.Option("content"), in)
 	if body == "" {
 		return "", fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
 	}
@@ -77,7 +74,7 @@ func bodyInput(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 }
 
 func commentBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
-	text := piped(in.Arg("body"), in.Stdin)
+	text := piped(in.Arg("body"), in)
 	if text == "" {
 		return "", fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
 	}
@@ -112,7 +109,7 @@ func spacesCmd() plugins.CommandSpec {
 			"agentio confluence spaces --limit 10",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listSpaces(limitQuery(in, 50), in.Option("type"))
+			return plugins.Result(apiFrom(ctx, run).listSpaces(limitQuery(in, 50), in.Option("type")))
 		},
 		Format: formatSpaces,
 	}
@@ -138,7 +135,7 @@ func pagesCmd() plugins.CommandSpec {
 			"agentio confluence pages --space ENG --limit 50",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listPages(in.Option("space"), in.Option("space-id"), in.Option("parent"), limitQuery(in, 25))
+			return plugins.Result(apiFrom(ctx, run).listPages(in.Option("space"), in.Option("space-id"), in.Option("parent"), limitQuery(in, 25)))
 		},
 		Format: formatPages,
 	}
@@ -163,7 +160,7 @@ func getCmd() plugins.CommandSpec {
 		},
 		Prepare: plugins.Parse(pageFormat),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).getPage(in.Arg("page-id"), plugins.Prepared[string](run))
+			return plugins.Result(apiFrom(ctx, run).getPage(in.Arg("page-id"), plugins.Prepared[string](run)))
 		},
 		Format: formatPage,
 	}
@@ -190,7 +187,7 @@ func searchCmd() plugins.CommandSpec {
 			`agentio confluence search --space ENG --type page --text "onboarding"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).search(in.Option("cql"), in.Option("space"), in.Option("type"), in.Option("text"), limitQuery(in, 25))
+			return plugins.Result(apiFrom(ctx, run).search(in.Option("cql"), in.Option("space"), in.Option("type"), in.Option("text"), limitQuery(in, 25)))
 		},
 		Format: formatSearch,
 	}
@@ -205,7 +202,7 @@ func createCmd() plugins.CommandSpec {
 		Operation:   "create page",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
-			{Flags: "--title <title>", Description: "Page title"},
+			{Flags: "--title <title>", Required: true, Description: "Page title"},
 			{Flags: "--space <key>", Description: "Space key (or use --space-id)"},
 			{Flags: "--space-id <id>", Description: "Space id (or use --space)"},
 			{Flags: "--parent <id>", Description: "Parent page id"},
@@ -220,7 +217,7 @@ func createCmd() plugins.CommandSpec {
 			`agentio confluence create --title "Sub Page" --space ENG --parent 123456 --content "<p>Content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.OptionPtr("parent"), plugins.Prepared[string](run))
+			return plugins.Result(apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.OptionPtr("parent"), plugins.Prepared[string](run)))
 		},
 		Format: formatCreated,
 	}
@@ -248,7 +245,7 @@ func updateCmd() plugins.CommandSpec {
 			`agentio confluence update 123456 --title "New Title" --content "<p>New content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.OptionPtr("title"), plugins.Prepared[string](run))
+			return plugins.Result(apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.OptionPtr("title"), plugins.Prepared[string](run)))
 		},
 		Format: formatUpdated,
 	}
@@ -265,7 +262,7 @@ func commentsCmd() plugins.CommandSpec {
 			"agentio confluence comments 123456",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).listComments(in.Arg("page-id"))
+			return plugins.Result(apiFrom(ctx, run).listComments(in.Arg("page-id")))
 		},
 		Format: formatComments,
 	}
@@ -290,7 +287,7 @@ func commentCmd() plugins.CommandSpec {
 			`echo "LGTM" | agentio confluence comment 123456`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			return apiFrom(ctx, run).addComment(in.Arg("page-id"), plugins.Prepared[string](run))
+			return plugins.Result(apiFrom(ctx, run).addComment(in.Arg("page-id"), plugins.Prepared[string](run)))
 		},
 		Format: formatComment,
 	}

@@ -208,12 +208,11 @@ func addCmd() plugins.CommandSpec {
 		Path:        "add",
 		Description: "Add a new task",
 		Access:      "write",
-		Prepare:     plugins.Required("--title <title>"),
 		Operation:   "create task",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg},
 		Options: []plugins.OptionSpec{
-			{Flags: "--title <title>", Description: "Task title"},
+			{Flags: "--title <title>", Required: true, Description: "Task title"},
 			{Flags: "--notes <text>", Description: "Task notes/description (or pipe via stdin)"},
 			{Flags: "--due <date>", Description: "Due date (RFC3339 or YYYY-MM-DD)"},
 			{Flags: "--parent <task-id>", Description: "Parent task ID (create as subtask)"},

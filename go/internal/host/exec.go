@@ -86,8 +86,12 @@ func Invoke(ctx context.Context, spec *plugins.CommandSpec, in plugins.CommandIn
 	return spec.Run(ctx, in, run)
 }
 
-// prepare is the pre-profile phase. A failure prints nothing.
+// prepare is the pre-profile phase: the required options, then the
+// command's Prepare. A failure prints nothing.
 func prepare(ctx context.Context, spec *plugins.CommandSpec, in plugins.CommandInput, pre *plugins.PrepareContext) (any, bool, error) {
+	if err := plugins.RequireOptions(in, pre.Fail, spec.Options); err != nil {
+		return nil, false, err
+	}
 	if spec.Prepare == nil {
 		return nil, false, nil
 	}

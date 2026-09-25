@@ -91,18 +91,29 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 		got = append(got, string(code)+"|"+message+"|"+suggestion)
 		return errors.New(message)
 	}}
+	required := func(flags ...string) []OptionSpec {
+		var opts []OptionSpec
+		for _, f := range flags {
+			opts = append(opts, OptionSpec{Flags: f, Required: true})
+		}
+		return opts
+	}
 	in := CommandInput{Options: map[string]any{"space": "", "limit": true, "query": "q"}}
-	if err := RequireOptions(in, run.Fail, "--query <q>", "--limit <n>", "--space <id>"); err == nil {
+	if err := RequireOptions(in, run.Fail, required("--query <q>", "--limit <n>", "--space <id>")); err == nil {
 		t.Fatal("a bool where a string is required passed")
 	}
 	// Commander's requiredOption checks `=== undefined`: a given "" is present,
 	// while an absent option (nil, as the host leaves it) still fails after it.
-	if err := RequireOptions(in, run.Fail, "--space <id>"); err != nil {
+	if err := RequireOptions(in, run.Fail, required("--space <id>")); err != nil {
 		t.Fatalf("a given empty string failed: %v", err)
 	}
 	in.Options["missing"] = nil
-	if err := RequireOptions(in, run.Fail, "--space <id>", "--missing <x>"); err == nil {
+	if err := RequireOptions(in, run.Fail, required("--space <id>", "--missing <x>")); err == nil {
 		t.Fatal("an absent option after a given empty one passed")
+	}
+	// An option that is not Required may be absent.
+	if err := RequireOptions(in, run.Fail, []OptionSpec{{Flags: "--missing <x>"}}); err != nil {
+		t.Fatal(err)
 	}
 	want := []string{
 		"INVALID_PARAMS|required option '--limit <n>' not specified|",
@@ -111,12 +122,12 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("%q", got)
 	}
-	if err := RequireOptions(in, run.Fail, "--query <q>"); err != nil {
+	if err := RequireOptions(in, run.Fail, required("--query <q>")); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// Parse, Check and Required are Prepare adapters: a failure carries no
+// Parse and Check are Prepare adapters: a failure carries no
 // value and never stops the command early; Prepared reads the value back as
 // the type Parse produced, and a missing or other-typed value as its zero.
 func TestPrepareAdapters(t *testing.T) {
@@ -151,14 +162,7 @@ func TestPrepareAdapters(t *testing.T) {
 	if v, done, err := check(context.Background(), CommandInput{}, pre); v != nil || done || err == nil {
 		t.Fatalf("check: %#v %v %v", v, done, err)
 	}
-	req := Required("--query <q>")
-	if _, _, err := req(context.Background(), CommandInput{Options: map[string]any{"query": ""}}, pre); err != nil {
-		t.Fatalf("given empty is present: %v", err)
-	}
-	if _, _, err := req(context.Background(), CommandInput{Options: map[string]any{}}, pre); err == nil {
-		t.Fatal("absent option passed")
-	}
-	want := "INVALID_PARAMS|n is required,INVALID_PARAMS|no,INVALID_PARAMS|required option '--query <q>' not specified"
+	want := "INVALID_PARAMS|n is required,INVALID_PARAMS|no"
 	if strings.Join(failed, ",") != want {
 		t.Fatalf("failures %v", failed)
 	}

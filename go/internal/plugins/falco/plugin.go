@@ -230,7 +230,7 @@ func peppolSyncCmd() plugins.CommandSpec {
 		Description: "Download every matching Peppol document into a directory",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--output <dir>", Description: "Target directory (created if missing)"},
+			{Flags: "--output <dir>", Required: true, Description: "Target directory (created if missing)"},
 			{Flags: "--since <date>", Description: "Only documents dated on or after YYYY-MM-DD"},
 			{Flags: "--sender <text>", Description: "Only documents whose supplier name or VAT number contains this"},
 			{Flags: "--extract-pdf", Description: "Ensure a PDF exists for every document"},
@@ -313,7 +313,7 @@ func invoicesSyncCmd() plugins.CommandSpec {
 		Description: "Download outbound billing document PDFs into a directory",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--output <dir>", Description: "Target directory (created if missing)"},
+			{Flags: "--output <dir>", Required: true, Description: "Target directory (created if missing)"},
 			{Flags: "--since <date>", Description: "Only documents sent or created on or after YYYY-MM-DD"},
 			{Flags: "--customer <text>", Description: "Only documents whose customer name contains this"},
 			{Flags: "--include <types>", Description: "Comma-separated document types", DefaultValue: "Invoice,CreditNote"},

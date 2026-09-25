@@ -38,10 +38,9 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new Apps Script project (standalone or container-bound)",
 		Access:      "write",
-		Prepare:     plugins.Required("--title <title>"),
 		Operation:   "create script project",
 		Options: []plugins.OptionSpec{
-			{Flags: "--title <title>", Description: "Script project title"},
+			{Flags: "--title <title>", Required: true, Description: "Script project title"},
 			{Flags: "--parent <containerId>", Description: "Bind to a Sheet/Doc/Form/Slides ID (omit for standalone)"},
 		},
 		Examples: []string{

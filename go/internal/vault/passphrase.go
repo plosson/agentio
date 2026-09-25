@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 const MinPassphraseLen = 8
@@ -57,7 +58,7 @@ func setMemory(pass string, set bool) {
 }
 
 func HasResidentPassphrase() bool {
-	if strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE")) != "" {
+	if os.Getenv("AGENTIO_PASSPHRASE") != "" {
 		return true
 	}
 	_, set, _ := memory()
@@ -74,7 +75,8 @@ const (
 )
 
 func lookupPassphrase() (string, passSource) {
-	if v := strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE")); v != "" {
+	// Verbatim, as Bun: a passphrase may start or end with a space.
+	if v := os.Getenv("AGENTIO_PASSPHRASE"); v != "" {
 		return v, fromEnv
 	}
 	pass, set, only := memory()
@@ -179,7 +181,7 @@ func ClearPassphrase() error {
 }
 
 func ValidatePassphrase(passphrase string) error {
-	if len(passphrase) < MinPassphraseLen {
+	if jsvalue.Length(passphrase) < MinPassphraseLen { // String#length
 		return clierr.New(clierr.InvalidParams,
 			"Passphrase must be at least 8 characters", "")
 	}

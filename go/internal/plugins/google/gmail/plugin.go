@@ -179,7 +179,7 @@ func searchCmd() plugins.CommandSpec {
 		Description: "Search messages using Gmail query syntax",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--query <query>", Description: "Search query"},
+			{Flags: "--query <query>", Required: true, Description: "Search query"},
 			{Flags: "--limit <n>", Description: "Max results (capped at 10000; >100 returns IDs only without per-message metadata)", DefaultValue: "10"},
 			{Flags: "--ids-only", Description: "Print one message ID per line (pipe-friendly into archive/label)"},
 		},
@@ -200,7 +200,6 @@ func searchCmd() plugins.CommandSpec {
 			"has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.",
 			"Combine with spaces (AND), OR, or - to negate.",
 		},
-		Prepare: plugins.Required("--query <query>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {

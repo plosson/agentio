@@ -3,24 +3,43 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/plosson/agentio/go/internal/plugins"
+	"github.com/plosson/agentio/go/internal/plugins/acme"
+	"github.com/plosson/agentio/go/internal/plugins/board"
 	"github.com/plosson/agentio/go/internal/plugins/google/googletest"
+	"github.com/plosson/agentio/go/internal/plugins/ping"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
 	"github.com/plosson/agentio/go/internal/vault"
 	"github.com/spf13/pflag"
 )
 
+// testCatalog is the production catalog after the host fixtures (acme, board,
+// ping), which only tests register.
+var testCatalog = func() *plugins.Registry {
+	reg, err := plugins.NewRegistry(acme.New(), board.New(), ping.New())
+	if err != nil {
+		panic(err)
+	}
+	registerServices(reg)
+	return reg
+}()
+
 func run(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 	var out, err bytes.Buffer
-	code := Execute(plugins.Default, args, &out, &err, strings.NewReader(""))
+	code := Execute(testCatalog, args, &out, &err, strings.NewReader(""))
 	return code, out.String(), err.String()
 }
 
@@ -28,6 +47,44 @@ func initCLI(t *testing.T) {
 	t.Helper()
 	testbox.Isolate(t)
 	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+}
+
+// The production catalog is Bun's SERVICE_PLUGINS, in order, without telegram:
+// the host fixtures (acme, board, ping) exist only in tests, so no help,
+// known-services list, docs or vault hint shows them.
+func TestProductionCatalogIsBunsServicesWithoutTheFixtures(t *testing.T) {
+	initCLI(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "")
+	want := []string{"confluence", "discourse", "dropbox", "falco", "gcal", "gchat", "gdocs", "gdrive", "github",
+		"gmail", "gsheets", "gslides", "gscript", "gtasks", "jira", "revolut", "rss", "slack", "sql"}
+	if got := ids(plugins.Default); !reflect.DeepEqual(got, want) {
+		t.Fatalf("catalog\n got %v\nwant %v", got, want)
+	}
+	exec := func(args ...string) (int, string) {
+		var out, errOut bytes.Buffer
+		code := Execute(plugins.Default, args, &out, &errOut, strings.NewReader(""))
+		return code, out.String() + errOut.String()
+	}
+	fixture := func(text string) bool {
+		for _, id := range []string{"acme", "board", "ping"} {
+			if strings.Contains(text, "agentio "+id) || strings.Contains(text, `"`+id+`"`) ||
+				strings.Contains(text, " "+id+" ") || strings.Contains(text, id+", ") || strings.Contains(text, "\n"+id+"\t") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, args := range [][]string{{"--help"}, {"docs"}, {"plugin", "list"}, {"profile", "add", "nosuch"},
+		{"vault", "init", "--passphrase", "test-pass-123", "--no-migrate"}} {
+		if _, text := exec(args...); fixture(text) {
+			t.Errorf("%v shows a test fixture:\n%s", args, text)
+		}
+	}
+	for _, id := range []string{"acme", "board", "ping"} {
+		if code, text := exec(id); code == 0 {
+			t.Errorf("%s ran in the production binary:\n%s", id, text)
+		}
+	}
 }
 
 func TestDocsDoNotNeedAVault(t *testing.T) {
@@ -224,7 +281,7 @@ func TestProfileAddPassesServiceSetupOptions(t *testing.T) {
 }
 
 // Bun slack `profile add` declares requiredOption('--profile <name>'): an
-// absent --profile fails before setup runs, a given "" is present (setup runs
+// absent --profile fails with Commander's message before setup runs, a given "" is present (setup runs
 // and the suggested name is used), and the top-level `profile add <service>`
 // keeps --profile optional.
 func TestProfileAddRequireProfile(t *testing.T) {
@@ -263,7 +320,7 @@ func TestProfileAddRequireProfile(t *testing.T) {
 		return code, out.String(), errOut.String()
 	}
 	code, out, errOut := exec("desk", "profile", "add", "--read-only")
-	if code == 0 || setups != 0 || out != "" || errOut != "Error [INVALID_PARAMS]: required option '--profile <name>' not specified\n" {
+	if code != 1 || setups != 0 || out != "" || errOut != "error: required option '--profile <name>' not specified\n" {
 		t.Fatalf("absent --profile: code %d setups %d\n%q\n%q", code, setups, out, errOut)
 	}
 	if refs, _ := profile.List("desk", nil); len(refs) != 0 {
@@ -675,5 +732,317 @@ func TestImportReportsAFailedVaultWrite(t *testing.T) {
 				t.Fatalf("code %d\n%s\n%s", code, out, errOut)
 			}
 		})
+	}
+}
+
+// A command line Commander rejects fails with Commander's message and exit 1,
+// in Commander's order (a missing value, then a missing required option, then
+// an unknown option, then the argument count), before the vault gate.
+// Expectations are Bun's output (`bun run src/index.ts …`, no vault).
+func TestParseErrorsAreCommanders(t *testing.T) {
+	initCLI(t)
+	cases := []struct{ line, stderr string }{
+		{"gmail lst", "error: unknown command 'lst'\n(Did you mean list?)"},
+		{"gmail nosuch", "error: unknown command 'nosuch'"},
+		{"nonexistent", "error: too many arguments. Expected 0 arguments but got 1."},
+		{"help", "error: too many arguments. Expected 0 arguments but got 1."},
+		{"help gmail", "error: too many arguments. Expected 0 arguments but got 2."},
+		{"gmail get", "error: missing required argument 'message-id'"},
+		{"gmail get a b", "error: too many arguments for 'get'. Expected 1 argument but got 2."},
+		{"gmail search --bogus", "error: required option '--query <query>' not specified"},
+		{"gmail search --query x --bogus", "error: unknown option '--bogus'"},
+		{"gmail list --limit", "error: option '--limit <n>' argument missing"},
+		{"gmail list --limt", "error: unknown option '--limt'\n(Did you mean --limit?)"},
+		{"vault init --bogus", "error: unknown option '--bogus'"},
+		{"status extra", "error: too many arguments for 'status'. Expected 0 arguments but got 1."},
+		{"gmail --bogus", "error: unknown option '--bogus'"},
+		{"gmail lst --bogus", "error: unknown command 'lst'\n(Did you mean list?)"},
+		{"gmail -x", "error: unknown option '-x'"},
+		{"vault lst", "error: unknown command 'lst'"},
+		{"vault ini", "error: unknown command 'ini'\n(Did you mean init?)"},
+		{"gmail hlp", "error: unknown command 'hlp'\n(Did you mean help?)"},
+		{"gmail labels lst", "error: unknown command 'lst'\n(Did you mean list?)"},
+		{"profile add", "error: missing required argument 'service'"},
+		{"profile add gmail extra", "error: too many arguments for 'add'. Expected 1 argument but got 2."},
+		{"gtasks lists --bogus", "error: unknown option '--bogus'"},
+		{"gtasks lists nosuch", "error: too many arguments for 'list'. Expected 0 arguments but got 1."},
+		{"status --json=1", "error: unknown option '--json=1'\n(Did you mean --json?)"},
+		{"reauth x", "error: too many arguments for 'reauth'. Expected 0 arguments but got 1."},
+		{"gmail get -- -5 x", "error: too many arguments for 'get'. Expected 1 argument but got 2."},
+		{"slack profile add", "error: required option '--profile <name>' not specified"},
+		{"gmail profile update", "error: required option '--profile <name>' not specified"},
+		{"gmail profile rename --to y", "error: required option '--profile <name>' not specified"},
+		{"--version=x", "error: unknown option '--version=x'\n(Did you mean --version?)"},
+		{"-v", "error: unknown option '-v'"},
+		{"sql query --bogus x y", "error: unknown option '--bogus'"},
+		{"gchat list --space", "error: option '--space <id>' argument missing"},
+		{"gcal create --summary s", "error: required option '--from <datetime>' not specified"},
+		{"revolut pay --from a --to b --amount 1", "error: required option '--currency <code>' not specified"},
+		{"gmail list --query", "error: option '--query <query>' argument missing"},
+		{"profile rename gmail a", "error: missing required argument 'new-name'"},
+		{"vault set", "error: missing required argument 'path'"},
+	}
+	for _, c := range cases {
+		var out, errOut bytes.Buffer
+		code := Execute(plugins.Default, strings.Fields(c.line), &out, &errOut, strings.NewReader(""))
+		if code != 1 || out.String() != "" || errOut.String() != c.stderr+"\n" {
+			t.Errorf("%s: code %d\nstdout %q\nstderr %q\nwant   %q", c.line, code, out.String(), errOut.String(), c.stderr+"\n")
+		}
+	}
+	// A negative number is an operand of a leaf, not an option: the line
+	// parses and reaches the vault gate.
+	var out, errOut bytes.Buffer
+	if code := Execute(plugins.Default, []string{"gmail", "get", "-5"}, &out, &errOut, strings.NewReader("")); code != 2 || !strings.Contains(errOut.String(), "VAULT_NOT_CONFIGURED") {
+		t.Errorf("gmail get -5: code %d %q", code, errOut.String())
+	}
+}
+
+// Commander prints help to stdout (exit 0) when asked, and to stderr (exit 1)
+// for a group given no subcommand or `help <unknown>`.
+func TestHelpStreamsAndExitCodesAreCommanders(t *testing.T) {
+	initCLI(t)
+	cases := []struct {
+		line     string
+		code     int
+		contains string
+	}{
+		{"gmail", 1, "search"},
+		{"gmail labels", 1, "create"},
+		{"vault", 1, "init"},
+		{"profile", 1, "rename"},
+		{"gmail help", 0, "search"},
+		{"gmail help nosuch", 1, "search"},
+		{"gmail help list", 0, "--limit"},
+		{"gmail search --bogus --help", 0, "--query"},
+		{"gmail search --query x --bogus --help", 0, "--query"},
+		{"gmail lst --help", 0, "search"},
+		{"gmail -h", 0, "search"},
+		{"gtasks lists --help", 0, "create"},
+	}
+	for _, c := range cases {
+		var out, errOut bytes.Buffer
+		code := Execute(plugins.Default, strings.Fields(c.line), &out, &errOut, strings.NewReader(""))
+		shown, silent := out.String(), errOut.String()
+		if c.code == 1 {
+			shown, silent = silent, shown
+		}
+		if code != c.code || silent != "" || !strings.Contains(shown, c.contains) || strings.Contains(shown, "error") {
+			t.Errorf("%s: code %d (want %d)\nstdout %q\nstderr %q", c.line, code, c.code, out.String(), errOut.String())
+		}
+	}
+}
+
+// Commander's -V, --version prints the bare version and exits 0, wherever the
+// root sees it (it parses its own options first); -v is not a version flag.
+func TestVersionFlagIsCommanders(t *testing.T) {
+	initCLI(t)
+	for _, line := range []string{"-V", "--version", "-Vx", "gmail list --version", "gmail list --limit --version", "gmail search --query -V"} {
+		var out, errOut bytes.Buffer
+		code := Execute(plugins.Default, strings.Fields(line), &out, &errOut, strings.NewReader(""))
+		if code != 0 || out.String() != Version+"\n" || errOut.String() != "" {
+			t.Errorf("%s: code %d %q %q", line, code, out.String(), errOut.String())
+		}
+	}
+}
+
+// The release version comes from package.json at build time, as Bun's
+// BUILD_VERSION does: `bun run build:go` sets cli.Version with -ldflags -X, and
+// the built binary prints exactly that.
+func TestBuildInjectsThePackageVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary")
+	}
+	raw, err := os.ReadFile("../../../package.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	const symbol = "-X github.com/plosson/agentio/go/internal/cli.Version="
+	if script := pkg.Scripts["build:go"]; !strings.Contains(script, symbol+"$(bun -e 'console.log(require(\"./package.json\").version)')") {
+		t.Fatalf("build:go does not inject the package.json version: %q", script)
+	}
+	bin := filepath.Join(t.TempDir(), "agentio")
+	build := exec.Command("go", "build", "-ldflags", symbol+"9.8.7-test", "-o", bin, "../../cmd/agentio")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	testbox.Isolate(t) // after the build, which needs the real module cache
+	for _, flag := range []string{"--version", "-V"} {
+		out, err := exec.Command(bin, flag).Output()
+		if err != nil || string(out) != "9.8.7-test\n" {
+			t.Fatalf("%s: %q %v", flag, out, err)
+		}
+	}
+}
+
+// openStdin is a stdin pipe that stays open and silent, as an agent's
+// subprocess stdin often is, and remembers whether anything read it.
+type openStdin struct {
+	pr      *io.PipeReader
+	touched atomic.Bool
+}
+
+func (s *openStdin) Read(p []byte) (int, error) {
+	s.touched.Store(true)
+	return s.pr.Read(p)
+}
+
+// Bun's commands read stdin only when the value it stands in for is missing
+// (`query || await readStdin()`): a command given the value neither blocks on
+// an open stdin pipe nor consumes it, and a command without it reads it.
+func TestStdinIsReadOnlyWhenTheValueIsMissing(t *testing.T) {
+	initCLI(t)
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	execWith := func(stdin io.Reader, args ...string) (int, string, bool) {
+		done := make(chan struct{})
+		var code int
+		var errOut bytes.Buffer
+		go func() {
+			defer close(done)
+			var out bytes.Buffer
+			code = Execute(plugins.Default, args, &out, &errOut, stdin)
+		}()
+		select {
+		case <-done:
+			return code, errOut.String(), true
+		case <-time.After(5 * time.Second):
+			return 0, "", false
+		}
+	}
+	given := [][]string{
+		{"sql", "query", "select 1"},
+		{"jira", "comment", "K-1", "hello"},
+		{"confluence", "comment", "123", "hello"},
+		{"confluence", "create", "--title", "t", "--space", "S", "--content", "c"},
+		{"slack", "send", "hi"},
+		{"gchat", "send", "hi"},
+		{"gmail", "archive", "id-1"},
+		{"gmail", "send", "--to", "a@example.com", "--subject", "s", "--body", "b"},
+		{"gdocs", "create", "--title", "t", "--content", "c"},
+		{"gtasks", "add", "L", "--title", "t", "--notes", "n"},
+	}
+	var pipes []*io.PipeWriter
+	defer func() {
+		for _, w := range pipes {
+			w.Close()
+		}
+	}()
+	for _, args := range given {
+		pr, pw := io.Pipe()
+		pipes = append(pipes, pw)
+		stdin := &openStdin{pr: pr}
+		code, errOut, finished := execWith(stdin, args...)
+		if !finished {
+			t.Errorf("%v blocked on an open stdin although the value was given", args)
+			continue
+		}
+		if stdin.touched.Load() || code == 0 || !strings.Contains(errOut, "PROFILE_NOT_FOUND") {
+			t.Errorf("%v: read stdin %v, code %d\n%s", args, stdin.touched.Load(), code, errOut)
+		}
+	}
+	// Without the value, the piped text stands in for it; nothing piped is
+	// Bun's "is required" error.
+	if code, errOut, _ := execWith(strings.NewReader("select 1\n"), "sql", "query"); code == 0 || !strings.Contains(errOut, "PROFILE_NOT_FOUND") {
+		t.Errorf("piped query: code %d\n%s", code, errOut)
+	}
+	if code, errOut, _ := execWith(strings.NewReader(" \n"), "sql", "query"); code == 0 || !strings.Contains(errOut, "Query is required") {
+		t.Errorf("blank piped query: code %d\n%s", code, errOut)
+	}
+}
+
+// Bun resolvePassphrase (src/vault/passphrase-input.ts): --passphrase-stdin
+// takes readStdin() (fully trimmed) and refuses nothing piped;
+// AGENTIO_PASSPHRASE is used verbatim; off a terminal with none of them it
+// refuses with Bun's message.
+func TestPassphraseResolutionIsBuns(t *testing.T) {
+	initCLI(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "")
+	execIn := func(stdin string, args ...string) (int, string) {
+		var out, errOut bytes.Buffer
+		code := Execute(plugins.Default, args, &out, &errOut, strings.NewReader(stdin))
+		return code, errOut.String()
+	}
+	const noStdin = "Error [INVALID_PARAMS]: No passphrase received on stdin\n" +
+		"Suggestion: Pipe it in, e.g. printf %s \"$PW\" | agentio vault set <path> --passphrase-stdin\n"
+	for _, piped := range []string{"", " \t\r\n"} {
+		if code, errOut := execIn(piped, "vault", "init", "--passphrase-stdin"); code != 1 || errOut != noStdin {
+			t.Errorf("piped %q: code %d\n%q", piped, code, errOut)
+		}
+	}
+	const noTerminal = "Error [INVALID_PARAMS]: A passphrase is required and no terminal is available to prompt\n" +
+		"Suggestion: Use --passphrase-stdin, --passphrase <value>, or set AGENTIO_PASSPHRASE\n"
+	if code, errOut := execIn("", "vault", "init"); code != 1 || errOut != noTerminal {
+		t.Errorf("no passphrase: code %d\n%q", code, errOut)
+	}
+	if vault.Exists() {
+		t.Fatal("a refused init created a vault")
+	}
+	// opens reports whether the vault file decrypts with exactly pass, as the
+	// Bun CLI would decrypt it.
+	opens := func(pass string) bool {
+		path, err := vault.ReadPointer()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = vault.Decrypt(string(raw), pass)
+		return err == nil
+	}
+	// Piped: String#trim, so edge spaces and tabs go too.
+	if code, errOut := execIn("\t pass-12345 \n", "vault", "init", "--passphrase-stdin"); code != 0 || !opens("pass-12345") {
+		t.Fatalf("piped init: code %d %s", code, errOut)
+	}
+	// The env var verbatim, for a new vault and to open one Bun encrypted.
+	testbox.Isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", " spaced pass ")
+	if code, errOut := execIn("", "vault", "init"); code != 0 || !opens(" spaced pass ") {
+		t.Fatalf("env init: code %d %s", code, errOut)
+	}
+	testbox.Isolate(t)
+	plain, _ := json.Marshal(vault.EmptyContents())
+	encoded, err := vault.Encrypt(string(plain), " spaced pass ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "bun.vault")
+	if err := os.WriteFile(path, []byte(encoded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := vault.WritePointer(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTIO_PASSPHRASE", " spaced pass ")
+	if code, errOut := execIn("", "profile", "list"); code != 0 {
+		t.Fatalf("env passphrase with edge spaces: code %d %s", code, errOut)
+	}
+}
+
+// Bare `agentio` runs the root action, so Bun's preAction vault gate applies:
+// without a vault it fails, with one it prints the help (stdout, exit 0).
+func TestBareRootIsGatedOnTheVault(t *testing.T) {
+	initCLI(t)
+	var out, errOut bytes.Buffer
+	code := Execute(plugins.Default, nil, &out, &errOut, strings.NewReader(""))
+	if code != 2 || out.String() != "" || errOut.String() != "Error [VAULT_NOT_CONFIGURED]: No vault configured\nSuggestion: Run: agentio vault init\n" {
+		t.Fatalf("no vault: code %d %q %q", code, out.String(), errOut.String())
+	}
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Execute(plugins.Default, nil, &out, &errOut, strings.NewReader(""))
+	if code != 0 || !strings.Contains(out.String(), "gmail") || errOut.String() != "" {
+		t.Fatalf("with a vault: code %d %q %q", code, out.String(), errOut.String())
 	}
 }

@@ -212,7 +212,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	want := map[string]row{
 		"list":     {"[path]", "--limit <n>=100 --recursive --folders", "read", ""},
 		"get":      {"<path>", "", "read", ""},
-		"search":   {"", "--query <text> --path <path> --limit <n>=20 --filename-only", "read", ""},
+		"search":   {"", "--query <text>! --path <path> --limit <n>=20 --filename-only", "read", ""},
 		"download": {"<path>", "--output <path>", "read", ""},
 		"put":      {"<file-path>", "--path <path> --overwrite", "write", "upload a file"},
 		"mkdir":    {"<path>", "", "write", "create a folder"},
@@ -255,6 +255,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

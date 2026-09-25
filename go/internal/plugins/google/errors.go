@@ -17,7 +17,7 @@ func Message(err error) string {
 	if errors.As(err, &ge) {
 		return gaxiosMessage(ge.Code, []byte(ge.Body))
 	}
-	return err.Error()
+	return plugins.FetchFailure(err).Error()
 }
 
 // Code is the numeric error.code Bun reads off a failed googleapis call (the

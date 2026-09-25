@@ -52,7 +52,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"list":     {"", "--limit <n>=10 --query <query>", "read", "", true, false},
 		"metadata": {"<id-or-url>", "", "read", "", true, false},
 		"get":      {"<id-or-url>", "--slide <n>", "read", "", true, false},
-		"export":   {"<id-or-url>", "--output <path> --format <fmt>=pptx", "read", "", false, true},
+		"export":   {"<id-or-url>", "--output <path>! --format <fmt>=pptx", "read", "", false, false},
 		"create":   {"<title>", "", "write", "create presentation", true, false},
 		"copy":     {"<id-or-url> <title>", "--parent <folder-id>", "write", "copy presentation", true, false},
 		"batch":    {"<id-or-url>", "--requests-json <json> --file <path>", "write", "execute batch update", true, true},
@@ -86,6 +86,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

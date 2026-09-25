@@ -129,7 +129,7 @@ func exportCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
-			{Flags: "--output <path>", Description: "Output file path"},
+			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--format <fmt>", Description: "Export format: pptx, pdf, or odp", DefaultValue: "pptx"},
 		},
 		Examples: []string{
@@ -142,7 +142,6 @@ func exportCmd() plugins.CommandSpec {
 			"",
 			"Formats: pptx (default), pdf, odp.",
 		},
-		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {

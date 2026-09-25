@@ -121,12 +121,6 @@ func Check(check func(in CommandInput, fail FailFunc) error) func(context.Contex
 	}
 }
 
-// Required is a CommandSpec.Prepare that is only Commander's requiredOption
-// check (RequireOptions), which Bun runs before the action.
-func Required(flags ...string) func(context.Context, CommandInput, *PrepareContext) (any, bool, error) {
-	return Check(func(in CommandInput, fail FailFunc) error { return RequireOptions(in, fail, flags...) })
-}
-
 // Prepared is run.Prepared as the type the command's Prepare returns.
 func Prepared[T any](run *RunContext) T {
 	v, _ := run.Prepared.(T)
@@ -150,12 +144,21 @@ type OptionSpec struct {
 	// Repeatable collects every occurrence of a <value> flag into a []string,
 	// empty when the flag is absent (Bun: a collector option with default []).
 	Repeatable bool
+	// Required is Commander's requiredOption: the CLI refuses the line without
+	// it (`error: required option '<Flags>' not specified`), and the host checks
+	// it again (RequireOptions) for a caller that skips the CLI.
+	Required bool
 }
 
 type CommandInput struct {
 	Args    map[string]any
 	Options map[string]any
 	Stdin   any // nil, string, or decoded JSON object
+	// ReadStdin, when Stdin is nil, reads a text command's stdin on first use:
+	// the piped text and whether anything was piped. Bun's commands read
+	// stdin only when the value it stands in for is missing, so the CLI does
+	// not read it before the command asks (Piped, Stdin, OptionOrStdin).
+	ReadStdin func() (string, bool)
 }
 
 // Arg is a string argument; absent or of another type is "".
@@ -228,10 +231,12 @@ func HTTPStatusToErrorCode(status int) ErrorCode {
 // the connection drops before the body is complete.
 const BunSocketClosed = "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
 
-// BunTransport is Bun's fetch as an http.RoundTripper: a response body that
-// cannot be read in full fails as `await response.arrayBuffer()` (or text(),
-// json()) rejects under Bun, so a plain io.ReadAll(resp.Body) anywhere
-// returns Bun's error. A timeout reads as AbortSignal.timeout's rejection.
+// BunTransport is Bun's fetch as an http.RoundTripper: a request that cannot
+// be sent fails with Bun's fetch error (FetchError; FetchFailure takes off the
+// http.Client wrapping), and a response body that cannot be read in full fails
+// as `await response.arrayBuffer()` (or text(), json()) rejects under Bun, so
+// a plain io.ReadAll(resp.Body) anywhere returns Bun's error. A timeout reads
+// as AbortSignal.timeout's rejection.
 type BunTransport struct {
 	// Base sends the request; nil is http.DefaultTransport at the time of the
 	// call, which tests replace.
@@ -255,7 +260,7 @@ func (t BunTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := base.RoundTrip(req)
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, fetchError(req, err, transportRoots(base))
 	}
 	resp.Body = &bunBody{ReadCloser: resp.Body, ctx: req.Context(), cancel: cancel}
 	return resp, nil
@@ -293,10 +298,12 @@ func NewHTTPClient(timeout time.Duration) *http.Client {
 
 var bunClient = NewHTTPClient(0)
 
-// Fetch is Bun's global fetch: req sent under ctx, its body failing as Bun's
-// does. It is what the host hands a plugin, and a plugin's own default.
+// Fetch is Bun's global fetch: req sent under ctx, failing as Bun's does
+// (a failed send is the bare FetchError). It is what the host hands a
+// plugin, and a plugin's own default.
 func Fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return bunClient.Do(req.WithContext(ctx))
+	resp, err := bunClient.Do(req.WithContext(ctx))
+	return resp, FetchFailure(err)
 }
 
 // PrepareContext is what CommandSpec.Prepare receives: no profile, no
@@ -319,10 +326,22 @@ func Result[T any](v T, err error) (any, error) {
 	return v, nil
 }
 
+// Piped is the raw piped text and whether anything was piped (Bun
+// readStdin() !== null), read now if the CLI left it for later.
+func Piped(in CommandInput) (string, bool) {
+	if text, ok := in.Stdin.(string); ok {
+		return text, true
+	}
+	if in.Stdin == nil && in.ReadStdin != nil {
+		return in.ReadStdin()
+	}
+	return "", false
+}
+
 // Stdin is Bun readStdin(): the piped text decoded as Buffer#toString('utf-8')
 // and trimmed as String#trim does; "" when nothing was piped.
 func Stdin(in CommandInput) string {
-	text, _ := in.Stdin.(string)
+	text, _ := Piped(in)
 	return jsvalue.Trim(jsvalue.BufferString([]byte(text)))
 }
 
@@ -366,15 +385,18 @@ func JSONPayload(in CommandInput, source any, fail FailFunc, stdinHint string) (
 	return payload, nil
 }
 
-// RequireOptions is Commander's requiredOption check, in declaration order:
-// only an absent option fails. A given "" is present, as Commander checks
-// `=== undefined`, and the command then handles the empty value as Bun does.
-// flags are the Bun declarations ("--space <id>").
-func RequireOptions(in CommandInput, fail FailFunc, flags ...string) error {
-	for _, f := range flags {
-		name := strings.TrimPrefix(strings.Fields(f)[0], "--")
+// RequireOptions is Commander's requiredOption check over the Required
+// options, in declaration order: only an absent option fails. A given "" is
+// present, as Commander checks `=== undefined`, and the command then handles
+// the empty value as Bun does.
+func RequireOptions(in CommandInput, fail FailFunc, opts []OptionSpec) error {
+	for _, opt := range opts {
+		if !opt.Required {
+			continue
+		}
+		name := strings.TrimPrefix(strings.Fields(opt.Flags)[0], "--")
 		if _, given := in.LookupOption(name); !given {
-			return fail("INVALID_PARAMS", fmt.Sprintf("required option '%s' not specified", f), "")
+			return fail("INVALID_PARAMS", fmt.Sprintf("required option '%s' not specified", opt.Flags), "")
 		}
 	}
 	return nil

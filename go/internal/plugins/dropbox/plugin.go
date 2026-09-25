@@ -149,7 +149,7 @@ func searchCmd() plugins.CommandSpec {
 		Description: "Search for files and folders",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--query <text>", Description: "Search text"},
+			{Flags: "--query <text>", Required: true, Description: "Search text"},
 			{Flags: "--path <path>", Description: "Restrict the search to a folder"},
 			{Flags: "--limit <n>", Description: "Maximum results to return", DefaultValue: "20"},
 			{Flags: "--filename-only", Description: "Match names only, not file contents"},
@@ -163,7 +163,6 @@ func searchCmd() plugins.CommandSpec {
 			"agentio dropbox search --query 2026 --filename-only --limit 50",
 			"# Newly uploaded files can take a few minutes to become searchable.",
 		},
-		Prepare: plugins.Required("--query <text>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			limit, err := parseLimit(run, in.Option("limit"))
 			if err != nil {

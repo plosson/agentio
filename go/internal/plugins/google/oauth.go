@@ -304,7 +304,7 @@ func scopeOf(tok *oauth2.Token) string {
 func tokenError(err error) error {
 	var re *oauth2.RetrieveError
 	if !errors.As(err, &re) || re.Response == nil {
-		return err
+		return plugins.FetchFailure(err)
 	}
 	message := gaxiosMessage(re.Response.StatusCode, re.Body)
 	if message == "invalid_grant" && strings.Contains(strings.ToLower(re.ErrorDescription), "reauth") {

@@ -52,7 +52,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	}
 	want := map[string]row{
 		"get":       {"<doc-id-or-url>", "--format <format>=markdown --output <file>", "read", "", "", false},
-		"create":    {"", "--title <title> --content <text> --folder <folder-id>", "write", "create document", "text", true},
+		"create":    {"", "--title <title>! --content <text> --folder <folder-id>", "write", "create document", "text", true},
 		"list":      {"", "--limit <n>=10 --query <query>", "read", "", "", true},
 		"structure": {"<doc-id-or-url>", "--tab <tab-id> --all-tabs", "read", "", "", false},
 		"tabs":      {"<doc-id-or-url>", "", "read", "", "", true},
@@ -87,6 +87,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}

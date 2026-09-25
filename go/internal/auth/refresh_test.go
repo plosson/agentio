@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -186,3 +188,31 @@ var errBoom = boom{}
 type boom struct{}
 
 func (boom) Error() string { return "provider rejected refresh" }
+
+// A refresh whose token request cannot be sent names Bun's fetch error as the
+// reason, not Go's `Post "…": dial tcp …` text.
+func TestRefreshReasonIsBunsFetchError(t *testing.T) {
+	initVault(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := "http://" + ln.Addr().String() + "/token"
+	ln.Close()
+	reg := newReg(t, &plugins.RefreshSpec{
+		SecretFields: []string{"refreshToken"},
+		Applies:      func(map[string]any) bool { return true },
+		IsStale:      func(map[string]any, int64, int64) bool { return true },
+		Run: func(ctx context.Context, _ map[string]any) (map[string]any, error) {
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, closed, nil)
+			_, err := plugins.NewHTTPClient(0).Do(req)
+			return nil, err
+		},
+	})
+	store(t, map[string]any{"accessToken": "old", "refreshToken": "rt"})
+	_, err = auth.GetFresh(context.Background(), reg, "acme", "ada", auth.RefreshOptions{Force: true})
+	want := `Token refresh failed for acme profile "ada": Unable to connect. Is the computer able to access the url?`
+	if ce, ok := err.(*clierr.Error); !ok || ce.Message != want {
+		t.Fatalf("err = %v", err)
+	}
+}

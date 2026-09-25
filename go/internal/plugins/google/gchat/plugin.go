@@ -190,12 +190,9 @@ func stringify(v any, indent string) ([]byte, error) {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
-// textOrJSON is Bun's `--space` requiredOption and `--format <format>`
-// check, made before getGChatClient; true is json.
+// textOrJSON is Bun's `--format <format>` check, made before
+// getGChatClient; true is json.
 func textOrJSON(in plugins.CommandInput, fail plugins.FailFunc) (bool, error) {
-	if err := plugins.RequireOptions(in, fail, "--space <id>"); err != nil {
-		return false, err
-	}
 	switch format := in.Option("format"); format {
 	case "text":
 		return false, nil
@@ -280,7 +277,7 @@ func listCmd() plugins.CommandSpec {
 		Description: "List messages from a Google Chat space (OAuth profiles only)",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
-			{Flags: "--space <id>", Description: "Space ID"},
+			{Flags: "--space <id>", Required: true, Description: "Space ID"},
 			{Flags: "--limit <n>", Description: "Number of messages", DefaultValue: "10"},
 			{Flags: "--thread <id>", Description: "Filter by thread ID"},
 			{Flags: "--since <date>", Description: "Only messages after this date (YYYY-MM-DD)"},
@@ -333,7 +330,7 @@ func getCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID", Required: true}},
 		Options: []plugins.OptionSpec{
-			{Flags: "--space <id>", Description: "Space ID"},
+			{Flags: "--space <id>", Required: true, Description: "Space ID"},
 			{Flags: "--format <format>", Description: "Output format: text or json", DefaultValue: "text"},
 		},
 		Examples: []string{
@@ -412,14 +409,13 @@ func membersCmd() plugins.CommandSpec {
 		Path:        "members",
 		Description: "List members of a Google Chat space (OAuth profiles only)",
 		Access:      "read",
-		Options:     []plugins.OptionSpec{{Flags: "--space <id-or-name>", Description: "Space ID or display name"}},
+		Options:     []plugins.OptionSpec{{Flags: "--space <id-or-name>", Required: true, Description: "Space ID or display name"}},
 		Examples: []string{
 			"# members by space id",
 			"agentio gchat members --space spaces/AAAA1234",
 			"# members by space display name (resolved against the space list)",
 			`agentio gchat members --space "Engineering"`,
 		},
-		Prepare: plugins.Required("--space <id-or-name>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {

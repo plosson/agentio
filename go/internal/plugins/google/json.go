@@ -34,7 +34,7 @@ func CallJSON(ctx context.Context, run *plugins.RunContext, keys Keys, method, b
 	}
 	resp, err := HTTPClient(run, keys).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, plugins.FetchFailure(err)
 	}
 	defer resp.Body.Close()
 	if err := googleapi.CheckResponse(resp); err != nil {

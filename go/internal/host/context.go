@@ -111,7 +111,7 @@ func prompt(s Streams, rd *lines.Reader, question string, secret bool) (string, 
 		question += " "
 	}
 	fmt.Fprint(s.err(), question)
-	if secret && isTerminal(s.in()) && !rd.Waiting() {
+	if secret && IsTerminal(s.in()) && !rd.Waiting() {
 		fd := int(os.Stdin.Fd())
 		b, err := term.ReadPassword(fd)
 		fmt.Fprintln(s.err())
@@ -140,7 +140,8 @@ func confirm(s Streams, rd *lines.Reader, question string) (bool, error) {
 	}
 }
 
-func isTerminal(r io.Reader) bool {
+// IsTerminal reports whether r is a terminal (Bun process.stdin.isTTY).
+func IsTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
@@ -153,7 +154,7 @@ func ReadStdin(r io.Reader) (string, bool, error) {
 	if r == nil {
 		r = os.Stdin
 	}
-	if isTerminal(r) {
+	if IsTerminal(r) {
 		return "", false, nil
 	}
 	b, err := io.ReadAll(r)

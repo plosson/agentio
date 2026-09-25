@@ -210,10 +210,10 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	want := map[string]row{
 		"peppol list":      {"", "--since <date> --sender <text> --format <format>=text", "read", ""},
 		"peppol get":       {"<id>", "--output <path> --extract-pdf", "read", ""},
-		"peppol sync":      {"", "--output <dir> --since <date> --sender <text> --extract-pdf --force", "read", ""},
+		"peppol sync":      {"", "--output <dir>! --since <date> --sender <text> --extract-pdf --force", "read", ""},
 		"peppol mark-paid": {"<ref>", "--status <status>=Paid --unpaid --format <format>=text", "write", "mark an invoice as paid"},
 		"peppol import":    {"<ref>", "--dry-run --format <format>=text", "write", "import a Peppol document into the invoice register"},
-		"invoices sync":    {"", "--output <dir> --since <date> --customer <text> --include <types>=Invoice,CreditNote --force", "read", ""},
+		"invoices sync":    {"", "--output <dir>! --since <date> --customer <text> --include <types>=Invoice,CreditNote --force", "read", ""},
 	}
 	p := New()
 	if p.ID != "falco" || p.DisplayName != "Falco" ||
@@ -246,6 +246,9 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		}
 		for _, o := range c.Options {
 			f := o.Flags
+			if o.Required {
+				f += "!" // requiredOption
+			}
 			if d, ok := o.DefaultValue.(string); ok {
 				f += "=" + d
 			}
