@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/lines"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/term"
@@ -81,7 +82,7 @@ func (p *Prompter) Confirm(question string) (bool, error) {
 	if err != nil && err != io.EOF {
 		return false, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
+	switch strings.ToLower(jsvalue.Trim(answer)) {
 	case "y", "yes":
 		return true, nil
 	default:

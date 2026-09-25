@@ -16,6 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/profile"
 	"github.com/plosson/agentio/go/internal/testbox"
@@ -245,8 +246,9 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	fake := newFake(t, forumHandler)
 	sc := host.NewSetupContext(host.Streams{In: strings.NewReader(""), Out: io.Discard, Err: io.Discard})
 	// The URL is given without a scheme change and with a trailing slash; the
-	// answers carry whitespace that Bun's prompt() trims.
-	asked := answers(sc, "  "+fake.url+"/  ", " key-9 ", " carol ")
+	// answers carry whitespace that Bun's prompt() trims as String#trim: the
+	// BOM and U+00A0 go, U+0085 stays.
+	asked := answers(sc, "  "+fake.url+"/  ", " key-9\u0085 ", "\u00a0carol\xef\xbb\xbf")
 	var out bytes.Buffer
 	if err := host.AddProfile(context.Background(), New(), plugins.SetupOptions{}, sc, &out); err != nil {
 		t.Fatal(err)
@@ -263,11 +265,11 @@ func TestSetupUsesBunKeysAndTheHostSavesIt(t *testing.T) {
 	if strings.Join(keys, ",") != "apiKey,baseUrl,username" {
 		t.Fatalf("keys %v", keys)
 	}
-	if stored["baseUrl"] != fake.url || stored["apiKey"] != "key-9" || stored["username"] != "carol" {
+	if stored["baseUrl"] != fake.url || stored["apiKey"] != "key-9\u0085" || stored["username"] != "carol" {
 		t.Fatalf("%#v", stored)
 	}
 	h := fake.recorded()
-	if len(h) != 1 || h[0].Path != "/categories.json" || h[0].APIKey != "key-9" || h[0].APIUsername != "carol" {
+	if len(h) != 1 || h[0].Path != "/categories.json" || h[0].APIKey != "key-9\u0085" || h[0].APIUsername != "carol" {
 		t.Fatalf("validation request %#v", h)
 	}
 	if !strings.Contains(out.String(), `Profile "carol" configured!`) || !strings.Contains(out.String(), "Test with: agentio discourse list") {
@@ -505,15 +507,31 @@ func TestErrorMessageFollowsTheBunFallbacks(t *testing.T) {
 	}
 }
 
+// parsed is JSON.parse(raw).
+func parsed(t *testing.T, raw string) any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func TestFormatMatchesBun(t *testing.T) {
 	a := newAPI(context.Background(), storedCreds(""), nil)
-	a.categories[7] = "Support Desk"
-	parent := 1
+	a.categories[cacheKey(json.Number("7"))] = "Support Desk"
 	long := "<b>" + strings.Repeat("é", 99) + "</b>"
-	cats := []category{
-		{ID: 1, Name: "General", Slug: "general", Description: "<p>Talk</p>", TopicCount: 10, PostCount: 40},
-		{ID: 7, Name: "Sub", Slug: "sub", Description: long, ParentCategoryID: &parent},
-		{ID: 8, Name: "Tags only", Slug: "t", Description: "<br>"},
+	var cats []any
+	for _, raw := range []string{
+		`{"id":1,"name":"General","slug":"general","description":"<p>Talk</p>","topic_count":10,"post_count":40}`,
+		`{"id":7,"name":"Sub","slug":"sub","description":` + jsvalue.Quote(long) + `,"topic_count":0,"post_count":0,"parent_category_id":1}`,
+		`{"id":8,"name":"Tags only","slug":"t","description":"<br>","topic_count":0,"post_count":0}`,
+	} {
+		c, err := parseCategory(parsed(t, raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cats = append(cats, c)
 	}
 	want := "Categories (3)\n\n" +
 		"[1] General\n    Slug: general\n    Topics: 10 | Posts: 40\n    > Talk\n\n" +
@@ -522,10 +540,16 @@ func TestFormatMatchesBun(t *testing.T) {
 	if got := formatCategories(cats); got != want {
 		t.Fatalf("categories\n%q\n%q", got, want)
 	}
-	name := "Support Desk"
-	topics := []topic{
-		{ID: 100, Title: "Hello", PostsCount: 2, ReplyCount: 1, Views: 50, LikeCount: 3, CategoryName: &name, CreatedAt: "a", LastPostedAt: "b", Pinned: true, Archived: true},
-		{ID: 101, Title: "Orphan", CreatedAt: "a", LastPostedAt: "a"},
+	var topics []any
+	for _, raw := range []string{
+		`{"id":100,"title":"Hello","posts_count":2,"reply_count":1,"views":50,"like_count":3,"category_id":7,"created_at":"a","last_posted_at":"b","pinned":true,"archived":true}`,
+		`{"id":101,"title":"Orphan","posts_count":0,"reply_count":0,"views":0,"like_count":0,"created_at":"a","last_posted_at":"a"}`,
+	} {
+		tp, err := a.parseTopic(parsed(t, raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		topics = append(topics, tp)
 	}
 	want = "Topics (2)\n\n" +
 		"[1] 100 | Hello [pinned, archived]\n    Category: Support Desk\n    Posts: 2 | Replies: 1 | Views: 50 | Likes: 3\n    Created: a\n    Last Post: b\n\n" +
@@ -533,20 +557,110 @@ func TestFormatMatchesBun(t *testing.T) {
 	if got := formatTopics(topics); got != want {
 		t.Fatalf("topics\n%q\n%q", got, want)
 	}
-	if formatTopics([]topic{}) != "No topics found" || formatCategories([]category{}) != "No categories found" {
+	if formatTopics([]any{}) != "No topics found" || formatCategories([]any{}) != "No categories found" {
 		t.Fatal("empty lists")
 	}
-	empty := ""
-	alice := "Alice A"
-	detail := topicDetail{ID: 100, Title: "Hello", Slug: "hello", Closed: true, CreatedAt: "a", LastPostedAt: "a", Posts: []post{
-		{Username: "alice", DisplayName: &alice, PostNumber: 1, CreatedAt: "c1", LikeCount: 2, ReplyCount: 1, Cooked: "<p>Hi\u00a0 <b>there</b></p>\n<p>bye</p>"},
-		{Username: "bob", DisplayName: &empty, PostNumber: 2, CreatedAt: "c2", Cooked: ""},
-	}}
+	detail := a.topicFields(parsed(t, `{"id":100,"title":"Hello","slug":"hello","posts_count":0,"reply_count":0,"views":0,"like_count":0,"closed":true,"created_at":"a","last_posted_at":"a"}`))
+	var posts []any
+	for _, raw := range []string{
+		`{"username":"alice","display_username":"Alice A","post_number":1,"created_at":"c1","like_count":2,"reply_count":1,"cooked":"<p>Hi\u00a0 <b>there</b></p>\n<p>bye</p>"}`,
+		`{"username":"bob","display_username":"","post_number":2,"created_at":"c2","like_count":0,"reply_count":0,"cooked":""}`,
+	} {
+		p, err := parsePost(parsed(t, raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		posts = append(posts, p)
+	}
+	detail.Set("posts", posts)
 	want = "ID: 100\nTitle: Hello [closed]\nSlug: hello\nPosts: 0 | Replies: 0 | Views: 0 | Likes: 0\nCreated: a\nLast Post: a\n---\n" +
 		"\n[Post #1] by Alice A (c1)\nLikes: 2 | Replies: 1\nHi there bye\n" +
 		"\n[Post #2] by bob (c2)\nLikes: 0 | Replies: 0\n"
 	if got := formatTopic(detail); got != want {
 		t.Fatalf("topic\n%q\n%q", got, want)
+	}
+}
+
+// Fields the forum leaves out or sends as null read as JavaScript reads them:
+// "undefined" in the text, a TypeError where Bun dereferences them, and an
+// empty 2xx body is null. Expectations are Bun's output against the same
+// answers (a local mock through the CLI).
+func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
+	reg := setupVault(t)
+	type answers struct{ categories, other string }
+	cases := []struct {
+		name    string
+		answer  answers
+		path    string
+		in      plugins.CommandInput
+		out     string
+		errText string
+	}{
+		{"empty categories body", answers{"", "{}"}, "categories", plugins.CommandInput{}, "",
+			`null is not an object (evaluating '(await this.request("GET", "/categories.json")).category_list')`},
+		{"no category_list", answers{"{}", "{}"}, "categories", plugins.CommandInput{}, "",
+			`undefined is not an object (evaluating '(await this.request("GET", "/categories.json")).category_list.categories')`},
+		{"no categories", answers{`{"category_list":{}}`, "{}"}, "categories", plugins.CommandInput{}, "",
+			`undefined is not an object (evaluating '(await this.request("GET", "/categories.json")).category_list.categories.map')`},
+		{"null category", answers{`{"category_list":{"categories":[null]}}`, "{}"}, "categories", plugins.CommandInput{}, "",
+			`null is not an object (evaluating 'raw.id')`},
+		{"empty category", answers{`{"category_list":{"categories":[{}]}}`, "{}"}, "categories", plugins.CommandInput{},
+			"Categories (1)\n\n[undefined] undefined\n    Slug: undefined\n    Topics: undefined | Posts: undefined\n", ""},
+		{"no topic_list", answers{`{"category_list":{"categories":[{}]}}`, "{}"}, "list", plugins.CommandInput{Options: map[string]any{"page": "0"}}, "",
+			`undefined is not an object (evaluating 'data.topic_list.topics')`},
+		{"no topics", answers{`{"category_list":{"categories":[{}]}}`, `{"topic_list":{}}`}, "list", plugins.CommandInput{Options: map[string]any{"page": "0"}}, "",
+			`undefined is not an object (evaluating 'data.topic_list.topics.map')`},
+		{"empty topic", answers{`{"category_list":{"categories":[{}]}}`, `{"topic_list":{"topics":[{}]}}`}, "list", plugins.CommandInput{Options: map[string]any{"page": "0"}},
+			"Topics (1)\n\n[1] undefined | undefined\n    Posts: undefined | Replies: undefined | Views: undefined | Likes: undefined\n    Created: undefined\n", ""},
+		{"null poster", answers{`{"category_list":{"categories":[{}]}}`, `{"topic_list":{"topics":[{"last_posted_at":null,"created_at":null,"posters":[null]}]}}`}, "list", plugins.CommandInput{Options: map[string]any{"page": "0"}}, "",
+			`null is not an object (evaluating 'p.user_id')`},
+		{"nameless category", answers{`{"category_list":{"categories":[{"slug":"x"}]}}`, "{}"}, "list", plugins.CommandInput{Options: map[string]any{"category": "foo", "page": "0"}}, "",
+			`undefined is not an object (evaluating 'c.name.toLowerCase')`},
+		{"empty topic body", answers{`{"category_list":{"categories":[{}]}}`, ""}, "get", plugins.CommandInput{Args: map[string]any{"topic-id": "1"}}, "",
+			`null is not an object (evaluating 'data.id')`},
+		{"no post_stream", answers{`{"category_list":{"categories":[{}]}}`, "{}"}, "get", plugins.CommandInput{Args: map[string]any{"topic-id": "1"}}, "",
+			`undefined is not an object (evaluating 'data.post_stream.posts')`},
+		{"null post", answers{`{"category_list":{"categories":[{}]}}`, `{"post_stream":{"posts":[null]}}`}, "get", plugins.CommandInput{Args: map[string]any{"topic-id": "1"}}, "",
+			`null is not an object (evaluating 'raw.id')`},
+		{"post without cooked", answers{`{"category_list":{"categories":[{}]}}`, `{"post_stream":{"posts":[{}]}}`}, "get", plugins.CommandInput{Args: map[string]any{"topic-id": "1"}},
+			"ID: undefined\nTitle: undefined\nSlug: undefined\nPosts: undefined | Replies: undefined | Views: undefined | Likes: undefined\nCreated: undefined\nLast Post: undefined\n---\n\n[Post #undefined] by undefined (undefined)\nLikes: undefined | Replies: undefined",
+			`undefined is not an object (evaluating 'post.cooked.replace')`},
+		{"not JSON", answers{"<html>", "{}"}, "categories", plugins.CommandInput{}, "",
+			"Failed to connect to Discourse: JSON Parse error: Unrecognized token '<'"},
+		// A 204 has no body at all: response.json() throws.
+		{"no content", answers{"204", "{}"}, "categories", plugins.CommandInput{}, "",
+			"Failed to connect to Discourse: Unexpected end of JSON input"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := newFake(t, func(w http.ResponseWriter, h hit) {
+				body := c.answer.other
+				if h.Path == "/categories.json" {
+					body = c.answer.categories
+				}
+				if body == "204" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, body)
+			})
+			if err := profile.Save("discourse", "meta", storedCreds(fake.url), profile.SaveOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			res, err := exec(t, reg, c.path, c.in)
+			out := ""
+			if res != nil {
+				out = spec(t, c.path).Format(res)
+			}
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			if out != c.out || errText != c.errText {
+				t.Fatalf("out %q\nerr %q", out, errText)
+			}
+		})
 	}
 }
 

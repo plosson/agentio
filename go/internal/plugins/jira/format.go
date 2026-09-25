@@ -3,18 +3,31 @@ package jira
 import (
 	"fmt"
 	"strings"
+
+	"github.com/plosson/agentio/go/internal/jsvalue"
 )
 
 func trimFinal(s string) string {
 	return strings.TrimSuffix(s, "\n")
 }
 
-func set(s *string) bool {
-	return s != nil && *s != ""
+// str is `${o.key…}` for a model the client built.
+func str(o any, keys ...string) string {
+	return jsvalue.String(member(o, keys...))
 }
 
+func member(o any, keys ...string) any {
+	for _, k := range keys {
+		o = jsvalue.Member(o, k)
+	}
+	return o
+}
+
+func truthy(o any, key string) bool { return jsvalue.Truthy(jsvalue.Member(o, key)) }
+
+// formatProjects is printJiraProjectList.
 func formatProjects(v any) string {
-	projects, ok := v.([]project)
+	projects, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -25,18 +38,19 @@ func formatProjects(v any) string {
 	fmt.Fprintf(&b, "Projects (%d)\n\n", len(projects))
 	for _, p := range projects {
 		private := ""
-		if p.IsPrivate {
+		if truthy(p, "isPrivate") {
 			private = " [private]"
 		}
-		fmt.Fprintf(&b, "%s - %s%s\n", p.Key, p.Name, private)
-		fmt.Fprintf(&b, "    Type: %s\n", p.ProjectTypeKey)
+		fmt.Fprintf(&b, "%s - %s%s\n", str(p, "key"), str(p, "name"), private)
+		fmt.Fprintf(&b, "    Type: %s\n", str(p, "projectTypeKey"))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatIssues is printJiraIssueList.
 func formatIssues(v any) string {
-	issues, ok := v.([]issue)
+	issues, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -46,50 +60,48 @@ func formatIssues(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Issues (%d)\n\n", len(issues))
 	for _, i := range issues {
-		fmt.Fprintf(&b, "%s [%s] %s\n", i.Key, i.Status, i.Summary)
-		fmt.Fprintf(&b, "    Type: %s | Project: %s\n", i.IssueType, i.ProjectKey)
-		if set(i.Assignee) {
-			fmt.Fprintf(&b, "    Assignee: %s\n", *i.Assignee)
+		fmt.Fprintf(&b, "%s [%s] %s\n", str(i, "key"), str(i, "status"), str(i, "summary"))
+		fmt.Fprintf(&b, "    Type: %s | Project: %s\n", str(i, "issueType"), str(i, "projectKey"))
+		if truthy(i, "assignee") {
+			fmt.Fprintf(&b, "    Assignee: %s\n", str(i, "assignee"))
 		}
-		if set(i.Priority) {
-			fmt.Fprintf(&b, "    Priority: %s\n", *i.Priority)
+		if truthy(i, "priority") {
+			fmt.Fprintf(&b, "    Priority: %s\n", str(i, "priority"))
 		}
-		fmt.Fprintf(&b, "    Updated: %s\n", i.Updated)
+		fmt.Fprintf(&b, "    Updated: %s\n", str(i, "updated"))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatIssue is printJiraIssue.
 func formatIssue(v any) string {
-	i, ok := v.(issue)
+	i, ok := v.(*jsvalue.Object)
 	if !ok {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Key: %s\n", i.Key)
-	fmt.Fprintf(&b, "Summary: %s\n", i.Summary)
-	fmt.Fprintf(&b, "Status: %s\n", i.Status)
-	fmt.Fprintf(&b, "Type: %s\n", i.IssueType)
-	fmt.Fprintf(&b, "Project: %s\n", i.ProjectKey)
-	if set(i.Priority) {
-		fmt.Fprintf(&b, "Priority: %s\n", *i.Priority)
+	fmt.Fprintf(&b, "Key: %s\n", str(i, "key"))
+	fmt.Fprintf(&b, "Summary: %s\n", str(i, "summary"))
+	fmt.Fprintf(&b, "Status: %s\n", str(i, "status"))
+	fmt.Fprintf(&b, "Type: %s\n", str(i, "issueType"))
+	fmt.Fprintf(&b, "Project: %s\n", str(i, "projectKey"))
+	for _, f := range []struct{ key, label string }{{"priority", "Priority"}, {"assignee", "Assignee"}, {"reporter", "Reporter"}} {
+		if truthy(i, f.key) {
+			fmt.Fprintf(&b, "%s: %s\n", f.label, str(i, f.key))
+		}
 	}
-	if set(i.Assignee) {
-		fmt.Fprintf(&b, "Assignee: %s\n", *i.Assignee)
-	}
-	if set(i.Reporter) {
-		fmt.Fprintf(&b, "Reporter: %s\n", *i.Reporter)
-	}
-	fmt.Fprintf(&b, "Created: %s\n", i.Created)
-	fmt.Fprintf(&b, "Updated: %s\n", i.Updated)
-	if i.Description != "" {
+	fmt.Fprintf(&b, "Created: %s\n", str(i, "created"))
+	fmt.Fprintf(&b, "Updated: %s\n", str(i, "updated"))
+	if truthy(i, "description") {
 		b.WriteString("---\n")
-		b.WriteString(i.Description)
+		b.WriteString(str(i, "description"))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatTransitions is printJiraTransitions.
 func formatTransitions(v any) string {
 	l, ok := v.(transitionList)
 	if !ok {
@@ -101,23 +113,18 @@ func formatTransitions(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Available transitions for %s:\n\n", l.issueKey)
 	for _, t := range l.items {
-		fmt.Fprintf(&b, "[%s] %s → %s\n", t.ID, t.Name, t.To.Name)
+		fmt.Fprintf(&b, "[%s] %s → %s\n", str(t, "id"), str(t, "name"), str(t, "to", "name"))
 	}
 	return trimFinal(b.String())
 }
 
+// formatComment is printJiraCommentResult.
 func formatComment(v any) string {
-	r, ok := v.(commentResult)
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf("Comment added\nIssue: %s\nComment ID: %s", r.IssueKey, r.ID)
+	return fmt.Sprintf("Comment added\nIssue: %s\nComment ID: %s", str(v, "issueKey"), str(v, "id"))
 }
 
+// formatTransition is printJiraTransitionResult.
 func formatTransition(v any) string {
-	r, ok := v.(transitionResult)
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf("Issue transitioned\nIssue: %s\nTransition: %s\nNew Status: %s", r.IssueKey, r.TransitionName, r.NewStatus)
+	return fmt.Sprintf("Issue transitioned\nIssue: %s\nTransition: %s\nNew Status: %s",
+		str(v, "issueKey"), str(v, "transitionName"), str(v, "newStatus"))
 }

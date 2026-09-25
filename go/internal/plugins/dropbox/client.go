@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -278,8 +279,15 @@ func decodeBody(resp *http.Response, out any) error {
 	if err != nil {
 		return err
 	}
-	if len(raw) == 0 || out == nil {
+	if out == nil {
 		return nil
+	}
+	// Bun `text ? JSON.parse(text) : undefined`: an empty body leaves out as is.
+	if len(raw) == 0 {
+		return nil
+	}
+	if _, err := jsvalue.Parse(raw); err != nil {
+		return errors.New(jsvalue.ParseErrorMessage(raw))
 	}
 	return json.Unmarshal(raw, out)
 }

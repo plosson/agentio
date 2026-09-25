@@ -1472,6 +1472,37 @@ func TestExpensesReceiptsExportsToStderrAndKeepsGoing(t *testing.T) {
 	}
 }
 
+// Bun prints the list first and downloads the receipts after it, so the
+// list is on stdout before the first receipt is fetched (the download's lines
+// follow on stderr).
+func TestExpensesListPrintsBeforeTheReceipts(t *testing.T) {
+	var events []string
+	newFake(t, func(w http.ResponseWriter, h hit) {
+		if h.Path == "/expenses?count=100" {
+			writeJSON(w, 200, []any{map[string]any{"id": "e1", "state": "s", "receipt_ids": []any{"r1"}}})
+			return
+		}
+		events = append(events, "fetch "+h.Path)
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write([]byte("%PDF"))
+	})
+	in := input(nil, map[string]any{"receipts": filepath.Join(t.TempDir(), "r"), "format": "csv"})
+	in.Print = func(line string) { events = append(events, "print "+strings.SplitN(line, "\n", 2)[0]) }
+	res, err := runCmd(t, "expenses", in, func(run *plugins.RunContext) {
+		run.Log = func(parts ...any) { events = append(events, "log "+parts[0].(string)) }
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0] != "print date,expense_id,state,amount,currency,merchant,category,description,spender,transaction_id,receipt_count,receipt_ids" ||
+		events[1] != "fetch /expenses/e1/receipts/r1/content" || !strings.HasPrefix(events[2], "log Downloaded 1 receipt(s)") {
+		t.Fatalf("%q", events)
+	}
+	if render(t, "expenses", res) != "" {
+		t.Fatalf("printed twice: %q", render(t, "expenses", res))
+	}
+}
+
 // --- output ------------------------------------------------------------------------
 
 func fromJSON(t *testing.T, raw string) any {
@@ -1642,4 +1673,26 @@ func TestACutTokenResponseFailsLikeBun(t *testing.T) {
 		t.Fatalf("%#v", err)
 	}
 	testbox.WantSocketClosed(t, err)
+}
+
+// The issuer is new URL(redirectUri).hostname: an internationalized host is
+// punycoded, percent escapes decoded; a host new URL() refuses is invalid.
+// Expectations probed with Bun.
+func TestIssuerIsTheWHATWGHostname(t *testing.T) {
+	for uri, want := range map[string]string{
+		"https://Bücher.example/cb":   "xn--bcher-kva.example",
+		"https://EXAMPLE.com:8443/cb": "example.com",
+		"https://ex%41mple.com/":      "example.com",
+		"https://faß.ExAmple/":        "xn--fa-hia.example",
+		"https://[::1]:3000/cb":       "[::1]",
+	} {
+		if got, err := issuerFromRedirectURI(uri); err != nil || got != want {
+			t.Errorf("%s: %q %v, want %q", uri, got, err, want)
+		}
+	}
+	for _, uri := range []string{"https://a b.com/", "https://a<b/", "https://%zz.com/"} {
+		if got, err := issuerFromRedirectURI(uri); err == nil || err.Error() != `Redirect URI "`+uri+`" is not a valid URL` {
+			t.Errorf("%s: %q %v", uri, got, err)
+		}
+	}
 }

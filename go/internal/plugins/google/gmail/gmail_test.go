@@ -465,7 +465,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"emailAddress": "me@example.com"}
 	if v, err := New().Profile.Validate(fake.Ctx(), run); err != nil || !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v %v", v, err)
@@ -1479,5 +1479,37 @@ func TestEmptySearchQueryListsWithoutQ(t *testing.T) {
 	}
 	if q, ok := fake.Recorded()[0].Query["q"]; ok || len(fake.Recorded()) == 0 {
 		t.Fatalf("q sent: %q", q)
+	}
+}
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000
+
+// Bun looks the filters and the label names up together (Promise.all): when
+// both fail, the error is the one that came first in time, whichever call it
+// is. The same holds for filters get and for the --apply and --remove labels
+// of filters create and label.
+func TestParallelLookupsReportTheFirstFailure(t *testing.T) {
+	product.SetupVault(t)
+	fake := googletest.NewFake(t, func(w http.ResponseWriter, h googletest.Hit) {
+		if strings.Contains(h.Path, "/settings/filters") {
+			time.Sleep(300 * time.Millisecond)
+			googletest.WriteAPIError(w, 400, "filters failed")
+			return
+		}
+		googletest.WriteAPIError(w, 400, "labels failed")
+	})
+	for _, c := range []struct {
+		path string
+		args map[string]any
+	}{
+		{"filters list", nil},
+		{"filters get", map[string]any{"id": "f1"}},
+	} {
+		_, err, _ := runDirect(t, fake.Ctx(), c.path, product.Input(t, c.path, c.args, nil))
+		if ce := googletest.CliErr(t, err); !strings.Contains(ce.Message, "labels failed") {
+			t.Errorf("%s: %q", c.path, ce.Message)
+		}
 	}
 }

@@ -72,4 +72,12 @@ describe('command gating', () => {
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toContain('acme\tAPI 1\t0 commands\tvalid');
   });
+
+  test('a vault pointer that cannot be read is reported, not a crash or a missing vault', async () => {
+    await mkdir(join(tempHome, '.config', 'agentio', 'vault.path'));
+    const res = await runCli(['status']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toBe('Error: EISDIR: illegal operation on a directory, read\n');
+  });
 });

@@ -24,10 +24,17 @@ import (
 type Object struct {
 	keys []string
 	vals map[string]any
+	// asInserted keeps integer-like keys where they were set (Bun's native
+	// SQL row objects); a plain object puts them first.
+	asInserted bool
 }
 
 // NewObject is an empty object literal.
 func NewObject() *Object { return &Object{vals: map[string]any{}} }
+
+// NewInsertionOrderObject is an object whose keys all keep insertion order,
+// integer-like ones included: the row objects Bun's SQL client builds.
+func NewInsertionOrderObject() *Object { return &Object{vals: map[string]any{}, asInserted: true} }
 
 // Set is o[key] = v: a new key goes last, an existing key keeps its place.
 func (o *Object) Set(key string, v any) {
@@ -46,12 +53,41 @@ func (o *Object) Get(key string) (any, bool) {
 	return v, ok
 }
 
-// Keys is Object.keys(o) in insertion order.
+// Keys is Object.keys(o): array-index keys ascending, then the others in
+// insertion order, as JavaScript orders an object's own properties.
 func (o *Object) Keys() []string {
 	if o == nil {
 		return nil
 	}
-	return slices.Clone(o.keys)
+	if o.asInserted {
+		return slices.Clone(o.keys)
+	}
+	var indices, names []string
+	for _, k := range o.keys {
+		if _, ok := arrayIndex(k); ok {
+			indices = append(indices, k)
+		} else {
+			names = append(names, k)
+		}
+	}
+	if len(indices) == 0 {
+		return slices.Clone(o.keys)
+	}
+	slices.SortFunc(indices, func(a, b string) int {
+		x, _ := arrayIndex(a)
+		y, _ := arrayIndex(b)
+		return int(x) - int(y)
+	})
+	return append(indices, names...)
+}
+
+// arrayIndex is a canonical integer key below 2^32-1 ("0", "7"; not "07").
+func arrayIndex(k string) (uint32, bool) {
+	n, err := strconv.ParseUint(k, 10, 32)
+	if err != nil || n == math.MaxUint32 || strconv.FormatUint(n, 10) != k {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 // Str is a strict string field: anything else, including null, is absent.
@@ -160,7 +196,7 @@ func StringifyIndent(v any) []byte {
 
 func writeValue(b *bytes.Buffer, v any) {
 	switch t := v.(type) {
-	case nil:
+	case nil, undefinedValue:
 		b.WriteString("null")
 	case bool:
 		b.WriteString(strconv.FormatBool(t))
@@ -185,10 +221,15 @@ func writeValue(b *bytes.Buffer, v any) {
 			return
 		}
 		b.WriteByte('{')
-		for i, k := range t.keys {
-			if i > 0 {
+		first := true
+		for _, k := range t.Keys() {
+			if t.vals[k] == Undefined {
+				continue // JSON.stringify leaves undefined members out
+			}
+			if !first {
 				b.WriteByte(',')
 			}
+			first = false
 			writeString(b, k)
 			b.WriteByte(':')
 			writeValue(b, t.vals[k])

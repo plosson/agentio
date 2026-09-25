@@ -3,6 +3,7 @@ package google
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -32,7 +33,7 @@ func CallJSON(ctx context.Context, run *plugins.RunContext, keys Keys, method, b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := HTTPClient(run, keys).Do(req)
+	resp, err := HTTPClient(ctx, run, keys).Do(req)
 	if err != nil {
 		return nil, plugins.FetchFailure(err)
 	}
@@ -45,4 +46,15 @@ func CallJSON(ctx context.Context, run *plugins.RunContext, keys Keys, method, b
 		return nil, err
 	}
 	return jsvalue.Parse(raw)
+}
+
+// GetJSON is a GET through CallJSON that also decodes the answer into out, a
+// typed google.golang.org/api struct: raw keeps what the struct loses (a
+// field that is null versus absent, a zero that was sent).
+func GetJSON(ctx context.Context, run *plugins.RunContext, keys Keys, basePath, path string, out any) (raw any, err error) {
+	raw, err = CallJSON(ctx, run, keys, http.MethodGet, basePath, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return raw, json.Unmarshal(jsvalue.Stringify(raw), out)
 }

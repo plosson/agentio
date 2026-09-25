@@ -9,6 +9,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -209,6 +210,11 @@ type CommandInput struct {
 	// stdin only when the value it stands in for is missing, so the CLI does
 	// not read it before the command asks (Piped, Stdin, OptionOrStdin).
 	ReadStdin func() (string, bool)
+	// Print, when set, writes one line of the command's output to stdout at
+	// once, for a Bun command that console.logs as it goes (a sync's line per
+	// document) before its final result. The CLI leaves it nil under --json;
+	// a command then keeps the lines for its Format.
+	Print func(line string)
 }
 
 // Arg is a string argument; absent or of another type is "".
@@ -307,7 +313,11 @@ func (t BunTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		ctx, cancel = context.WithTimeout(req.Context(), t.Timeout)
 		req = req.WithContext(ctx)
 	}
-	resp, err := base.RoundTrip(req)
+	resp, err := connectAnswering(base).RoundTrip(req)
+	var refused *connectRefused
+	if errors.As(err, &refused) {
+		resp, err = refused.response(req), nil
+	}
 	if err != nil {
 		cancel()
 		return nil, fetchError(req, err, transportRoots(base))
@@ -354,6 +364,56 @@ var bunClient = NewHTTPClient(0)
 func Fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 	resp, err := bunClient.Do(req.WithContext(ctx))
 	return resp, FetchFailure(err)
+}
+
+// ResponseJSON is Bun's `await response.json()` on a body read in full. A
+// response whose status has no body (204, 205, 304) throws "Unexpected end of
+// JSON input"; any other empty body is null (Bun resolves, it does not throw);
+// anything else is JSON.parse'd and fails with JSON.parse's message.
+func ResponseJSON(status int, raw []byte) (any, error) {
+	switch status {
+	case http.StatusNoContent, http.StatusResetContent, http.StatusNotModified:
+		return nil, errors.New("Unexpected end of JSON input")
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	v, err := jsvalue.Parse(raw)
+	if err != nil {
+		return nil, errors.New(jsvalue.ParseErrorMessage(raw))
+	}
+	return v, nil
+}
+
+// DecodeJSON is `await response.json()` (ResponseJSON) decoded into out, for
+// an answer read into a typed value. null reports a body that reads as null
+// (empty), for the caller to fail on as its Bun code does; out is untouched.
+func DecodeJSON(status int, raw []byte, out any) (null bool, err error) {
+	v, err := ResponseJSON(status, raw)
+	if err != nil {
+		return false, err
+	}
+	if v == nil {
+		return true, nil
+	}
+	return false, json.Unmarshal(raw, out)
+}
+
+// All is Bun's `await Promise.all([...])` over tasks: they all run at once,
+// each to its end, and the error is the first one to happen in time (nil
+// when every task succeeds).
+func All(tasks ...func() error) error {
+	errs := make(chan error, len(tasks))
+	for _, task := range tasks {
+		go func() { errs <- task() }()
+	}
+	var first error
+	for range tasks {
+		if err := <-errs; err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // PrepareContext is what CommandSpec.Prepare receives: no profile, no

@@ -236,7 +236,7 @@ func hubError(status int, raw []byte, hubURL, method, path string) *clierr.Error
 	if code == clierr.NotFound && method == http.MethodPut {
 		if service := serviceOfProfileRoute(path); service != "" {
 			return clierr.New(clierr.ConfigError,
-				fmt.Sprintf("The vault hub at %s does not know the service %q", hubURL, service),
+				fmt.Sprintf("The vault hub at %s does not know the service \"%s\"", hubURL, service),
 				"The hub is running an older agentio. Update it, or unset the hub token to store this profile in the local vault.")
 		}
 	}

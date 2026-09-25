@@ -16,6 +16,7 @@ import (
 	"github.com/plosson/agentio/go/internal/auth"
 	"github.com/plosson/agentio/go/internal/clierr"
 	"github.com/plosson/agentio/go/internal/host"
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/obscure"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
@@ -577,22 +578,29 @@ func printed(t *testing.T, path string, v any, asJSON bool) string {
 	return b.String()
 }
 
-func TestResponseMappingAndFormat(t *testing.T) {
-	var payload struct {
-		Issues []apiIssue `json:"issues"`
+// mapped is each element of the JSON array raw through model.
+func mapped(t *testing.T, raw string, model func(any) (*jsvalue.Object, error)) []any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal([]byte(`{"issues":[
+	out, err := mapItems(v, "x", model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestResponseMappingAndFormat(t *testing.T) {
+	issues := mapped(t, `[
 		{"id":"1","key":"P-1","fields":{"summary":"Crash","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},
 		 "priority":{"name":"High"},"assignee":{"displayName":"Ada"},"reporter":null,"created":"2024-01-01","updated":"2024-01-02",
 		 "project":{"key":"P"},"issuetype":{"name":"Bug"},
 		 "description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"a"},{"type":"hardBreak"},{"type":"text","text":"b"}]},{"type":"paragraph","content":[{"type":"text","text":"c"}]}]}}},
 		{"id":"2","key":"P-2","fields":{"summary":"Plain","status":{"name":"Open","statusCategory":{"key":"new"}},"priority":null,"assignee":null,
 		 "created":"c","updated":"u","project":{"key":"P"},"issuetype":{"name":"Task"},"description":null}}
-	]}`), &payload)
-	var issues []issue
-	for _, i := range payload.Issues {
-		issues = append(issues, i.model())
-	}
+	]`, func(i any) (*jsvalue.Object, error) { return issueModel(i, "issue") })
 	want := "Issues (2)\n\n" +
 		"P-1 [In Progress] Crash\n    Type: Bug | Project: P\n    Assignee: Ada\n    Priority: High\n    Updated: 2024-01-02\n\n" +
 		"P-2 [Open] Plain\n    Type: Task | Project: P\n    Updated: u\n\n"
@@ -622,28 +630,24 @@ func TestResponseMappingAndFormat(t *testing.T) {
 		t.Fatalf("json %s", got)
 	}
 
-	var projects struct {
-		Values []project `json:"values"`
-	}
-	_ = json.Unmarshal([]byte(`{"values":[
+	projects := mapped(t, `[
 		{"id":"1","key":"P","name":"Proj","projectTypeKey":"software","simplified":false,"style":"classic","isPrivate":true,"avatarUrls":{"48x48":"https://x/48","16x16":"https://x/16"}},
 		{"id":"2","key":"Q","name":"Other","projectTypeKey":"business","simplified":true,"style":"next-gen","isPrivate":false}
-	]}`), &projects)
-	if got := printed(t, "projects", projects.Values, false); got != "Projects (2)\n\nP - Proj [private]\n    Type: software\n\nQ - Other\n    Type: business\n\n" {
+	]`, projectModel)
+	if got := printed(t, "projects", projects, false); got != "Projects (2)\n\nP - Proj [private]\n    Type: software\n\nQ - Other\n    Type: business\n\n" {
 		t.Fatalf("projects %q", got)
 	}
-	if got := printed(t, "projects", projects.Values[:1], true); !strings.Contains(got, `"avatarUrls": {
+	if got := printed(t, "projects", projects[:1], true); !strings.Contains(got, `"avatarUrls": {
       "48x48": "https://x/48",
       "16x16": "https://x/16"
     }`) {
 		t.Fatalf("avatar order %s", got)
 	}
-	if strings.Contains(printed(t, "projects", projects.Values[1:], true), "avatarUrls") {
+	if strings.Contains(printed(t, "projects", projects[1:], true), "avatarUrls") {
 		t.Fatal("absent avatarUrls printed")
 	}
 
-	list := transitionList{issueKey: "P-1"}
-	_ = json.Unmarshal([]byte(`[{"id":"31","name":"Start","to":{"id":"3","name":"In Progress","statusCategory":{"key":"indeterminate","name":"In Progress"}}}]`), &list.items)
+	list := transitionList{issueKey: "P-1", items: mapped(t, `[{"id":"31","name":"Start","to":{"id":"3","name":"In Progress","statusCategory":{"key":"indeterminate","name":"In Progress"}}}]`, transitionModel)}
 	if got := printed(t, "transitions", list, false); got != "Available transitions for P-1:\n\n[31] Start → In Progress\n" {
 		t.Fatalf("transitions %q", got)
 	}
@@ -653,8 +657,69 @@ func TestResponseMappingAndFormat(t *testing.T) {
 	if got := printed(t, "transitions", transitionList{issueKey: "P-1"}, true); got != "[]\n" {
 		t.Fatalf("no transitions json %q", got)
 	}
-	if printed(t, "projects", []project{}, false) != "No projects found\n" || printed(t, "search", []issue{}, false) != "No issues found\n" {
+	if printed(t, "projects", []any{}, false) != "No projects found\n" || printed(t, "search", []any{}, false) != "No issues found\n" {
 		t.Fatal("empty lists")
+	}
+}
+
+// Fields JIRA leaves out read as JavaScript reads them: "undefined" in the
+// text, Bun's TypeError where it dereferences them, null for an empty body,
+// and JSON.parse's message for one that is not JSON. Expectations are Bun's
+// output against the same answers (a local mock through the CLI).
+func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(far()), false)
+	cases := []struct {
+		answer  string
+		path    string
+		args    map[string]any
+		out     string
+		errText string
+	}{
+		{"", "projects", nil, "", `null is not an object (evaluating '(await this.request("GET", path)).values')`},
+		{"{}", "projects", nil, "", `undefined is not an object (evaluating '(await this.request("GET", path)).values.map')`},
+		{`{"values":[null]}`, "projects", nil, "", `null is not an object (evaluating 'p.id')`},
+		{`{"values":[{}]}`, "projects", nil, "Projects (1)\n\nundefined - undefined\n    Type: undefined\n", ""},
+		{"", "search", nil, "", "null is not an object (evaluating '(await this.request(\"GET\", `/search/jql?${params.toString()}`)).issues')"},
+		{`{"issues":[null]}`, "search", nil, "", `null is not an object (evaluating 'issue.id')`},
+		{`{"issues":[{}]}`, "search", nil, "", `undefined is not an object (evaluating 'issue.fields.summary')`},
+		{`{"issues":[{"fields":{}}]}`, "search", nil, "", `undefined is not an object (evaluating 'issue.fields.status.name')`},
+		{`{"issues":[{"fields":{"status":{}}}]}`, "search", nil, "", `undefined is not an object (evaluating 'issue.fields.status.statusCategory.key')`},
+		{`{"issues":[{"fields":{"status":{"statusCategory":{}}}}]}`, "search", nil, "", `undefined is not an object (evaluating 'issue.fields.project.key')`},
+		{`{"issues":[{"fields":{"status":{"statusCategory":{}},"project":{}}}]}`, "search", nil, "", `undefined is not an object (evaluating 'issue.fields.issuetype.name')`},
+		{`{"issues":[{"fields":{"status":{"statusCategory":{}},"project":{},"issuetype":{},"priority":null,"assignee":{}}}]}`, "search", nil,
+			"Issues (1)\n\nundefined [undefined] undefined\n    Type: undefined | Project: undefined\n    Updated: undefined\n", ""},
+		{"", "get", map[string]any{"issue-key": "X-1"}, "", `null is not an object (evaluating 'response.id')`},
+		{"{}", "get", map[string]any{"issue-key": "X-1"}, "", `undefined is not an object (evaluating 'response.fields.summary')`},
+		{`{"fields":{"status":{"statusCategory":{}},"project":{},"issuetype":{}}}`, "get", map[string]any{"issue-key": "X-1"},
+			"Key: undefined\nSummary: undefined\nStatus: undefined\nType: undefined\nProject: undefined\nCreated: undefined\nUpdated: undefined", ""},
+		{"", "transitions", map[string]any{"issue-key": "X-1"}, "", "null is not an object (evaluating '(await this.request(\"GET\", `/issue/${issueKey}/transitions`)).transitions')"},
+		{`{"transitions":[null]}`, "transitions", map[string]any{"issue-key": "X-1"}, "", `null is not an object (evaluating 't.id')`},
+		{`{"transitions":[{}]}`, "transitions", map[string]any{"issue-key": "X-1"}, "", `undefined is not an object (evaluating 't.to.id')`},
+		{`{"transitions":[{"to":{}}]}`, "transitions", map[string]any{"issue-key": "X-1"}, "", `undefined is not an object (evaluating 't.to.statusCategory.key')`},
+		{`{"transitions":[{"to":{"statusCategory":{}}}]}`, "transitions", map[string]any{"issue-key": "X-1"}, "Available transitions for X-1:\n\n[undefined] undefined → undefined", ""},
+		{`{"transitions":[{"id":"5","to":{"statusCategory":{}}}]}`, "transition", map[string]any{"issue-key": "X-1", "transition-id": "5"},
+			"Issue transitioned\nIssue: X-1\nTransition: undefined\nNew Status: undefined", ""},
+		{"{}", "comment", map[string]any{"issue-key": "X-1", "body": "hi"}, "Comment added\nIssue: X-1\nComment ID: undefined", ""},
+		{"", "comment", map[string]any{"issue-key": "X-1", "body": "hi"}, "",
+			"null is not an object (evaluating '(await this.request(\"POST\", `/issue/${issueKey}/comment`, {\n        body: adfBody\n      })).id')"},
+		{"<html>", "get", map[string]any{"issue-key": "X-1"}, "", "JSON Parse error: Unrecognized token '<'"},
+		{`{"a":`, "projects", nil, "", "JSON Parse error: Unexpected EOF"},
+	}
+	for _, c := range cases {
+		atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) { atlassiantest.WriteRaw(w, 200, c.answer) })
+		res, err := product.Exec(t, reg, c.path, plugins.CommandInput{Args: c.args, Options: map[string]any{"profile": "acme"}})
+		out := ""
+		if res != nil {
+			out = product.Spec(t, c.path).Format(res)
+		}
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		if out != c.out || errText != c.errText {
+			t.Errorf("%s %q:\nout %q\nerr %q", c.path, c.answer, out, errText)
+		}
 	}
 }
 
@@ -707,5 +772,22 @@ func TestSiteChoiceOffATerminalIsRefused(t *testing.T) {
 	}
 	if c, _ := vault.Load(); len(c.Config.Profiles["jira"]) != 0 {
 		t.Fatal("a profile was saved")
+	}
+}
+
+// A 2xx token answer that is not JSON fails as Bun's response.json() does;
+// an empty one is null, whose access_token Bun reads.
+func TestRefreshAnswerThatIsNotJSON(t *testing.T) {
+	for body, reason := range map[string]string{
+		"<html>": "JSON Parse error: Unrecognized token '<'",
+		"":       "null is not an object (evaluating 'data.access_token')",
+	} {
+		reg := product.SetupVault(t)
+		product.SaveProfile(t, "acme", storedCreds(1), false)
+		atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) { atlassiantest.WriteRaw(w, 200, body) })
+		_, err := product.Exec(t, reg, "projects", plugins.CommandInput{Options: map[string]any{"limit": "50"}})
+		if ce := atlassiantest.CliErr(t, err); ce.Message != `Token refresh failed for jira profile "acme": `+reason {
+			t.Errorf("%q: %#v", body, ce)
+		}
 	}
 }

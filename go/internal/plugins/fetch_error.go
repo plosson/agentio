@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -64,6 +65,7 @@ func fetchMessage(req *http.Request, err error, roots *x509.CertPool) string {
 	var timeout interface{ Timeout() bool }
 	var dns *net.DNSError
 	var verify *tls.CertificateVerificationError
+	var record tls.RecordHeaderError
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout():
 		return bunTimedOut
@@ -78,6 +80,9 @@ func fetchMessage(req *http.Request, err error, roots *x509.CertPool) string {
 		return BunSocketClosed
 	case errors.As(err, &verify):
 		return certificateMessage(req, verify.UnverifiedCertificates, roots)
+	case errors.As(err, &record):
+		// An answer that is not TLS (an HTTP server on an https:// URL).
+		return "unknown certificate verification error"
 	}
 	return ""
 }
@@ -141,4 +146,47 @@ func transportRoots(base http.RoundTripper) *x509.CertPool {
 		return t.TLSClientConfig.RootCAs
 	}
 	return nil
+}
+
+// connectRefused is a proxy's non-200 answer to CONNECT. Bun's fetch resolves
+// with that answer instead of rejecting, so BunTransport returns it as the
+// response.
+type connectRefused struct {
+	status string
+	code   int
+	header http.Header
+	body   []byte
+}
+
+func (e *connectRefused) Error() string { return e.status }
+
+func (e *connectRefused) response(req *http.Request) *http.Response {
+	return &http.Response{
+		Status: e.status, StatusCode: e.code, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: e.header, Body: io.NopCloser(bytes.NewReader(e.body)), ContentLength: int64(len(e.body)), Request: req,
+	}
+}
+
+// answering holds, per transport, a clone whose OnProxyConnectResponse keeps
+// a refused CONNECT; the caller's transport is not changed.
+var answering sync.Map
+
+func connectAnswering(base http.RoundTripper) http.RoundTripper {
+	t, ok := base.(*http.Transport)
+	if !ok || t.OnProxyConnectResponse != nil {
+		return base
+	}
+	if c, ok := answering.Load(t); ok {
+		return c.(*http.Transport)
+	}
+	c := t.Clone()
+	c.OnProxyConnectResponse = func(_ context.Context, _ *url.URL, _ *http.Request, resp *http.Response) error {
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		body, _ := io.ReadAll(resp.Body)
+		return &connectRefused{status: resp.Status, code: resp.StatusCode, header: resp.Header, body: body}
+	}
+	actual, _ := answering.LoadOrStore(t, c)
+	return actual.(*http.Transport)
 }

@@ -256,3 +256,14 @@ func TestSetupContextSelect(t *testing.T) {
 	_, err := setup.Select("Choose:", menu)
 	wantRefusal(t, err)
 }
+
+// Confirm is Bun's utils/stdin confirm(): the answer is String#trim'd, which
+// takes JavaScript white space (U+00A0, the BOM) but not U+0085.
+func TestConfirmTrimsAsJavaScript(t *testing.T) {
+	for answer, want := range map[string]bool{"\u00a0yes\u00a0\n": true, "\xef\xbb\xbfy\n": true, "\u0085y\n": false} {
+		got, err := NewPrompter(Streams{In: strings.NewReader(answer), Err: io.Discard}).Confirm("Save?")
+		if err != nil || got != want {
+			t.Errorf("%q: got %v %v", answer, got, err)
+		}
+	}
+}

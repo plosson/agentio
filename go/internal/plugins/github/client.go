@@ -80,12 +80,9 @@ func (c *Client) request(method, path string, body map[string]any) (any, error) 
 	if err != nil {
 		return nil, c.network(err)
 	}
-	// Bun's fetch reads an empty body (a 201 with no content) as null.
-	var data any
-	if len(raw) > 0 {
-		if data, err = jsvalue.Parse(raw); err != nil {
-			return nil, c.network(jsonParseError(raw, err))
-		}
+	data, err := plugins.ResponseJSON(resp.StatusCode, raw)
+	if err != nil {
+		return nil, c.network(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if data == nil {
@@ -109,19 +106,6 @@ func (c *Client) request(method, path string, body map[string]any) (any, error) 
 		return nil, c.fail("API_ERROR", "GitHub API error: "+message, "")
 	}
 	return data, nil
-}
-
-// jsonParseError is Bun's response.json() message for a blank body and for a
-// body that is not JSON at all (an HTML error page from a proxy).
-func jsonParseError(raw []byte, err error) error {
-	trimmed := bytes.TrimLeft(raw, " \t\r\n")
-	if len(trimmed) == 0 {
-		return errors.New("JSON Parse error: Unexpected EOF")
-	}
-	if !bytes.ContainsRune([]byte(`{["-0123456789tfn`), rune(trimmed[0])) && trimmed[0] < 0x80 {
-		return fmt.Errorf("JSON Parse error: Unrecognized token '%c'", trimmed[0])
-	}
-	return err
 }
 
 func (c *Client) network(err error) error {

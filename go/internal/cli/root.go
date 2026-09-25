@@ -220,7 +220,9 @@ func gate(cmd *cobra.Command, _ *plugins.Registry) error {
 	if bypass[name] || bypass[parent] {
 		return nil
 	}
-	if !vault.Exists() {
+	if exists, err := vault.Present(); err != nil {
+		return err
+	} else if !exists {
 		return clierr.New(clierr.VaultNotConfigured, "No vault configured", "Run: agentio vault init")
 	}
 	return nil
@@ -314,11 +316,15 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 					return err
 				}
 			}
-			result, err := host.Execute(context.Background(), reg, pluginCopy, &specCopy, in)
 			asJSON := false
 			if hostJSON {
 				asJSON, _ = c.Flags().GetBool("json")
 			}
+			if !asJSON {
+				out := c.OutOrStdout()
+				in.Print = func(line string) { fmt.Fprintln(out, line) }
+			}
+			result, err := host.Execute(context.Background(), reg, pluginCopy, &specCopy, in)
 			if err != nil {
 				// Bun prints what a command produced and then throws (a sync
 				// summary before "N documents failed"), so a value returned with
@@ -581,9 +587,9 @@ func updateCmd(service string) *cobra.Command {
 				return clierr.ProfileNotFoundError(service, name)
 			}
 			if value {
-				fmt.Fprintf(cmd.OutOrStdout(), "Profile %q is now read-only\n", name)
+				fmt.Fprintf(cmd.OutOrStdout(), "Profile \"%s\" is now read-only\n", name)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Profile %q read-only restriction removed\n", name)
+				fmt.Fprintf(cmd.OutOrStdout(), "Profile \"%s\" read-only restriction removed\n", name)
 			}
 			return nil
 		},
@@ -608,7 +614,7 @@ func renameCmd(service string) *cobra.Command {
 			if failure := profile.WriteFailure(outcome, service, name, to); failure != nil {
 				return failure
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile %q to %q\n", name, to)
+			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile \"%s\" to \"%s\"\n", name, to)
 			return nil
 		},
 	}
@@ -632,7 +638,7 @@ func removeCmd(service string) *cobra.Command {
 			if !ok {
 				return clierr.ProfileNotFoundError(service, name)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q\n", name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile \"%s\"\n", name)
 			return nil
 		},
 	}
@@ -652,7 +658,7 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 	}
 	assertKnown := func(service string) error {
 		if reg.Find(service) == nil || reg.Find(service).Profile == nil {
-			return clierr.New(clierr.InvalidParams, fmt.Sprintf("Unknown service: %q", service), "Known services: "+known())
+			return clierr.New(clierr.InvalidParams, fmt.Sprintf("Unknown service: \"%s\"", service), "Known services: "+known())
 		}
 		return nil
 	}
@@ -719,7 +725,7 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 			if failure := profile.WriteFailure(outcome, args[0], args[1], args[2]); failure != nil {
 				return failure
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Renamed profile %q to %q\n", args[1], args[2])
+			fmt.Fprintf(c.OutOrStdout(), "Renamed profile \"%s\" to \"%s\"\n", args[1], args[2])
 			return nil
 		},
 	}
@@ -737,7 +743,7 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 			if !ok {
 				return clierr.ProfileNotFoundError(args[0], args[1])
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Removed profile %q\n", args[1])
+			fmt.Fprintf(c.OutOrStdout(), "Removed profile \"%s\"\n", args[1])
 			return nil
 		},
 	}
@@ -761,7 +767,7 @@ func profileCmd(reg *plugins.Registry) *cobra.Command {
 			}
 			if code == "none" {
 				if name != "" {
-					return clierr.New(clierr.ProfileNotFound, fmt.Sprintf("Profile %q not found for %s", name, args[0]), "Add one with: agentio profile add "+args[0])
+					return clierr.New(clierr.ProfileNotFound, fmt.Sprintf("Profile \"%s\" not found for %s", name, args[0]), "Add one with: agentio profile add "+args[0])
 				}
 				return clierr.New(clierr.ProfileNotFound, "No profiles configured for "+args[0], "Add one with: agentio profile add "+args[0])
 			}

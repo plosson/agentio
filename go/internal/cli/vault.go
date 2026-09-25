@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,11 @@ func vaultInit() *cobra.Command {
 
 To use a vault that already exists, run 'agentio vault set <path>' instead.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if vault.Exists() {
+			exists, err := vault.Present()
+			if err != nil {
+				return err
+			}
+			if exists {
 				current, _ := vault.ReadPointer()
 				return clierr.New(clierr.ConfigError,
 					"A vault is already configured at "+current,
@@ -230,17 +235,12 @@ func vaultSet() *cobra.Command {
 Only the pointer and the stored passphrase change - neither vault file is
 moved, written to, or deleted. Run 'agentio doctor' to see the active vault.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			vaultPath := vault.NormalizeVaultPath(args[0])
-			if !strings.HasPrefix(vaultPath, "/") {
-				// relative paths are joined to the cwd then must still be absolute after normalize of a relative file
-			}
-			if !isAbs(vaultPath) {
-				cwd, _ := os.Getwd()
-				vaultPath = vault.NormalizeVaultPath(joinPath(cwd, args[0]))
-			}
-			if err := vault.ValidateVaultPath(vaultPath); err != nil {
+			// Bun normalizeVaultPath(resolve(path)): path.resolve is filepath.Abs.
+			resolved, err := filepath.Abs(args[0])
+			if err != nil {
 				return err
 			}
+			vaultPath := vault.NormalizeVaultPath(resolved)
 			if _, err := os.Stat(vaultPath); err != nil {
 				return clierr.New(clierr.NotFound, "No vault file at "+vaultPath, "Run `agentio vault init` to create a new vault, or check the path")
 			}
@@ -516,16 +516,17 @@ AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
 			}
 			plain, err := vault.Decrypt(strings.TrimSpace(encrypted), encKey)
 			if err != nil {
-				return clierr.New(clierr.AuthFailed, "Failed to decrypt configuration", "Check that you are using the correct encryption key")
+				return errUndecryptable
 			}
 			imported, err := decodeExport(plain)
 			if err != nil {
 				return err
 			}
-			if imported.Version != vault.CurrentVersion {
-				return clierr.New(clierr.InvalidParams, fmt.Sprintf("Unsupported export version: %d", imported.Version), "This version of agentio may not support this export format")
+			exists, err := vault.Present()
+			if err != nil {
+				return err
 			}
-			if !vault.Exists() {
+			if !exists {
 				passphrase, err := resolvePassphrase(cmd, pass, stdin, true)
 				if err != nil {
 					return err
@@ -719,7 +720,31 @@ func exportBlob(c *vault.Contents, selected []selection) string {
 	return string(jsvalue.Stringify(body))
 }
 
+var errUndecryptable = clierr.New(clierr.AuthFailed, "Failed to decrypt configuration", "Check that you are using the correct encryption key")
+
+// decodeExport is Bun's JSON.parse of the decrypted export, inside the same
+// try/catch as the decryption (text that is not JSON reads as a wrong key),
+// then its `exportData.version !== 1` check.
 func decodeExport(plain string) (*vault.Contents, error) {
+	parsed, err := jsvalue.Parse([]byte(plain))
+	if err != nil {
+		return nil, errUndecryptable
+	}
+	if parsed == nil {
+		return nil, errors.New("null is not an object (evaluating 'exportData.version')")
+	}
+	version := "undefined"
+	if obj, ok := parsed.(*jsvalue.Object); ok {
+		if v, ok := obj.Get("version"); ok {
+			version = jsvalue.String(v)
+			if n, isNum := v.(json.Number); isNum && jsvalue.Number(string(n)) == vault.CurrentVersion {
+				version = ""
+			}
+		}
+	}
+	if version != "" {
+		return nil, clierr.New(clierr.InvalidParams, "Unsupported export version: "+version, "This version of agentio may not support this export format")
+	}
 	dec := json.NewDecoder(strings.NewReader(plain))
 	dec.UseNumber()
 	var c vault.Contents

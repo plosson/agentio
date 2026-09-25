@@ -387,7 +387,8 @@ func TestErrorMappingFollowsBun(t *testing.T) {
 		{200, "  \n", clierr.NetworkError, "Failed to connect to GitHub: JSON Parse error: Unexpected EOF", ""},
 		{404, ``, clierr.NetworkError, "Failed to connect to GitHub: null is not an object (evaluating 'data.message')", ""},
 		{400, `[1]`, clierr.APIError, "GitHub API error: Unknown GitHub API error", ""},
-		{200, `{"a":1`, clierr.NetworkError, "", ""},
+		{200, `{"a":1`, clierr.NetworkError, "Failed to connect to GitHub: JSON Parse error: Expected '}'", ""},
+		{205, ``, clierr.NetworkError, "Failed to connect to GitHub: Unexpected end of JSON input", ""},
 	}
 	for _, c := range cases {
 		newFake(t, func(w http.ResponseWriter, h hit) {

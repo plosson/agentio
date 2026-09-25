@@ -477,6 +477,13 @@ func TestCommandsSendTheBunRequests(t *testing.T) {
 		h.Query.Get("cql") != `title ~ 'API' AND space.key = "ENG" AND type = "page" AND text ~ "say \"hi\""` || h.Query.Get("limit") != "5" {
 		t.Fatalf("search %#v", h)
 	}
+	// The query string is URLSearchParams': `~` escaped, `*` not.
+	if _, err := product.Exec(t, reg, "search", plugins.CommandInput{Options: opts("text", "a~b*(c)", "limit", "25")}); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); h.RawQuery != "cql=text+%7E+%22a%7Eb*%28c%29%22&limit=25" {
+		t.Fatalf("search query %q", h.RawQuery)
+	}
 	if _, err := product.Exec(t, reg, "search", plugins.CommandInput{Options: opts("limit", "25")}); err != nil {
 		t.Fatal(err)
 	}
@@ -581,18 +588,25 @@ func TestInputErrorsMatchBun(t *testing.T) {
 	}
 }
 
+func parsed(t *testing.T, raw string) any {
+	t.Helper()
+	v, err := jsvalue.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 func TestResponseMappingAndFormat(t *testing.T) {
 	a := api{siteURL: "https://acme.atlassian.net/"}
 	// search: content fields win, then the top-level title, then "(untitled)".
-	var hits []searchHit
-	_ = json.Unmarshal([]byte(`[
+	results, err := mapItems(parsed(t, `[
 		{"content":{"id":"1","type":"page","title":"Doc","space":{"key":"ENG"}},"excerpt":"<b>x</b> &amp; y","url":"/spaces/ENG/pages/1","lastModified":"2024-01-01"},
 		{"title":"Loose"},
 		{"content":{"id":"3","title":""}}
-	]`), &hits)
-	var results []searchResult
-	for _, h := range hits {
-		results = append(results, a.searchModel(h))
+	]`), "r", a.searchModel)
+	if err != nil {
+		t.Fatal(err)
 	}
 	want := "Results (3)\n\n" +
 		"[page] 1 | Doc\n    Space: ENG\n    Modified: 2024-01-01\n    Link: https://acme.atlassian.net/wiki/spaces/ENG/pages/1\n    > x & y\n\n" +
@@ -601,13 +615,13 @@ func TestResponseMappingAndFormat(t *testing.T) {
 	if got := formatSearch(results); got != want {
 		t.Fatalf("search\n%q\n%q", got, want)
 	}
-	if formatSearch([]searchResult{}) != "No results" || formatSpaces([]space{}) != "No spaces found" ||
-		formatPages([]page{}) != "No pages found" || formatComments([]comment{}) != "No comments" {
+	if formatSearch([]any{}) != "No results" || formatSpaces([]any{}) != "No spaces found" ||
+		formatPages([]any{}) != "No pages found" || formatComments([]any{}) != "No comments" {
 		t.Fatal("empty lists")
 	}
 	// A comment with no body still prints its preview line, as Bun does.
-	got := formatComments([]comment{{ID: "c1", Version: 2, CreatedAt: "t"}})
-	if got != "Comments (1)\n\n[c1] v2 t\n    > \n" {
+	comment := parsed(t, `{"id":"c1","version":2,"createdAt":"t","body":""}`)
+	if got := formatComments([]any{comment}); got != "Comments (1)\n\n[c1] v2 t\n    > \n" {
 		t.Fatalf("%q", got)
 	}
 	// Truncation counts UTF-16 units like String.prototype.slice.
@@ -615,15 +629,101 @@ func TestResponseMappingAndFormat(t *testing.T) {
 		t.Fatal("utf16 truncate")
 	}
 	// ADF bodies flatten blocks with blank lines and hard breaks with newlines.
-	adf := map[string]any{"type": "doc", "content": []any{
-		map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "a"}, map[string]any{"type": "hardBreak"}, map[string]any{"type": "text", "text": "b"}}},
-		map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "c"}}},
-	}}
+	adf := parsed(t, `{"type":"doc","content":[
+		{"type":"paragraph","content":[{"type":"text","text":"a"},{"type":"hardBreak"},{"type":"text","text":"b"}]},
+		{"type":"paragraph","content":[{"type":"text","text":"c"}]}]}`)
 	if atlassian.ExtractTextFromADF(adf) != "a\nb\n\nc" {
 		t.Fatalf("%q", atlassian.ExtractTextFromADF(adf))
 	}
 	if stripHTML("<p>one</p>  <p class='x'>two<br/>three</p>\n\n\n\n&quot;q&quot;&#39;&nbsp;") != "one\n\ntwo\nthree\n\n\"q\"'" {
 		t.Fatalf("%q", stripHTML("<p>one</p>  <p class='x'>two<br/>three</p>\n\n\n\n&quot;q&quot;&#39;&nbsp;"))
+	}
+}
+
+// Fields Confluence leaves out read as JavaScript reads them: "undefined" in
+// the text, Bun's TypeError where it dereferences them, null for an empty
+// body, and `v + 1` for the next version. Expectations are Bun's output
+// against the same answers (a local mock through the CLI).
+func TestMissingFieldsReadAsBunReadsThem(t *testing.T) {
+	reg := product.SetupVault(t)
+	product.SaveProfile(t, "acme", storedCreds(atlassiantest.Far()), false)
+	page := map[string]any{"page-id": "1"}
+	opts := func(kv ...string) map[string]any {
+		m := map[string]any{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	cases := []struct {
+		answer  string
+		path    string
+		in      plugins.CommandInput
+		out     string
+		errText string
+		sent    string
+	}{
+		{"", "spaces", plugins.CommandInput{Options: opts("limit", "50")}, "", "null is not an object (evaluating '(await this.request(\"GET\", this.baseV2, `/spaces?${params.toString()}`)).results')", ""},
+		{`{"results":[null]}`, "spaces", plugins.CommandInput{Options: opts("limit", "50")}, "", `null is not an object (evaluating 's.id')`, ""},
+		{`{"results":[{"description":{"plain":{"value":5}}}]}`, "spaces", plugins.CommandInput{Options: opts("limit", "50")},
+			"Spaces (1)\n\nundefined - undefined\n    ID: undefined\n    Type: undefined | Status: undefined\n    > 5\n", "", ""},
+		{"", "pages", plugins.CommandInput{Options: opts("limit", "25")}, "", `null is not an object (evaluating '(await this.request("GET", this.baseV2, path)).results')`, ""},
+		{`{"results":[null]}`, "pages", plugins.CommandInput{Options: opts("limit", "25")}, "", `null is not an object (evaluating 'p.id')`, ""},
+		{`{"results":[{}]}`, "pages", plugins.CommandInput{Options: opts("limit", "25")}, "", `undefined is not an object (evaluating 'p.version.number')`, ""},
+		{`{"results":[{"version":{},"_links":{"webui":"/x"}}]}`, "pages", plugins.CommandInput{Options: opts("limit", "25")},
+			"Pages (1)\n\nundefined | undefined\n    Space: undefined | Status: undefined | vundefined\n    Created: undefined\n    Link: https://acme.atlassian.net/wiki/x\n", "", ""},
+		{`{"results":[null]}`, "pages", plugins.CommandInput{Options: opts("limit", "25", "space", "SP")}, "", `Space "SP" not found`, ""},
+		{"null", "pages", plugins.CommandInput{Options: opts("limit", "25", "space", "123")}, "", `null is not an object (evaluating 's.id')`, ""},
+		{"{}", "pages", plugins.CommandInput{Options: opts("limit", "25", "space", "123")}, "", `undefined is not an object (evaluating '(await this.request("GET", this.baseV2, path)).results.map')`, ""},
+		{"", "get", plugins.CommandInput{Args: page, Options: opts("format", "storage")}, "", `null is not an object (evaluating 'response.body')`, ""},
+		{"{}", "get", plugins.CommandInput{Args: page, Options: opts("format", "storage")}, "", `undefined is not an object (evaluating 'response.version.number')`, ""},
+		{`{"version":{}}`, "get", plugins.CommandInput{Args: page, Options: opts("format", "atlas_doc_format")},
+			"ID: undefined\nTitle: undefined\nSpace: undefined\nStatus: undefined\nVersion: undefined\nCreated: undefined", "", ""},
+		{`{"version":{"number":2},"body":{"atlas_doc_format":{"value":"nope"}}}`, "get", plugins.CommandInput{Args: page, Options: opts("format", "atlas_doc_format")},
+			"ID: undefined\nTitle: undefined\nSpace: undefined\nStatus: undefined\nVersion: 2\nCreated: undefined\n---\nnope", "", ""},
+		{`{"results":[null]}`, "comments", plugins.CommandInput{Args: page}, "", `null is not an object (evaluating 'c.id')`, ""},
+		{`{"results":[{}]}`, "comments", plugins.CommandInput{Args: page}, "", `undefined is not an object (evaluating 'c.version.number')`, ""},
+		{`{"results":[{"version":{}}]}`, "comments", plugins.CommandInput{Args: page}, "Comments (1)\n\n[undefined] vundefined undefined\n    > \n", "", ""},
+		{`{"results":[null]}`, "search", plugins.CommandInput{Options: opts("limit", "25")}, "", `null is not an object (evaluating 'r.content')`, ""},
+		{`{"results":[{}]}`, "search", plugins.CommandInput{Options: opts("limit", "25")}, "Results (1)\n\n[unknown]  | (untitled)\n", "", ""},
+		{`{"version":{}}`, "update", plugins.CommandInput{Args: page, Options: opts("content", "C")}, "Page updated\nID: undefined\nTitle: undefined\nVersion: undefined", "",
+			`{"id":"1","body":{"representation":"storage","value":"<p>C</p>"},"version":{"number":null}}`},
+		{`{"version":{"number":"3"}}`, "update", plugins.CommandInput{Args: page, Options: opts("content", "C")}, "Page updated\nID: undefined\nTitle: undefined\nVersion: 3", "",
+			`{"id":"1","body":{"representation":"storage","value":"<p>C</p>"},"version":{"number":"31"}}`},
+		{`{"version":{"number":null}}`, "update", plugins.CommandInput{Args: page, Options: opts("content", "C")}, "Page updated\nID: undefined\nTitle: undefined\nVersion: null", "",
+			`{"id":"1","body":{"representation":"storage","value":"<p>C</p>"},"version":{"number":1}}`},
+		{"{}", "create", plugins.CommandInput{Options: opts("title", "T", "space-id", "9", "content", "C")}, "Page created\nID: undefined\nTitle: undefined\nSpace: undefined", "",
+			`{"spaceId":"9","status":"current","title":"T","body":{"representation":"storage","value":"<p>C</p>"}}`},
+		{"null", "create", plugins.CommandInput{Options: opts("title", "T", "space-id", "9", "content", "C")}, "", `null is not an object (evaluating 'response.id')`, ""},
+		{"{}", "comment", plugins.CommandInput{Args: map[string]any{"page-id": "1", "body": "hi"}}, "Comment added\nPage: 1\nComment ID: undefined", "",
+			`{"pageId":"1","body":{"representation":"storage","value":"<p>hi</p>"}}`},
+		{"", "comment", plugins.CommandInput{Args: map[string]any{"page-id": "1", "body": "hi"}}, "",
+			"null is not an object (evaluating '(await this.request(\"POST\", this.baseV2, \"/footer-comments\", {\n        pageId,\n        body: {\n          representation: \"storage\",\n          value: storage\n        }\n      })).id')", ""},
+	}
+	for _, c := range cases {
+		fake := atlassiantest.NewFake(t, func(w http.ResponseWriter, h hit) { atlassiantest.WriteRaw(w, 200, c.answer) })
+		in := c.in
+		in.Options = map[string]any{"profile": "acme"}
+		for k, v := range c.in.Options {
+			in.Options[k] = v
+		}
+		res, err := product.Exec(t, reg, c.path, in)
+		out := ""
+		if res != nil {
+			out = product.Spec(t, c.path).Format(res)
+		}
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		if out != c.out || errText != c.errText {
+			t.Errorf("%s %q:\nout %q\nerr %q", c.path, c.answer, out, errText)
+		}
+		if c.sent != "" {
+			if h := fake.Last(); h.Raw != c.sent {
+				t.Errorf("%s %q sent %s", c.path, c.answer, h.Raw)
+			}
+		}
 	}
 }
 

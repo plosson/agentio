@@ -112,17 +112,20 @@ func (a *api) list(limit float64, query string) ([]google.DriveFile, error) {
 	return files, nil
 }
 
-// magnitude is `dimension?.magnitude ?? undefined`.
-func magnitude(d *slides.Dimension) *float64 {
-	if d == nil || d.Magnitude == 0 {
+// magnitude is `pageSize?.<dimension>?.magnitude ?? undefined`, read from
+// the answer as sent: a zero is kept, null is none.
+func magnitude(raw any, dimension string) *float64 {
+	m := jsvalue.Optional(jsvalue.Optional(jsvalue.Member(raw, "pageSize"), dimension), "magnitude")
+	if jsvalue.Nullish(m) {
 		return nil
 	}
-	m := d.Magnitude
-	return &m
+	f := jsvalue.Number(jsvalue.String(m))
+	return &f
 }
 
 func (a *api) metadata(idOrURL string) (*presentation, error) {
-	resp, err := a.slides.Presentations.Get(extractPresentationID(idOrURL)).Context(a.Ctx).Do()
+	var resp slides.Presentation
+	raw, err := google.GetJSON(a.Ctx, a.RunContext, google.Camel, a.slides.BasePath, "v1/presentations/"+url.PathEscape(extractPresentationID(idOrURL)), &resp)
 	if err != nil {
 		return nil, a.Failed("get presentation metadata", err)
 	}
@@ -130,9 +133,7 @@ func (a *api) metadata(idOrURL string) (*presentation, error) {
 	if out.Title == "" {
 		out.Title = "Untitled"
 	}
-	if size := resp.PageSize; size != nil {
-		out.Width, out.Height = magnitude(size.Width), magnitude(size.Height)
-	}
+	out.Width, out.Height = magnitude(raw, "width"), magnitude(raw, "height")
 	for i, s := range resp.Slides {
 		out.Slides = append(out.Slides, slideInfo{Index: i, ObjectID: s.ObjectId, Title: slideTitle(s)})
 	}

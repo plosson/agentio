@@ -526,7 +526,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1, "full"), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry, "full"), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -1241,3 +1241,7 @@ func TestEmptySearchQueryIsSent(t *testing.T) {
 		t.Fatalf("%q", q)
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

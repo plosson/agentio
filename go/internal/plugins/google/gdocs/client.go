@@ -82,7 +82,8 @@ func (a *api) create(title, markdown, folderID string) (*created, error) {
 		file.Parents = []string{folderID}
 	}
 	f, err := a.drive.Files.Create(file).
-		Media(strings.NewReader(markdown), googleapi.ContentType("text/markdown")).
+		// ChunkSize(0) sends one multipart request whatever the size, as Bun does.
+		Media(strings.NewReader(markdown), googleapi.ContentType("text/markdown"), googleapi.ChunkSize(0)).
 		Fields("id,name,webViewLink").Context(a.Ctx).Do()
 	if err != nil {
 		return nil, a.Failed("create document", err)

@@ -360,7 +360,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -591,6 +591,21 @@ func TestCreateUploadsMarkdownWithTheBunMetadata(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 
+	// Content past googleapi's 16 MB default chunk is still one multipart
+	// request, as Bun sends it (no resumable session).
+	respond = map[string]any{"id": "big"}
+	big := strings.Repeat("x", 17<<20)
+	before := len(fake.Recorded())
+	if _, err := product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", nil, map[string]any{"title": "Big", "content": big})); err != nil {
+		t.Fatal(err)
+	}
+	if hits := fake.Recorded()[before:]; len(hits) != 1 || hits[0].Query.Get("uploadType") != "multipart" {
+		t.Fatalf("%d requests, %v", len(hits), hits[0].Query)
+	}
+	if _, _, body := parts(fake.Recorded()[before]); body != big {
+		t.Fatalf("body of %d bytes", len(body))
+	}
+
 	// Piped markdown is trimmed; no folder sends no parents; missing fields fall back.
 	respond = map[string]any{"id": "new2"}
 	in = product.Input(t, "create", nil, map[string]any{"title": "Q4"})
@@ -599,7 +614,7 @@ func TestCreateUploadsMarkdownWithTheBunMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, _, body = parts(fake.Recorded()[1])
+	meta, _, body = parts(fake.Last())
 	if googletest.JSONText(meta) != `{"mimeType":"application/vnd.google-apps.document","name":"Q4"}` || body != "# Q4 plan" {
 		t.Fatalf("%v %q", meta, body)
 	}
@@ -624,7 +639,7 @@ func TestCreateUploadsMarkdownWithTheBunMetadata(t *testing.T) {
 			t.Fatalf("%#v", ce)
 		}
 	}
-	if n := len(fake.Recorded()); n != 2 {
+	if n := len(fake.Recorded()); n != 3 {
 		t.Fatalf("an invalid create reached the API: %d", n)
 	}
 }
@@ -868,3 +883,7 @@ func TestEmptyTitleIsSentAsGiven(t *testing.T) {
 		t.Fatalf("%#v", ce)
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

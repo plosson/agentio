@@ -88,7 +88,7 @@ func pageFormat(in plugins.CommandInput, fail plugins.FailFunc) (string, error) 
 	case "storage", "atlas_doc_format", "view":
 		return format, nil
 	}
-	return "", fail("INVALID_PARAMS", fmt.Sprintf("Invalid format %q. Use storage, atlas_doc_format, or view.", format), "")
+	return "", fail("INVALID_PARAMS", fmt.Sprintf("Invalid format \"%s\". Use storage, atlas_doc_format, or view.", format), "")
 }
 
 func spacesCmd() plugins.CommandSpec {

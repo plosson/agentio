@@ -369,7 +369,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -827,6 +827,8 @@ func TestMetadataCreateCopyAndExport(t *testing.T) {
 		"GET /v4/spreadsheets/s1": `{"spreadsheetId":"s1","properties":{"title":"Plan","locale":"en_US","timeZone":"Europe/Paris"},"sheets":[` +
 			`{"properties":{"sheetId":0,"title":"Sheet1","gridProperties":{"rowCount":1000,"columnCount":26}}},{"properties":{"sheetId":5}}],"spreadsheetUrl":"https://docs.google.com/spreadsheets/d/s1/edit"}`,
 		"GET /v4/spreadsheets/s2": `{"spreadsheetId":"s2","properties":{}}`,
+		"GET /v4/spreadsheets/s3": `{"spreadsheetId":"s3"}`,
+		"GET /v4/spreadsheets/s4": `{"spreadsheetId":"s4","properties":null}`,
 		"POST /v4/spreadsheets":   `{"spreadsheetId":"n1","properties":{"title":"Budget"},"spreadsheetUrl":"https://docs.google.com/spreadsheets/d/n1/edit"}`,
 		"POST /files/s1/copy":     `{"id":"c1","name":"Plan (copy)"}`,
 	})
@@ -847,6 +849,13 @@ func TestMetadataCreateCopyAndExport(t *testing.T) {
 	if got := googletest.JSONText(v); got != `{"id":"s2","title":"Untitled","url":"https://docs.google.com/spreadsheets/d/s2","sheets":[]}` {
 		t.Fatal(got)
 	}
+	// No properties: Bun reads props.title off them and reports the TypeError.
+	for id, base := range map[string]string{"s3": "undefined", "s4": "null"} {
+		v, err = product.Exec(fake.Ctx(), t, reg, "metadata", product.Input(t, "metadata", map[string]any{"spreadsheet-id-or-url": id}, nil))
+		if ce := googletest.CliErr(t, err); v != nil || ce.Code != "API_ERROR" || ce.Message != "Failed to get metadata: "+base+" is not an object (evaluating 'props.title')" {
+			t.Fatalf("%s: %#v", id, ce)
+		}
+	}
 
 	v, err = product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", map[string]any{"title": "Budget"}, map[string]any{"sheets": " Income , Expenses"}))
 	if err != nil {
@@ -862,6 +871,19 @@ func TestMetadataCreateCopyAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	if h := last(); googletest.JSONText(h.JSON) != `{"properties":{"title":"Solo"}}` {
+		t.Fatal(h.Raw)
+	}
+	// An empty title or sheet name is sent as "", as Bun sends it.
+	if _, err := product.Exec(fake.Ctx(), t, reg, "create", product.Input(t, "create", map[string]any{"title": ""}, map[string]any{"sheets": "a, ,b"})); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); googletest.JSONText(h.JSON) != `{"properties":{"title":""},"sheets":[{"properties":{"title":"a"}},{"properties":{"title":""}},{"properties":{"title":"b"}}]}` {
+		t.Fatal(h.Raw)
+	}
+	if _, err := product.Exec(fake.Ctx(), t, reg, "copy", product.Input(t, "copy", map[string]any{"spreadsheet-id-or-url": "s1", "title": ""}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if h := last(); googletest.JSONText(h.JSON) != `{"name":""}` {
 		t.Fatal(h.Raw)
 	}
 
@@ -1030,3 +1052,7 @@ func TestExportWriteFailsLikeNode(t *testing.T) {
 		}
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

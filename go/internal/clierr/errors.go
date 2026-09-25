@@ -94,13 +94,13 @@ func MultipleProfiles(service string, names []string) *Error {
 
 func ProfileNotFoundError(service, profile string) *Error {
 	return New(ProfileNotFound,
-		fmt.Sprintf("No %s profile %q", service, profile),
+		fmt.Sprintf("No %s profile \"%s\"", service, profile),
 		fmt.Sprintf("Run: agentio %s profile list", service))
 }
 
 func NoCredentials(service, profile string) *Error {
 	return New(AuthFailed,
-		fmt.Sprintf("No credentials found for %s profile %q", service, profile),
+		fmt.Sprintf("No credentials found for %s profile \"%s\"", service, profile),
 		fmt.Sprintf("Run: agentio %s profile add --profile %s", service, profile))
 }
 

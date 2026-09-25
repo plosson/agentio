@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/obscure"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
@@ -124,8 +125,10 @@ func requestToken(ctx context.Context, do fetchFunc, payload map[string]any, pre
 		RefreshToken *string `json:"refresh_token"`
 		ExpiresIn    float64 `json:"expires_in"`
 	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
+	if null, err := plugins.DecodeJSON(resp.StatusCode, body, &parsed); err != nil {
 		return tokenResult{}, err
+	} else if null {
+		return tokenResult{}, jsvalue.TypeError(nil, "data.access_token")
 	}
 	// Atlassian omits the refresh token when it is not rotating. Bun keeps the previous one.
 	rt := previousRefresh
@@ -159,7 +162,7 @@ func accessibleSites(ctx context.Context, do fetchFunc, access string) ([]site, 
 		return nil, fmt.Errorf("Failed to get accessible resources: %s", string(body))
 	}
 	var sites []site
-	if err := json.Unmarshal(body, &sites); err != nil {
+	if _, err := plugins.DecodeJSON(resp.StatusCode, body, &sites); err != nil {
 		return nil, err
 	}
 	return sites, nil

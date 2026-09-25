@@ -3,11 +3,11 @@ package atlassian
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -34,20 +34,18 @@ func NewClient(ctx context.Context, run *plugins.RunContext, errorPrefix string)
 	}
 }
 
-// Request sends method to target with body as JSON (none when nil) and
-// decodes the answer into out. A 204 or an empty answer leaves out as is.
-func (c Client) Request(method, target string, body any, out any) error {
+// Request is the Bun clients' request(): body sent as JSON.stringify(body)
+// (none when nil), a failure raised as "<ErrorPrefix>: <body>", a 204 as {}
+// and any other answer as `await response.json()` reads it (an empty body is
+// null).
+func (c Client) Request(method, target string, body any) (any, error) {
 	var reader io.Reader
 	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		reader = bytes.NewReader(raw)
+		reader = bytes.NewReader(jsvalue.Stringify(body))
 	}
 	req, err := http.NewRequestWithContext(c.Ctx, method, target, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Access)
 	req.Header.Set("Accept", "application/json")
@@ -56,34 +54,38 @@ func (c Client) Request(method, target string, body any, out any) error {
 	}
 	resp, err := c.Fetch(c.Ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.Fail(plugins.HTTPStatusToErrorCode(resp.StatusCode), c.ErrorPrefix+": "+string(raw), "")
+		return nil, c.Fail(plugins.HTTPStatusToErrorCode(resp.StatusCode), c.ErrorPrefix+": "+string(raw), "")
 	}
-	if resp.StatusCode == http.StatusNoContent || out == nil {
-		return nil
+	if resp.StatusCode == http.StatusNoContent {
+		return jsvalue.NewObject(), nil
 	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil
+	return plugins.ResponseJSON(resp.StatusCode, raw)
+}
+
+// Pick is an object literal of raw's members: pairs are the new key, then
+// the member of raw it takes (`{ id: raw.id, spaceId: raw.space_id }`). A
+// missing member is undefined, which --json leaves out.
+func Pick(raw any, pairs ...string) *jsvalue.Object {
+	o := jsvalue.NewObject()
+	for i := 0; i+1 < len(pairs); i += 2 {
+		o.Set(pairs[i], jsvalue.Member(raw, pairs[i+1]))
 	}
-	return json.Unmarshal(raw, out)
+	return o
 }
 
 // ExtractTextFromADF is the Bun clients' extractTextFromAdf: top-level
 // blocks joined by a blank line, text nodes concatenated, hard breaks as
 // newlines.
 func ExtractTextFromADF(adf any) string {
-	doc, ok := adf.(map[string]any)
-	if !ok {
-		return ""
-	}
-	content, ok := doc["content"].([]any)
+	content, ok := jsvalue.Member(adf, "content").([]any)
 	if !ok {
 		return ""
 	}
@@ -95,19 +97,17 @@ func ExtractTextFromADF(adf any) string {
 }
 
 func extractNode(node any) string {
-	n, ok := node.(map[string]any)
-	if !ok {
+	if _, ok := node.(*jsvalue.Object); !ok {
 		return ""
 	}
-	if n["type"] == "text" {
-		if text, _ := n["text"].(string); text != "" {
-			return text
-		}
+	typ := jsvalue.Member(node, "type")
+	if text := jsvalue.Member(node, "text"); jsvalue.StrictEqual(typ, "text") && jsvalue.Truthy(text) {
+		return jsvalue.String(text)
 	}
-	if n["type"] == "hardBreak" {
+	if jsvalue.StrictEqual(typ, "hardBreak") {
 		return "\n"
 	}
-	content, ok := n["content"].([]any)
+	content, ok := jsvalue.Member(node, "content").([]any)
 	if !ok {
 		return ""
 	}

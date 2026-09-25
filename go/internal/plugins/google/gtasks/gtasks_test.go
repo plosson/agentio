@@ -374,7 +374,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"items": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "tasks access ok" {
@@ -693,7 +693,7 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"items":[{"id":"L1","title":"A","kind":"tasks#taskList","etag":"e"},{}]}`)
 	})
-	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(1), "acme", fake.Ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,3 +713,7 @@ func TestTaskJSONKeepsBunsShape(t *testing.T) {
 		t.Fatalf("%s", raw)
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

@@ -54,7 +54,7 @@ func (c *client) parseURL(feedURL string) (*feed, error) {
 			return nil, err
 		}
 		if strings.HasPrefix(feedURL, "https") != (u.Scheme == "https") || (u.Scheme != "http" && u.Scheme != "https") {
-			return nil, fmt.Errorf("Protocol %q not supported", u.Scheme+":")
+			return nil, fmt.Errorf("Protocol \"%s\" not supported", u.Scheme+":")
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 		if err != nil {

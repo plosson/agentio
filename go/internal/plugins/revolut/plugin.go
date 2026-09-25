@@ -470,16 +470,27 @@ func expensesCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
-			if dir := in.Option("receipts"); dir != "" {
-				downloadReceipts(c, run, expenses, dir)
-			}
 			format := in.Option("format")
-			return &view{value: values(expenses), asJSON: format == "json", text: func() string {
+			list := &view{value: values(expenses), asJSON: format == "json", text: func() string {
 				if format == "csv" {
 					return expensesCSV(expenses)
 				}
 				return expenseListText(expenses)
-			}}, nil
+			}}
+			dir := in.Option("receipts")
+			if dir == "" {
+				return list, nil
+			}
+			// Bun prints the list, then downloads: its lines go to stderr after.
+			if in.Print == nil {
+				downloadReceipts(c, run, expenses, dir)
+				return list, nil
+			}
+			if text := formatView(list); text != "" {
+				in.Print(text)
+			}
+			downloadReceipts(c, run, expenses, dir)
+			return nil, nil
 		},
 		Format: formatView,
 	}

@@ -33,26 +33,19 @@ const (
 	assertionTTLSec     = 60 * 60
 )
 
-// specialScheme is the WHATWG set whose URLs must name a host.
-var specialScheme = map[string]bool{"http": true, "https": true, "ws": true, "wss": true, "ftp": true}
-
 // issuerFromRedirectURI is the JWT `iss` claim: Revolut derives it from the
-// host of the registered redirect URI, not the full URI.
+// host of the registered redirect URI (new URL(uri).hostname), not the full
+// URI.
 func issuerFromRedirectURI(redirectURI string) (string, error) {
-	u, err := url.Parse(redirectURI)
-	if err != nil || u.Scheme == "" || specialScheme[strings.ToLower(u.Scheme)] && u.Host == "" {
+	host, ok := jsvalue.URLHostname(redirectURI)
+	if !ok {
 		return "", &apiError{
 			code:       "INVALID_PARAMS",
 			message:    fmt.Sprintf(`Redirect URI "%s" is not a valid URL`, redirectURI),
 			suggestion: "Use the full URI registered with Revolut, e.g. https://example.com/callback",
 		}
 	}
-	// WHATWG URL#hostname keeps IPv6 brackets and lower-cases the host.
-	host := u.Host
-	if i := strings.LastIndex(host, ":"); i >= 0 && !strings.HasSuffix(host, "]") {
-		host = host[:i]
-	}
-	return strings.ToLower(host), nil
+	return host, nil
 }
 
 // signingKey is the first private key in a PEM file, as OpenSSL finds it

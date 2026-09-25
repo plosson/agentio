@@ -137,7 +137,7 @@ type CreatedFile struct {
 // parentFolderID when given. The title is kept, and linkPrefix + id is the URL,
 // when Drive returns none. A failure is Failed(operation).
 func (a API) CopyDriveFile(svc *drive.Service, fileID, title, parentFolderID, operation, linkPrefix string) (*CreatedFile, error) {
-	file := &drive.File{Name: title}
+	file := &drive.File{Name: title, ForceSendFields: []string{"Name"}} // "" is sent, as Bun sends it
 	if parentFolderID != "" {
 		file.Parents = []string{parentFolderID}
 	}

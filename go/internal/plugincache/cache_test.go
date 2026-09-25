@@ -39,3 +39,16 @@ func TestCacheRejectsPathTricksAndCorruptFiles(t *testing.T) {
 		t.Fatalf("cache escaped the temp home: %s", path)
 	}
 }
+
+// The file is JSON.stringify(value), as Bun writes it: no HTML escaping.
+func TestWriteIsJSONStringify(t *testing.T) {
+	testbox.Isolate(t)
+	if err := Write("acme", "scope", "note", map[string]string{"text": "a&<b> "}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := Path("acme", "scope", "note")
+	raw, _ := os.ReadFile(path)
+	if string(raw) != "{\"text\":\"a&<b> \"}" {
+		t.Fatalf("%q", raw)
+	}
+}

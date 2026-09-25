@@ -33,7 +33,7 @@ func writeRefusal(service, profileName, operation string, readOnly bool) error {
 		suggestion = "The profile or the key is read-only on the vault hub; change it there"
 	}
 	return clierr.New(clierr.PermissionDenied,
-		fmt.Sprintf("Cannot %s: profile %q is read-only", operation, profileName),
+		fmt.Sprintf("Cannot %s: profile \"%s\" is read-only", operation, profileName),
 		suggestion)
 }
 
@@ -193,7 +193,7 @@ func AddProfile(ctx context.Context, p *plugins.Plugin, opts plugins.SetupOption
 	if err := profile.Save(p.ID, name, result.Credentials, save); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Profile %q configured!\n", name)
+	fmt.Fprintf(out, "Profile \"%s\" configured!\n", name)
 	if result.Info != "" {
 		fmt.Fprintln(out, result.Info)
 	}

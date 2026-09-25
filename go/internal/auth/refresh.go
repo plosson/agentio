@@ -89,7 +89,7 @@ func GetFresh(ctx context.Context, reg *plugins.Registry, service, profileName s
 		if err != nil {
 			reason := plugins.FetchFailure(err).Error()
 			return Fresh{}, clierr.New(clierr.TokenExpired,
-				fmt.Sprintf("Token refresh failed for %s profile %q: %s", service, profileName, reason),
+				fmt.Sprintf("Token refresh failed for %s profile \"%s\": %s", service, profileName, reason),
 				fmt.Sprintf("Re-authenticate with: agentio %s profile add --profile %s", service, profileName))
 		}
 		if err := SetCredentials(service, profileName, fresh); err != nil {

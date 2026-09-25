@@ -34,8 +34,10 @@ type Hit struct {
 	Method string
 	Path   string
 	Query  url.Values
-	Auth   string
-	Type   string
+	// RawQuery is the query string as sent.
+	RawQuery string
+	Auth     string
+	Type     string
 	// Raw is the body as sent, Body the same body decoded when it is a JSON object.
 	Raw  string
 	Body map[string]any
@@ -86,7 +88,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	h := Hit{
 		Host: r.Header.Get("X-Orig-Host"), Method: r.Method, Path: r.URL.Path,
-		Query: r.URL.Query(), Auth: r.Header.Get("Authorization"),
+		Query: r.URL.Query(), RawQuery: r.URL.RawQuery, Auth: r.Header.Get("Authorization"),
 		Type: r.Header.Get("Content-Type"), Raw: string(raw),
 	}
 	if len(raw) > 0 {

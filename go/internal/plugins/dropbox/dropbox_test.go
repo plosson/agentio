@@ -1136,3 +1136,13 @@ func jsonEqual(a, b any) bool {
 	y, _ := json.Marshal(b)
 	return bytes.Equal(x, y)
 }
+
+// A success body that is not JSON fails with JSON.parse's message (Bun
+// `text ? JSON.parse(text) : undefined`).
+func TestASuccessBodyThatIsNotJSONFailsLikeBun(t *testing.T) {
+	newFake(t, func(w http.ResponseWriter, h hit) { _, _ = io.WriteString(w, `{"account_id":`) })
+	a := newAPI(context.Background(), storedCreds(int64(1)), host.NewRunContext(nil, "", nil).Fetch)
+	if _, err := a.account(); err == nil || err.Error() != "JSON Parse error: Unexpected EOF" {
+		t.Fatalf("%v", err)
+	}
+}

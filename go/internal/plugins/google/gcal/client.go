@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
+	"net/http"
 	"strings"
 	"time"
 
@@ -363,32 +363,30 @@ func (a *api) respond(calendarID, eventID, status, comment string) (*event, erro
 }
 
 func (a *api) freeBusy(ids []string, timeMin, timeMax string) (*freeBusy, error) {
-	// Bun sends the times as given, "" included.
-	req := &calendar.FreeBusyRequest{TimeMin: timeMin, TimeMax: timeMax, ForceSendFields: []string{"TimeMin", "TimeMax"}}
-	for _, id := range ids {
-		req.Items = append(req.Items, &calendar.FreeBusyRequestItem{Id: id})
+	// Bun's requestBody { timeMin, timeMax, items }, the times as given.
+	body := jsvalue.NewObject()
+	body.Set("timeMin", timeMin)
+	body.Set("timeMax", timeMax)
+	items := make([]any, len(ids))
+	for i, id := range ids {
+		item := jsvalue.NewObject()
+		item.Set("id", id)
+		items[i] = item
 	}
-	resp, err := a.svc.Freebusy.Query(req).Context(a.Ctx).Do()
+	body.Set("items", items)
+	raw, err := google.CallJSON(a.Ctx, a.RunContext, google.Snake, http.MethodPost, a.svc.BasePath, "freeBusy", jsvalue.Stringify(body))
 	if err != nil {
 		return nil, a.APIError("Calendar API error", err)
 	}
-	var order []string
-	seen := map[string]bool{}
-	for _, id := range ids {
-		if _, ok := resp.Calendars[id]; ok && !seen[id] {
-			order = append(order, id)
-			seen[id] = true
-		}
+	var resp calendar.FreeBusyResponse
+	if err := json.Unmarshal(jsvalue.Stringify(raw), &resp); err != nil {
+		return nil, a.APIError("Calendar API error", err)
 	}
-	var rest []string
-	for id := range resp.Calendars {
-		if !seen[id] {
-			rest = append(rest, id)
-		}
-	}
-	sort.Strings(rest)
+	// Object.entries(response.data.calendars): the answer's order.
+	calendars, _ := jsvalue.Member(raw, "calendars").(*jsvalue.Object)
+	order := calendars.Keys()
 	out := &freeBusy{Calendars: []busyCalendar{}}
-	for _, id := range append(order, rest...) {
+	for _, id := range order {
 		data := resp.Calendars[id]
 		c := busyCalendar{ID: id, Busy: []busyPeriod{}}
 		for _, b := range data.Busy {

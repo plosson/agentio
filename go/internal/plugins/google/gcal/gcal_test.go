@@ -364,7 +364,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"id": "me@example.com"}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -616,14 +616,17 @@ func TestWriteCommandsSendTheBunBodies(t *testing.T) {
 	}
 }
 
-func TestFreeBusyKeepsTheRequestOrder(t *testing.T) {
+// Bun walks Object.entries(response.data.calendars): the answer's order,
+// whatever the order of the request.
+func TestFreeBusyKeepsTheResponseOrder(t *testing.T) {
 	reg := product.SetupVault(t)
 	product.SaveProfile(t, "acme", storedCreds(time.Now().Add(time.Hour).UnixMilli()), false)
 	fake := googletest.NewFakeAt(t, "/calendar/v3/", func(w http.ResponseWriter, h googletest.Hit) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"calendars":{
+			"amy@example.com":{"busy":[],"errors":[{"domain":"global","reason":"notFound"}]},
 			"zed@example.com":{"busy":[{"start":"2024-04-15T16:00:00Z","end":"2024-04-15T17:00:00Z"}]},
-			"amy@example.com":{"busy":[],"errors":[{"domain":"global","reason":"notFound"}]}}}`)
+			"bob@example.com":{}}}`)
 	})
 	got, err := product.Exec(fake.Ctx(), t, reg, "freebusy", product.Input(t, "freebusy", map[string]any{"calendar-ids": " zed@example.com, ,amy@example.com"},
 		map[string]any{"from": "2024-04-15T00:00:00Z", "to": "2024-04-16T00:00:00Z"}))
@@ -632,15 +635,15 @@ func TestFreeBusyKeepsTheRequestOrder(t *testing.T) {
 	}
 	h := fake.Recorded()[0]
 	if h.Method != "POST" || h.Path != "/calendar/v3/freeBusy" ||
-		googletest.JSONText(h.JSON) != `{"items":[{"id":"zed@example.com"},{"id":"amy@example.com"}],"timeMax":"2024-04-16T00:00:00Z","timeMin":"2024-04-15T00:00:00Z"}` {
-		t.Fatalf("%s %s", h.Path, googletest.JSONText(h.JSON))
+		h.Raw != `{"timeMin":"2024-04-15T00:00:00Z","timeMax":"2024-04-16T00:00:00Z","items":[{"id":"zed@example.com"},{"id":"amy@example.com"}]}` {
+		t.Fatalf("%s %s", h.Path, h.Raw)
 	}
-	want := "Free/Busy Information\n\nCalendar: zed@example.com\n  Busy: 2024-04-15T16:00:00Z - 2024-04-15T17:00:00Z\n\nCalendar: amy@example.com\n  Error: notFound\n  (no busy periods)\n"
+	want := "Free/Busy Information\n\nCalendar: amy@example.com\n  Error: notFound\n  (no busy periods)\n\nCalendar: zed@example.com\n  Busy: 2024-04-15T16:00:00Z - 2024-04-15T17:00:00Z\n\nCalendar: bob@example.com\n  (no busy periods)\n"
 	if formatFreeBusy(got) != want {
 		t.Fatalf("%q", formatFreeBusy(got))
 	}
 	raw, _ := json.Marshal(got)
-	if string(raw) != `{"calendars":{"zed@example.com":{"busy":[{"start":"2024-04-15T16:00:00Z","end":"2024-04-15T17:00:00Z"}]},"amy@example.com":{"busy":[],"errors":[{"domain":"global","reason":"notFound"}]}}}` {
+	if string(raw) != `{"calendars":{"amy@example.com":{"busy":[],"errors":[{"domain":"global","reason":"notFound"}]},"zed@example.com":{"busy":[{"start":"2024-04-15T16:00:00Z","end":"2024-04-15T17:00:00Z"}]},"bob@example.com":{"busy":[]}}}` {
 		t.Fatalf("%s", raw)
 	}
 	if formatFreeBusy(&freeBusy{}) != "No free/busy data" {
@@ -793,7 +796,7 @@ func TestEventJSONKeepsBunsShape(t *testing.T) {
 			"reminders":{"useDefault":false,"overrides":[{"method":"popup","minutes":0}]},"creator":{"email":"c@example.com"},
 			"conferenceData":{"conferenceId":"x"},"unknownField":1}`)
 	})
-	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(1), "acme", fake.Ctx()))
+	a, err := apiFrom(fake.Ctx(), host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,3 +931,7 @@ func TestEmptyRequiredOptionsReachTheCommand(t *testing.T) {
 		t.Fatal("a refused command reached the API")
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

@@ -3,6 +3,8 @@ package sql
 import (
 	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -311,5 +313,43 @@ func TestPostgresConnectFailuresMatchBun(t *testing.T) {
 	}
 	if got := pgErrorMessage(&pgconn.PgError{Detail: "d", Hint: "h"}); got != " d\nh" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// Bun's SQL reads only its own PG* variables (connect.go): libpq's others
+// (service files, client certificates, target_session_attrs, ...) and the
+// files libpq finds under HOME must not reach the connection.
+func TestPostgresConfigIgnoresLibpqEnvironment(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".postgresql"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"postgresql.crt", "postgresql.key", "root.crt"} {
+		if err := os.WriteFile(filepath.Join(home, ".postgresql", f), []byte("not a pem"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for k, v := range map[string]string{
+		"PGSERVICE": "nosuch", "PGSERVICEFILE": filepath.Join(home, "missing.conf"),
+		"PGSSLROOTCERT": filepath.Join(home, "missing.pem"), "PGSSLCERT": filepath.Join(home, "c.pem"), "PGSSLKEY": filepath.Join(home, "k.pem"),
+		"PGSSLSNI": "0", "PGTARGETSESSIONATTRS": "read-write", "PGAPPNAME": "libpq-app", "PGOPTIONS": "-c x=1",
+	} {
+		t.Setenv(k, v)
+	}
+	for _, mode := range []sslMode{sslDisable, sslRequire, sslVerifyFull} {
+		cfg, err := newPostgres(serverOptions{adapter: adapterPostgres, hostname: "db.example.com", port: 5432, username: "u", database: "d", sslMode: mode}).config()
+		if err != nil {
+			t.Fatalf("%v: %v", mode, err)
+		}
+		if cfg.ValidateConnect != nil || cfg.RuntimeParams["application_name"] != "" || cfg.RuntimeParams["options"] != "" {
+			t.Fatalf("%v: %#v", mode, cfg.RuntimeParams)
+		}
+		if tc := cfg.TLSConfig; tc != nil && (len(tc.Certificates) != 0 || tc.RootCAs != nil || (mode == sslVerifyFull && tc.ServerName != "db.example.com")) {
+			t.Fatalf("%v: TLS from the environment: %#v", mode, tc)
+		}
+	}
+	if os.Getenv("PGSERVICE") != "nosuch" {
+		t.Fatal("the environment was not restored")
 	}
 }

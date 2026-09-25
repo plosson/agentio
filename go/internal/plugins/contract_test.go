@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -316,5 +317,68 @@ func TestBunTransportTimeoutCoversTheBody(t *testing.T) {
 	defer resp.Body.Close()
 	if _, err := io.ReadAll(resp.Body); err == nil || err.Error() != "The operation timed out." {
 		t.Fatalf("%v", err)
+	}
+}
+
+// ResponseJSON is Bun's `await response.json()`: an empty body is null, not
+// an error, unless the status has no body; anything else is JSON.parse'd with
+// JavaScriptCore's message. Probed with Bun fetch against a local server.
+func TestResponseJSONIsBunsResponseJSON(t *testing.T) {
+	for _, c := range []struct {
+		status    int
+		raw, want string
+	}{
+		{200, "", "null"},
+		{201, "", "null"},
+		{204, "", "error Unexpected end of JSON input"},
+		{205, "", "error Unexpected end of JSON input"},
+		{200, `{"a":1}`, `{"a":1}`},
+		{200, " ", "error JSON Parse error: Unexpected EOF"},
+		{200, "<html>", "error JSON Parse error: Unrecognized token '<'"},
+		{200, "1 2", "error JSON Parse error: Unable to parse JSON string"},
+		{200, "nul", `error JSON Parse error: Unexpected identifier "nul"`},
+	} {
+		v, err := ResponseJSON(c.status, []byte(c.raw))
+		got := string(jsvalue.Stringify(v))
+		if err != nil {
+			got = "error " + err.Error()
+		}
+		if got != c.want {
+			t.Errorf("%d %q: %s, want %s", c.status, c.raw, got, c.want)
+		}
+	}
+}
+
+func TestDecodeJSONFailsWithJSONParsesMessage(t *testing.T) {
+	var out struct{ A int }
+	if null, err := DecodeJSON(200, []byte(`{"A":`), &out); null || err == nil || err.Error() != "JSON Parse error: Unexpected EOF" {
+		t.Fatal(null, err)
+	}
+	if null, err := DecodeJSON(200, nil, &out); !null || err != nil {
+		t.Fatal(null, err)
+	}
+	if null, err := DecodeJSON(200, []byte(`{"A":2}`), &out); null || err != nil || out.A != 2 {
+		t.Fatal(null, err, out)
+	}
+}
+
+// All runs every task at once and reports the error that came first in
+// time, as Promise.all rejects with the first rejection.
+func TestAllIsPromiseAll(t *testing.T) {
+	var done sync.WaitGroup
+	done.Add(3)
+	slow := errors.New("slow")
+	fast := errors.New("fast")
+	err := All(
+		func() error { defer done.Done(); time.Sleep(100 * time.Millisecond); return slow },
+		func() error { defer done.Done(); return nil },
+		func() error { defer done.Done(); time.Sleep(10 * time.Millisecond); return fast },
+	)
+	if err != fast {
+		t.Fatalf("%v", err)
+	}
+	done.Wait()
+	if All() != nil || All(func() error { return nil }) != nil {
+		t.Fatal("no error expected")
 	}
 }

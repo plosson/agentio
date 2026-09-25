@@ -140,7 +140,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 		} else {
 			payload, err := c.downloadPeppolDocumentUbl(id)
 			if err == nil {
-				err = os.WriteFile(xmlPath, payload, 0o666)
+				err = nodefs.WriteFile(xmlPath, payload)
 			}
 			if err != nil {
 				run.Log(fmt.Sprintf("  ✗ %s — %s", basename, err.Error()))
@@ -161,7 +161,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 				pdf, err = renderUblXMLToPdf(xml)
 			}
 			if err == nil {
-				err = os.WriteFile(pdfPath, pdf, 0o666)
+				err = nodefs.WriteFile(pdfPath, pdf)
 			}
 			if err != nil {
 				run.Log(fmt.Sprintf("  ✗ %s.pdf — %s", basename, err.Error()))
@@ -179,7 +179,7 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 		if plan.reuseXML {
 			mark = "·"
 		}
-		res.lines = append(res.lines, fmt.Sprintf("  %s %s  (%s)", mark, basename, describePeppolDocument(d)))
+		res.print(in, fmt.Sprintf("  %s %s  (%s)", mark, basename, describePeppolDocument(d)))
 	}
 
 	if err := saveManifest(output, m); err != nil {
@@ -243,7 +243,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 		}
 		payload, err := c.downloadBillingDocumentPdf(id)
 		if err == nil {
-			err = os.WriteFile(pdfPath, payload, 0o666)
+			err = nodefs.WriteFile(pdfPath, payload)
 		}
 		if err != nil {
 			run.Log(fmt.Sprintf("  ✗ %s — %s", basename, err.Error()))
@@ -251,7 +251,7 @@ func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.
 			continue
 		}
 		t.Downloaded++
-		res.lines = append(res.lines, fmt.Sprintf("  ✓ %s  (%s)", basename, describeBillingDocument(d)))
+		res.print(in, fmt.Sprintf("  ✓ %s  (%s)", basename, describeBillingDocument(d)))
 	}
 
 	if err := saveManifest(output, m); err != nil {

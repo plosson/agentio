@@ -607,12 +607,12 @@ func filtersListCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			filters, err := a.listFilters()
-			if err != nil {
-				return nil, err
-			}
-			names, err := a.labelNamesByID()
-			if err != nil {
+			var filters []filter
+			var names map[string]string
+			if err := plugins.All(
+				func() (err error) { filters, err = a.listFilters(); return },
+				func() (err error) { names, err = a.labelNamesByID(); return },
+			); err != nil {
 				return nil, err
 			}
 			return &filterListing{filters: filters, names: names}, nil
@@ -636,12 +636,12 @@ func filtersGetCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			f, err := a.getFilter(in.Arg("id"))
-			if err != nil {
-				return nil, err
-			}
-			names, err := a.labelNamesByID()
-			if err != nil {
+			var f *filter
+			var names map[string]string
+			if err := plugins.All(
+				func() (err error) { f, err = a.getFilter(in.Arg("id")); return },
+				func() (err error) { names, err = a.labelNamesByID(); return },
+			); err != nil {
 				return nil, err
 			}
 			return &filterView{filter: *f, names: names}, nil
@@ -738,12 +738,11 @@ func filtersCreateCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			add, err := a.resolveLabelIDs(in.List("apply"))
-			if err != nil {
-				return nil, err
-			}
-			remove, err := a.resolveLabelIDs(in.List("remove"))
-			if err != nil {
+			var add, remove []string
+			if err := plugins.All(
+				func() (err error) { add, err = a.resolveLabelIDs(in.List("apply")); return },
+				func() (err error) { remove, err = a.resolveLabelIDs(in.List("remove")); return },
+			); err != nil {
 				return nil, err
 			}
 			action := filterAction{Forward: in.Option("forward")}
@@ -851,12 +850,11 @@ func labelCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			add, err := a.resolveLabelIDs(apply)
-			if err != nil {
-				return nil, err
-			}
-			drop, err := a.resolveLabelIDs(remove)
-			if err != nil {
+			var add, drop []string
+			if err := plugins.All(
+				func() (err error) { add, err = a.resolveLabelIDs(apply); return },
+				func() (err error) { drop, err = a.resolveLabelIDs(remove); return },
+			); err != nil {
 				return nil, err
 			}
 			modifyOne := func(id string) (any, error) {

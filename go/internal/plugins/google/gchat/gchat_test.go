@@ -508,12 +508,12 @@ func TestValidate(t *testing.T) {
 	if err != nil || !v.Valid || v.Info != "webhook" || len(fake.Recorded()) != 0 {
 		t.Fatalf("webhook %#v %v", v, err)
 	}
-	run := host.NewRunContext(oauthCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(oauthCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{}
 	if v, _ := New().Profile.Validate(fake.Ctx(), run); !v.Valid || v.Info != "me@example.com" {
 		t.Fatalf("%#v", v)
 	}
-	noEmail := oauthCreds(1)
+	noEmail := oauthCreds(freshExpiry)
 	delete(noEmail, "email")
 	if v, _ := New().Profile.Validate(fake.Ctx(), host.NewRunContext(noEmail, "acme", fake.Ctx())); !v.Valid || v.Info != "oauth" {
 		t.Fatalf("%#v", v)
@@ -706,12 +706,14 @@ func TestSendViaOAuth(t *testing.T) {
 	if product.Spec(t, "send").Format(res) != "Message sent\nID: M9\nSpace: ENG1" {
 		t.Fatalf("%q", product.Spec(t, "send").Format(res))
 	}
-	// A --json object is spread into the message (Bun `{ ...payload }`); a
-	// payload that is not an object gives no message field. The Chat SDK
-	// writes the request, so the posted fields are compared, not the text.
+	// A --json payload is spread into the request body (Bun `{ ...payload }`)
+	// and sent as is: key order, fields the Chat API may reject, an array's
+	// or a string's indices. A falsy payload sends `{ text }`.
 	for _, c := range []struct{ stdin, want, format string }{
-		{`{"text":"card <&>","cardsV2":[{"cardId":"c"}]}`, googletest.JSONText(map[string]any{"cardsV2": []any{map[string]any{"cardId": "c"}}, "text": "card <&>"}), "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
-		{`[1,2]`, `{}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		{`{"text":"card <&>","cardsV2":[{"cardId":"c"}],"unknownField":{"z":1,"a":2}}`, `{"text":"card <&>","cardsV2":[{"cardId":"c"}],"unknownField":{"z":1,"a":2}}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		{`{"text":5}`, `{"text":5}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		{`[1,2]`, `{"0":1,"1":2}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
+		{`"ab"`, `{"0":"a","1":"b"}`, "Message sent\nID: M9\nSpace: AAAA\nType: JSON payload"},
 		// Bun reports `!!payload`, so a falsy payload is not a JSON payload.
 		{`0`, `{}`, "Message sent\nID: M9\nSpace: AAAA"},
 		{`false`, `{}`, "Message sent\nID: M9\nSpace: AAAA"},
@@ -723,8 +725,8 @@ func TestSendViaOAuth(t *testing.T) {
 			t.Fatal(err)
 		}
 		posted := fake.Recorded()[1]
-		if googletest.JSONText(posted.JSON) != c.want || product.Spec(t, "send").Format(res) != c.format {
-			t.Fatalf("%s: posted %s, %q", c.stdin, googletest.JSONText(posted.JSON), product.Spec(t, "send").Format(res))
+		if posted.Raw != c.want || posted.Type != "application/json" || product.Spec(t, "send").Format(res) != c.format {
+			t.Fatalf("%s: posted %s %q, %q", c.stdin, posted.Raw, posted.Type, product.Spec(t, "send").Format(res))
 		}
 	}
 }
@@ -757,13 +759,18 @@ func TestSendUploadsAttachmentsBeforeTheMessage(t *testing.T) {
 	if strings.Join(fake.Paths(), ",") != "GET /v1/spaces/AAAA,POST /upload/v1/spaces/AAAA/attachments:upload,POST /upload/v1/spaces/AAAA/attachments:upload,POST /v1/spaces/AAAA/messages" {
 		t.Fatalf("%v", fake.Paths())
 	}
+	// The uploads run at once (Bun Promise.all): they arrive in either order.
 	for i, want := range []string{"Content-Type: image/png", "Content-Type: application/octet-stream"} {
-		up := all[1+i]
-		if up.Query.Get("uploadType") != "multipart" || !strings.Contains(up.Raw, want) || !strings.Contains(up.Raw, `"filename":"`+filepath.Base([]string{png, notes}[i])+`"`) {
+		name := `"filename":"` + filepath.Base([]string{png, notes}[i]) + `"`
+		up := all[1]
+		if !strings.Contains(up.Raw, name) {
+			up = all[2]
+		}
+		if up.Query.Get("uploadType") != "multipart" || !strings.Contains(up.Raw, want) || !strings.Contains(up.Raw, name) {
 			t.Fatalf("upload %d %v %q", i, up.Query, up.Raw)
 		}
 	}
-	if got := googletest.JSONText(all[3].JSON); got != `{"attachment":[{"contentName":"old"},{"attachmentDataRef":{"resourceName":"ref-multipart"}},{"attachmentDataRef":{"resourceName":"ref-multipart"}}],"text":"card"}` {
+	if got := all[3].Raw; got != `{"text":"card","attachment":[{"contentName":"old"},{"attachmentDataRef":{"resourceName":"ref-multipart"}},{"attachmentDataRef":{"resourceName":"ref-multipart"}}]}` {
 		t.Fatalf("%s", got)
 	}
 	if product.Spec(t, "send").Format(res) != "Message sent\nID: M1\nSpace: AAAA\nType: JSON payload" {
@@ -918,6 +925,8 @@ func (c *chatFake) handle(w http.ResponseWriter, h googletest.Hit) {
 			return
 		}
 		googletest.WriteJSON(w, 200, map[string]any{"people": c.directory, "nextSyncToken": "sync-1"})
+	case h.Path == "/v1/people/503":
+		googletest.WriteAPIError(w, 503, "busy")
 	case strings.HasPrefix(h.Path, "/v1/people/"):
 		if p, ok := c.people[strings.TrimPrefix(h.Path, "/v1/people/")]; ok {
 			googletest.WriteJSON(w, 200, p)
@@ -930,6 +939,11 @@ func (c *chatFake) handle(w http.ResponseWriter, h googletest.Hit) {
 			googletest.WriteJSON(w, 200, map[string]any{"name": "spaces/DM7"})
 		case "users/8":
 			googletest.WriteAPIError(w, 403, "scope")
+		case "users/5":
+			googletest.WriteAPIError(w, 503, "busy")
+		case "users/6":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, "<html>")
 		default:
 			googletest.WriteAPIError(w, 404, "none")
 		}
@@ -1115,6 +1129,8 @@ func TestSpacesAndDirectMessages(t *testing.T) {
 	}{
 		{"8", clierr.PermissionDenied, `findDirectMessage failed: 403 {"error":{"code":403,"message":"scope"}}` + "\n", "Check that the OAuth scope includes chat.spaces.readonly"},
 		{"users/9", clierr.NotFound, "No direct message space exists with users/9", "Open the chat once in Google Chat to create the DM space"},
+		// Bun's findDirectMessage is a plain fetch: a 503 is not retried.
+		{"users/5", clierr.APIError, `findDirectMessage failed: 503 {"error":{"code":503,"message":"busy"}}` + "\n", "Check that the OAuth scope includes chat.spaces.readonly"},
 		{"grace", clierr.InvalidParams, `Cannot resolve "grace" to a user`, "Provide an email address, numeric user ID, or users/<id> resource name"},
 		{"nobody@example.com", clierr.NotFound, "Email not found in workspace directory: nobody@example.com", `Run "agentio gchat directory refresh" if the user was added recently`},
 	}
@@ -1124,6 +1140,17 @@ func TestSpacesAndDirectMessages(t *testing.T) {
 		if res != nil || ce.Code != c.code || ce.Message != c.message || ce.Suggestion != c.suggest {
 			t.Errorf("%s: %#v", c.with, ce)
 		}
+	}
+	before := len(fake.Recorded())
+	if _, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": "users/5"})); err == nil {
+		t.Fatal("no error")
+	}
+	if n := len(fake.Recorded()) - before; n != 1 {
+		t.Fatalf("findDirectMessage sent %d requests", n)
+	}
+	// An answer that is not JSON fails as res.json() does.
+	if _, err := product.Exec(fake.Ctx(), t, reg, "spaces", product.Input(t, "spaces", nil, map[string]any{"with": "users/6"})); err == nil || err.Error() != "JSON Parse error: Unrecognized token '<'" {
+		t.Fatalf("%v", err)
 	}
 	// A directory that cannot be fetched is reported when an email needs it.
 	cf.dirStatus = 403
@@ -1193,6 +1220,22 @@ func TestMembersAndUserUsePeopleThenTheDirectory(t *testing.T) {
 	res, err = product.Exec(fake.Ctx(), t, reg, "user", product.Input(t, "user", map[string]any{"user-id": "404"}, nil))
 	if ce := googletest.CliErr(t, err); res != nil || ce.Code != clierr.NotFound || ce.Message != `User not found: "404"` || ce.Suggestion != "Check the user ID is valid" {
 		t.Fatalf("%#v", ce)
+	}
+	// Bun reads people with plain fetch: a 503 is not retried; it falls back
+	// to the directory.
+	before := len(fake.Recorded())
+	_, err = product.Exec(fake.Ctx(), t, reg, "user", product.Input(t, "user", map[string]any{"user-id": "503"}, nil))
+	if ce := googletest.CliErr(t, err); ce.Code != clierr.NotFound {
+		t.Fatalf("%#v", ce)
+	}
+	n := 0
+	for _, h := range fake.Recorded()[before:] {
+		if h.Path == "/v1/people/503" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("people/503 requested %d times", n)
 	}
 	_, err = product.Exec(fake.Ctx(), t, reg, "members", product.Input(t, "members", nil, nil))
 	if ce := googletest.CliErr(t, err); ce.Message != "required option '--space <id-or-name>' not specified" {
@@ -1385,5 +1428,44 @@ func TestEmptySpaceReachesTheClient(t *testing.T) {
 func TestFormatJSONKeepsLineSeparators(t *testing.T) {
 	if got, want := asJSON(map[string]any{"text": "a b <&>"}), "{\n  \"text\": \"a b <&>\"\n}"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000
+
+// The directory keeps the users object's order, as Bun does: a lookup by
+// email takes the first match in that order (not in sorted id order), and a
+// rewrite keeps it. Expectations are Bun's Object.entries and JSON.stringify.
+func TestDirectoryKeepsTheUsersOrder(t *testing.T) {
+	testbox.Isolate(t)
+	path, err := plugincache.Path("gchat", "me@example.com", "directory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := `{"fetchedAt":"2999-01-01T00:00:00.000Z","users":{"users/9":{"displayName":"Nine","email":"dup@example.com"},"users/1":{"displayName":"One","email":"DUP@example.com"}}}`
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := newDirectory(context.Background(), nil, "me@example.com")
+	if err := d.ensureFresh(false); err != nil {
+		t.Fatal(err)
+	}
+	if id, entry := d.lookupByEmail("dup@EXAMPLE.com"); id != "users/9" || entry.DisplayName != "Nine" {
+		t.Fatalf("%q %#v", id, entry)
+	}
+	d.data.Users.set("users/1", directoryEntry{DisplayName: "Uno"})
+	d.data.Users.set("users/5", directoryEntry{DisplayName: "Five"})
+	d.data.Users.remove("users/9")
+	if err := d.save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if string(raw) != `{"fetchedAt":"2999-01-01T00:00:00.000Z","users":{"users/1":{"displayName":"Uno"},"users/5":{"displayName":"Five"}}}` {
+		t.Fatalf("%s", raw)
 	}
 }

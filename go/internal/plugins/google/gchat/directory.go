@@ -2,9 +2,9 @@ package gchat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -29,9 +29,85 @@ type directoryEntry struct {
 
 // directoryFile is the cache file, shared with the Bun CLI.
 type directoryFile struct {
-	FetchedAt string                    `json:"fetchedAt"`
-	SyncToken string                    `json:"syncToken,omitempty"`
-	Users     map[string]directoryEntry `json:"users"`
+	FetchedAt string          `json:"fetchedAt"`
+	SyncToken string          `json:"syncToken,omitempty"`
+	Users     *directoryUsers `json:"users"`
+}
+
+// directoryUsers is Bun's users object: entries by user id, in the order
+// they were first set, which is the order a lookup by email walks.
+type directoryUsers struct {
+	ids  []string
+	byID map[string]directoryEntry
+}
+
+func newDirectoryUsers() *directoryUsers {
+	return &directoryUsers{byID: map[string]directoryEntry{}}
+}
+
+func (u *directoryUsers) get(id string) (directoryEntry, bool) {
+	e, ok := u.byID[id]
+	return e, ok
+}
+
+// set is users[id] = entry: a new id goes last, a known one keeps its place.
+func (u *directoryUsers) set(id string, e directoryEntry) {
+	if _, ok := u.byID[id]; !ok {
+		u.ids = append(u.ids, id)
+	}
+	u.byID[id] = e
+}
+
+// remove is `delete users[id]`.
+func (u *directoryUsers) remove(id string) {
+	if _, ok := u.byID[id]; !ok {
+		return
+	}
+	delete(u.byID, id)
+	for i, x := range u.ids {
+		if x == id {
+			u.ids = append(u.ids[:i:i], u.ids[i+1:]...)
+			break
+		}
+	}
+}
+
+// clone is `{ ...users }`.
+func (u *directoryUsers) clone() *directoryUsers {
+	out := newDirectoryUsers()
+	for _, id := range u.ids {
+		out.set(id, u.byID[id])
+	}
+	return out
+}
+
+func (u *directoryUsers) MarshalJSON() ([]byte, error) {
+	o := jsvalue.NewObject()
+	for _, id := range u.ids {
+		o.Set(id, u.byID[id])
+	}
+	return jsvalue.Stringify(o), nil
+}
+
+func (u *directoryUsers) UnmarshalJSON(raw []byte) error {
+	v, err := jsvalue.Parse(raw)
+	if err != nil {
+		return err
+	}
+	obj, ok := v.(*jsvalue.Object)
+	if !ok {
+		return errors.New("users is not an object")
+	}
+	*u = *newDirectoryUsers()
+	for _, id := range obj.Keys() {
+		val, _ := obj.Get(id)
+		var e directoryEntry
+		if err := json.Unmarshal(jsvalue.Stringify(val), &e); err != nil {
+			return err
+		}
+		u.set(id, e)
+	}
+	return nil
 }
 
 type directory struct {
@@ -50,7 +126,7 @@ func (d *directory) lookup(userID string) *directoryEntry {
 	if d.data == nil {
 		return nil
 	}
-	if entry, ok := d.data.Users[userID]; ok {
+	if entry, ok := d.data.Users.get(userID); ok {
 		return &entry
 	}
 	return nil
@@ -61,13 +137,8 @@ func (d *directory) lookupByEmail(email string) (string, *directoryEntry) {
 		return "", nil
 	}
 	target := strings.ToLower(email)
-	ids := make([]string, 0, len(d.data.Users))
-	for id := range d.data.Users {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		entry := d.data.Users[id]
+	for _, id := range d.data.Users.ids { // Object.entries order
+		entry := d.data.Users.byID[id]
 		if entry.Email != "" && strings.ToLower(entry.Email) == target {
 			return id, &entry
 		}
@@ -79,7 +150,7 @@ func (d *directory) size() int {
 	if d.data == nil {
 		return 0
 	}
-	return len(d.data.Users)
+	return len(d.data.Users.ids)
 }
 
 func (d *directory) fetchedAt() string {
@@ -122,7 +193,7 @@ func (d *directory) load() {
 	// Caches are disposable: absence and corruption both mean a fresh fetch.
 	if ok, _ := plugincache.Read("gchat", d.scope, "directory", &file); ok {
 		if file.Users == nil {
-			file.Users = map[string]directoryEntry{}
+			file.Users = newDirectoryUsers()
 		}
 		d.data = &file
 	}
@@ -148,7 +219,7 @@ func (d *directory) page(syncToken, pageToken string) (*people.ListDirectoryPeop
 }
 
 func (d *directory) fetchFull() error {
-	users := map[string]directoryEntry{}
+	users := newDirectoryUsers()
 	syncToken, pageToken := "", ""
 	for {
 		resp, err := d.page("", pageToken)
@@ -174,10 +245,7 @@ func (d *directory) fetchFull() error {
 }
 
 func (d *directory) fetchIncremental(syncToken string) error {
-	users := make(map[string]directoryEntry, len(d.data.Users))
-	for id, entry := range d.data.Users {
-		users[id] = entry
-	}
+	users := d.data.Users.clone()
 	next, pageToken := "", ""
 	for {
 		resp, err := d.page(syncToken, pageToken)
@@ -194,7 +262,7 @@ func (d *directory) fetchIncremental(syncToken string) error {
 				continue
 			}
 			if p.Metadata != nil && p.Metadata.Deleted {
-				delete(users, id)
+				users.remove(id)
 			} else {
 				ingest(users, p)
 			}
@@ -221,7 +289,7 @@ func personToUserID(resourceName string) string {
 	return "users/" + id
 }
 
-func ingest(users map[string]directoryEntry, p *people.Person) {
+func ingest(users *directoryUsers, p *people.Person) {
 	id := personToUserID(p.ResourceName)
 	if id == "" {
 		return
@@ -234,5 +302,5 @@ func ingest(users map[string]directoryEntry, p *people.Person) {
 	if display == "" {
 		display = email
 	}
-	users[id] = directoryEntry{DisplayName: display, Email: email}
+	users.set(id, directoryEntry{DisplayName: display, Email: email})
 }

@@ -488,3 +488,32 @@ func TestCLIMatchesTheBunCapture(t *testing.T) {
 		t.Fatalf("refreshed credential %#v", stored)
 	}
 }
+
+// Bun prints each synced document as it goes (console.log), so a run that
+// then fails, here on writing the manifest, has already printed them; the
+// summary never comes. Expectation built from the Bun capture of 08-sync and
+// Bun.write's error for a directory.
+func TestSyncPrintsEachDocumentAsItGoes(t *testing.T) {
+	seedVault(t)
+	f := newFixture(t)
+	goldenDir, err := filepath.Abs(filepath.Join("testdata", "bun"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(filepath.Join("synced", ".manifest.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.resetOrdered()
+	var out, errOut bytes.Buffer
+	code := withStderr(t, &errOut, func() int {
+		return cli.Execute(plugins.Default, strings.Fields("falco peppol sync --profile acme --output synced --extract-pdf"), &out, os.Stderr, strings.NewReader(""))
+	})
+	wantOut, _, _ := strings.Cut(golden(t, goldenDir, "08-sync", "out"), "\n\nDone:")
+	if code != 1 || out.String() != wantOut+"\n" {
+		t.Fatalf("exit %d\nstdout %q\nwant   %q", code, out.String(), wantOut+"\n")
+	}
+	if !strings.HasSuffix(errOut.String(), "Error: EISDIR: illegal operation on a directory, open 'synced/.manifest.json'\n") {
+		t.Fatalf("stderr %q", errOut.String())
+	}
+}

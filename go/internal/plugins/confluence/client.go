@@ -5,81 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 )
 
-type space struct {
-	ID          string `json:"id"`
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	HomepageID  string `json:"homepageId,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-type page struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	SpaceID   string `json:"spaceId"`
-	Status    string `json:"status"`
-	ParentID  string `json:"parentId,omitempty"`
-	AuthorID  string `json:"authorId,omitempty"`
-	CreatedAt string `json:"createdAt"`
-	Version   int    `json:"version"`
-	WebURL    string `json:"webUrl,omitempty"`
-}
-
-// pageDetail is ConfluencePageDetail: the page plus its extracted body.
-type pageDetail struct {
-	page
-	Body       string `json:"body"`
-	BodyFormat string `json:"bodyFormat"`
-}
-
-type comment struct {
-	ID        string `json:"id"`
-	PageID    string `json:"pageId"`
-	AuthorID  string `json:"authorId,omitempty"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
-	Version   int    `json:"version"`
-}
-
-type searchResult struct {
-	ID           string `json:"id"`
-	Type         string `json:"type"`
-	Title        string `json:"title"`
-	SpaceKey     string `json:"spaceKey,omitempty"`
-	URL          string `json:"url,omitempty"`
-	Excerpt      string `json:"excerpt,omitempty"`
-	LastModified string `json:"lastModified,omitempty"`
-}
-
-type pageCreated struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	SpaceID string `json:"spaceId"`
-	WebURL  string `json:"webUrl,omitempty"`
-}
-
-type pageUpdated struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Version int    `json:"version"`
-}
-
-type commentCreated struct {
-	ID     string `json:"id"`
-	PageID string `json:"pageId"`
-}
+// The models are the Bun client's objects (ConfluenceSpace, ConfluencePage,
+// ...), built from the answer as JavaScript reads it: a missing field is
+// undefined (left out of --json, "undefined" in text), and reading a field of
+// null or undefined fails with Bun's TypeError.
 
 type api struct {
 	atlassian.Client
@@ -107,59 +47,84 @@ func (a api) webURL(path string) string {
 	return strings.TrimSuffix(a.siteURL, "/") + "/wiki" + path
 }
 
-func (a api) request(method, base, path string, body any, out any) error {
-	return a.Request(method, base+path, body, out)
+func (a api) request(method, base, path string, body any) (any, error) {
+	return a.Request(method, base+path, body)
 }
 
+// Bun's request() calls as the transpiled source shows them in a TypeError.
+const (
+	spacesText   = "(await this.request(\"GET\", this.baseV2, `/spaces?${params.toString()}`))"
+	pagesText    = `(await this.request("GET", this.baseV2, path))`
+	commentsText = "(await this.request(\"GET\", this.baseV2, `/pages/${pageId}/footer-comments?body-format=storage`))"
+	commentText  = "(await this.request(\"POST\", this.baseV2, \"/footer-comments\", {\n        pageId,\n        body: {\n          representation: \"storage\",\n          value: storage\n        }\n      }))"
+	searchText   = "(await this.request(\"GET\", this.baseV1, `/search?${params.toString()}`))"
+)
+
+// mapItems is `text.map(f)` over the answer at text.
+func mapItems(list any, text string, f func(item any) (*jsvalue.Object, error)) ([]any, error) {
+	items, err := jsvalue.Items(list, text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		o, err := f(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// results is `text.results.map(f)`.
+func results(response any, text string, f func(item any) (*jsvalue.Object, error)) ([]any, error) {
+	list, err := jsvalue.Path(response, text, "results")
+	if err != nil {
+		return nil, err
+	}
+	return mapItems(list, text+".results", f)
+}
+
+// webLink is `raw._links?.webui ? this.webUrl(raw._links.webui) : undefined`.
+func (a api) webLink(raw any) any {
+	webui := jsvalue.Optional(jsvalue.Member(raw, "_links"), "webui")
+	if !jsvalue.Truthy(webui) {
+		return jsvalue.Undefined
+	}
+	return a.webURL(jsvalue.String(webui))
+}
+
+// query is Bun's `${path}?${params.toString()}` over URLSearchParams set in
+// the order given.
 func query(path string, kv ...string) string {
-	v := url.Values{}
+	q := jsvalue.NewSearchParams()
 	for i := 0; i+1 < len(kv); i += 2 {
-		v.Set(kv[i], kv[i+1])
+		q.Set(kv[i], kv[i+1])
 	}
-	if len(v) == 0 {
-		return path
-	}
-	return path + "?" + v.Encode()
+	return path + "?" + q.String()
 }
 
-type apiSpace struct {
-	ID          string `json:"id"`
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	HomepageID  string `json:"homepageId"`
-	Description *struct {
-		Plain *struct {
-			Value string `json:"value"`
-		} `json:"plain"`
-	} `json:"description"`
-}
-
-func (s apiSpace) model() space {
-	desc := ""
-	if s.Description != nil && s.Description.Plain != nil {
-		desc = s.Description.Plain.Value
+// spaceModel is the ConfluenceSpace Bun builds from raw, read as text.
+func spaceModel(raw any, text string) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, text+".id")
 	}
-	return space{ID: s.ID, Key: s.Key, Name: s.Name, Type: s.Type, Status: s.Status, HomepageID: s.HomepageID, Description: desc}
+	o := atlassian.Pick(raw, "id", "id", "key", "key", "name", "name", "type", "type", "status", "status", "homepageId", "homepageId")
+	o.Set("description", jsvalue.Optional(jsvalue.Optional(jsvalue.Member(raw, "description"), "plain"), "value"))
+	return o, nil
 }
 
-func (a api) listSpaces(limit, typ string) ([]space, error) {
+func (a api) listSpaces(limit, typ string) ([]any, error) {
 	pairs := []string{"limit", limit}
 	if typ != "" {
 		pairs = append(pairs, "type", typ)
 	}
-	var payload struct {
-		Results []apiSpace `json:"results"`
-	}
-	if err := a.request(http.MethodGet, a.v2(), query("/spaces", pairs...), nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, a.v2(), query("/spaces", pairs...), nil)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]space, 0, len(payload.Results))
-	for _, s := range payload.Results {
-		out = append(out, s.model())
-	}
-	return out, nil
+	return results(response, spacesText, func(s any) (*jsvalue.Object, error) { return spaceModel(s, "s") })
 }
 
 func digitsOnly(s string) bool {
@@ -174,234 +139,255 @@ func digitsOnly(s string) bool {
 	return true
 }
 
-func (a api) getSpace(idOrKey string) (space, error) {
+func (a api) getSpace(idOrKey string) (*jsvalue.Object, error) {
 	if digitsOnly(idOrKey) {
-		var s apiSpace
-		if err := a.request(http.MethodGet, a.v2(), "/spaces/"+idOrKey, nil, &s); err != nil {
-			return space{}, err
-		}
-		return s.model(), nil
-	}
-	var payload struct {
-		Results []apiSpace `json:"results"`
-	}
-	if err := a.request(http.MethodGet, a.v2(), query("/spaces", "keys", idOrKey, "limit", "1"), nil, &payload); err != nil {
-		return space{}, err
-	}
-	if len(payload.Results) == 0 {
-		return space{}, a.Fail("NOT_FOUND", fmt.Sprintf("Space %q not found", idOrKey), "")
-	}
-	return payload.Results[0].model(), nil
-}
-
-type apiPage struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	SpaceID   string `json:"spaceId"`
-	Status    string `json:"status"`
-	ParentID  string `json:"parentId"`
-	AuthorID  string `json:"authorId"`
-	CreatedAt string `json:"createdAt"`
-	Version   struct {
-		Number float64 `json:"number"`
-	} `json:"version"`
-	Links struct {
-		WebUI string `json:"webui"`
-	} `json:"_links"`
-	Body *struct {
-		Storage *struct {
-			Value string `json:"value"`
-		} `json:"storage"`
-		Atlas *struct {
-			Value string `json:"value"`
-		} `json:"atlas_doc_format"`
-		View *struct {
-			Value string `json:"value"`
-		} `json:"view"`
-	} `json:"body"`
-}
-
-func (a api) pageModel(p apiPage) page {
-	out := page{
-		ID: p.ID, Title: p.Title, SpaceID: p.SpaceID, Status: p.Status,
-		ParentID: p.ParentID, AuthorID: p.AuthorID, CreatedAt: p.CreatedAt, Version: int(p.Version.Number),
-	}
-	if p.Links.WebUI != "" {
-		out.WebURL = a.webURL(p.Links.WebUI)
-	}
-	return out
-}
-
-func (a api) listPages(spaceKey, spaceID, parentID, limit string) ([]page, error) {
-	if spaceID == "" && spaceKey != "" {
-		found, err := a.getSpace(spaceKey)
+		s, err := a.request(http.MethodGet, a.v2(), "/spaces/"+idOrKey, nil)
 		if err != nil {
 			return nil, err
 		}
-		spaceID = found.ID
+		return spaceModel(s, "s")
+	}
+	response, err := a.request(http.MethodGet, a.v2(), query("/spaces", "keys", idOrKey, "limit", "1"), nil)
+	if err != nil {
+		return nil, err
+	}
+	list, err := jsvalue.Path(response, spacesText, "results")
+	if err != nil {
+		return nil, err
+	}
+	if jsvalue.Nullish(list) {
+		return nil, jsvalue.TypeError(list, spacesText+".results[0]")
+	}
+	match := jsvalue.Member(list, "0")
+	if !jsvalue.Truthy(match) {
+		return nil, a.Fail("NOT_FOUND", fmt.Sprintf("Space \"%s\" not found", idOrKey), "")
+	}
+	return spaceModel(match, "match")
+}
+
+// spaceIDFor is Bun's `let spaceId = options.spaceId; if (!spaceId &&
+// options.spaceKey) spaceId = (await this.getSpace(key)).id`.
+func (a api) spaceIDFor(spaceKey, spaceID string) (any, error) {
+	if spaceID != "" || spaceKey == "" {
+		return spaceID, nil
+	}
+	found, err := a.getSpace(spaceKey)
+	if err != nil {
+		return nil, err
+	}
+	return jsvalue.Member(found, "id"), nil
+}
+
+// pageModel is the ConfluencePage Bun builds from raw, read as text.
+func (a api) pageModel(raw any, text string) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, text+".id")
+	}
+	o := atlassian.Pick(raw, "id", "id", "title", "title", "spaceId", "spaceId", "status", "status",
+		"parentId", "parentId", "authorId", "authorId", "createdAt", "createdAt")
+	version, err := jsvalue.Path(raw, text, "version", "number")
+	if err != nil {
+		return nil, err
+	}
+	o.Set("version", version)
+	o.Set("webUrl", a.webLink(raw))
+	return o, nil
+}
+
+func (a api) listPages(spaceKey, spaceID, parentID, limit string) ([]any, error) {
+	id, err := a.spaceIDFor(spaceKey, spaceID)
+	if err != nil {
+		return nil, err
 	}
 	pairs := []string{"limit", limit}
 	if parentID != "" {
 		pairs = append(pairs, "parent-id", parentID)
 	}
 	path := query("/pages", pairs...)
-	if spaceID != "" {
-		path = query("/spaces/"+spaceID+"/pages", pairs...)
+	if jsvalue.Truthy(id) {
+		path = query("/spaces/"+jsvalue.String(id)+"/pages", pairs...)
 	}
-	var payload struct {
-		Results []apiPage `json:"results"`
-	}
-	if err := a.request(http.MethodGet, a.v2(), path, nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, a.v2(), path, nil)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]page, 0, len(payload.Results))
-	for _, p := range payload.Results {
-		out = append(out, a.pageModel(p))
-	}
-	return out, nil
+	return results(response, pagesText, func(p any) (*jsvalue.Object, error) { return a.pageModel(p, "p") })
 }
 
-func (a api) getPage(pageID, bodyFormat string) (pageDetail, error) {
-	var response apiPage
-	path := query("/pages/"+pageID, "body-format", bodyFormat)
-	if err := a.request(http.MethodGet, a.v2(), path, nil, &response); err != nil {
-		return pageDetail{}, err
+func (a api) getPage(pageID, bodyFormat string) (*jsvalue.Object, error) {
+	response, err := a.request(http.MethodGet, a.v2(), query("/pages/"+pageID, "body-format", bodyFormat), nil)
+	if err != nil {
+		return nil, err
 	}
-	return pageDetail{page: a.pageModel(response), Body: pageBody(response, bodyFormat), BodyFormat: bodyFormat}, nil
+	if jsvalue.Nullish(response) {
+		return nil, jsvalue.TypeError(response, "response.body")
+	}
+	body := pageBody(jsvalue.Member(response, "body"), bodyFormat)
+	detail, err := a.pageModel(response, "response")
+	if err != nil {
+		return nil, err
+	}
+	detail.Set("body", body)
+	detail.Set("bodyFormat", bodyFormat)
+	return detail, nil
 }
 
-func pageBody(response apiPage, bodyFormat string) string {
-	if response.Body == nil {
-		return ""
-	}
-	if bodyFormat == "atlas_doc_format" && response.Body.Atlas != nil && response.Body.Atlas.Value != "" {
-		var adf any
-		if err := json.Unmarshal([]byte(response.Body.Atlas.Value), &adf); err != nil {
-			return response.Body.Atlas.Value
+// pageBody is getPage's body: the requested representation made plain text,
+// storage as the fallback, "" when there is none.
+func pageBody(body any, bodyFormat string) any {
+	value := func(format string) any { return jsvalue.Optional(jsvalue.Optional(body, format), "value") }
+	if atlas := value("atlas_doc_format"); bodyFormat == "atlas_doc_format" && jsvalue.Truthy(atlas) {
+		adf, err := jsvalue.Parse([]byte(jsvalue.String(atlas)))
+		if err != nil {
+			return atlas
 		}
 		return atlassian.ExtractTextFromADF(adf)
 	}
-	if bodyFormat == "view" && response.Body.View != nil && response.Body.View.Value != "" {
-		return stripHTML(response.Body.View.Value)
+	if view := value("view"); bodyFormat == "view" && jsvalue.Truthy(view) {
+		return stripHTML(jsvalue.String(view))
 	}
-	if response.Body.Storage != nil && response.Body.Storage.Value != "" {
-		return stripHTML(response.Body.Storage.Value)
+	if storage := value("storage"); jsvalue.Truthy(storage) {
+		return stripHTML(jsvalue.String(storage))
 	}
 	return ""
 }
 
-func (a api) createPage(spaceKey, spaceID, title string, parentID *string, body string) (pageCreated, error) {
-	if spaceID == "" && spaceKey != "" {
-		found, err := a.getSpace(spaceKey)
-		if err != nil {
-			return pageCreated{}, err
-		}
-		spaceID = found.ID
+// storageBody is `{ representation: 'storage', value: storage }`.
+func storageBody(text string) *jsvalue.Object {
+	body := jsvalue.NewObject()
+	body.Set("representation", "storage")
+	body.Set("value", textToStorage(text))
+	return body
+}
+
+func (a api) createPage(spaceKey, spaceID, title string, parentID *string, body string) (*jsvalue.Object, error) {
+	id, err := a.spaceIDFor(spaceKey, spaceID)
+	if err != nil {
+		return nil, err
 	}
-	if spaceID == "" {
-		return pageCreated{}, a.Fail("INVALID_PARAMS", "spaceId or spaceKey is required to create a page", "")
+	if !jsvalue.Truthy(id) {
+		return nil, a.Fail("INVALID_PARAMS", "spaceId or spaceKey is required to create a page", "")
 	}
-	payload := map[string]any{
-		"spaceId": spaceID,
-		"status":  "current",
-		"title":   title,
-		"body": map[string]any{
-			"representation": "storage",
-			"value":          textToStorage(body),
-		},
-	}
+	payload := jsvalue.NewObject()
+	payload.Set("spaceId", id)
+	payload.Set("status", "current")
+	payload.Set("title", title)
+	payload.Set("parentId", jsvalue.Undefined)
 	if parentID != nil { // Bun sends a given "" as is.
-		payload["parentId"] = *parentID
+		payload.Set("parentId", *parentID)
 	}
-	var response apiPage
-	if err := a.request(http.MethodPost, a.v2(), "/pages", payload, &response); err != nil {
-		return pageCreated{}, err
+	payload.Set("body", storageBody(body))
+	response, err := a.request(http.MethodPost, a.v2(), "/pages", payload)
+	if err != nil {
+		return nil, err
 	}
-	created := pageCreated{ID: response.ID, Title: response.Title, SpaceID: response.SpaceID}
-	if response.Links.WebUI != "" {
-		created.WebURL = a.webURL(response.Links.WebUI)
+	if jsvalue.Nullish(response) {
+		return nil, jsvalue.TypeError(response, "response.id")
 	}
+	created := atlassian.Pick(response, "id", "id", "title", "title", "spaceId", "spaceId")
+	created.Set("webUrl", a.webLink(response))
 	return created, nil
 }
 
-func (a api) updatePage(pageID string, title *string, body string) (pageUpdated, error) {
+// plusOne is JavaScript's `v + 1`.
+func plusOne(v any) any {
+	switch x := v.(type) {
+	case nil:
+		return 1.0
+	case bool:
+		if x {
+			return 2.0
+		}
+		return 1.0
+	case string:
+		return x + "1"
+	case json.Number, float64:
+		return jsvalue.Number(jsvalue.String(x)) + 1
+	case *jsvalue.Object, []any:
+		return jsvalue.String(x) + "1"
+	}
+	return math.NaN() // undefined + 1
+}
+
+func (a api) updatePage(pageID string, title *string, body string) (*jsvalue.Object, error) {
 	current, err := a.getPage(pageID, "storage")
 	if err != nil {
-		return pageUpdated{}, err
-	}
-	if title == nil { // Bun `params.title ?? current.title`: "" is kept.
-		title = &current.Title
-	}
-	payload := map[string]any{
-		"id":     pageID,
-		"status": current.Status,
-		"title":  *title,
-		"body": map[string]any{
-			"representation": "storage",
-			"value":          textToStorage(body),
-		},
-		"version": map[string]any{"number": current.Version + 1},
-	}
-	var response apiPage
-	if err := a.request(http.MethodPut, a.v2(), "/pages/"+pageID, payload, &response); err != nil {
-		return pageUpdated{}, err
-	}
-	return pageUpdated{ID: response.ID, Title: response.Title, Version: int(response.Version.Number)}, nil
-}
-
-type apiComment struct {
-	ID        string `json:"id"`
-	AuthorID  string `json:"authorId"`
-	CreatedAt string `json:"createdAt"`
-	Version   struct {
-		Number float64 `json:"number"`
-	} `json:"version"`
-	Body *struct {
-		Storage *struct {
-			Value string `json:"value"`
-		} `json:"storage"`
-	} `json:"body"`
-}
-
-func (a api) listComments(pageID string) ([]comment, error) {
-	var payload struct {
-		Results []apiComment `json:"results"`
-	}
-	path := "/pages/" + pageID + "/footer-comments?body-format=storage"
-	if err := a.request(http.MethodGet, a.v2(), path, nil, &payload); err != nil {
 		return nil, err
 	}
-	out := make([]comment, 0, len(payload.Results))
-	for _, c := range payload.Results {
-		body := ""
-		if c.Body != nil && c.Body.Storage != nil && c.Body.Storage.Value != "" {
-			body = stripHTML(c.Body.Storage.Value)
-		}
-		out = append(out, comment{
-			ID: c.ID, PageID: pageID, AuthorID: c.AuthorID, Body: body, CreatedAt: c.CreatedAt, Version: int(c.Version.Number),
-		})
+	payload := jsvalue.NewObject()
+	payload.Set("id", pageID)
+	payload.Set("status", jsvalue.Member(current, "status"))
+	if title != nil { // Bun `params.title ?? current.title`: "" is kept.
+		payload.Set("title", *title)
+	} else {
+		payload.Set("title", jsvalue.Member(current, "title"))
 	}
+	payload.Set("body", storageBody(body))
+	version := jsvalue.NewObject()
+	version.Set("number", plusOne(jsvalue.Member(current, "version")))
+	payload.Set("version", version)
+	response, err := a.request(http.MethodPut, a.v2(), "/pages/"+pageID, payload)
+	if err != nil {
+		return nil, err
+	}
+	if jsvalue.Nullish(response) {
+		return nil, jsvalue.TypeError(response, "response.id")
+	}
+	updated := atlassian.Pick(response, "id", "id", "title", "title")
+	number, err := jsvalue.Path(response, "response", "version", "number")
+	if err != nil {
+		return nil, err
+	}
+	updated.Set("version", number)
+	return updated, nil
+}
+
+func (a api) listComments(pageID string) ([]any, error) {
+	response, err := a.request(http.MethodGet, a.v2(), "/pages/"+pageID+"/footer-comments?body-format=storage", nil)
+	if err != nil {
+		return nil, err
+	}
+	return results(response, commentsText, func(c any) (*jsvalue.Object, error) {
+		if jsvalue.Nullish(c) {
+			return nil, jsvalue.TypeError(c, "c.id")
+		}
+		o := atlassian.Pick(c, "id", "id")
+		o.Set("pageId", pageID)
+		o.Set("authorId", jsvalue.Member(c, "authorId"))
+		body := any("")
+		if storage := jsvalue.Optional(jsvalue.Optional(jsvalue.Member(c, "body"), "storage"), "value"); jsvalue.Truthy(storage) {
+			body = stripHTML(jsvalue.String(storage))
+		}
+		o.Set("body", body)
+		o.Set("createdAt", jsvalue.Member(c, "createdAt"))
+		version, err := jsvalue.Path(c, "c", "version", "number")
+		if err != nil {
+			return nil, err
+		}
+		o.Set("version", version)
+		return o, nil
+	})
+}
+
+func (a api) addComment(pageID, body string) (*jsvalue.Object, error) {
+	payload := jsvalue.NewObject()
+	payload.Set("pageId", pageID)
+	payload.Set("body", storageBody(body))
+	response, err := a.request(http.MethodPost, a.v2(), "/footer-comments", payload)
+	if err != nil {
+		return nil, err
+	}
+	id, err := jsvalue.Path(response, commentText, "id")
+	if err != nil {
+		return nil, err
+	}
+	out := jsvalue.NewObject()
+	out.Set("id", id)
+	out.Set("pageId", pageID)
 	return out, nil
 }
 
-func (a api) addComment(pageID, body string) (commentCreated, error) {
-	payload := map[string]any{
-		"pageId": pageID,
-		"body": map[string]any{
-			"representation": "storage",
-			"value":          textToStorage(body),
-		},
-	}
-	var response struct {
-		ID string `json:"id"`
-	}
-	if err := a.request(http.MethodPost, a.v2(), "/footer-comments", payload, &response); err != nil {
-		return commentCreated{}, err
-	}
-	return commentCreated{ID: response.ID, PageID: pageID}, nil
-}
-
-func (a api) search(cql, spaceKey, typ, text, limit string) ([]searchResult, error) {
+func (a api) search(cql, spaceKey, typ, text, limit string) ([]any, error) {
 	var parts []string
 	if cql != "" {
 		parts = append(parts, cql)
@@ -419,66 +405,42 @@ func (a api) search(cql, spaceKey, typ, text, limit string) ([]searchResult, err
 	if queryCQL == "" {
 		queryCQL = `type = "page" ORDER BY lastmodified DESC`
 	}
-	var payload struct {
-		Results []searchHit `json:"results"`
-	}
-	path := query("/search", "cql", queryCQL, "limit", limit)
-	if err := a.request(http.MethodGet, a.v1(), path, nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, a.v1(), query("/search", "cql", queryCQL, "limit", limit), nil)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]searchResult, 0, len(payload.Results))
-	for _, hit := range payload.Results {
-		out = append(out, a.searchModel(hit))
-	}
-	return out, nil
+	return results(response, searchText, a.searchModel)
 }
 
-type searchHit struct {
-	Content *struct {
-		ID    string  `json:"id"`
-		Type  *string `json:"type"`
-		Title *string `json:"title"`
-		Space *struct {
-			Key string `json:"key"`
-		} `json:"space"`
-	} `json:"content"`
-	Title        *string `json:"title"`
-	Excerpt      *string `json:"excerpt"`
-	URL          *string `json:"url"`
-	LastModified *string `json:"lastModified"`
+// orElse is `v ?? fallback`.
+func orElse(v, fallback any) any {
+	if jsvalue.Nullish(v) {
+		return fallback
+	}
+	return v
 }
 
-func (a api) searchModel(hit searchHit) searchResult {
-	id := ""
-	typ := "unknown"
-	title := "(untitled)"
-	spaceKey := ""
-	if hit.Content != nil {
-		id = hit.Content.ID
-		if hit.Content.Type != nil {
-			typ = *hit.Content.Type
-		}
-		if hit.Content.Space != nil {
-			spaceKey = hit.Content.Space.Key
-		}
+// searchModel is the ConfluenceSearchResult Bun maps each hit to.
+func (a api) searchModel(r any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(r) {
+		return nil, jsvalue.TypeError(r, "r.content")
 	}
-	switch {
-	case hit.Content != nil && hit.Content.Title != nil:
-		title = *hit.Content.Title
-	case hit.Title != nil:
-		title = *hit.Title
+	content := jsvalue.Member(r, "content")
+	o := jsvalue.NewObject()
+	o.Set("id", orElse(jsvalue.Optional(content, "id"), ""))
+	o.Set("type", orElse(jsvalue.Optional(content, "type"), "unknown"))
+	o.Set("title", orElse(jsvalue.Optional(content, "title"), orElse(jsvalue.Member(r, "title"), "(untitled)")))
+	o.Set("spaceKey", jsvalue.Optional(jsvalue.Optional(content, "space"), "key"))
+	o.Set("url", jsvalue.Undefined)
+	if url := jsvalue.Member(r, "url"); jsvalue.Truthy(url) {
+		o.Set("url", a.webURL(jsvalue.String(url)))
 	}
-	out := searchResult{ID: id, Type: typ, Title: title, SpaceKey: spaceKey}
-	if hit.URL != nil && *hit.URL != "" {
-		out.URL = a.webURL(*hit.URL)
+	o.Set("excerpt", jsvalue.Undefined)
+	if excerpt := jsvalue.Member(r, "excerpt"); jsvalue.Truthy(excerpt) {
+		o.Set("excerpt", stripHTML(jsvalue.String(excerpt)))
 	}
-	if hit.Excerpt != nil && *hit.Excerpt != "" {
-		out.Excerpt = stripHTML(*hit.Excerpt)
-	}
-	if hit.LastModified != nil && *hit.LastModified != "" {
-		out.LastModified = *hit.LastModified
-	}
-	return out
+	o.Set("lastModified", jsvalue.Member(r, "lastModified"))
+	return o, nil
 }
 
 func textToStorage(text string) string {
@@ -516,7 +478,7 @@ func stripHTML(html string) string {
 		"&#39;", "'",
 	).Replace(html)
 	html = reNL.ReplaceAllString(html, "\n\n")
-	return strings.TrimSpace(html)
+	return jsvalue.Trim(html)
 }
 
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {

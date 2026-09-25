@@ -11,8 +11,22 @@ func trimFinal(s string) string {
 	return strings.TrimSuffix(s, "\n")
 }
 
+// str is `${o.key}` for a model the client built.
+func str(o any, key string) string { return jsvalue.String(jsvalue.Member(o, key)) }
+
+func truthy(o any, key string) bool { return jsvalue.Truthy(jsvalue.Member(o, key)) }
+
+// preview is `v.length > n ? v.slice(0, n) + '...' : v`.
+func preview(v any, n int) string {
+	if s, ok := v.(string); ok {
+		return jsvalue.Truncate(s, n)
+	}
+	return jsvalue.String(v) // a value without a length is printed whole
+}
+
+// formatSpaces is printConfluenceSpaceList.
 func formatSpaces(v any) string {
-	spaces, ok := v.([]space)
+	spaces, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -22,19 +36,20 @@ func formatSpaces(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Spaces (%d)\n\n", len(spaces))
 	for _, s := range spaces {
-		fmt.Fprintf(&b, "%s - %s\n", s.Key, s.Name)
-		fmt.Fprintf(&b, "    ID: %s\n", s.ID)
-		fmt.Fprintf(&b, "    Type: %s | Status: %s\n", s.Type, s.Status)
-		if s.Description != "" {
-			fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(s.Description, 100))
+		fmt.Fprintf(&b, "%s - %s\n", str(s, "key"), str(s, "name"))
+		fmt.Fprintf(&b, "    ID: %s\n", str(s, "id"))
+		fmt.Fprintf(&b, "    Type: %s | Status: %s\n", str(s, "type"), str(s, "status"))
+		if truthy(s, "description") {
+			fmt.Fprintf(&b, "    > %s\n", preview(jsvalue.Member(s, "description"), 100))
 		}
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatPages is printConfluencePageList.
 func formatPages(v any) string {
-	pages, ok := v.([]page)
+	pages, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -44,51 +59,53 @@ func formatPages(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Pages (%d)\n\n", len(pages))
 	for _, p := range pages {
-		fmt.Fprintf(&b, "%s | %s\n", p.ID, p.Title)
-		fmt.Fprintf(&b, "    Space: %s | Status: %s | v%d\n", p.SpaceID, p.Status, p.Version)
-		if p.ParentID != "" {
-			fmt.Fprintf(&b, "    Parent: %s\n", p.ParentID)
+		fmt.Fprintf(&b, "%s | %s\n", str(p, "id"), str(p, "title"))
+		fmt.Fprintf(&b, "    Space: %s | Status: %s | v%s\n", str(p, "spaceId"), str(p, "status"), str(p, "version"))
+		if truthy(p, "parentId") {
+			fmt.Fprintf(&b, "    Parent: %s\n", str(p, "parentId"))
 		}
-		fmt.Fprintf(&b, "    Created: %s\n", p.CreatedAt)
-		if p.WebURL != "" {
-			fmt.Fprintf(&b, "    Link: %s\n", p.WebURL)
+		fmt.Fprintf(&b, "    Created: %s\n", str(p, "createdAt"))
+		if truthy(p, "webUrl") {
+			fmt.Fprintf(&b, "    Link: %s\n", str(p, "webUrl"))
 		}
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatPage is printConfluencePage.
 func formatPage(v any) string {
-	p, ok := v.(pageDetail)
+	p, ok := v.(*jsvalue.Object)
 	if !ok {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "ID: %s\n", p.ID)
-	fmt.Fprintf(&b, "Title: %s\n", p.Title)
-	fmt.Fprintf(&b, "Space: %s\n", p.SpaceID)
-	fmt.Fprintf(&b, "Status: %s\n", p.Status)
-	fmt.Fprintf(&b, "Version: %d\n", p.Version)
-	if p.ParentID != "" {
-		fmt.Fprintf(&b, "Parent: %s\n", p.ParentID)
+	fmt.Fprintf(&b, "ID: %s\n", str(p, "id"))
+	fmt.Fprintf(&b, "Title: %s\n", str(p, "title"))
+	fmt.Fprintf(&b, "Space: %s\n", str(p, "spaceId"))
+	fmt.Fprintf(&b, "Status: %s\n", str(p, "status"))
+	fmt.Fprintf(&b, "Version: %s\n", str(p, "version"))
+	if truthy(p, "parentId") {
+		fmt.Fprintf(&b, "Parent: %s\n", str(p, "parentId"))
 	}
-	if p.AuthorID != "" {
-		fmt.Fprintf(&b, "Author: %s\n", p.AuthorID)
+	if truthy(p, "authorId") {
+		fmt.Fprintf(&b, "Author: %s\n", str(p, "authorId"))
 	}
-	fmt.Fprintf(&b, "Created: %s\n", p.CreatedAt)
-	if p.WebURL != "" {
-		fmt.Fprintf(&b, "Link: %s\n", p.WebURL)
+	fmt.Fprintf(&b, "Created: %s\n", str(p, "createdAt"))
+	if truthy(p, "webUrl") {
+		fmt.Fprintf(&b, "Link: %s\n", str(p, "webUrl"))
 	}
-	if p.Body != "" {
+	if truthy(p, "body") {
 		b.WriteString("---\n")
-		b.WriteString(p.Body)
+		b.WriteString(str(p, "body"))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatComments is printConfluenceCommentList.
 func formatComments(v any) string {
-	comments, ok := v.([]comment)
+	comments, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -98,18 +115,19 @@ func formatComments(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Comments (%d)\n\n", len(comments))
 	for _, c := range comments {
-		fmt.Fprintf(&b, "[%s] v%d %s\n", c.ID, c.Version, c.CreatedAt)
-		if c.AuthorID != "" {
-			fmt.Fprintf(&b, "    Author: %s\n", c.AuthorID)
+		fmt.Fprintf(&b, "[%s] v%s %s\n", str(c, "id"), str(c, "version"), str(c, "createdAt"))
+		if truthy(c, "authorId") {
+			fmt.Fprintf(&b, "    Author: %s\n", str(c, "authorId"))
 		}
-		fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(c.Body, 200))
+		fmt.Fprintf(&b, "    > %s\n", preview(jsvalue.Member(c, "body"), 200))
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatSearch is printConfluenceSearchResults.
 func formatSearch(v any) string {
-	results, ok := v.([]searchResult)
+	results, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -119,61 +137,43 @@ func formatSearch(v any) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Results (%d)\n\n", len(results))
 	for _, r := range results {
-		fmt.Fprintf(&b, "[%s] %s | %s\n", r.Type, r.ID, r.Title)
-		if r.SpaceKey != "" {
-			fmt.Fprintf(&b, "    Space: %s\n", r.SpaceKey)
+		fmt.Fprintf(&b, "[%s] %s | %s\n", str(r, "type"), str(r, "id"), str(r, "title"))
+		if truthy(r, "spaceKey") {
+			fmt.Fprintf(&b, "    Space: %s\n", str(r, "spaceKey"))
 		}
-		if r.LastModified != "" {
-			fmt.Fprintf(&b, "    Modified: %s\n", r.LastModified)
+		if truthy(r, "lastModified") {
+			fmt.Fprintf(&b, "    Modified: %s\n", str(r, "lastModified"))
 		}
-		if r.URL != "" {
-			fmt.Fprintf(&b, "    Link: %s\n", r.URL)
+		if truthy(r, "url") {
+			fmt.Fprintf(&b, "    Link: %s\n", str(r, "url"))
 		}
-		if r.Excerpt != "" {
-			fmt.Fprintf(&b, "    > %s\n", jsvalue.Truncate(r.Excerpt, 150))
+		if truthy(r, "excerpt") {
+			fmt.Fprintf(&b, "    > %s\n", preview(jsvalue.Member(r, "excerpt"), 150))
 		}
 		b.WriteString("\n")
 	}
 	return trimFinal(b.String())
 }
 
+// formatCreated is printConfluencePageCreated.
 func formatCreated(v any) string {
-	r, ok := v.(pageCreated)
-	if !ok {
-		return ""
-	}
 	var b strings.Builder
 	b.WriteString("Page created\n")
-	fmt.Fprintf(&b, "ID: %s\n", r.ID)
-	fmt.Fprintf(&b, "Title: %s\n", r.Title)
-	fmt.Fprintf(&b, "Space: %s\n", r.SpaceID)
-	if r.WebURL != "" {
-		fmt.Fprintf(&b, "Link: %s\n", r.WebURL)
+	fmt.Fprintf(&b, "ID: %s\n", str(v, "id"))
+	fmt.Fprintf(&b, "Title: %s\n", str(v, "title"))
+	fmt.Fprintf(&b, "Space: %s\n", str(v, "spaceId"))
+	if truthy(v, "webUrl") {
+		fmt.Fprintf(&b, "Link: %s\n", str(v, "webUrl"))
 	}
 	return trimFinal(b.String())
 }
 
+// formatUpdated is printConfluencePageUpdated.
 func formatUpdated(v any) string {
-	r, ok := v.(pageUpdated)
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Page updated\n")
-	fmt.Fprintf(&b, "ID: %s\n", r.ID)
-	fmt.Fprintf(&b, "Title: %s\n", r.Title)
-	fmt.Fprintf(&b, "Version: %d\n", r.Version)
-	return trimFinal(b.String())
+	return fmt.Sprintf("Page updated\nID: %s\nTitle: %s\nVersion: %s", str(v, "id"), str(v, "title"), str(v, "version"))
 }
 
+// formatComment is printConfluenceCommentResult.
 func formatComment(v any) string {
-	r, ok := v.(commentCreated)
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Comment added\n")
-	fmt.Fprintf(&b, "Page: %s\n", r.PageID)
-	fmt.Fprintf(&b, "Comment ID: %s\n", r.ID)
-	return trimFinal(b.String())
+	return fmt.Sprintf("Comment added\nPage: %s\nComment ID: %s", str(v, "pageId"), str(v, "id"))
 }

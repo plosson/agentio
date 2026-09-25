@@ -335,13 +335,13 @@ func TestRefreshFailureHasGoogleAuthLibrarysMessage(t *testing.T) {
 	}
 }
 
-// The product client sends the stored access token and never goes to the
-// token endpoint by itself, even with an expired expiry.
-func TestNewServiceUsesTheStoredTokenAndNeverRefreshes(t *testing.T) {
+// The product client sends the stored access token while it is not expiring
+// and does not go to the token endpoint for it.
+func TestNewServiceUsesTheStoredTokenWhileItIsFresh(t *testing.T) {
 	noSleep(t)
 	fake := newFake(t, func(w http.ResponseWriter, r *http.Request, n int) {
 		if r.URL.Path == "/token" {
-			t.Error("the API client refreshed on its own")
+			t.Error("the API client refreshed a fresh token")
 		}
 		if n == 1 {
 			writeJSON(w, 503, map[string]any{"error": map[string]any{"code": 503, "message": "busy"}})
@@ -350,7 +350,7 @@ func TestNewServiceUsesTheStoredTokenAndNeverRefreshes(t *testing.T) {
 		writeJSON(w, 200, map[string]any{"id": "me@example.com"})
 	})
 	run := &plugins.RunContext{
-		Credentials: map[string]any{"access_token": "at-stored", "refresh_token": "rt", "expiry_date": int64(1), "token_type": "Bearer"},
+		Credentials: map[string]any{"access_token": "at-stored", "refresh_token": "rt", "expiry_date": time.Now().Add(time.Hour).UnixMilli(), "token_type": "mac"},
 		Fetch:       plugins.Fetch,
 	}
 	svc, err := NewService(fake.ctx(), run, Snake, calendar.NewService)
@@ -365,9 +365,97 @@ func TestNewServiceUsesTheStoredTokenAndNeverRefreshes(t *testing.T) {
 		t.Fatalf("%#v %d", entry, fake.count())
 	}
 	for _, h := range fake.hits {
+		// createGoogleAuth sets no token_type: the library sends Bearer.
 		if h.Header.Get("Authorization") != "Bearer at-stored" || h.URL.Path != "/api/users/me/calendarList/primary" {
 			t.Fatalf("%s %s", h.URL.Path, h.Header.Get("Authorization"))
 		}
+	}
+}
+
+// The client is google-auth-library's OAuth2Client over the stored tokens:
+// no token at all fails before any request with the library's message; an
+// expiring token is refreshed in memory first; a 401 or 403 with both tokens
+// and no expiry refreshes once and sends the request again. Nothing is
+// written back (Bun does not listen for the refreshed tokens).
+func TestTheClientRefreshesAsOAuth2ClientDoes(t *testing.T) {
+	noSleep(t)
+	type call struct{ path, auth string }
+	cases := []struct {
+		name  string
+		creds map[string]any
+		api   []int // statuses the API answers in turn
+		token int   // token endpoint status
+		calls []call
+		err   string
+	}{
+		{"no tokens", map[string]any{"email": "x"}, nil, 200, nil,
+			"No access, refresh token, API key or refresh handler callback is set."},
+		{"refresh token only", map[string]any{"refresh_token": "rt"}, []int{200}, 200,
+			[]call{{"/token", ""}, {"/api/users/me/calendarList/primary", "Bearer at-new"}}, ""},
+		{"expiring", map[string]any{"access_token": "old", "refresh_token": "rt", "expiry_date": int64(1)}, []int{200}, 200,
+			[]call{{"/token", ""}, {"/api/users/me/calendarList/primary", "Bearer at-new"}}, ""},
+		{"expiring, no refresh token", map[string]any{"access_token": "old", "expiry_date": int64(1)}, nil, 200, nil,
+			"No refresh token is set."},
+		{"expiring, token endpoint 403", map[string]any{"access_token": "old", "refresh_token": "rt", "expiry_date": int64(1)}, nil, 403,
+			[]call{{"/token", ""}}, "Could not refresh access token: denied"},
+		{"401 without expiry", map[string]any{"access_token": "old", "refresh_token": "rt"}, []int{401, 200}, 200,
+			[]call{{"/api/users/me/calendarList/primary", "Bearer old"}, {"/token", ""}, {"/api/users/me/calendarList/primary", "Bearer at-new"}}, ""},
+		{"403 twice", map[string]any{"access_token": "old", "refresh_token": "rt"}, []int{403, 403}, 200,
+			[]call{{"/api/users/me/calendarList/primary", "Bearer old"}, {"/token", ""}, {"/api/users/me/calendarList/primary", "Bearer at-new"}}, "nope"},
+		{"401 with an expiry", map[string]any{"access_token": "old", "refresh_token": "rt", "expiry_date": time.Now().Add(time.Hour).UnixMilli()}, []int{401}, 200,
+			[]call{{"/api/users/me/calendarList/primary", "Bearer old"}}, "nope"},
+		{"401 without a refresh token", map[string]any{"access_token": "old"}, []int{401}, 200,
+			[]call{{"/api/users/me/calendarList/primary", "Bearer old"}}, "nope"},
+		{"401, refresh fails", map[string]any{"access_token": "old", "refresh_token": "rt"}, []int{401}, 403,
+			[]call{{"/api/users/me/calendarList/primary", "Bearer old"}, {"/token", ""}}, "denied"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := 0
+			fake := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+				if r.URL.Path == "/token" {
+					if c.token != 200 {
+						writeJSON(w, c.token, map[string]any{"error": "denied"})
+						return
+					}
+					writeJSON(w, 200, map[string]any{"access_token": "at-new", "expires_in": 3600, "token_type": "Bearer"})
+					return
+				}
+				status := c.api[api]
+				api++
+				if status != 200 {
+					writeJSON(w, status, map[string]any{"error": map[string]any{"code": status, "message": "nope"}})
+					return
+				}
+				writeJSON(w, 200, map[string]any{"id": "me@example.com"})
+			})
+			creds := map[string]any{}
+			for k, v := range c.creds {
+				creds[k] = v
+			}
+			svc, err := NewService(fake.ctx(), &plugins.RunContext{Credentials: creds, Fetch: plugins.Fetch}, Snake, calendar.NewService)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.CalendarList.Get("primary").Do()
+			got := ""
+			if err != nil {
+				got = Message(err)
+			}
+			if got != c.err {
+				t.Fatalf("error %q, want %q", got, c.err)
+			}
+			var calls []call
+			for _, h := range fake.hits {
+				calls = append(calls, call{h.URL.Path, h.Header.Get("Authorization")})
+			}
+			if fmt.Sprint(calls) != fmt.Sprint(c.calls) {
+				t.Fatalf("calls %v, want %v", calls, c.calls)
+			}
+			if fmt.Sprint(creds) != fmt.Sprint(c.creds) {
+				t.Fatalf("stored credentials changed: %v", creds)
+			}
+		})
 	}
 }
 

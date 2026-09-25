@@ -366,7 +366,7 @@ func TestValidate(t *testing.T) {
 		}
 		googletest.WriteJSON(w, status, body)
 	})
-	run := host.NewRunContext(storedCreds(1), "acme", fake.Ctx())
+	run := host.NewRunContext(storedCreds(freshExpiry), "acme", fake.Ctx())
 	status, body = 200, map[string]any{"files": []any{}}
 	v, err := New().Profile.Validate(fake.Ctx(), run)
 	if err != nil || !v.Valid || v.Info != "me@example.com" {
@@ -473,6 +473,8 @@ func TestMetadataReadsTitlesAndDimensions(t *testing.T) {
 	product.SaveProfile(t, "acme", fresh(), false)
 	fake := slidesFake(t, map[string]string{
 		"GET /v1/presentations/p2": `{"presentationId":"p2","slides":[]}`,
+		"GET /v1/presentations/p4": `{"presentationId":"p4","pageSize":{"width":{"magnitude":0},"height":{"magnitude":5143500}}}`,
+		"GET /v1/presentations/p5": `{"presentationId":"p5","pageSize":{"width":{"magnitude":null},"height":{"magnitude":1}}}`,
 		"GET /v1/presentations/p3": `{"presentationId":"p3","title":"","pageSize":{"width":{"magnitude":7000000.5}},"slides":[{"objectId":"only","pageElements":[{"shape":{"placeholder":{"type":"TITLE"},"text":{"textElements":[]}}},{"shape":{"placeholder":{"type":"TITLE"},"text":{"textElements":[{"textRun":{"content":"Second"}}]}}}]}]}`,
 	})
 	v, err := product.Exec(fake.Ctx(), t, reg, "metadata", product.Input(t, "metadata", map[string]any{"id-or-url": "https://docs.google.com/presentation/d/p1/edit#slide=id.s1"}, nil))
@@ -500,6 +502,21 @@ func TestMetadataReadsTitlesAndDimensions(t *testing.T) {
 	}
 	if got := googletest.JSONText(v); got != `{"id":"p3","title":"Untitled","url":"https://docs.google.com/presentation/d/p3","slideCount":1,"width":7000000.5,"slides":[{"index":0,"objectId":"only"}]}` {
 		t.Fatal(got)
+	}
+	// A zero magnitude is a dimension (`?? undefined` keeps 0); null is none.
+	v, err = product.Exec(fake.Ctx(), t, reg, "metadata", product.Input(t, "metadata", map[string]any{"id-or-url": "p4"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := product.Printed(t, "metadata", v, false); got != "ID: p4\nTitle: Untitled\nURL: https://docs.google.com/presentation/d/p4\nSlides: 0\nDimensions: 0.00\" × 5.63\"\n" {
+		t.Fatalf("%q", got)
+	}
+	v, err = product.Exec(fake.Ctx(), t, reg, "metadata", product.Input(t, "metadata", map[string]any{"id-or-url": "p5"}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := product.Printed(t, "metadata", v, false); got != "ID: p5\nTitle: Untitled\nURL: https://docs.google.com/presentation/d/p5\nSlides: 0\n" {
+		t.Fatalf("%q", got)
 	}
 	v, err = product.Exec(fake.Ctx(), t, reg, "metadata", product.Input(t, "metadata", map[string]any{"id-or-url": "p2"}, nil))
 	if err != nil {
@@ -776,3 +793,7 @@ func TestExportWriteFailsLikeNode(t *testing.T) {
 		}
 	}
 }
+
+// freshExpiry is a stored expiry far ahead: google-auth-library would
+// refresh an expiring token on its own before the call.
+const freshExpiry = 9_000_000_000_000

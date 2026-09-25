@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/plugins"
 )
 
 const dash = "—"
@@ -204,6 +205,16 @@ type syncResult struct {
 }
 
 func (r *syncResult) MarshalJSON() ([]byte, error) { return json.Marshal(r.tally) }
+
+// print is Bun's console.log of one synced document: on stdout at once when
+// the CLI streams, else kept for formatSync.
+func (r *syncResult) print(in plugins.CommandInput, line string) {
+	if in.Print != nil {
+		in.Print(line)
+		return
+	}
+	r.lines = append(r.lines, line)
+}
 
 func formatSync(v any) string {
 	r, ok := v.(*syncResult)

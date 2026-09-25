@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -86,7 +87,7 @@ func getCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, failed(run, err)
 			}
-			return detail, nil
+			return detail, topicError(detail)
 		},
 		Format: formatTopic,
 	}
@@ -123,11 +124,11 @@ func categoriesCmd() plugins.CommandSpec {
 	}
 }
 
-// ask is Bun's prompt(): the answer is trimmed. A closed stdin reads as empty,
-// so the caller's "is required" check reports it.
+// ask is Bun's prompt(): the answer String#trim'd. A closed stdin reads as
+// empty, so the caller's "is required" check reports it.
 func ask(setup *plugins.SetupContext, question string) string {
 	answer, _ := setup.Prompt(question, false)
-	return strings.TrimSpace(answer)
+	return jsvalue.Trim(answer)
 }
 
 func setup(ctx context.Context, _ plugins.SetupOptions, setup *plugins.SetupContext) (*plugins.SetupResult, error) {

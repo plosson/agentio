@@ -1045,3 +1045,101 @@ func TestBareRootIsGatedOnTheVault(t *testing.T) {
 		t.Fatalf("with a vault: code %d %q %q", code, out.String(), errOut.String())
 	}
 }
+
+// What the export decrypts to is JSON.parse'd inside Bun's decrypt try/catch,
+// then its version is compared with 1: text that is not JSON reads as a wrong
+// key, and a version that is not the number 1 is named as String(version).
+// Expectations are Bun's output for the same blobs.
+func TestImportReadsTheDecryptedExportAsBunDoes(t *testing.T) {
+	cases := []struct{ plain, stderr string }{
+		{"not json", "Error [AUTH_FAILED]: Failed to decrypt configuration\nSuggestion: Check that you are using the correct encryption key\n"},
+		{`{"version":1,"config":{"profiles":{}},"credentials":{}} x`, "Error [AUTH_FAILED]: Failed to decrypt configuration\nSuggestion: Check that you are using the correct encryption key\n"},
+		{`{"version":"1"}`, "Error [INVALID_PARAMS]: Unsupported export version: 1\nSuggestion: This version of agentio may not support this export format\n"},
+		{`{}`, "Error [INVALID_PARAMS]: Unsupported export version: undefined\nSuggestion: This version of agentio may not support this export format\n"},
+		{`[1]`, "Error [INVALID_PARAMS]: Unsupported export version: undefined\nSuggestion: This version of agentio may not support this export format\n"},
+		{`{"version":1.0e0,"version":2}`, "Error [INVALID_PARAMS]: Unsupported export version: 2\nSuggestion: This version of agentio may not support this export format\n"},
+		{`null`, "Error: null is not an object (evaluating 'exportData.version')\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.plain, func(t *testing.T) {
+			initCLI(t)
+			blob, err := vault.Encrypt(c.plain, exportKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AGENTIO_CONFIG", blob)
+			t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+			_, out, errOut := run(t, "vault", "import", "--key", exportKey)
+			if errOut != c.stderr || out != "" {
+				t.Fatalf("stdout %q\nstderr %q\nwant   %q", out, errOut, c.stderr)
+			}
+			if _, err := os.Stat(vault.DefaultVaultPath()); err == nil {
+				t.Fatal("a refused import wrote a vault")
+			}
+		})
+	}
+}
+
+// vault set takes path.resolve(path) before looking for a directory: `..` is
+// folded and a trailing slash dropped, so a missing "dir/" is a missing file
+// named dir, not dir/agentio.vault. Expectations are Bun's output.
+func TestVaultSetResolvesThePathAsNode(t *testing.T) {
+	initCLI(t)
+	base := t.TempDir()
+	for arg, want := range map[string]string{
+		base + "/missing/":        base + "/missing",
+		base + "/a/../v.enc":      base + "/v.enc",
+		base + "//x/./y/../v.enc": base + "/x/v.enc",
+	} {
+		code, out, errOut := run(t, "vault", "set", arg)
+		wantErr := "Error [NOT_FOUND]: No vault file at " + want + "\nSuggestion: Run `agentio vault init` to create a new vault, or check the path\n"
+		if code != 5 || out != "" || errOut != wantErr {
+			t.Fatalf("%s: code %d\nstdout %q\nstderr %q\nwant   %q", arg, code, out, errOut, wantErr)
+		}
+	}
+}
+
+// A vault pointer that cannot be read is an error for the gate, vault init
+// and vault import, not a missing vault (Bun readPointer throws).
+func TestUnreadableVaultPointerIsAnError(t *testing.T) {
+	for name, args := range map[string][]string{
+		"gate":   {"status"},
+		"init":   {"vault", "init", "--passphrase", "test-pass-123", "--no-migrate"},
+		"import": {"vault", "import", "--key", exportKey, "--passphrase", "test-pass-123"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			initCLI(t)
+			t.Setenv("AGENTIO_CONFIG", exportedBlob(t))
+			if err := os.MkdirAll(vault.PointerPath(), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := run(t, args...)
+			if code != 1 || out != "" || errOut != "Error: EISDIR: illegal operation on a directory, read\n" {
+				t.Fatalf("code %d\nstdout %q\nstderr %q", code, out, errOut)
+			}
+		})
+	}
+}
+
+// Names are quoted as Bun's template literals do, "${name}", not with Go's %q
+// escaping of quotes, backslashes and control characters.
+func TestNamesInMessagesAreQuotedVerbatim(t *testing.T) {
+	initCLI(t)
+	if code, _, errOut := run(t, "vault", "init", "--passphrase", "test-pass-123", "--no-migrate"); code != 0 {
+		t.Fatal(errOut)
+	}
+	name := "we\"ird\\na\tme"
+	cases := []struct {
+		args   []string
+		stderr string
+	}{
+		{[]string{"profile", "add", "no\"such"}, "Error [INVALID_PARAMS]: Unknown service: \"no\"such\"\n"},
+		{[]string{"board", "profile", "remove", "--profile", name}, "Error [PROFILE_NOT_FOUND]: No board profile \"" + name + "\"\n"},
+	}
+	for _, c := range cases {
+		_, _, errOut := run(t, c.args...)
+		if !strings.HasPrefix(errOut, c.stderr) {
+			t.Errorf("%q:\nstderr %q\nwant   %q", c.args, errOut, c.stderr)
+		}
+	}
+}

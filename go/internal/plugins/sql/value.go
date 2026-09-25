@@ -116,7 +116,7 @@ func buildRow(columns []column, values []any) *jsvalue.Object {
 		}
 	}
 	sort.SliceStable(indexed, func(a, b int) bool { return columns[indexed[a]].index < columns[indexed[b]].index })
-	row := jsvalue.NewObject()
+	row := jsvalue.NewInsertionOrderObject()
 	for _, i := range append(indexed, named...) {
 		row.Set(columns[i].name, values[i])
 	}

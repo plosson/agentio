@@ -9,11 +9,13 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,6 +82,15 @@ func newCert(t *testing.T, name string, parent *certPair, isCA bool, notAfter ti
 	return &certPair{cert: cert, key: key, der: der}
 }
 
+// plainHTTP is an HTTP (not TLS) server on 127.0.0.1: a TLS client hello
+// gets an HTTP 400 back.
+func plainHTTP(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/"
+}
+
 // tlsServer serves chain (leaf first) on 127.0.0.1.
 func tlsServer(t *testing.T, chain ...*certPair) string {
 	t.Helper()
@@ -137,6 +148,7 @@ func TestFetchFailsToSendLikeBun(t *testing.T) {
 		{"unknown issuer", nil, tlsServer(t, leaf), nil, "unable to verify the first certificate"},
 		{"expired, trusted", trust, tlsServer(t, expired), nil, "certificate has expired"},
 		{"expired, untrusted", nil, tlsServer(t, expired), nil, "unable to verify the first certificate"},
+		{"plain http", nil, "https" + strings.TrimPrefix(plainHTTP(t), "http"), nil, "unknown certificate verification error"},
 		{"altname", trust, mismatch, nil,
 			"ERR_TLS_CERT_ALTNAME_INVALID fetching \"" + mismatch + "\". For more information, pass `verbose: true` in the second argument to fetch()"},
 	}
@@ -187,3 +199,34 @@ func TestFetchFailsToSendLikeBun(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A proxy that refuses the CONNECT answers the request: Bun's fetch resolves
+// with the proxy's response (status, headers, body), it does not reject.
+// Probed: `HTTPS_PROXY=… bun -e 'await fetch("https://example.invalid/x")'`
+// against a proxy answering `407 Proxy Auth Required` gives 407, "denied".
+func TestProxyRefusingConnectIsTheResponse(t *testing.T) {
+	proxyAddr := serve(t, func(c net.Conn) {
+		buf := make([]byte, 4096)
+		_, _ = c.Read(buf)
+		_, _ = c.Write([]byte("HTTP/1.1 407 Proxy Auth Required\r\nContent-Type: text/plain\r\nX-P: 1\r\nContent-Length: 6\r\n\r\ndenied"))
+		c.Close()
+	})
+	proxy, _ := url.Parse(proxyAddr)
+	for _, base := range []*http.Transport{{Proxy: http.ProxyURL(proxy)}, {Proxy: http.ProxyURL(proxy)}} {
+		for i := 0; i < 2; i++ { // the same transport twice
+			req, _ := http.NewRequest(http.MethodGet, "https://example.invalid/x", nil)
+			resp, err := (&http.Client{Transport: BunTransport{Base: base}}).Do(req)
+			if err != nil {
+				t.Fatalf("error %v", err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != 407 || resp.Status != "407 Proxy Auth Required" || string(body) != "denied" || resp.Header.Get("X-P") != "1" {
+				t.Fatalf("%d %q %q %v", resp.StatusCode, resp.Status, body, resp.Header)
+			}
+		}
+		if base.OnProxyConnectResponse != nil {
+			t.Fatal("the caller's transport was changed")
+		}
+	}
+}

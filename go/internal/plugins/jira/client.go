@@ -2,7 +2,6 @@ package jira
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -14,70 +13,23 @@ import (
 	"github.com/plosson/agentio/go/internal/plugins/atlassian"
 )
 
-type project struct {
-	ID             string `json:"id"`
-	Key            string `json:"key"`
-	Name           string `json:"name"`
-	ProjectTypeKey string `json:"projectTypeKey"`
-	Simplified     bool   `json:"simplified"`
-	Style          string `json:"style"`
-	IsPrivate      bool   `json:"isPrivate"`
-	// AvatarURLs is passed through as sent: key order kept, absent omitted.
-	AvatarURLs json.RawMessage `json:"avatarUrls,omitempty"`
-}
-
-type issue struct {
-	ID                string  `json:"id"`
-	Key               string  `json:"key"`
-	Summary           string  `json:"summary"`
-	Status            string  `json:"status"`
-	StatusCategoryKey string  `json:"statusCategoryKey"`
-	Priority          *string `json:"priority,omitempty"`
-	Assignee          *string `json:"assignee,omitempty"`
-	Reporter          *string `json:"reporter,omitempty"`
-	Created           string  `json:"created"`
-	Updated           string  `json:"updated"`
-	ProjectKey        string  `json:"projectKey"`
-	IssueType         string  `json:"issueType"`
-	Description       string  `json:"description"`
-}
-
-type transition struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	To   struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		StatusCategory struct {
-			Key  string `json:"key"`
-			Name string `json:"name"`
-		} `json:"statusCategory"`
-	} `json:"to"`
-}
+// The models are the Bun client's objects (JiraProject, JiraIssue,
+// JiraTransition, ...), built from the answer as JavaScript reads it: a
+// missing field is undefined (left out of --json, "undefined" in text), and
+// reading a field of null or undefined fails with Bun's TypeError.
 
 // transitionList is the transitions of one issue. It prints as the array;
 // Format also needs the issue key.
 type transitionList struct {
 	issueKey string
-	items    []transition
+	items    []any
 }
 
 func (l transitionList) MarshalJSON() ([]byte, error) {
 	if l.items == nil {
 		return []byte("[]"), nil
 	}
-	return json.Marshal(l.items)
-}
-
-type commentResult struct {
-	ID       string `json:"id"`
-	IssueKey string `json:"issueKey"`
-}
-
-type transitionResult struct {
-	IssueKey       string `json:"issueKey"`
-	TransitionName string `json:"transitionName"`
-	NewStatus      string `json:"newStatus"`
+	return jsvalue.Stringify(l.items), nil
 }
 
 type api struct {
@@ -98,8 +50,8 @@ func (a api) base() string {
 	return "https://api.atlassian.com/ex/jira/" + a.cloudID + "/rest/api/3"
 }
 
-func (a api) request(method, path string, body any, out any) error {
-	return a.Request(method, a.base()+path, body, out)
+func (a api) request(method, path string, body any) (any, error) {
+	return a.Request(method, a.base()+path, body)
 }
 
 // limit is Bun parseInt(options.limit, 10), or ok false when it is falsy
@@ -112,80 +64,101 @@ func limit(raw string) (string, bool) {
 	return jsvalue.NumberString(n), true
 }
 
-func (a api) listProjects(maxResults string) ([]project, error) {
+// mapItems is `text.map(f)` over the answer at text.
+func mapItems(list any, text string, f func(item any) (*jsvalue.Object, error)) ([]any, error) {
+	items, err := jsvalue.Items(list, text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		o, err := f(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// field reads `text.keys…` from the answer, or fails as JavaScript does.
+func field(base any, text string, keys ...string) (any, error) {
+	return jsvalue.Path(base, text, keys...)
+}
+
+func (a api) listProjects(maxResults string) ([]any, error) {
 	path := "/project/search"
 	if n, ok := limit(maxResults); ok {
 		q := jsvalue.NewSearchParams()
 		q.Set("maxResults", n)
 		path += "?" + q.String()
 	}
-	var payload struct {
-		Values []project `json:"values"`
-	}
-	if err := a.request(http.MethodGet, path, nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, path, nil)
+	if err != nil {
 		return nil, err
 	}
-	if payload.Values == nil {
-		return []project{}, nil
+	const text = `(await this.request("GET", path))`
+	values, err := field(response, text, "values")
+	if err != nil {
+		return nil, err
 	}
-	return payload.Values, nil
+	return mapItems(values, text+".values", projectModel)
 }
 
-type apiIssue struct {
-	ID     string `json:"id"`
-	Key    string `json:"key"`
-	Fields struct {
-		Summary string `json:"summary"`
-		Status  struct {
-			Name           string `json:"name"`
-			StatusCategory struct {
-				Key string `json:"key"`
-			} `json:"statusCategory"`
-		} `json:"status"`
-		Priority *named  `json:"priority"`
-		Assignee *person `json:"assignee"`
-		Reporter *person `json:"reporter"`
-		Created  string  `json:"created"`
-		Updated  string  `json:"updated"`
-		Project  struct {
-			Key string `json:"key"`
-		} `json:"project"`
-		IssueType struct {
-			Name string `json:"name"`
-		} `json:"issuetype"`
-		Description any `json:"description"`
-	} `json:"fields"`
+// projectModel is the JiraProject Bun maps each project to.
+func projectModel(p any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(p) {
+		return nil, jsvalue.TypeError(p, "p.id")
+	}
+	return atlassian.Pick(p, "id", "id", "key", "key", "name", "name", "projectTypeKey", "projectTypeKey",
+		"simplified", "simplified", "style", "style", "isPrivate", "isPrivate", "avatarUrls", "avatarUrls"), nil
 }
 
-type named struct {
-	Name *string `json:"name"`
+// issueModel is the JiraIssue Bun builds from raw, read as text ("issue" in
+// search, "response" in get), in the order the object literal reads it.
+func issueModel(raw any, text string) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, text+".id")
+	}
+	o := atlassian.Pick(raw, "id", "id", "key", "key")
+	for _, f := range []struct {
+		key  string
+		path []string
+	}{
+		{"summary", []string{"fields", "summary"}},
+		{"status", []string{"fields", "status", "name"}},
+		{"statusCategoryKey", []string{"fields", "status", "statusCategory", "key"}},
+	} {
+		v, err := field(raw, text, f.path...)
+		if err != nil {
+			return nil, err
+		}
+		o.Set(f.key, v)
+	}
+	fields := jsvalue.Member(raw, "fields")
+	o.Set("priority", jsvalue.Optional(jsvalue.Member(fields, "priority"), "name"))
+	o.Set("assignee", jsvalue.Optional(jsvalue.Member(fields, "assignee"), "displayName"))
+	o.Set("reporter", jsvalue.Optional(jsvalue.Member(fields, "reporter"), "displayName"))
+	o.Set("created", jsvalue.Member(fields, "created"))
+	o.Set("updated", jsvalue.Member(fields, "updated"))
+	for _, f := range []struct {
+		key  string
+		path []string
+	}{
+		{"projectKey", []string{"fields", "project", "key"}},
+		{"issueType", []string{"fields", "issuetype", "name"}},
+	} {
+		v, err := field(raw, text, f.path...)
+		if err != nil {
+			return nil, err
+		}
+		o.Set(f.key, v)
+	}
+	o.Set("description", atlassian.ExtractTextFromADF(jsvalue.Member(fields, "description")))
+	return o, nil
 }
 
-type person struct {
-	DisplayName *string `json:"displayName"`
-}
-
-func (i apiIssue) model() issue {
-	out := issue{
-		ID: i.ID, Key: i.Key, Summary: i.Fields.Summary,
-		Status: i.Fields.Status.Name, StatusCategoryKey: i.Fields.Status.StatusCategory.Key,
-		Created: i.Fields.Created, Updated: i.Fields.Updated,
-		ProjectKey: i.Fields.Project.Key, IssueType: i.Fields.IssueType.Name,
-		Description: atlassian.ExtractTextFromADF(i.Fields.Description),
-	}
-	if i.Fields.Priority != nil {
-		out.Priority = i.Fields.Priority.Name
-	}
-	if i.Fields.Assignee != nil {
-		out.Assignee = i.Fields.Assignee.DisplayName
-	}
-	if i.Fields.Reporter != nil {
-		out.Reporter = i.Fields.Reporter.DisplayName
-	}
-	return out
-}
-
-func (a api) searchIssues(jql, projectKey, status, assignee, maxResults string) ([]issue, error) {
+func (a api) searchIssues(jql, projectKey, status, assignee, maxResults string) ([]any, error) {
 	var parts []string
 	if jql != "" {
 		parts = append(parts, jql)
@@ -211,67 +184,117 @@ func (a api) searchIssues(jql, projectKey, status, assignee, maxResults string) 
 	q.Set("jql", query)
 	q.Set("maxResults", n)
 	q.Set("fields", "summary,status,priority,assignee,reporter,created,updated,project,issuetype,description")
-	var payload struct {
-		Issues []apiIssue `json:"issues"`
-	}
-	if err := a.request(http.MethodGet, "/search/jql?"+q.String(), nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, "/search/jql?"+q.String(), nil)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]issue, 0, len(payload.Issues))
-	for _, i := range payload.Issues {
-		out = append(out, i.model())
+	const text = "(await this.request(\"GET\", `/search/jql?${params.toString()}`))"
+	issues, err := field(response, text, "issues")
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return mapItems(issues, text+".issues", func(i any) (*jsvalue.Object, error) { return issueModel(i, "issue") })
 }
 
-func (a api) getIssue(key string) (issue, error) {
-	var response apiIssue
-	if err := a.request(http.MethodGet, "/issue/"+key, nil, &response); err != nil {
-		return issue{}, err
+func (a api) getIssue(key string) (*jsvalue.Object, error) {
+	response, err := a.request(http.MethodGet, "/issue/"+key, nil)
+	if err != nil {
+		return nil, err
 	}
-	return response.model(), nil
+	return issueModel(response, "response")
 }
 
 func (a api) getTransitions(key string) (transitionList, error) {
-	var payload struct {
-		Transitions []transition `json:"transitions"`
-	}
-	if err := a.request(http.MethodGet, "/issue/"+key+"/transitions", nil, &payload); err != nil {
+	response, err := a.request(http.MethodGet, "/issue/"+key+"/transitions", nil)
+	if err != nil {
 		return transitionList{}, err
 	}
-	return transitionList{issueKey: key, items: payload.Transitions}, nil
+	const text = "(await this.request(\"GET\", `/issue/${issueKey}/transitions`))"
+	list, err := field(response, text, "transitions")
+	if err != nil {
+		return transitionList{}, err
+	}
+	items, err := mapItems(list, text+".transitions", transitionModel)
+	if err != nil {
+		return transitionList{}, err
+	}
+	return transitionList{issueKey: key, items: items}, nil
 }
 
-func (a api) transitionIssue(key, transitionID string) (transitionResult, error) {
+// transitionModel is the JiraTransition Bun maps each transition to.
+func transitionModel(t any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(t) {
+		return nil, jsvalue.TypeError(t, "t.id")
+	}
+	out := atlassian.Pick(t, "id", "id", "name", "name")
+	to := jsvalue.NewObject()
+	category := jsvalue.NewObject()
+	for _, f := range []struct {
+		into *jsvalue.Object
+		key  string
+		path []string
+	}{
+		{to, "id", []string{"to", "id"}},
+		{to, "name", []string{"to", "name"}},
+		{category, "key", []string{"to", "statusCategory", "key"}},
+		{category, "name", []string{"to", "statusCategory", "name"}},
+	} {
+		v, err := field(t, "t", f.path...)
+		if err != nil {
+			return nil, err
+		}
+		f.into.Set(f.key, v)
+	}
+	to.Set("statusCategory", category)
+	out.Set("to", to)
+	return out, nil
+}
+
+func (a api) transitionIssue(key, transitionID string) (*jsvalue.Object, error) {
 	list, err := a.getTransitions(key)
 	if err != nil {
-		return transitionResult{}, err
+		return nil, err
 	}
-	var found *transition
-	for i := range list.items {
-		if list.items[i].ID == transitionID {
-			found = &list.items[i]
+	var found any
+	for _, t := range list.items {
+		if jsvalue.StrictEqual(jsvalue.Member(t, "id"), transitionID) {
+			found = t
 			break
 		}
 	}
 	if found == nil {
-		return transitionResult{}, a.Fail("NOT_FOUND", `Transition "`+transitionID+`" not found or not available for this issue`, "")
+		return nil, a.Fail("NOT_FOUND", `Transition "`+transitionID+`" not found or not available for this issue`, "")
 	}
-	body := map[string]any{"transition": map[string]any{"id": transitionID}}
-	if err := a.request(http.MethodPost, "/issue/"+key+"/transitions", body, nil); err != nil {
-		return transitionResult{}, err
+	body := jsvalue.NewObject()
+	id := jsvalue.NewObject()
+	id.Set("id", transitionID)
+	body.Set("transition", id)
+	if _, err := a.request(http.MethodPost, "/issue/"+key+"/transitions", body); err != nil {
+		return nil, err
 	}
-	return transitionResult{IssueKey: key, TransitionName: found.Name, NewStatus: found.To.Name}, nil
+	out := jsvalue.NewObject()
+	out.Set("issueKey", key)
+	out.Set("transitionName", jsvalue.Member(found, "name"))
+	out.Set("newStatus", jsvalue.Member(jsvalue.Member(found, "to"), "name"))
+	return out, nil
 }
 
-func (a api) addComment(key, body string) (commentResult, error) {
-	var response struct {
-		ID string `json:"id"`
+func (a api) addComment(key, body string) (*jsvalue.Object, error) {
+	payload := jsvalue.NewObject()
+	payload.Set("body", textToADF(body))
+	response, err := a.request(http.MethodPost, "/issue/"+key+"/comment", payload)
+	if err != nil {
+		return nil, err
 	}
-	if err := a.request(http.MethodPost, "/issue/"+key+"/comment", map[string]any{"body": textToADF(body)}, &response); err != nil {
-		return commentResult{}, err
+	const text = "(await this.request(\"POST\", `/issue/${issueKey}/comment`, {\n        body: adfBody\n      }))"
+	id, err := field(response, text, "id")
+	if err != nil {
+		return nil, err
 	}
-	return commentResult{ID: response.ID, IssueKey: key}, nil
+	out := jsvalue.NewObject()
+	out.Set("id", id)
+	out.Set("issueKey", key)
+	return out, nil
 }
 
 type adfInline struct {

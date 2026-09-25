@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
@@ -63,10 +64,7 @@ func Write(pluginID, scope, name string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
+	raw := jsvalue.Stringify(value) // Bun JSON.stringify(value)
 	nonce := make([]byte, 6)
 	_, _ = rand.Read(nonce)
 	tmp := fmt.Sprintf("%s.%d.%s.tmp", path, os.Getpid(), hex.EncodeToString(nonce))

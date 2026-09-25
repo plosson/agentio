@@ -9,115 +9,106 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
-type category struct {
-	ID               int    `json:"id"`
-	Name             string `json:"name"`
-	Slug             string `json:"slug"`
-	Description      string `json:"description"`
-	TopicCount       int    `json:"topicCount"`
-	PostCount        int    `json:"postCount"`
-	Color            string `json:"color"`
-	ParentCategoryID *int   `json:"parentCategoryId,omitempty"`
+// The models are the Bun client's objects (DiscourseCategory, DiscourseTopic,
+// DiscourseTopicDetail, DiscoursePost), built from the answer as JavaScript
+// reads it: a missing field is undefined (left out of --json, "undefined" in
+// text), and reading a field of null or undefined fails with Bun's TypeError.
+
+// parseCategory is Bun parseCategory.
+func parseCategory(raw any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, "raw.id")
+	}
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	description := get("description")
+	if !jsvalue.Truthy(description) {
+		description = ""
+	}
+	c := jsvalue.NewObject()
+	c.Set("id", get("id"))
+	c.Set("name", get("name"))
+	c.Set("slug", get("slug"))
+	c.Set("description", description)
+	c.Set("topicCount", get("topic_count"))
+	c.Set("postCount", get("post_count"))
+	c.Set("color", get("color"))
+	c.Set("parentCategoryId", get("parent_category_id"))
+	return c, nil
 }
 
-type poster struct {
-	UserID int `json:"userId"`
+// parseTopic is Bun parseTopic.
+func (a *api) parseTopic(raw any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, "raw.id")
+	}
+	t := a.topicFields(raw)
+	posters := jsvalue.Member(raw, "posters")
+	if jsvalue.Nullish(posters) { // raw.posters?.map(...)
+		posters = jsvalue.Undefined
+	} else {
+		items, err := jsvalue.Items(posters, "raw.posters?")
+		if err != nil {
+			return nil, err
+		}
+		list := make([]any, 0, len(items))
+		for _, p := range items {
+			if jsvalue.Nullish(p) {
+				return nil, jsvalue.TypeError(p, "p.user_id")
+			}
+			poster := jsvalue.NewObject()
+			poster.Set("userId", jsvalue.Member(p, "user_id"))
+			list = append(list, poster)
+		}
+		posters = list
+	}
+	t.Set("posters", posters)
+	return t, nil
 }
 
-type topic struct {
-	ID           int       `json:"id"`
-	Title        string    `json:"title"`
-	Slug         string    `json:"slug"`
-	PostsCount   int       `json:"postsCount"`
-	ReplyCount   int       `json:"replyCount"`
-	Views        int       `json:"views"`
-	LikeCount    int       `json:"likeCount"`
-	CategoryID   int       `json:"categoryId"`
-	CategoryName *string   `json:"categoryName,omitempty"`
-	CreatedAt    string    `json:"createdAt"`
-	LastPostedAt string    `json:"lastPostedAt"`
-	Pinned       bool      `json:"pinned"`
-	Closed       bool      `json:"closed"`
-	Archived     bool      `json:"archived"`
-	Posters      *[]poster `json:"posters,omitempty"`
+// topicFields are the fields DiscourseTopic and DiscourseTopicDetail share,
+// read from a non-nullish raw topic in Bun's order.
+func (a *api) topicFields(raw any) *jsvalue.Object {
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	t := jsvalue.NewObject()
+	t.Set("id", get("id"))
+	t.Set("title", get("title"))
+	t.Set("slug", get("slug"))
+	t.Set("postsCount", get("posts_count"))
+	t.Set("replyCount", get("reply_count"))
+	t.Set("views", get("views"))
+	t.Set("likeCount", get("like_count"))
+	t.Set("categoryId", get("category_id"))
+	t.Set("categoryName", a.categoryName(get("category_id")))
+	t.Set("createdAt", get("created_at"))
+	t.Set("lastPostedAt", get("last_posted_at"))
+	t.Set("pinned", get("pinned"))
+	t.Set("closed", get("closed"))
+	t.Set("archived", get("archived"))
+	return t
 }
 
-type post struct {
-	ID          int     `json:"id"`
-	Username    string  `json:"username"`
-	DisplayName *string `json:"displayName,omitempty"`
-	CreatedAt   string  `json:"createdAt"`
-	UpdatedAt   string  `json:"updatedAt"`
-	PostNumber  int     `json:"postNumber"`
-	Raw         *string `json:"raw,omitempty"`
-	Cooked      string  `json:"cooked"`
-	ReplyCount  int     `json:"replyCount"`
-	LikeCount   int     `json:"likeCount"`
-}
-
-// topicDetail is DiscourseTopicDetail. Bun never sets posters on it.
-type topicDetail struct {
-	ID           int     `json:"id"`
-	Title        string  `json:"title"`
-	Slug         string  `json:"slug"`
-	PostsCount   int     `json:"postsCount"`
-	ReplyCount   int     `json:"replyCount"`
-	Views        int     `json:"views"`
-	LikeCount    int     `json:"likeCount"`
-	CategoryID   int     `json:"categoryId"`
-	CategoryName *string `json:"categoryName,omitempty"`
-	CreatedAt    string  `json:"createdAt"`
-	LastPostedAt string  `json:"lastPostedAt"`
-	Pinned       bool    `json:"pinned"`
-	Closed       bool    `json:"closed"`
-	Archived     bool    `json:"archived"`
-	Posts        []post  `json:"posts"`
-}
-
-type rawCategory struct {
-	ID               int     `json:"id"`
-	Name             string  `json:"name"`
-	Slug             string  `json:"slug"`
-	Description      *string `json:"description"`
-	TopicCount       int     `json:"topic_count"`
-	PostCount        int     `json:"post_count"`
-	Color            string  `json:"color"`
-	ParentCategoryID *int    `json:"parent_category_id"`
-}
-
-type rawTopic struct {
-	ID           int    `json:"id"`
-	Title        string `json:"title"`
-	Slug         string `json:"slug"`
-	PostsCount   int    `json:"posts_count"`
-	ReplyCount   int    `json:"reply_count"`
-	Views        int    `json:"views"`
-	LikeCount    int    `json:"like_count"`
-	CategoryID   int    `json:"category_id"`
-	CreatedAt    string `json:"created_at"`
-	LastPostedAt string `json:"last_posted_at"`
-	Pinned       bool   `json:"pinned"`
-	Closed       bool   `json:"closed"`
-	Archived     bool   `json:"archived"`
-	Posters      *[]struct {
-		UserID int `json:"user_id"`
-	} `json:"posters"`
-}
-
-type rawPost struct {
-	ID              int     `json:"id"`
-	Username        string  `json:"username"`
-	DisplayUsername *string `json:"display_username"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	PostNumber      int     `json:"post_number"`
-	Raw             *string `json:"raw"`
-	Cooked          string  `json:"cooked"`
-	ReplyCount      int     `json:"reply_count"`
-	LikeCount       int     `json:"like_count"`
+// parsePost is Bun parsePost.
+func parsePost(raw any) (*jsvalue.Object, error) {
+	if jsvalue.Nullish(raw) {
+		return nil, jsvalue.TypeError(raw, "raw.id")
+	}
+	get := func(k string) any { return jsvalue.Member(raw, k) }
+	p := jsvalue.NewObject()
+	p.Set("id", get("id"))
+	p.Set("username", get("username"))
+	p.Set("displayName", get("display_username"))
+	p.Set("createdAt", get("created_at"))
+	p.Set("updatedAt", get("updated_at"))
+	p.Set("postNumber", get("post_number"))
+	p.Set("raw", get("raw"))
+	p.Set("cooked", get("cooked"))
+	p.Set("replyCount", get("reply_count"))
+	p.Set("likeCount", get("like_count"))
+	return p, nil
 }
 
 // apiError is a Bun CliError thrown by DiscourseClient.request. Commands turn
@@ -137,8 +128,9 @@ type api struct {
 	username string
 	ctx      context.Context
 	fetch    fetchFunc
-	// categories is Bun's categoryCache: filled by getCategories, read by topics.
-	categories map[int]string
+	// categories is Bun's categoryCache (a Map from category id to name):
+	// filled by getCategories, read by topics.
+	categories map[string]any
 }
 
 func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
@@ -148,7 +140,7 @@ func newAPI(ctx context.Context, creds map[string]any, fetch fetchFunc) *api {
 		username:   str(creds, "username"),
 		ctx:        ctx,
 		fetch:      fetch,
-		categories: map[int]string{},
+		categories: map[string]any{},
 	}
 }
 
@@ -161,30 +153,33 @@ func networkError(err error) *apiError {
 	return &apiError{code: "NETWORK_ERROR", message: "Failed to connect to Discourse: " + err.Error()}
 }
 
-func (a *api) get(path string, out any) error {
+// get is Bun request('GET', path): the answer as `await response.json()`
+// reads it, and any failure but an API error as NETWORK_ERROR.
+func (a *api) get(path string) (any, error) {
 	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, a.baseURL+path, nil)
 	if err != nil {
-		return networkError(err)
+		return nil, networkError(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Api-Key", a.apiKey)
 	req.Header.Set("Api-Username", a.username)
 	resp, err := a.fetch(a.ctx, req)
 	if err != nil {
-		return networkError(err)
+		return nil, networkError(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return networkError(err)
+		return nil, networkError(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &apiError{code: plugins.HTTPStatusToErrorCode(resp.StatusCode), message: errorMessage(resp.StatusCode, string(raw))}
+		return nil, &apiError{code: plugins.HTTPStatusToErrorCode(resp.StatusCode), message: errorMessage(resp.StatusCode, string(raw))}
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return networkError(err)
+	data, err := plugins.ResponseJSON(resp.StatusCode, raw)
+	if err != nil {
+		return nil, networkError(err)
 	}
-	return nil
+	return data, nil
 }
 
 // errorMessage follows the Bun try/catch: a truthy `errors` array is joined,
@@ -252,66 +247,96 @@ func jsTruthy(v any) bool {
 	}
 }
 
-func (a *api) getCategories() ([]category, error) {
-	var payload struct {
-		CategoryList struct {
-			Categories []rawCategory `json:"categories"`
-		} `json:"category_list"`
-	}
-	if err := a.get("/categories.json", &payload); err != nil {
+func (a *api) getCategories() ([]any, error) {
+	const request = `(await this.request("GET", "/categories.json"))`
+	data, err := a.get("/categories.json")
+	if err != nil {
 		return nil, err
 	}
-	out := make([]category, 0, len(payload.CategoryList.Categories))
-	for _, c := range payload.CategoryList.Categories {
-		desc := ""
-		if c.Description != nil {
-			desc = *c.Description
+	list, err := jsvalue.Path(data, request, "category_list", "categories")
+	if err != nil {
+		return nil, err
+	}
+	items, err := jsvalue.Items(list, request+".category_list.categories")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, raw := range items {
+		c, err := parseCategory(raw)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, category{
-			ID: c.ID, Name: c.Name, Slug: c.Slug, Description: desc,
-			TopicCount: c.TopicCount, PostCount: c.PostCount, Color: c.Color,
-			ParentCategoryID: c.ParentCategoryID,
-		})
-		a.categories[c.ID] = c.Name
+		out = append(out, c)
+	}
+	for _, c := range out {
+		id, _ := c.(*jsvalue.Object).Get("id")
+		name, _ := c.(*jsvalue.Object).Get("name")
+		a.categories[cacheKey(id)] = name
 	}
 	return out, nil
 }
 
-func (a *api) categoryName(id int) *string {
-	if name, ok := a.categories[id]; ok {
-		return &name
+// cacheKey is the Map key of a category id: SameValueZero, so 1 and "1"
+// differ and 1.0 is 1.
+func cacheKey(id any) string {
+	if id == jsvalue.Undefined {
+		return "undefined"
 	}
-	return nil
+	return string(jsvalue.Stringify(id))
 }
 
-func (a *api) listTopics(categoryFilter string, page int) ([]topic, error) {
+// categoryName is categoryCache.get(id): undefined when not cached.
+func (a *api) categoryName(id any) any {
+	if name, ok := a.categories[cacheKey(id)]; ok {
+		return name
+	}
+	return jsvalue.Undefined
+}
+
+// findCategory is Bun's categories.find(c => c.slug === filter ||
+// c.name.toLowerCase() === filter?.toLowerCase()).
+func findCategory(cats []any, filter string) (*jsvalue.Object, error) {
+	for _, c := range cats {
+		cat := c.(*jsvalue.Object)
+		slug, _ := cat.Get("slug")
+		if jsvalue.StrictEqual(slug, filter) {
+			return cat, nil
+		}
+		name, _ := cat.Get("name")
+		if jsvalue.Nullish(name) {
+			return nil, jsvalue.TypeError(name, "c.name.toLowerCase")
+		}
+		if strings.ToLower(jsvalue.String(name)) == strings.ToLower(filter) {
+			return cat, nil
+		}
+	}
+	return nil, nil
+}
+
+func (a *api) listTopics(categoryFilter string, page int) ([]any, error) {
 	path := "/latest.json"
 	if categoryFilter != "" {
 		cats, err := a.getCategories()
 		if err != nil {
 			return nil, err
 		}
-		var found *category
-		for i := range cats {
-			if cats[i].Slug == categoryFilter || strings.ToLower(cats[i].Name) == strings.ToLower(categoryFilter) {
-				found = &cats[i]
-				break
-			}
+		found, err := findCategory(cats, categoryFilter)
+		if err != nil {
+			return nil, err
 		}
 		if found == nil {
-			return nil, &apiError{code: "NOT_FOUND", message: fmt.Sprintf("Category %q not found", categoryFilter)}
+			return nil, &apiError{code: "NOT_FOUND", message: fmt.Sprintf("Category \"%s\" not found", categoryFilter)}
 		}
-		path = fmt.Sprintf("/c/%s/%d/l/latest.json", found.Slug, found.ID)
+		slug, _ := found.Get("slug")
+		id, _ := found.Get("id")
+		path = "/c/" + jsvalue.String(slug) + "/" + jsvalue.String(id) + "/l/latest.json"
 	}
 	if page > 0 {
 		path += "?page=" + strconv.Itoa(page)
 	}
-	var payload struct {
-		TopicList struct {
-			Topics []rawTopic `json:"topics"`
-		} `json:"topic_list"`
-	}
-	if err := a.get(path, &payload); err != nil {
+	data, err := a.get(path)
+	if err != nil {
 		return nil, err
 	}
 	if len(a.categories) == 0 {
@@ -319,57 +344,57 @@ func (a *api) listTopics(categoryFilter string, page int) ([]topic, error) {
 			return nil, err
 		}
 	}
-	out := make([]topic, 0, len(payload.TopicList.Topics))
-	for _, t := range payload.TopicList.Topics {
-		var posters *[]poster
-		if t.Posters != nil {
-			list := make([]poster, 0, len(*t.Posters))
-			for _, p := range *t.Posters {
-				list = append(list, poster{UserID: p.UserID})
-			}
-			posters = &list
+	list, err := jsvalue.Path(data, "data", "topic_list", "topics")
+	if err != nil {
+		return nil, err
+	}
+	items, err := jsvalue.Items(list, "data.topic_list.topics")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, 0, len(items))
+	for _, raw := range items {
+		t, err := a.parseTopic(raw)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, topic{
-			ID: t.ID, Title: t.Title, Slug: t.Slug, PostsCount: t.PostsCount,
-			ReplyCount: t.ReplyCount, Views: t.Views, LikeCount: t.LikeCount,
-			CategoryID: t.CategoryID, CategoryName: a.categoryName(t.CategoryID),
-			CreatedAt: t.CreatedAt, LastPostedAt: t.LastPostedAt,
-			Pinned: t.Pinned, Closed: t.Closed, Archived: t.Archived, Posters: posters,
-		})
+		out = append(out, t)
 	}
 	return out, nil
 }
 
-func (a *api) getTopic(id int) (topicDetail, error) {
-	var data struct {
-		rawTopic
-		PostStream struct {
-			Posts []rawPost `json:"posts"`
-		} `json:"post_stream"`
-	}
-	if err := a.get(fmt.Sprintf("/t/%d.json", id), &data); err != nil {
-		return topicDetail{}, err
+func (a *api) getTopic(id int) (*jsvalue.Object, error) {
+	data, err := a.get(fmt.Sprintf("/t/%d.json", id))
+	if err != nil {
+		return nil, err
 	}
 	if len(a.categories) == 0 {
 		if _, err := a.getCategories(); err != nil {
-			return topicDetail{}, err
+			return nil, err
 		}
 	}
-	posts := make([]post, 0, len(data.PostStream.Posts))
-	for _, p := range data.PostStream.Posts {
-		posts = append(posts, post{
-			ID: p.ID, Username: p.Username, DisplayName: p.DisplayUsername,
-			CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, PostNumber: p.PostNumber,
-			Raw: p.Raw, Cooked: p.Cooked, ReplyCount: p.ReplyCount, LikeCount: p.LikeCount,
-		})
+	if jsvalue.Nullish(data) {
+		return nil, jsvalue.TypeError(data, "data.id")
 	}
-	return topicDetail{
-		ID: data.ID, Title: data.Title, Slug: data.Slug, PostsCount: data.PostsCount,
-		ReplyCount: data.ReplyCount, Views: data.Views, LikeCount: data.LikeCount,
-		CategoryID: data.CategoryID, CategoryName: a.categoryName(data.CategoryID),
-		CreatedAt: data.CreatedAt, LastPostedAt: data.LastPostedAt,
-		Pinned: data.Pinned, Closed: data.Closed, Archived: data.Archived, Posts: posts,
-	}, nil
+	detail := a.topicFields(data)
+	list, err := jsvalue.Path(data, "data", "post_stream", "posts")
+	if err != nil {
+		return nil, err
+	}
+	items, err := jsvalue.Items(list, "data.post_stream.posts")
+	if err != nil {
+		return nil, err
+	}
+	posts := make([]any, 0, len(items))
+	for _, raw := range items {
+		p, err := parsePost(raw)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
+	detail.Set("posts", posts)
+	return detail, nil
 }
 
 func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationResult, error) {

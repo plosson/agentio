@@ -280,14 +280,16 @@ func (a *api) clear(idOrURL, a1 string) (*cleared, error) {
 
 func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
 	id := extractSpreadsheetID(idOrURL)
-	resp, err := a.sheets.Spreadsheets.Get(id).Context(a.Ctx).Do()
+	var resp sheets.Spreadsheet
+	raw, err := google.GetJSON(a.Ctx, a.RunContext, google.Camel, a.sheets.BasePath, "v4/spreadsheets/"+url.PathEscape(id), &resp)
 	if err != nil {
 		return nil, a.Failed("get metadata", err)
 	}
-	props := resp.Properties
-	if props == nil {
-		props = &sheets.SpreadsheetProperties{}
+	// Bun `const props = response.data.properties!; props.title`.
+	if p := jsvalue.Member(raw, "properties"); jsvalue.Nullish(p) {
+		return nil, a.Failed("get metadata", jsvalue.TypeError(p, "props.title"))
 	}
+	props := resp.Properties
 	out := &spreadsheet{ID: resp.SpreadsheetId, Title: props.Title, Locale: props.Locale, TimeZone: props.TimeZone, URL: resp.SpreadsheetUrl, Sheets: []sheet{}}
 	if out.Title == "" {
 		out.Title = "Untitled"
@@ -312,9 +314,10 @@ func (a *api) metadata(idOrURL string) (*spreadsheet, error) {
 }
 
 func (a *api) create(title string, sheetNames []string) (*google.CreatedFile, error) {
-	body := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: title}}
+	// Titles go as given, "" included, as Bun sends them.
+	body := &sheets.Spreadsheet{Properties: &sheets.SpreadsheetProperties{Title: title, ForceSendFields: []string{"Title"}}}
 	for _, name := range sheetNames {
-		body.Sheets = append(body.Sheets, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: jsvalue.Trim(name)}})
+		body.Sheets = append(body.Sheets, &sheets.Sheet{Properties: &sheets.SheetProperties{Title: jsvalue.Trim(name), ForceSendFields: []string{"Title"}}})
 	}
 	resp, err := a.sheets.Spreadsheets.Create(body).Context(a.Ctx).Do()
 	if err != nil {

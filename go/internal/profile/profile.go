@@ -35,7 +35,7 @@ func RefOf(service, name string) string { return service + "/" + name }
 func ValidateName(name string) error {
 	if name == "" || name == " " || containsSlash(name) || trimEmpty(name) {
 		return clierr.New(clierr.InvalidParams,
-			fmt.Sprintf("Invalid profile name %q", name),
+			fmt.Sprintf("Invalid profile name \"%s\"", name),
 			`A name cannot be empty or contain "/"`)
 	}
 	return nil
@@ -127,7 +127,7 @@ func Require(service, name string) (string, error) {
 	}
 	if name != "" {
 		return "", clierr.New(clierr.ProfileNotFound,
-			fmt.Sprintf("Profile %q not found for %s", name, service),
+			fmt.Sprintf("Profile \"%s\" not found for %s", name, service),
 			fmt.Sprintf("Run: agentio %s profile add", service))
 	}
 	return "", clierr.New(clierr.ProfileNotFound,
@@ -437,7 +437,7 @@ func WriteFailure(outcome WriteOutcome, service, name, to string) *clierr.Error 
 			"Profile "+RefOf(service, target)+" already exists",
 			"Choose another name")
 	default:
-		return clierr.New(clierr.InvalidParams, fmt.Sprintf("Invalid profile name %q", to), `A name cannot be empty or contain "/"`)
+		return clierr.New(clierr.InvalidParams, fmt.Sprintf("Invalid profile name \"%s\"", to), `A name cannot be empty or contain "/"`)
 	}
 }
 

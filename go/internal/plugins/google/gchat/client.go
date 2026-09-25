@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,10 +27,6 @@ import (
 
 // now is the clock behind fallback timestamps and the directory TTL.
 var now = time.Now
-
-// peopleConcurrency bounds the parallel People API lookups Bun runs with
-// Promise.all.
-const peopleConcurrency = 8
 
 var attachmentMIME = map[string]string{
 	".png":  "image/png",
@@ -234,42 +232,54 @@ func (a *api) sendViaOAuth(o sendOptions) (*sendResult, error) {
 	if o.spaceID == "" {
 		return nil, a.Fail("INVALID_PARAMS", "spaceId is required for OAuth profiles", "Specify with --space or configure default in profile")
 	}
-	var refs []*chat.AttachmentDataRef
-	for _, path := range o.attachments {
-		ref, err := a.uploadAttachment(o.spaceID, path)
-		if err != nil {
-			return nil, err
+	refs, err := a.uploadAttachments(o.spaceID, o.attachments)
+	if err != nil {
+		return nil, err
+	}
+	// Bun `options.payload ? { ...options.payload } : { text: options.text }`,
+	// sent as it is: the API, not the client, judges the fields.
+	body := jsvalue.NewObject()
+	if jsvalue.Truthy(o.payload) {
+		body = jsvalue.Spread(o.payload)
+	} else if o.text != "" {
+		body.Set("text", o.text)
+	}
+	if len(refs) > 0 {
+		existing, _ := jsvalue.Member(body, "attachment").([]any)
+		attachments := append([]any{}, existing...)
+		for _, ref := range refs {
+			item := jsvalue.NewObject()
+			item.Set("attachmentDataRef", ref)
+			attachments = append(attachments, item)
 		}
-		refs = append(refs, ref)
+		body.Set("attachment", attachments)
 	}
 	const suggestion = "Check that the space ID is valid and OAuth token is not expired"
-	msg, err := requestMessage(o.body())
-	if err != nil {
-		return nil, a.Fail("API_ERROR", "Failed to send message: "+err.Error(), suggestion)
-	}
-	for _, ref := range refs {
-		msg.Attachment = append(msg.Attachment, &chat.Attachment{AttachmentDataRef: ref})
-	}
-	created, err := a.chat.Spaces.Messages.Create("spaces/"+o.spaceID, msg).Context(a.Ctx).Do()
+	parent := strings.ReplaceAll(url.PathEscape("spaces/"+o.spaceID), "%2F", "/") // {+parent}
+	created, err := google.CallJSON(a.Ctx, a.RunContext, google.Camel, http.MethodPost, a.chat.BasePath, "v1/"+parent+"/messages", jsvalue.Stringify(body))
 	if err != nil {
 		return nil, a.StatusError("Failed to send message: ", err, suggestion)
 	}
-	return &sendResult{MessageID: lastSegment(created.Name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
+	name, _ := jsvalue.Member(created, "name").(string)
+	return &sendResult{MessageID: lastSegment(name), SpaceID: o.spaceID, Text: o.text, IsJSONPayload: jsvalue.Truthy(o.payload)}, nil
 }
 
-// requestMessage is Bun `{ ...payload }` as a Chat message. Spreading a
-// non-object gives no message field.
-func requestMessage(body any) (*chat.Message, error) {
-	msg := &chat.Message{}
-	switch body.(type) {
-	case *jsvalue.Object, map[string]any:
-	default:
-		return msg, nil
+// uploadAttachments is Bun's Promise.all over uploadAttachment: every upload
+// runs at once, the refs keep the paths' order, and the first upload to fail
+// is the error.
+func (a *api) uploadAttachments(spaceID string, paths []string) ([]any, error) {
+	refs := make([]any, len(paths))
+	tasks := make([]func() error, len(paths))
+	for i, path := range paths {
+		tasks[i] = func() error {
+			ref, err := a.uploadAttachment(spaceID, path)
+			if err == nil {
+				refs[i], _ = jsvalue.Parse(jsvalue.Stringify(ref))
+			}
+			return err
+		}
 	}
-	if err := json.Unmarshal(jsvalue.Stringify(body), msg); err != nil {
-		return nil, err
-	}
-	return msg, nil
+	return refs, plugins.All(tasks...)
 }
 
 func (a *api) uploadAttachment(spaceID, path string) (*chat.AttachmentDataRef, error) {
@@ -506,19 +516,43 @@ func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
 	if err != nil {
 		return nil, err
 	}
-	dm, err := a.chat.Spaces.FindDirectMessage().Name(resource).Context(a.Ctx).Do()
+	// Bun calls findDirectMessage with plain fetch: no retries, its own errors.
+	token, err := google.AccessToken(a.Ctx, a.RunContext, google.Camel)
 	if err != nil {
-		var ge *googleapi.Error
-		if !errors.As(err, &ge) {
-			return nil, err
-		}
-		if ge.Code == 404 {
-			return nil, a.Fail("NOT_FOUND", "No direct message space exists with "+emailOrUserID, "Open the chat once in Google Chat to create the DM space")
-		}
-		return nil, a.Fail(plugins.HTTPStatusToErrorCode(ge.Code), fmt.Sprintf("findDirectMessage failed: %d %s", ge.Code, ge.Body),
+		return nil, err
+	}
+	if token == "" {
+		return nil, a.Fail("AUTH_FAILED", "Failed to obtain access token", "")
+	}
+	req, err := http.NewRequestWithContext(a.Ctx, http.MethodGet, a.chat.BasePath+"v1/spaces:findDirectMessage?name="+jsvalue.EncodeURIComponent(resource), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := a.Fetch(a.Ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == 404 {
+		return nil, a.Fail("NOT_FOUND", "No direct message space exists with "+emailOrUserID, "Open the chat once in Google Chat to create the DM space")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, a.Fail(plugins.HTTPStatusToErrorCode(resp.StatusCode), fmt.Sprintf("findDirectMessage failed: %d %s", resp.StatusCode, raw),
 			"Check that the OAuth scope includes chat.spaces.readonly")
 	}
-	name := dm.DisplayName
+	data, err := plugins.ResponseJSON(resp.StatusCode, raw)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, jsvalue.TypeError(nil, "data.displayName")
+	}
+	name, _ := jsvalue.Member(data, "displayName").(string)
 	if name == "" {
 		if d := a.directory(); d != nil {
 			if entry := d.lookup(resource); entry != nil {
@@ -529,7 +563,8 @@ func (a *api) findDirectMessage(emailOrUserID string) (*space, error) {
 	if name == "" {
 		name = "Unnamed"
 	}
-	return &space{Name: dm.Name, DisplayName: name, Type: "DM"}, nil
+	spaceName, _ := jsvalue.Member(data, "name").(string)
+	return &space{Name: spaceName, DisplayName: name, Type: "DM"}, nil
 }
 
 var digits = regexp.MustCompile(`^[0-9]+$`)
@@ -645,33 +680,69 @@ type personReply struct {
 	err    error
 }
 
-// getPeople fetches people/<id> for each users/<id> in parallel.
+// getPeople fetches people/<id> for each users/<id>, all at once (Bun
+// Promise.all), each with plain fetch as Bun does: no retries. A status that
+// is not ok is a *googleapi.Error; a body that is not a person is an error.
 func (a *api) getPeople(names []string, fields string) map[string]personReply {
 	out := make(map[string]personReply, len(names))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, peopleConcurrency)
+	if len(names) == 0 {
+		return out
+	}
+	token, err := google.AccessToken(a.Ctx, a.RunContext, google.Camel)
+	if err == nil && token == "" {
+		err = errors.New("no access token")
+	}
+	var unique []string
 	for _, name := range names {
-		mu.Lock()
-		_, dup := out[name]
-		out[name] = personReply{}
-		mu.Unlock()
-		if dup {
-			continue
+		if _, dup := out[name]; !dup {
+			out[name] = personReply{err: err}
+			unique = append(unique, name)
 		}
+	}
+	if err != nil {
+		return out
+	}
+	replies := make([]personReply, len(unique))
+	var wg sync.WaitGroup
+	for i, name := range unique {
 		wg.Add(1)
-		slots <- struct{}{}
-		go func(name string) {
-			defer func() { <-slots; wg.Done() }()
-			id := strings.Replace(name, "users/", "", 1)
-			p, err := a.people.People.Get("people/" + id).PersonFields(fields).Context(a.Ctx).Do()
-			mu.Lock()
-			out[name] = personReply{person: p, err: err}
-			mu.Unlock()
-		}(name)
+		go func() {
+			defer wg.Done()
+			p, err := a.fetchPerson(token, strings.Replace(name, "users/", "", 1), fields)
+			replies[i] = personReply{person: p, err: err}
+		}()
 	}
 	wg.Wait()
+	for i, name := range unique {
+		out[name] = replies[i]
+	}
 	return out
+}
+
+// fetchPerson is Bun's `fetch(people/<id>?personFields=…)`, then res.json().
+func (a *api) fetchPerson(token, id, fields string) (*people.Person, error) {
+	req, err := http.NewRequestWithContext(a.Ctx, http.MethodGet, a.people.BasePath+"v1/people/"+id+"?personFields="+fields, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := a.Fetch(a.Ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &googleapi.Error{Code: resp.StatusCode, Body: string(raw)}
+	}
+	var p people.Person
+	if null, err := plugins.DecodeJSON(resp.StatusCode, raw, &p); err != nil || null {
+		return nil, errors.New("not a person")
+	}
+	return &p, nil
 }
 
 // fetchPersons is fetchPerson for each name, the People API calls in

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -48,9 +50,12 @@ var pgSSLModes = map[sslMode]string{
 // and the URL's other query parameters.
 func (p *postgresDB) config() (*pgconn.Config, error) {
 	o := p.opts
-	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=%s connect_timeout=%d",
+	// Every setting libpq would otherwise take from HOME (client certificates,
+	// root.crt) is given, empty; its environment is set aside while parsing.
+	dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=%s connect_timeout=%d "+
+		"sslrootcert='' sslcert='' sslkey='' sslpassword='' sslsni='' sslnegotiation='' target_session_attrs=any",
 		pgQuote(o.hostname), o.port, pgQuote(o.username), pgQuote(o.database), pgSSLModes[o.sslMode], int(connectTimeout/time.Second))
-	cfg, err := pgconn.ParseConfig(dsn)
+	cfg, err := parseWithoutLibpqEnv(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +75,31 @@ func (p *postgresDB) config() (*pgconn.Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// libpqEnv are the variables pgconn.ParseConfig reads (parseEnvSettings).
+// Bun's SQL reads only its own list, which serverOptionsFor has applied.
+var libpqEnv = []string{
+	"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGPASSFILE", "PGAPPNAME",
+	"PGCONNECT_TIMEOUT", "PGSSLMODE", "PGSSLKEY", "PGSSLCERT", "PGSSLSNI", "PGSSLROOTCERT",
+	"PGSSLPASSWORD", "PGSSLNEGOTIATION", "PGTARGETSESSIONATTRS", "PGSERVICE", "PGSERVICEFILE",
+	"PGTZ", "PGOPTIONS",
+}
+
+var libpqEnvMu sync.Mutex
+
+// parseWithoutLibpqEnv is pgconn.ParseConfig(dsn) in an environment without
+// libpqEnv, which is put back afterwards.
+func parseWithoutLibpqEnv(dsn string) (*pgconn.Config, error) {
+	libpqEnvMu.Lock()
+	defer libpqEnvMu.Unlock()
+	for _, name := range libpqEnv {
+		if v, ok := os.LookupEnv(name); ok {
+			os.Unsetenv(name)
+			defer os.Setenv(name, v)
+		}
+	}
+	return pgconn.ParseConfig(dsn)
 }
 
 func (p *postgresDB) connect(ctx context.Context) error {

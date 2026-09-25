@@ -34,6 +34,8 @@ func String(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return "null"
+	case undefinedValue:
+		return "undefined"
 	case string:
 		return t
 	case bool:
@@ -66,7 +68,7 @@ func String(v any) string {
 // Truthy is `!!v` for a Parse value or a plain Go scalar.
 func Truthy(v any) bool {
 	switch x := v.(type) {
-	case nil:
+	case nil, undefinedValue:
 		return false
 	case bool:
 		return x

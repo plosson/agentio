@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 )
 
 // manifest is the sync directory's .manifest.json: the Falco document id
@@ -84,10 +85,13 @@ func saveManifest(dir string, m *manifest) error {
 	out.Set("updated_at", m.updatedAt)
 	out.Set("entries", entries)
 	path := manifestPath(dir)
-	if err := os.WriteFile(path, jsvalue.StringifyIndent(out), 0o600); err != nil {
+	if err := nodefs.WriteFile(path, jsvalue.StringifyIndent(out)); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nodefs.NodeFSError("chmod", path, err)
+	}
+	return nil
 }
 
 // indexManifest maps each basename back to its document id.
