@@ -7,7 +7,7 @@ import type { RunContext, SetupContext } from '../plugin-sdk';
 export function createSetupContext(): SetupContext {
   return {
     async prompt(question, options) {
-      return options?.secret
+      return options?.secret && process.stdin.isTTY
         ? password({ message: question, mask: true })
         : prompt(question.endsWith(' ') ? question : `${question} `);
     },

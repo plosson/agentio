@@ -4,7 +4,6 @@
 package oauth
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/lines"
 )
 
 const (
@@ -113,8 +113,8 @@ type AwaitConfig struct {
 	ServiceName   string
 	ExpectedState string
 	AuthURL       string
-	// In, when set, is the paste source. Nil uses os.Stdin.
-	In io.Reader
+	// Lines, when set, is the paste source. Nil uses os.Stdin's reader.
+	Lines *lines.Reader
 	// Err receives the human instructions. Nil uses os.Stderr.
 	Err io.Writer
 }
@@ -125,9 +125,9 @@ func AwaitCode(ctx context.Context, cfg AwaitConfig) (Result, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
-	in := cfg.In
+	in := cfg.Lines
 	if in == nil {
-		in = os.Stdin
+		in = lines.For(os.Stdin)
 	}
 	callback := make(chan Result, 1)
 	fail := make(chan error, 1)
@@ -173,12 +173,15 @@ func AwaitCode(ctx context.Context, cfg AwaitConfig) (Result, error) {
 	fmt.Fprintln(errOut, "On a remote machine the redirect lands on this host and your browser cannot")
 	fmt.Fprintln(errOut, "reach it - approve access anyway, then paste the address bar contents here.")
 
+	// Once the callback wins, the paste stops waiting and a line typed later
+	// goes to the next prompt.
+	pasteCtx, stopPaste := context.WithCancel(ctx)
+	defer stopPaste()
 	pasted := make(chan Result, 1)
 	pasteErr := make(chan error, 1)
 	go func() {
 		fmt.Fprint(errOut, "? Redirect URL (or code): ")
-		reader := bufio.NewReader(in)
-		line, err := reader.ReadString('\n')
+		line, err := in.ReadLine(pasteCtx)
 		if err != nil && line == "" {
 			pasteErr <- err
 			return

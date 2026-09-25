@@ -1,7 +1,7 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
-import { createInterface } from 'readline';
 import { URL } from 'url';
 import { CliError } from '../utils/errors';
+import { readLine } from '../utils/stdin';
 
 const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
@@ -246,22 +246,10 @@ export function parseOAuthRedirect(
  * taken the code from the callback server and only needs stdin released.
  */
 function readPastedRedirect(): { promise: Promise<string>; cancel: () => void } {
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
-
-  const promise = new Promise<string>((resolve) => {
-    rl.question('? Redirect URL (or code): ', (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-
-  return {
-    promise,
-    cancel: () => {
-      rl.close();
-      process.stdin.pause();
-    },
-  };
+  const controller = new AbortController();
+  process.stderr.write('? Redirect URL (or code): ');
+  const promise = readLine(controller.signal).then((answer) => answer ?? new Promise<string>(() => {}));
+  return { promise, cancel: () => controller.abort() };
 }
 
 export interface AwaitOAuthCodeConfig extends Omit<OAuthServerConfig, 'signal'> {

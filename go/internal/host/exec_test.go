@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,68 @@ func TestOAuthUsesAPinnedCallbackPort(t *testing.T) {
 	}
 }
 
+// When the browser callback wins, the paste prompt must let go of stdin: the
+// answer to the next question (Jira "Select a site") is not the paste's.
+func TestOAuthCallbackLeavesStdinToTheNextPrompt(t *testing.T) {
+	feeds := map[string][]string{
+		"one write":      {"2\nyes\n"},
+		"delayed writes": {"2", "\n", "ye", "s\n"},
+	}
+	for name, parts := range feeds {
+		t.Run(name, func(t *testing.T) {
+			testbox.Isolate(t)
+			t.Setenv("PATH", t.TempDir()) // no browser opener
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			port := ln.Addr().(*net.TCPAddr).Port
+			_ = ln.Close()
+
+			pr, pw := io.Pipe()
+			defer pw.Close()
+			setup := NewSetupContext(Streams{In: pr, Out: io.Discard, Err: io.Discard})
+			go func() {
+				for i := 0; i < 200; i++ {
+					resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?code=abc&state=s1", port))
+					if err == nil {
+						resp.Body.Close()
+						return
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}()
+			res, err := setup.OAuth(context.Background(), plugins.OAuthSetupOptions{
+				ServiceName: "Demo", ExpectedState: "s1", Port: port,
+				AuthorizationURL: func(string) string { return "https://example.invalid/auth" },
+			})
+			if err != nil || res.Code != "abc" {
+				t.Fatalf("oauth %#v %v", res, err)
+			}
+			go func() {
+				for _, part := range parts {
+					_, _ = io.WriteString(pw, part)
+					time.Sleep(20 * time.Millisecond)
+				}
+			}()
+			answered := make(chan string, 1)
+			go func() {
+				site, err := setup.Prompt("? Select a site (1-2):", false)
+				ok, err2 := setup.Confirm("Continue?")
+				answered <- fmt.Sprintf("%s|%v|%v|%v", site, err, ok, err2)
+			}()
+			select {
+			case got := <-answered:
+				if got != "2|<nil>|true|<nil>" {
+					t.Fatalf("answers %q", got)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("the next prompt never got its answer")
+			}
+		})
+	}
+}
+
 // Bun prints JSON.stringify(value, null, 2), which leaves <, > and & as-is.
 func TestPrintResultJSONDoesNotEscapeHTML(t *testing.T) {
 	value := map[string]any{"body": "<p>a & b</p>", "n": 1}
@@ -426,6 +489,77 @@ func TestConfirmMatchesBunPromptAndAnswers(t *testing.T) {
 	}
 	if NewRunContext(nil, "p", nil).Confirm == nil {
 		t.Fatal("RunContext has no Confirm")
+	}
+}
+
+// Piped answers to several prompts all arrive, whether the pipe hands them over
+// in one write or line by line: `printf 'host\nKEY\nuser\n' | ... profile add`.
+func TestSetupPromptsShareOneStdinReader(t *testing.T) {
+	feeds := map[string][]string{
+		"one write":      {"host\nKEY\nuser\ny\nsecret\n"},
+		"delayed writes": {"ho", "st\nKEY\n", "user\r\n", "y\nsec", "ret\n"},
+	}
+	for name, parts := range feeds {
+		t.Run(name, func(t *testing.T) {
+			pr, pw := io.Pipe()
+			go func() {
+				for _, part := range parts {
+					_, _ = io.WriteString(pw, part)
+					time.Sleep(20 * time.Millisecond)
+				}
+				_ = pw.Close()
+			}()
+			setup := NewSetupContext(Streams{In: pr, Out: io.Discard, Err: io.Discard})
+			var got []string
+			for _, q := range []string{"? Forum URL:", "? API Key:", "? Username:"} {
+				answer, err := setup.Prompt(q, false)
+				if err != nil {
+					t.Fatalf("%s: %v (after %q)", q, err, got)
+				}
+				got = append(got, answer)
+			}
+			ok, err := setup.Confirm("Save?")
+			if err != nil || !ok {
+				t.Fatalf("confirm %v %v (after %q)", ok, err, got)
+			}
+			secret, err := setup.Prompt("? Token:", true) // not a terminal: read as a line
+			if err != nil {
+				t.Fatalf("secret: %v", err)
+			}
+			got = append(got, secret)
+			if strings.Join(got, "|") != "host|KEY|user|secret" {
+				t.Fatalf("answers %q", got)
+			}
+			if extra, err := setup.Prompt("? More:", false); err != io.EOF || extra != "" {
+				t.Fatalf("past the end: %q %v", extra, err)
+			}
+		})
+	}
+}
+
+// RunContext.Confirm reads os.Stdin afresh for each question; answers piped
+// together must still reach each one.
+func TestRunContextConfirmsShareStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = old; _ = r.Close() }()
+	_, _ = w.WriteString("y\nn\nyes\n")
+	_ = w.Close()
+	run := NewRunContext(nil, "p", nil)
+	var got []bool
+	for i := 0; i < 3; i++ {
+		ok, err := run.Confirm("Delete?")
+		if err != nil {
+			t.Fatalf("confirm %d: %v", i, err)
+		}
+		got = append(got, ok)
+	}
+	if fmt.Sprint(got) != "[true false true]" {
+		t.Fatalf("answers %v", got)
 	}
 }
 

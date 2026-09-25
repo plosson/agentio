@@ -1,7 +1,6 @@
 package host
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/lines"
 	"github.com/plosson/agentio/go/internal/oauth"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"golang.org/x/term"
@@ -20,6 +20,9 @@ type Streams struct {
 	In  io.Reader
 	Out io.Writer
 	Err io.Writer
+
+	// lines is the one line reader over In, shared by every prompt.
+	lines *lines.Reader
 }
 
 func StdStreams() Streams {
@@ -31,6 +34,13 @@ func (s Streams) in() io.Reader {
 		return s.In
 	}
 	return os.Stdin
+}
+
+func (s Streams) lineReader() *lines.Reader {
+	if s.lines != nil {
+		return s.lines
+	}
+	return lines.For(s.in())
 }
 
 func (s Streams) err() io.Writer {
@@ -53,6 +63,7 @@ func fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 
 // NewSetupContext builds the host surface a profile.setup receives.
 func NewSetupContext(s Streams) *plugins.SetupContext {
+	s.lines = s.lineReader()
 	return &plugins.SetupContext{
 		Prompt:  func(q string, secret bool) (string, error) { return prompt(s, q, secret) },
 		Confirm: func(q string) (bool, error) { return confirm(s, q) },
@@ -74,7 +85,7 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 			}
 			res, err := oauth.AwaitCode(ctx, oauth.AwaitConfig{
 				Port: port, ServiceName: opts.ServiceName, ExpectedState: opts.ExpectedState,
-				AuthURL: authURL, In: s.in(), Err: s.err(),
+				AuthURL: authURL, Lines: s.lines, Err: s.err(),
 			})
 			if err != nil {
 				return plugins.OAuthSetupResult{}, err
@@ -106,7 +117,8 @@ func prompt(s Streams, question string, secret bool) (string, error) {
 		question += " "
 	}
 	fmt.Fprint(s.err(), question)
-	if secret && isTerminal(s.in()) {
+	in := s.lineReader()
+	if secret && isTerminal(s.in()) && !in.Waiting() {
 		fd := int(os.Stdin.Fd())
 		b, err := term.ReadPassword(fd)
 		fmt.Fprintln(s.err())
@@ -115,7 +127,7 @@ func prompt(s Streams, question string, secret bool) (string, error) {
 		}
 		return string(b), nil
 	}
-	line, err := bufio.NewReader(s.in()).ReadString('\n')
+	line, err := in.ReadLine(context.Background())
 	if err != nil && line == "" {
 		return "", err
 	}
