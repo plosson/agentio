@@ -38,16 +38,27 @@ func HasCredentials(service, profile string) (bool, error) {
 		}
 		return false, nil
 	}
-	c, err := vault.Load()
+	store, err := AllCredentials()
 	if err != nil {
 		return false, err
 	}
-	svc := c.Credentials[service]
-	if svc == nil {
-		return false, nil
+	return HasStored(store, service, profile), nil
+}
+
+// AllCredentials is Bun's getAllCredentials: every stored credential object in
+// one read. Local vault only.
+func AllCredentials() (vault.Credentials, error) {
+	c, err := vault.Load()
+	if err != nil {
+		return nil, err
 	}
-	_, ok := svc[profile]
-	return ok, nil
+	return c.Credentials, nil
+}
+
+// HasStored is Bun's hasStored, `!!store[service]?.[profile]`: a stored null
+// is nothing stored.
+func HasStored(store vault.Credentials, service, profile string) bool {
+	return store[service][profile] != nil
 }
 
 // SetCredentials replaces one profile's credential object. Local vault only.

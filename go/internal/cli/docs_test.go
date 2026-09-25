@@ -73,8 +73,8 @@ func bunReferenceOutput(t *testing.T) bunDocs {
 
 // notPorted are Bun command groups the Go CLI does not have: `plugin verify`
 // (external plugins are out of scope; Go's `plugin list` is its own), and
-// `doctor` and `update` while they are not ported. Anything else must match.
-var notPorted = map[string]bool{"plugin": true, "doctor": true, "update": true}
+// `update` while it is not ported. Anything else must match.
+var notPorted = map[string]bool{"plugin": true, "update": true}
 
 // withoutGroups drops the `## agentio <group> …` sections of a Markdown text
 // whose sections start with "## agentio ".

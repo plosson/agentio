@@ -21,7 +21,9 @@ import (
 	"github.com/plosson/agentio/go/internal/vault"
 )
 
-const (
+// Bun's fixed bind: the daemon runs in a container, so the port is mapped
+// there. Tests move both off it; nothing else changes them.
+var (
 	Host = "0.0.0.0"
 	Port = 7890
 )
@@ -309,11 +311,11 @@ func (s *Server) credentials(w http.ResponseWriter, key *profile.KeyView, ref pr
 	}
 	fresh, err := auth.GetFresh(rContext(), s.Registry, ref.Service, ref.Name, auth.RefreshOptions{Buffer: auth.HubRefreshBuffer})
 	if err != nil {
-		log.Printf("v1 action=credentials key=%s (%s) profile=%s/%s outcome=%s", key.ID, key.Name, ref.Service, ref.Name, codeOf(err))
+		audit(key, "credentials", ref, err, nil)
 		writeErr(w, err)
 		return
 	}
-	log.Printf("v1 action=credentials key=%s (%s) profile=%s/%s outcome=ok refreshed=%t", key.ID, key.Name, ref.Service, ref.Name, fresh.Refreshed)
+	audit(key, "credentials", ref, nil, fresh.Refreshed)
 	writeJSON(w, http.StatusOK, object{
 		{"service", ref.Service}, {"name", ref.Name}, {"readOnly", readOnly}, {"refreshed", fresh.Refreshed},
 		{"credentials", auth.ForRemote(s.Registry, ref.Service, fresh.Credentials)},
@@ -352,13 +354,10 @@ func (s *Server) saveProfile(w http.ResponseWriter, r *http.Request, key *profil
 		writeErr(w, clierr.New(clierr.InvalidParams, "credentials must be a non-empty object", ""))
 		return
 	}
-	outcome, err := profile.SaveForKey(key.ID, ref.Service, ref.Name, creds, opt)
-	if err != nil {
+	if err := applyWrite(key, "save", ref, "", func() (profile.WriteOutcome, error) {
+		return profile.SaveForKey(key.ID, ref.Service, ref.Name, creds, opt)
+	}); err != nil {
 		writeErr(w, err)
-		return
-	}
-	if failure := profile.WriteFailure(outcome, ref.Service, ref.Name, ""); failure != nil {
-		writeErr(w, failure)
 		return
 	}
 	ro, _ := profile.IsReadOnly(ref.Service, ref.Name)
@@ -382,13 +381,10 @@ func (s *Server) renameProfile(w http.ResponseWriter, r *http.Request, key *prof
 		writeErr(w, clierr.New(clierr.InvalidParams, "name must be a string", ""))
 		return
 	}
-	outcome, err := profile.RenameForKey(key.ID, ref.Service, ref.Name, to)
-	if err != nil {
+	if err := applyWrite(key, "rename", ref, to, func() (profile.WriteOutcome, error) {
+		return profile.RenameForKey(key.ID, ref.Service, ref.Name, to)
+	}); err != nil {
 		writeErr(w, err)
-		return
-	}
-	if failure := profile.WriteFailure(outcome, ref.Service, ref.Name, to); failure != nil {
-		writeErr(w, failure)
 		return
 	}
 	writeJSON(w, http.StatusOK, object{{"service", ref.Service}, {"name", to}})
@@ -399,13 +395,10 @@ func (s *Server) deleteProfile(w http.ResponseWriter, key *profile.KeyView, ref 
 		writeErr(w, err)
 		return
 	}
-	outcome, err := profile.DeleteForKey(key.ID, ref.Service, ref.Name)
-	if err != nil {
+	if err := applyWrite(key, "delete", ref, "", func() (profile.WriteOutcome, error) {
+		return profile.DeleteForKey(key.ID, ref.Service, ref.Name)
+	}); err != nil {
 		writeErr(w, err)
-		return
-	}
-	if failure := profile.WriteFailure(outcome, ref.Service, ref.Name, ""); failure != nil {
-		writeErr(w, failure)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -413,11 +406,33 @@ func (s *Server) deleteProfile(w http.ResponseWriter, key *profile.KeyView, ref 
 
 func rContext() context.Context { return context.Background() }
 
-func codeOf(err error) string {
-	if ce, ok := err.(*clierr.Error); ok {
-		return strings.ToLower(string(ce.Code))
+// audit is Bun's audited span closing: one v1 line with the outcome, ok or the
+// lowercase code of a CLI error. Any other failure is not logged, as in Bun;
+// refreshed rides along only when given.
+func audit(key *profile.KeyView, action string, ref profRef, err error, refreshed any) {
+	outcome := "ok"
+	if err != nil {
+		ce, ok := err.(*clierr.Error)
+		if !ok {
+			return
+		}
+		outcome = strings.ToLower(string(ce.Code))
 	}
-	return "error"
+	daemonLog("v1", field{"action", action}, field{"key", key.ID + " (" + key.Name + ")"},
+		field{"profile", ref.Service + "/" + ref.Name}, field{"outcome", outcome}, field{"refreshed", refreshed})
+}
+
+// applyWrite is Bun's applyWrite: a keyed profile write whose outcome other
+// than success becomes the shared error, audited either way.
+func applyWrite(key *profile.KeyView, action string, ref profRef, to string, write func() (profile.WriteOutcome, error)) error {
+	outcome, err := write()
+	if err == nil {
+		if failure := profile.WriteFailure(outcome, ref.Service, ref.Name, to); failure != nil {
+			err = failure
+		}
+	}
+	audit(key, action, ref, err, nil)
+	return err
 }
 
 func readJSON(r *http.Request, dest any) error {

@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"math"
 	"os"
 	"sync"
@@ -47,7 +47,7 @@ func IntervalHours(raw string) float64 {
 	}
 	hours := jsvalue.Number(raw)
 	if math.IsNaN(hours) || math.IsInf(hours, 0) || hours < 0 {
-		log.Printf("Ignoring AGENTIO_KEEPALIVE_HOURS=\"%s\": not a number of hours", raw)
+		say(`Ignoring AGENTIO_KEEPALIVE_HOURS="` + raw + `": not a number of hours`)
 		return DefaultIntervalHours
 	}
 	if hours == 0 {
@@ -55,8 +55,8 @@ func IntervalHours(raw string) float64 {
 	}
 	clamped := math.Min(math.Max(hours, MinIntervalHours), MaxIntervalHours)
 	if clamped != hours {
-		log.Printf("AGENTIO_KEEPALIVE_HOURS=%s is outside %d-%d, using %s",
-			jsvalue.NumberString(hours), MinIntervalHours, MaxIntervalHours, jsvalue.NumberString(clamped))
+		say(fmt.Sprintf("AGENTIO_KEEPALIVE_HOURS=%s is outside %d-%d, using %s",
+			jsvalue.NumberString(hours), MinIntervalHours, MaxIntervalHours, jsvalue.NumberString(clamped)))
 	}
 	return clamped
 }
@@ -65,7 +65,7 @@ func IntervalHours(raw string) float64 {
 // It always returns. A locked vault or an overlapping pass is a skip.
 func RunRefreshPass(ctx context.Context, reg *plugins.Registry) PassResult {
 	if !vault.Unlocked() {
-		log.Printf("keepalive outcome=skipped reason=%q", "vault is locked")
+		daemonLog("keepalive", field{"outcome", "skipped"}, field{"reason", "vault is locked"})
 		return PassResult{}
 	}
 	auth.EnterHub()
@@ -73,7 +73,7 @@ func RunRefreshPass(ctx context.Context, reg *plugins.Registry) PassResult {
 	keepMu.Lock()
 	if passing {
 		keepMu.Unlock()
-		log.Printf("keepalive outcome=skipped reason=%q", "a pass is already running")
+		daemonLog("keepalive", field{"outcome", "skipped"}, field{"reason", "a pass is already running"})
 		return PassResult{}
 	}
 	passing = true
@@ -85,40 +85,44 @@ func RunRefreshPass(ctx context.Context, reg *plugins.Registry) PassResult {
 	}()
 	result, err := walk(ctx, reg)
 	if err != nil {
-		reason := err.Error()
-		if ce, ok := err.(*clierr.Error); ok {
-			reason = string(ce.Code)
-		}
-		log.Printf("keepalive outcome=aborted reason=%s", reason)
+		daemonLog("keepalive", field{"outcome", "aborted"}, field{"reason", reasonOf(err)})
 		return PassResult{}
 	}
-	log.Printf("keepalive outcome=pass refreshed=%d fresh=%d skipped=%d failed=%d", result.Refreshed, result.Fresh, result.Skipped, result.Failed)
+	daemonLog("keepalive", field{"outcome", "pass"}, field{"refreshed", result.Refreshed},
+		field{"fresh", result.Fresh}, field{"skipped", result.Skipped}, field{"failed", result.Failed})
 	return result
+}
+
+// reasonOf is a failure as the keepalive lines name it: the code of a CLI
+// error, the message of anything else.
+func reasonOf(err error) string {
+	if ce, ok := err.(*clierr.Error); ok {
+		return string(ce.Code)
+	}
+	return err.Error()
 }
 
 func walk(ctx context.Context, reg *plugins.Registry) (PassResult, error) {
 	var result PassResult
+	// Both listings are read once, before any refresh: only they can abort the
+	// pass. A profile with nothing stored was added but never authorised.
+	stored, err := auth.AllCredentials()
+	if err != nil {
+		return result, err
+	}
 	refs, err := profile.List("")
 	if err != nil {
 		return result, err
 	}
 	for _, ref := range refs {
-		has, err := auth.HasCredentials(ref.Service, ref.Name)
-		if err != nil {
-			return result, err
-		}
-		if !has {
+		if !auth.HasStored(stored, ref.Service, ref.Name) {
 			result.Skipped++
 			continue
 		}
 		fresh, err := auth.GetFresh(ctx, reg, ref.Service, ref.Name, auth.RefreshOptions{Buffer: auth.HubRefreshBuffer})
 		if err != nil {
 			result.Failed++
-			reason := err.Error()
-			if ce, ok := err.(*clierr.Error); ok {
-				reason = string(ce.Code)
-			}
-			log.Printf("keepalive profile=%s/%s outcome=failed reason=%s", ref.Service, ref.Name, reason)
+			daemonLog("keepalive", field{"profile", ref.Service + "/" + ref.Name}, field{"outcome", "failed"}, field{"reason", reasonOf(err)})
 			continue
 		}
 		if fresh.Refreshed {
@@ -135,11 +139,11 @@ func StartKeepalive(ctx context.Context, reg *plugins.Registry, hours float64) {
 	defer keepMu.Unlock()
 	stopLocked()
 	if hours == 0 {
-		log.Printf("Token keepalive is off (AGENTIO_KEEPALIVE_HOURS=0)")
+		say("Token keepalive is off (AGENTIO_KEEPALIVE_HOURS=0)")
 		return
 	}
 	gap = time.Duration(hours * float64(keepaliveUnit))
-	log.Printf("Token keepalive every %sh", jsvalue.NumberString(hours))
+	say("Token keepalive every " + jsvalue.NumberString(hours) + "h")
 	schedule(ctx, reg, 0)
 }
 
@@ -147,6 +151,7 @@ func StartKeepalive(ctx context.Context, reg *plugins.Registry, hours float64) {
 func schedule(ctx context.Context, reg *plugins.Registry, delay time.Duration) {
 	var t *time.Timer
 	t = time.AfterFunc(delay, func() {
+		waitForBoot()
 		RunRefreshPass(ctx, reg)
 		keepMu.Lock()
 		defer keepMu.Unlock()

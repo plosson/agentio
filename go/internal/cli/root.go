@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -153,7 +152,7 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 		root.AddCommand(serviceCmd(reg, p))
 	}
 	addGitHubVaultSecretCommands(root, reg)
-	root.AddCommand(docsCmd(), daemonCmd(reg), keyCmd(), loginCmd(), logoutCmd(), pluginCmd(reg),
+	root.AddCommand(docsCmd(), daemonCmd(reg), doctorCmd(), keyCmd(), loginCmd(), logoutCmd(), pluginCmd(reg),
 		profileCmd(reg), reauthCmd(reg), skillCmd(reg), statusCmd(reg), vaultCmd())
 	return root
 }
@@ -938,21 +937,8 @@ func daemonCmd(reg *plugins.Registry) *cobra.Command {
 		Example: `  # run the daemon in the foreground (Docker CMD, or a terminal for dev)
   agentio daemon start`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			vault.SetMemoryOnly(true)
-			if pw, src := passFromEnv(); src == "env" {
-				if err := vault.Unlock(pw); err != nil {
-					return err
-				}
-				os.Unsetenv("AGENTIO_PASSPHRASE")
-				fmt.Fprintln(c.ErrOrStderr(), "Vault unlocked from AGENTIO_PASSPHRASE")
-				daemon.KeepaliveFromEnv(context.Background(), reg)
-			} else {
-				fmt.Fprintln(c.ErrOrStderr(), "Vault is locked")
-			}
-			addr := fmt.Sprintf("%s:%d", daemon.Host, daemon.Port)
-			fmt.Fprintf(c.ErrOrStderr(), "agentio-daemon listening on %s\n", addr)
-			srv := &daemon.Server{Registry: reg, Version: Version}
-			return http.ListenAndServe(addr, srv.Handler())
+			defer daemon.SetOutput(c.OutOrStdout())()
+			return daemon.Run(reg, Version)
 		},
 	}
 	status := &cobra.Command{
@@ -960,20 +946,12 @@ func daemonCmd(reg *plugins.Registry) *cobra.Command {
 		Example: `  # show whether the daemon is running
   agentio daemon status`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			fmt.Fprintf(c.OutOrStdout(), "daemon http://127.0.0.1:%d/health\n", daemon.Port)
+			fmt.Fprintln(c.OutOrStdout(), renderChecks([]check{checkDaemon()}))
 			return nil
 		},
 	}
 	cmd.AddCommand(start, status)
 	return cmd
-}
-
-func passFromEnv() (string, string) {
-	v := os.Getenv("AGENTIO_PASSPHRASE")
-	if v == "" {
-		return "", ""
-	}
-	return v, "env"
 }
 
 // openBrowser opens the approval page; tests replace it.

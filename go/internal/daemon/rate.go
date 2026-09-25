@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -93,9 +94,9 @@ func ClientIP(r *http.Request) string {
 			}
 		}
 	}
-	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		return host[:i]
+	// Bun's requestIP address: the host alone, an IPv6 one without brackets.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
-	return host
+	return r.RemoteAddr
 }

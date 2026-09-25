@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/plosson/agentio/go/internal/clierr"
+	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 )
 
 // The cache is keyed on the vault file and its mtime, so a long-lived process
@@ -44,15 +46,17 @@ func PointerExists() bool {
 	return err == nil
 }
 
+// ReadPointer is Bun's readPointer: the pointer's text, trimmed, or "" when
+// there is no pointer. A pointer that cannot be read fails as Node's readFile.
 func ReadPointer() (string, error) {
-	b, err := os.ReadFile(PointerPath())
+	if !PointerExists() {
+		return "", nil
+	}
+	b, err := nodefs.ReadFile(PointerPath())
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
 		return "", err
 	}
-	return string(bytes.TrimSpace(b)), nil
+	return jsvalue.Trim(jsvalue.BufferString(b)), nil
 }
 
 func WritePointer(vaultPath string) error {
@@ -77,12 +81,19 @@ func DeletePointer() error {
 }
 
 func Exists() bool {
+	ok, _ := Present()
+	return ok
+}
+
+// Present is Bun's vaultExists: the pointer names a file that exists. A
+// pointer that cannot be read is an error, not an absent vault.
+func Present() (bool, error) {
 	p, err := ReadPointer()
 	if err != nil || p == "" {
-		return false
+		return false, err
 	}
 	_, err = os.Stat(p)
-	return err == nil
+	return err == nil, nil
 }
 
 // notConfigured is Bun's requireVaultPath refusal: agentio was never set up.

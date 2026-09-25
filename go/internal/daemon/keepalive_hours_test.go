@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"log"
-	"os"
 	"strings"
 	"testing"
 
@@ -13,9 +11,10 @@ import (
 // AGENTIO_KEEPALIVE_HOURS is read with Bun's Number(raw): fractions,
 // exponents, hex and padding are hours; the clamp and the lines are Bun's.
 func TestKeepaliveHoursAreReadLikeBun(t *testing.T) {
+	isolate(t)
 	logs := &lockedLog{}
-	log.SetOutput(logs)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	restoreLog := SetOutput(logs)
+	t.Cleanup(restoreLog)
 	cases := []struct {
 		raw   string
 		hours float64
@@ -42,11 +41,10 @@ func TestKeepaliveHoursAreReadLikeBun(t *testing.T) {
 			t.Errorf("%q: %v, want %v", c.raw, got, c.hours)
 		}
 		got := strings.TrimSpace(logs.take())
-		if c.line == "" && got != "" || c.line != "" && !strings.HasSuffix(got, " "+c.line) {
+		if got != c.line {
 			t.Errorf("%q: logged %q, want %q", c.raw, got, c.line)
 		}
 	}
-	isolate(t)
 	reg, err := plugins.NewRegistry()
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +52,7 @@ func TestKeepaliveHoursAreReadLikeBun(t *testing.T) {
 	logs.take()
 	StartKeepalive(context.Background(), reg, 1.5)
 	StopKeepalive()
-	if got := logs.take(); !strings.Contains(got, " Token keepalive every 1.5h\n") {
+	if got := logs.take(); got != "Token keepalive every 1.5h\n" {
 		t.Fatalf("start line %q", got)
 	}
 }

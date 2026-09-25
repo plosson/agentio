@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,5 +25,28 @@ func TestHubCallFailsLikeBunWhenTheAnswerIsCut(t *testing.T) {
 			t.Errorf("%d: %q %#v", status, raw, err)
 		}
 		testbox.WantSocketClosed(t, err)
+	}
+}
+
+// Bun's remoteCredentials POSTs with no body, so no Content-Type either.
+func TestRemoteCredentialsPostsNoBody(t *testing.T) {
+	testbox.Isolate(t)
+	var gotBody, gotType string
+	var gotLength int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotType, gotLength = string(b), r.Header.Get("Content-Type"), r.ContentLength
+		_, _ = io.WriteString(w, `{"credentials":{"a":"b"}}`)
+	}))
+	defer srv.Close()
+	token, _ := auth.EncodeToken(auth.TokenParts{URL: srv.URL, Kid: "k", Secret: "s"})
+	t.Setenv("AGENTIO_TOKEN", token)
+	auth.Reset()
+	creds, err := auth.RemoteCredentials("acme", "ada")
+	if err != nil || creds["a"] != "b" {
+		t.Fatalf("%#v %v", creds, err)
+	}
+	if gotBody != "" || gotType != "" || gotLength != 0 {
+		t.Errorf("body %q, Content-Type %q, length %d", gotBody, gotType, gotLength)
 	}
 }

@@ -5,12 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +26,7 @@ import (
 func isolate(t *testing.T) {
 	t.Helper()
 	testbox.Isolate(t)
+	t.Cleanup(SetOutput(io.Discard))
 	ResetLimiters()
 	ResetDevice()
 	ResetSessions()
@@ -412,6 +411,12 @@ func (l *lockedLog) Write(p []byte) (int, error) {
 	return l.buf.Write(p)
 }
 
+func (l *lockedLog) snapshot() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
 func (l *lockedLog) take() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -435,7 +440,7 @@ func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := &lockedLog{}
-	log.SetOutput(logs)
+	restoreLog := SetOutput(logs)
 	keepMu.Lock()
 	keepaliveUnit = 10 * time.Millisecond
 	keepMu.Unlock()
@@ -455,7 +460,7 @@ func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		log.SetOutput(os.Stderr)
+		restoreLog()
 	})
 
 	p := acme.New()

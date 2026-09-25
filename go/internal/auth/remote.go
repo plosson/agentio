@@ -119,15 +119,16 @@ func Hub() (TokenParts, error) {
 	return parts, nil
 }
 
-func RemoteModeError(what string) *clierr.Error {
+// RemoteModeError is Bun's remoteModeError: the refusal names the hub, so a
+// malformed token fails with its own error instead.
+func RemoteModeError(what string) error {
 	h, err := Hub()
-	url := ""
-	if err == nil {
-		url = h.URL
+	if err != nil {
+		return err
 	}
 	return clierr.New(clierr.ConfigError,
 		what+" is not available in remote mode",
-		"This machine uses the vault hub at "+url+". Manage profiles and keys there.")
+		"This machine uses the vault hub at "+h.URL+". Manage profiles and keys there.")
 }
 
 func AssertLocal(what string) error {
@@ -350,7 +351,7 @@ func absentAsOutcome(raw json.RawMessage, err error) (string, error) {
 }
 
 func RemoteCredentials(service, name string) (map[string]any, error) {
-	raw, err := hubRequest(profileRoute(service, name)+"/credentials", http.MethodPost, map[string]any{})
+	raw, err := hubRequest(profileRoute(service, name)+"/credentials", http.MethodPost, nil)
 	if err != nil {
 		if ce, ok := err.(*clierr.Error); ok && ce.Code == clierr.NotFound {
 			return nil, nil
