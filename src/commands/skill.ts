@@ -88,7 +88,7 @@ export function generateSkill(program: Command, service: string): string {
   return out.join('\n').trimEnd() + '\n';
 }
 
-function listServices(program: Command): string[] {
+export function listServices(program: Command): string[] {
   const all = collectCommands(program, 'agentio');
   const services = new Set<string>();
   for (const cmd of all) {

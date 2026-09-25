@@ -42,6 +42,7 @@ func createCmd() plugins.CommandSpec {
 		Options: []plugins.OptionSpec{
 			{Flags: "--title <title>", Required: true, Description: "Script project title"},
 			{Flags: "--parent <containerId>", Description: "Bind to a Sheet/Doc/Form/Slides ID (omit for standalone)"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# standalone script",
@@ -50,6 +51,8 @@ func createCmd() plugins.CommandSpec {
 			`agentio gscript create --title "Sheet automation" --parent 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789`,
 			"# bound to a Doc, with explicit profile",
 			`agentio gscript create --title "Doc tools" --parent 1Doc... --profile work@example.com`,
+		},
+		ExampleNotes: []string{
 			"",
 			"The --parent ID is the container's Drive file ID (Sheet/Doc/Form/Slides).",
 		},
@@ -68,6 +71,7 @@ func metadataCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "metadata",
 		Description: "Get script project metadata",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{idArg},
 		Examples: []string{
@@ -93,6 +97,7 @@ func listCmd() plugins.CommandSpec {
 		Options: []plugins.OptionSpec{
 			{Flags: "--parent <containerId>", Description: "Only list scripts bound to this container"},
 			{Flags: "--limit <n>", Description: "Max results", DefaultValue: "25"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# all script projects",
@@ -124,6 +129,7 @@ func deleteCmd() plugins.CommandSpec {
 		Arguments:   []plugins.ArgumentSpec{idArg},
 		Options: []plugins.OptionSpec{
 			{Flags: "--force", Description: "Skip confirmation"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# confirm + delete",
@@ -160,6 +166,7 @@ func pullCmd() plugins.CommandSpec {
 		Arguments:   []plugins.ArgumentSpec{idArg, {Name: "dir", Description: "Local directory (default: cwd)"}},
 		Options: []plugins.OptionSpec{
 			{Flags: "--force", Description: "Overwrite a directory whose .clasp.json points to a different scriptId"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# pull into the current directory",
@@ -168,6 +175,8 @@ func pullCmd() plugins.CommandSpec {
 			"agentio gscript pull 1abc...XYZ ./my-script",
 			"# overwrite a directory pointing to a different script",
 			"agentio gscript pull 1abc...XYZ ./my-script --force",
+		},
+		ExampleNotes: []string{
 			"",
 			"Writes Code.gs, appsscript.json, *.html files, plus .clasp.json with the scriptId.",
 		},
@@ -198,6 +207,7 @@ func pushCmd() plugins.CommandSpec {
 		Arguments:   []plugins.ArgumentSpec{{Name: "dir", Description: "Local directory (default: cwd)"}},
 		Options: []plugins.OptionSpec{
 			{Flags: "--id <scriptId>", Description: "Override scriptId from .clasp.json"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# push current directory (uses .clasp.json)",
@@ -206,6 +216,8 @@ func pushCmd() plugins.CommandSpec {
 			"agentio gscript push ./my-script",
 			"# push to a script id that's not in .clasp.json",
 			"agentio gscript push ./my-script --id 1abc...XYZ",
+		},
+		ExampleNotes: []string{
 			"",
 			"Hidden files and .clasp.json are skipped. The push fails if appsscript.json is missing.",
 		},
@@ -230,6 +242,7 @@ func getCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "get",
 		Description: "Print one script file to stdout",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments: []plugins.ArgumentSpec{
 			idArg,
@@ -289,6 +302,7 @@ func putCmd() plugins.CommandSpec {
 		Options: []plugins.OptionSpec{
 			{Flags: "--source <text>", Description: "Inline content"},
 			{Flags: "--from <path>", Description: "Read content from a local file"},
+			plugins.ProfileOption("Profile name"),
 		},
 		Examples: []string{
 			"# inline content",
@@ -299,6 +313,8 @@ func putCmd() plugins.CommandSpec {
 			"echo 'function doIt(){}' | agentio gscript put 1abc...XYZ Code",
 			"# add a new helper",
 			"agentio gscript put 1abc...XYZ Helpers --source '// helpers go here'",
+		},
+		ExampleNotes: []string{
 			"",
 			"Type inference: extension on the file argument decides the API type",
 			"(.gs=SERVER_JS, .html=HTML, .json=JSON-only-for-appsscript). If the",

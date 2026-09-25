@@ -39,6 +39,7 @@ func listCmd() plugins.CommandSpec {
 		Description: "List recent presentations",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--limit <n>", Description: "Number of presentations", DefaultValue: "10"},
 			{Flags: "--query <query>", Description: "Drive search query filter"},
 		},
@@ -51,6 +52,8 @@ func listCmd() plugins.CommandSpec {
 			`agentio gslides list --query "name contains 'Q4'"`,
 			"# recently modified",
 			`agentio gslides list --query "modifiedTime > '2024-01-01'"`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Query syntax: name contains '...', name = '...', 'me' in owners,",
 			"modifiedTime > 'YYYY-MM-DD'. Combine with 'and'/'or'.",
@@ -70,6 +73,7 @@ func metadataCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "metadata",
 		Description: "Get presentation structure (slide count, dimensions, slide titles)",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Examples: []string{
@@ -96,6 +100,7 @@ func getCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--slide <n>", Description: "Zero-based slide index to read (omit for all slides)"},
 		},
 		Examples: []string{
@@ -105,6 +110,8 @@ func getCmd() plugins.CommandSpec {
 			"agentio gslides get 1A2bCdEf... --slide 0",
 			"# accept a full URL",
 			"agentio gslides get https://docs.google.com/presentation/d/1A2bCdEf.../edit",
+		},
+		ExampleNotes: []string{
 			"",
 			"Output includes text elements and speaker notes for each slide.",
 		},
@@ -129,6 +136,7 @@ func exportCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--format <fmt>", Description: "Export format: pptx, pdf, or odp", DefaultValue: "pptx"},
 		},
@@ -139,6 +147,8 @@ func exportCmd() plugins.CommandSpec {
 			"agentio gslides export 1A2bCdEf... --output deck.pdf --format pdf",
 			"# ODP (LibreOffice)",
 			"agentio gslides export 1A2bCdEf... --output deck.odp --format odp",
+		},
+		ExampleNotes: []string{
 			"",
 			"Formats: pptx (default), pdf, odp.",
 		},
@@ -169,6 +179,7 @@ func createCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "create",
 		Description: "Create a new blank presentation",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "write",
 		Operation:   "create presentation",
 		Arguments:   []plugins.ArgumentSpec{{Name: "title", Description: "Presentation title", Required: true}},
@@ -197,6 +208,7 @@ func copyCmd() plugins.CommandSpec {
 		Operation:   "copy presentation",
 		Arguments:   []plugins.ArgumentSpec{presentationArg, {Name: "title", Description: "New presentation title", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--parent <folder-id>", Description: "Destination folder ID"},
 		},
 		Examples: []string{
@@ -225,6 +237,7 @@ func batchCmd() plugins.CommandSpec {
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--requests-json <json>", Description: "Inline JSON array of Request objects"},
 			{Flags: "--file <path>", Description: "Path to a JSON file containing the requests array"},
 		},
@@ -233,6 +246,8 @@ func batchCmd() plugins.CommandSpec {
 			`agentio gslides batch 1A2bCdEf... --requests-json '[{"createSlide":{"insertionIndex":999,"slideLayoutReference":{"predefinedLayout":"BLANK"}}}]'`,
 			"# from a file",
 			"agentio gslides batch 1A2bCdEf... --file ./requests.json",
+		},
+		ExampleNotes: []string{
 			"",
 			"Accepts an array of Slides API Request objects. See:",
 			"https://developers.google.com/slides/api/reference/rest/v1/presentations/batchUpdate",

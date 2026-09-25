@@ -37,6 +37,7 @@ const flagSpecs = "agentio-commander-flags"
 var hostPlaceholders = map[string]string{
 	"profile": "name", "to": "name", "name": "name", "url": "url", "path": "path",
 	"file": "path", "key": "key", "passphrase": "value", "profiles": "list",
+	"service": "names", "format": "format",
 }
 
 // negativeNumber is Commander's negativeNumberArg: an operand of a command

@@ -19,7 +19,7 @@ import (
 
 func vaultCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "vault", Short: "Manage the agentio vault (config + credentials)"}
-	cmd.AddCommand(vaultInit(), vaultStatus(), vaultSet(), vaultPassphrase(), vaultReset(), vaultExport(), vaultImport(), vaultClear())
+	cmd.AddCommand(vaultInit(), vaultPassphrase(), vaultReset(), vaultExport(), vaultImport(), vaultClear(), vaultStatus(), vaultSet())
 	return cmd
 }
 
@@ -29,6 +29,16 @@ func vaultInit() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a new vault",
+		Example: `  # interactive first-time setup
+  agentio vault init
+
+  # non-interactive, passphrase piped in
+  printf %s "$VAULT_PW" | agentio vault init --path ~/.config/agentio/vault.enc --passphrase-stdin
+
+  # create a fresh vault, ignoring any legacy config on this machine
+  agentio vault init --no-migrate
+
+To use a vault that already exists, run 'agentio vault set <path>' instead.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if vault.Exists() {
 				current, _ := vault.ReadPointer()
@@ -174,6 +184,8 @@ func vaultStatus() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show the active vault and what it holds",
+		Example: `  # show the active vault path and profile count
+  agentio vault status`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			current, err := vault.ReadPointer()
 			if err != nil {
@@ -209,6 +221,20 @@ func vaultSet() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <path>",
 		Short: "Point agentio at an existing vault file",
+		Example: `  # switch to another vault, prompting for the passphrase
+  agentio vault set ~/Dropbox/agentio/work.vault
+
+  # non-interactive, passphrase piped in (keeps it out of history and ps)
+  printf %s "$VAULT_PW" | agentio vault set /path/to/work.vault --passphrase-stdin
+
+  # non-interactive via the environment
+  AGENTIO_PASSPHRASE="$VAULT_PW" agentio vault set /path/to/work.vault
+
+  # non-interactive as a flag (visible in shell history and process list)
+  agentio vault set /path/to/work.vault --passphrase "$VAULT_PW"
+
+Only the pointer and the stored passphrase change - neither vault file is
+moved, written to, or deleted. Run 'agentio doctor' to see the active vault.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vaultPath := vault.NormalizeVaultPath(args[0])
 			if !strings.HasPrefix(vaultPath, "/") {
@@ -260,7 +286,7 @@ func vaultSet() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&pass, "passphrase", "", "Vault passphrase")
+	cmd.Flags().StringVar(&pass, "passphrase", "", "Vault passphrase (visible in shell history and process list)")
 	cmd.Flags().BoolVar(&stdin, "passphrase-stdin", false, "Read the vault passphrase from stdin")
 	return cmd
 }
@@ -271,6 +297,11 @@ func vaultPassphrase() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "passphrase",
 		Short: "Change the passphrase of the current vault",
+		Example: `  # change the passphrase, prompting for the new one
+  agentio vault passphrase
+
+  # non-interactive
+  printf %s "$NEW_PW" | agentio vault passphrase --passphrase-stdin`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			current, err := vault.Load()
 			if err != nil {
@@ -293,7 +324,7 @@ func vaultPassphrase() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&pass, "passphrase", "", "New passphrase")
+	cmd.Flags().StringVar(&pass, "passphrase", "", "New passphrase (visible in shell history and process list)")
 	cmd.Flags().BoolVar(&stdin, "passphrase-stdin", false, "Read the new passphrase from stdin")
 	return cmd
 }
@@ -303,6 +334,14 @@ func vaultReset() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reset",
 		Short: "Delete the vault file, pointer, and stored passphrase",
+		Example: `  # wipe the vault (asks for confirmation)
+  agentio vault reset
+
+  # wipe non-interactively (CI / scripted reset)
+  agentio vault reset --force
+
+This deletes the vault file itself. To simply stop using a vault without
+destroying it, point agentio elsewhere with 'agentio vault set <path>'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !force {
 				return clierr.New(clierr.InvalidParams,
@@ -325,7 +364,18 @@ func vaultExport() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export configuration and credentials",
+		Short: "Export configuration and credentials (as environment variables by default, or to a file)",
+		Example: `  # interactive picker, prints AGENTIO_KEY=… and AGENTIO_CONFIG=… to stdout
+  agentio vault export
+
+  # export every profile non-interactively (good in scripts / CI)
+  agentio vault export --all
+
+  # write the encrypted blob to a file; only AGENTIO_KEY goes to stdout
+  agentio vault export --all --file ./agentio.enc
+
+  # bring your own encryption key (64 hex chars)
+  agentio vault export --all --key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !all {
 				all = true
@@ -391,9 +441,9 @@ func vaultExport() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&key, "key", "", "Encryption key (64 hex characters)")
-	cmd.Flags().StringVar(&file, "file", "", "Write encrypted config to a file")
-	cmd.Flags().BoolVar(&all, "all", false, "Export all profiles without prompting")
+	cmd.Flags().StringVar(&key, "key", "", "Encryption key (64 hex characters). If not provided, a random key will be generated")
+	cmd.Flags().StringVar(&file, "file", "", "Write encrypted config to file instead of outputting AGENTIO_CONFIG")
+	cmd.Flags().BoolVar(&all, "all", false, "Export all profiles without prompting for selection")
 	return cmd
 }
 
@@ -402,7 +452,19 @@ func vaultImport() *cobra.Command {
 	var merge, stdin bool
 	cmd := &cobra.Command{
 		Use:   "import [file]",
-		Short: "Import configuration and credentials",
+		Short: "Import configuration and credentials from an encrypted file or environment variables",
+		Example: `  # import from a file (key passed inline)
+  agentio vault import ./agentio.enc --key 0123…cdef
+
+  # import from AGENTIO_CONFIG env var, key from AGENTIO_KEY env var
+  AGENTIO_KEY=… AGENTIO_CONFIG=… agentio vault import
+
+  # merge into existing config (only adds missing profiles/credentials)
+  agentio vault import ./agentio.enc --key 0123…cdef --merge
+
+When no vault exists yet, import creates one at the default path. The passphrase
+for it resolves like 'vault init': --passphrase-stdin, --passphrase, then
+AGENTIO_PASSPHRASE; off a TTY one of those is required.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			encKey := key
 			if encKey == "" {
@@ -500,9 +562,9 @@ func vaultImport() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&key, "key", "", "Encryption key (64 hex characters)")
+	cmd.Flags().StringVar(&key, "key", "", "Encryption key (64 hex characters). Falls back to AGENTIO_KEY env var")
 	cmd.Flags().BoolVar(&merge, "merge", false, "Merge with existing configuration instead of replacing")
-	cmd.Flags().StringVar(&pass, "passphrase", "", "Passphrase when creating a vault")
+	cmd.Flags().StringVar(&pass, "passphrase", "", "Passphrase for the vault created when none exists yet (visible in shell history and process list)")
 	cmd.Flags().BoolVar(&stdin, "passphrase-stdin", false, "Read that passphrase from stdin")
 	return cmd
 }
@@ -512,6 +574,11 @@ func vaultClear() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clear",
 		Short: "Clear all configuration and credentials",
+		Example: `  # interactive: deletes all profiles and credentials after confirmation
+  agentio vault clear
+
+  # non-interactive (CI / scripted reset)
+  agentio vault clear --force`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !force {
 				return clierr.New(clierr.InvalidParams, "Refusing to clear without --force", "Re-run with --force if you are sure")

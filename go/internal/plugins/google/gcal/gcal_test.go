@@ -88,6 +88,10 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 		}
 		for _, o := range c.Options {
+			// The host's --profile, placed as in Bun; the docs parity test checks it.
+			if o.Flags == plugins.ProfileFlags {
+				continue
+			}
 			f := o.Flags
 			if o.Required {
 				f += "!" // requiredOption

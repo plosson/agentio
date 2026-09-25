@@ -144,6 +144,7 @@ func listCmd() plugins.CommandSpec {
 		Description: "List files",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--limit <n>", Description: "Number of files", DefaultValue: "20"},
 			{Flags: "--folder <id>", Description: `Folder ID to list (use "root" for root folder)`},
 			{Flags: "--query <query>", Description: "Drive API query filter"},
@@ -159,6 +160,9 @@ func listCmd() plugins.CommandSpec {
 			`agentio gdrive list --query "mimeType = 'application/pdf'"`,
 			"# files you own, sorted by name",
 			`agentio gdrive list --query "'me' in owners" --order "name"`,
+		},
+		ExampleNotes: []string{
+			"",
 			"Query syntax: name contains '...', mimeType = '...', 'me' in owners,",
 			"modifiedTime > 'YYYY-MM-DD', starred = true, shared = true.",
 			"Combine with 'and'/'or'.",
@@ -187,6 +191,7 @@ func foldersCmd() plugins.CommandSpec {
 		Description: "List folders",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--limit <n>", Description: "Number of folders", DefaultValue: "20"},
 			{Flags: "--parent <id>", Description: `Parent folder ID (use "root" for root folder)`},
 			{Flags: "--query <query>", Description: "Additional query filter"},
@@ -217,6 +222,7 @@ func getCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "get",
 		Description: "Get file metadata",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Examples: []string{
@@ -243,6 +249,7 @@ func searchCmd() plugins.CommandSpec {
 		Access:      "read",
 		Options: []plugins.OptionSpec{
 			{Flags: "--query <text>", Required: true, Description: "Search text (searches name and content)"},
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--limit <n>", Description: "Number of results", DefaultValue: "20"},
 			{Flags: "--type <mime>", Description: "Filter by MIME type"},
 			{Flags: "--folder <id>", Description: "Search within folder"},
@@ -274,6 +281,7 @@ func downloadCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--export <format>", Description: "Export format for Google Workspace files (pdf, docx, xlsx, csv, pptx, txt, etc.)"},
 		},
@@ -286,6 +294,9 @@ func downloadCmd() plugins.CommandSpec {
 			"agentio gdrive download 1A2bCdEf... --output data.csv --export csv",
 			"# export Google Slides as PowerPoint",
 			"agentio gdrive download 1A2bCdEf... --output deck.pptx --export pptx",
+		},
+		ExampleNotes: []string{
+			"",
 			"Export formats: Docs -> pdf|docx|odt|txt|html|rtf, Sheets -> xlsx|csv|pdf|ods|tsv,",
 			"Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.",
 		},
@@ -308,6 +319,7 @@ func putCmd() plugins.CommandSpec {
 		Operation:   "upload file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-path", Description: "Local file path", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--name <name>", Description: "Name for the file in Drive (defaults to local filename)"},
 			{Flags: "--folder <id>", Description: "Folder ID to upload to"},
 			{Flags: "--type <mime>", Description: "MIME type (auto-detected if not specified)"},
@@ -325,6 +337,9 @@ func putCmd() plugins.CommandSpec {
 			"agentio gdrive put data.xlsx --convert",
 			"# upload an image and make it publicly accessible (for Docs/Slides API image insertion)",
 			"agentio gdrive put banner.png --public",
+		},
+		ExampleNotes: []string{
+			"",
 			"Conversion: docx/doc/odt/txt/html/rtf -> Google Doc,",
 			"xlsx/xls/ods/csv/tsv -> Google Sheet, pptx/ppt/odp -> Google Slides.",
 		},
@@ -359,6 +374,7 @@ func copyCmd() plugins.CommandSpec {
 		Operation:   "copy file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--name <name>", Description: `Title for the copy (default: "Copy of <original>")`},
 			{Flags: "--folder <id>", Description: "Destination folder ID (default: same as source)"},
 		},
@@ -372,6 +388,9 @@ func copyCmd() plugins.CommandSpec {
 			"# clone with custom title into a specific folder",
 			`agentio gdrive copy https://docs.google.com/document/d/1A2bCdEf.../edit \`,
 			`  --name "Draft v2" --folder 1XyZaBc...`,
+		},
+		ExampleNotes: []string{
+			"",
 			"Server-side copy preserves layout, smart chips, and native blocks",
 			"exactly — no re-rendering. Comments are not carried over.",
 		},
@@ -394,6 +413,7 @@ func mkdirCmd() plugins.CommandSpec {
 		Operation:   "create folder",
 		Arguments:   []plugins.ArgumentSpec{{Name: "name", Description: "Folder name", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--parent <id>", Description: "Parent folder ID or URL (default: My Drive root)"},
 		},
 		Examples: []string{
@@ -417,6 +437,7 @@ func renameCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "rename",
 		Description: "Rename a file or folder",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "write",
 		Operation:   "rename file",
 		Arguments: []plugins.ArgumentSpec{
@@ -444,6 +465,7 @@ func moveCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "move",
 		Description: "Move a file or folder to another folder",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "write",
 		Operation:   "move file",
 		Arguments: []plugins.ArgumentSpec{
@@ -473,6 +495,7 @@ func trashCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "trash",
 		Description: "Move a file to the trash",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "write",
 		Operation:   "trash file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
@@ -481,6 +504,9 @@ func trashCmd() plugins.CommandSpec {
 			"agentio gdrive trash 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789",
 			"# move a file to the trash from a full Drive URL",
 			"agentio gdrive trash https://docs.google.com/document/d/1A2bCdEf.../edit",
+		},
+		ExampleNotes: []string{
+			"",
 			"Trashed files stay recoverable in Drive's trash for 30 days",
 			"before Google deletes them permanently.",
 		},
@@ -499,6 +525,7 @@ func permissionsCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "permissions",
 		Description: "List permissions on a file",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Examples: []string{
@@ -575,6 +602,7 @@ func shareCmd() plugins.CommandSpec {
 		Operation:   "share file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--anyone", Description: "Share via link (type=anyone)"},
 			{Flags: "--user <email>", Description: "Share with a specific user"},
 			{Flags: "--domain <domain>", Description: "Share with an entire domain"},
@@ -642,6 +670,7 @@ func unshareCmd() plugins.CommandSpec {
 		Operation:   "remove permission",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--permission-id <id>", Description: "Permission ID to remove"},
 			{Flags: "--anyone", Description: "Remove the anyone-with-link permission"},
 		},

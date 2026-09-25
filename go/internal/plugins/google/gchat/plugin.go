@@ -272,6 +272,7 @@ func listCmd() plugins.CommandSpec {
 		Description: "List messages from a Google Chat space (OAuth profiles only)",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--space <id>", Required: true, Description: "Space ID"},
 			{Flags: "--limit <n>", Description: "Number of messages", DefaultValue: "10"},
 			{Flags: "--thread <id>", Description: "Filter by thread ID"},
@@ -325,6 +326,7 @@ func getCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--space <id>", Required: true, Description: "Space ID"},
 			{Flags: "--format <format>", Description: "Output format: text or json", DefaultValue: "text"},
 		},
@@ -404,7 +406,7 @@ func membersCmd() plugins.CommandSpec {
 		Path:        "members",
 		Description: "List members of a Google Chat space (OAuth profiles only)",
 		Access:      "read",
-		Options:     []plugins.OptionSpec{{Flags: "--space <id-or-name>", Required: true, Description: "Space ID or display name"}},
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name (optional if only one profile exists)"), {Flags: "--space <id-or-name>", Required: true, Description: "Space ID or display name"}},
 		Examples: []string{
 			"# members by space id",
 			"agentio gchat members --space spaces/AAAA1234",

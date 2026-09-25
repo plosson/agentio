@@ -89,6 +89,8 @@ func searchCmd() plugins.CommandSpec {
 			`agentio jira search --project PROJ --status "In Progress" --assignee alice`,
 			"# high-priority items updated today, capped to 10",
 			`agentio jira search --jql "priority = High AND updated >= -1d" --limit 10`,
+		},
+		ExampleNotes: []string{
 			"",
 			`JQL syntax: project = KEY, assignee = currentUser(), status = "In Progress",`,
 			"created >= -7d, updated >= -1d, priority = High, labels = bug, resolution = Unresolved.",

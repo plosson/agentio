@@ -115,9 +115,14 @@ func (r *Registry) add(p *Plugin) error {
 		if cmd.Run == nil {
 			return fmt.Errorf("plugin %s command %s has no handler", p.ID, cmd.Path)
 		}
+		profilePlaced := false
 		for _, opt := range cmd.Options {
 			if !longFlag.MatchString(opt.Flags) {
 				return fmt.Errorf("plugin %s command %s has invalid option flags: %s", p.ID, cmd.Path, opt.Flags)
+			}
+			if opt.Flags == ProfileFlags && p.Profile != nil && !profilePlaced {
+				profilePlaced = true
+				continue
 			}
 			if hostFlag.MatchString(opt.Flags) {
 				return fmt.Errorf("plugin %s command %s redeclares host option: %s", p.ID, cmd.Path, opt.Flags)

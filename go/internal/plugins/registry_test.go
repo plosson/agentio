@@ -36,6 +36,14 @@ func TestRegistryRejectsABrokenContract(t *testing.T) {
 		{"host flag", func(p *Plugin) {
 			p.Commands[0].Options = []OptionSpec{{Flags: "--profile <name>", Description: "nope"}}
 		}, "host option"},
+		{"profile placed twice", func(p *Plugin) {
+			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate}
+			p.Commands[0].Options = []OptionSpec{ProfileOption("Profile name"), ProfileOption("Profile name")}
+		}, "host option"},
+		{"profile under another syntax", func(p *Plugin) {
+			p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate}
+			p.Commands[0].Options = []OptionSpec{{Flags: "-p, --profile <name>", Description: "Profile name"}}
+		}, "host option"},
 		{"bad flag", func(p *Plugin) {
 			p.Commands[0].Options = []OptionSpec{{Flags: "-x", Description: "short only"}}
 		}, "invalid option"},
@@ -113,4 +121,43 @@ func nopSetup(context.Context, SetupOptions, *SetupContext) (*SetupResult, error
 
 func nopValidate(context.Context, *RunContext) (ValidationResult, error) {
 	return ValidationResult{Valid: true}, nil
+}
+
+// ProfileOption places --profile where the Bun command declares it; without
+// it the host puts it after the leading required options.
+func TestProfileOptionPlacement(t *testing.T) {
+	p := valid()
+	p.Profile = &ProfileSpec{Setup: nopSetup, Validate: nopValidate}
+	p.Commands[0].Options = []OptionSpec{{Flags: "--a <x>", Description: "a"}, ProfileOption("Profile name")}
+	if _, err := NewRegistry(p); err != nil {
+		t.Fatal(err)
+	}
+	flags := func(opts []OptionSpec) string {
+		var out []string
+		for _, o := range opts {
+			out = append(out, o.Flags+"="+o.Description)
+		}
+		return strings.Join(out, " ")
+	}
+	req := OptionSpec{Flags: "--req <x>", Description: "r", Required: true}
+	opt := OptionSpec{Flags: "--opt <x>", Description: "o"}
+	late := OptionSpec{Flags: "--late <x>", Description: "l", Required: true}
+	def := "--profile <name>=Profile name (optional if only one profile exists)"
+	for _, c := range []struct {
+		in   []OptionSpec
+		want string
+	}{
+		{nil, def},
+		{[]OptionSpec{opt, req}, def + " --opt <x>=o --req <x>=r"},
+		{[]OptionSpec{req, req, opt, late}, "--req <x>=r --req <x>=r " + def + " --opt <x>=o --late <x>=l"},
+		{[]OptionSpec{req, opt, ProfileOption("Profile name")}, "--req <x>=r --opt <x>=o --profile <name>=Profile name"},
+	} {
+		in := append([]OptionSpec(nil), c.in...)
+		if got := flags(WithProfileOption(c.in)); got != c.want {
+			t.Errorf("got  %s\nwant %s", got, c.want)
+		}
+		if flags(in) != flags(c.in) {
+			t.Error("WithProfileOption changed its input")
+		}
+	}
 }

@@ -85,16 +85,22 @@ func Exists() bool {
 	return err == nil
 }
 
+// notConfigured is Bun's requireVaultPath refusal: agentio was never set up.
+func notConfigured() error {
+	return clierr.New(clierr.VaultNotConfigured, "agentio is not configured yet",
+		"Run `agentio vault init` to create one, or `agentio vault set <path>` to use an existing vault.")
+}
+
 func requirePath() (string, error) {
 	if !PointerExists() {
-		return "", clierr.New(clierr.VaultNotConfigured, "No vault configured", "Run: agentio vault init")
+		return "", notConfigured()
 	}
 	p, err := ReadPointer()
 	if err != nil {
 		return "", err
 	}
 	if p == "" {
-		return "", clierr.New(clierr.VaultNotConfigured, "No vault configured", "Run: agentio vault init")
+		return "", notConfigured()
 	}
 	return p, nil
 }
@@ -105,9 +111,8 @@ func requireExistingPath() (string, error) {
 		return "", err
 	}
 	if _, err := os.Stat(p); err != nil {
-		return "", clierr.New(clierr.VaultNotConfigured,
-			"Vault file is missing",
-			"Run: agentio vault init")
+		return "", clierr.New(clierr.ConfigError, "Vault file missing at "+p,
+			"Run `agentio vault set <path>` to point at an existing vault, or `agentio vault init` to create one")
 	}
 	return p, nil
 }

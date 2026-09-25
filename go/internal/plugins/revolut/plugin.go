@@ -671,6 +671,7 @@ func payCmd() plugins.CommandSpec {
 			{Flags: "--reason-code <code>", Description: "Transfer reason code, required by some corridors"},
 			{Flags: "--request-id <id>", Description: "Idempotency key for an own-account move (a UUID is generated when omitted)"},
 			{Flags: "--force", Description: "Skip the confirmation prompt on an own-account move"},
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			formatOption,
 		},
 		Examples: []string{

@@ -212,6 +212,7 @@ func createCmd() plugins.CommandSpec {
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-id", Description: "Calendar ID (default: primary)"}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--summary <title>", Required: true, Description: "Event title/summary"},
 			{Flags: "--from <datetime>", Required: true, Description: "Start time (RFC3339 or YYYY-MM-DD for all-day)"},
 			{Flags: "--to <datetime>", Required: true, Description: "End time (RFC3339 or YYYY-MM-DD for all-day)"},
@@ -431,6 +432,7 @@ func respondCmd() plugins.CommandSpec {
 			{Name: "event-id", Description: "Event ID", Required: true},
 		},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--status <status>", Required: true, Description: "Response: accepted, declined, tentative"},
 			{Flags: "--comment <text>", Description: "Optional comment"},
 		},
@@ -465,6 +467,7 @@ func freebusyCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-ids", Description: "Comma-separated calendar IDs", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--from <datetime>", Required: true, Description: "Start time (RFC3339)"},
 			{Flags: "--to <datetime>", Required: true, Description: "End time (RFC3339)"},
 		},

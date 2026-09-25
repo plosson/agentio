@@ -108,8 +108,11 @@ func infoCmd() plugins.CommandSpec {
 			"agentio rss info https://kau.sh",
 			"# also accepts a direct feed URL",
 			"agentio rss info https://example.com/atom.xml",
-			`# Auto-discovery looks for HTML <link rel="alternate"> tags first, then falls`,
-			"# back to common paths: /feed, /feed.xml, /rss.xml, /atom.xml, /index.xml.",
+		},
+		ExampleNotes: []string{
+			"",
+			`Auto-discovery looks for HTML <link rel="alternate"> tags first, then falls`,
+			"back to common paths: /feed, /feed.xml, /rss.xml, /atom.xml, /index.xml.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			info, err := newClient(ctx, run).getInfo(in.Arg("url"))

@@ -97,8 +97,11 @@ func listCmd() plugins.CommandSpec {
 			"agentio dropbox list /Documents --recursive --limit 500",
 			"# only the subfolders",
 			"agentio dropbox list /Documents --folders",
-			`# Paths are absolute and start at the Dropbox root, e.g. "/Documents/report.pdf".`,
-			"# Casing is preserved but matching is case-insensitive.",
+		},
+		ExampleNotes: []string{
+			"",
+			`Paths are absolute and start at the Dropbox root, e.g. "/Documents/report.pdf".`,
+			"Casing is preserved but matching is case-insensitive.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			limit, err := parseLimit(run, in.Option("limit"))
@@ -161,7 +164,10 @@ func searchCmd() plugins.CommandSpec {
 			"agentio dropbox search --query invoice --path /Accounting",
 			"# match file names only",
 			"agentio dropbox search --query 2026 --filename-only --limit 50",
-			"# Newly uploaded files can take a few minutes to become searchable.",
+		},
+		ExampleNotes: []string{
+			"",
+			"Newly uploaded files can take a few minutes to become searchable.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			limit, err := parseLimit(run, in.Option("limit"))
@@ -196,7 +202,10 @@ func downloadCmd() plugins.CommandSpec {
 			"agentio dropbox download /Documents",
 			"# download a folder to a named archive",
 			"agentio dropbox download /Photos/2026 --output ./photos-2026.zip",
-			"# Folder downloads are capped by Dropbox at 20 GB and 10,000 files.",
+		},
+		ExampleNotes: []string{
+			"",
+			"Folder downloads are capped by Dropbox at 20 GB and 10,000 files.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			r, err := apiOf(ctx, run).download(in.Arg("path"), in.Option("output"))
@@ -229,8 +238,11 @@ func putCmd() plugins.CommandSpec {
 			"agentio dropbox put ./out.csv --path /Reports/2026-results.csv",
 			"# update a file that already exists",
 			"agentio dropbox put ./report.pdf --path /Documents/report.pdf --overwrite",
-			"# Without --overwrite an existing destination is an error, never a silent replace.",
-			"# Files above 150 MB are uploaded in 8 MB chunks automatically.",
+		},
+		ExampleNotes: []string{
+			"",
+			"Without --overwrite an existing destination is an error, never a silent replace.",
+			"Files above 150 MB are uploaded in 8 MB chunks automatically.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			r, err := apiOf(ctx, run).upload(in.Arg("file-path"), in.Option("path"), in.Flag("overwrite"))
@@ -326,8 +338,11 @@ func deleteCmd() plugins.CommandSpec {
 			"agentio dropbox delete /Documents/old.pdf --force",
 			"# delete a folder and all of its contents",
 			"agentio dropbox delete /Archive/2019 --force",
-			"# Deleted items go to the Dropbox trash and stay recoverable for 30 days",
-			"# (180 days on business plans).",
+		},
+		ExampleNotes: []string{
+			"",
+			"Deleted items go to the Dropbox trash and stay recoverable for 30 days",
+			"(180 days on business plans).",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a := apiOf(ctx, run)

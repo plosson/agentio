@@ -1,12 +1,20 @@
 import { Command } from 'commander';
 import { collectCommands, type CommandInfo } from '../utils/command-tree';
+import { CliError, handleError } from '../utils/errors';
 
-function formatOption(opt: { flags: string; description: string; defaultValue?: string }): string {
+type DocsOption = CommandInfo['options'][number];
+
+/** Whether the reference shows a default: Commander's value unless absent or ''. */
+function shownDefault(opt: DocsOption): boolean {
+  return opt.defaultValue !== undefined && opt.defaultValue !== '';
+}
+
+function formatOption(opt: DocsOption): string {
   let line = opt.flags;
   if (opt.description) {
     line += `: ${opt.description}`;
   }
-  if (opt.defaultValue !== undefined && opt.defaultValue !== '') {
+  if (shownDefault(opt)) {
     line += ` (default: ${opt.defaultValue})`;
   }
   return line;
@@ -15,13 +23,7 @@ function formatOption(opt: { flags: string; description: string; defaultValue?: 
 // Commands excluded from docs output by default (utility/meta commands)
 const EXCLUDED_COMMANDS = ['config', 'status', 'update', 'claude', 'docs'];
 
-function generateDocs(program: Command, services?: string[]): string {
-  const lines: string[] = [];
-  const version = program.version();
-
-  lines.push(`# agentio CLI v${version}`);
-  lines.push('');
-
+function docsCommands(program: Command, services?: string[]): CommandInfo[] {
   let commands = collectCommands(program, 'agentio');
 
   // Filter by services if specified, otherwise exclude utility commands
@@ -37,6 +39,13 @@ function generateDocs(program: Command, services?: string[]): string {
     }
     return !EXCLUDED_COMMANDS.includes(service);
   });
+  return commands;
+}
+
+function markdownDocs(version: string | undefined, commands: CommandInfo[]): string {
+  const lines: string[] = [];
+  lines.push(`# agentio CLI v${version}`);
+  lines.push('');
 
   for (const cmd of commands) {
     // Header with full path and arguments
@@ -62,12 +71,47 @@ function generateDocs(program: Command, services?: string[]): string {
   return lines.join('\n').trimEnd();
 }
 
+/** The same reference as structured data; a default is the text the Markdown shows. */
+function jsonDocs(version: string | undefined, commands: CommandInfo[]): string {
+  return JSON.stringify(
+    {
+      version,
+      commands: commands.map((cmd) => ({
+        command: cmd.fullPath,
+        description: cmd.description,
+        arguments: cmd.arguments,
+        options: cmd.options.map((opt) => ({
+          flags: opt.flags,
+          description: opt.description,
+          ...(shownDefault(opt) ? { defaultValue: `${opt.defaultValue}` } : {}),
+        })),
+      })),
+    },
+    null,
+    2,
+  );
+}
+
+export function renderDocs(program: Command, options: { service?: string[]; format?: string }): string {
+  const format = options.format ?? 'markdown';
+  if (format !== 'markdown' && format !== 'json') {
+    throw new CliError('INVALID_PARAMS', `Unknown format: ${format}`, 'Use --format markdown or --format json');
+  }
+  const commands = docsCommands(program, options.service);
+  return format === 'json' ? jsonDocs(program.version(), commands) : markdownDocs(program.version(), commands);
+}
+
 export function registerDocsCommand(program: Command): void {
   program
     .command('docs', { hidden: true })
     .description('Output CLI reference for LLMs')
     .option('--service <names>', 'Filter by service (comma-separated)', (val) => val.split(',').map((s: string) => s.trim()))
+    .option('--format <format>', 'Output format: markdown or json', 'markdown')
     .action((options) => {
-      console.log(generateDocs(program, options.service));
+      try {
+        console.log(renderDocs(program, options));
+      } catch (error) {
+        handleError(error);
+      }
     });
 }

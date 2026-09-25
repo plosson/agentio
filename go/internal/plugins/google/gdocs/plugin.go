@@ -103,6 +103,7 @@ func createCmd() plugins.CommandSpec {
 		Operation:   "create document",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--title <title>", Required: true, Description: "Document title"},
 			{Flags: "--content <text>", Description: "Markdown content (or pipe via stdin)"},
 			{Flags: "--folder <folder-id>", Description: "Folder ID to create the document in"},
@@ -144,6 +145,8 @@ func listCmd() plugins.CommandSpec {
 			`agentio gdocs list --query "name contains 'report'"`,
 			"# recently modified docs since a date",
 			`agentio gdocs list --query "modifiedTime > '2024-01-01'"`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Query syntax: name contains '...', name = '...', 'me' in owners,",
 			"modifiedTime > 'YYYY-MM-DD', starred = true, trashed = false.",
@@ -182,6 +185,8 @@ func structureCmd() plugins.CommandSpec {
 			"agentio gdocs structure 1A2bCdEf... --tab t.4cykv13flp0m | jq '.body.content'",
 			"# every tab's content in one payload",
 			"agentio gdocs structure 1A2bCdEf... --all-tabs | jq '.tabs[].tabProperties'",
+		},
+		ExampleNotes: []string{
 			"",
 			"Without --tab or --all-tabs, only the first tab is returned (Docs API default).",
 			"Indices from --tab are relative to that tab: pass the same tabId in the",
@@ -214,6 +219,8 @@ func tabsCmd() plugins.CommandSpec {
 			"agentio gdocs tabs 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789",
 			"# a tab ID also appears in the browser URL as ?tab=t.xxxx",
 			"agentio gdocs tabs https://docs.google.com/document/d/1A2bCdEf.../edit",
+		},
+		ExampleNotes: []string{
 			"",
 			"Tab IDs feed --tab on 'structure' and the location.tabId / range.tabId",
 			"fields of 'batch' requests.",
@@ -250,6 +257,8 @@ func batchCmd() plugins.CommandSpec {
 			"agentio gdocs batch 1A2bCdEf... --file ./requests.json",
 			"# write into a specific tab (indices come from: agentio gdocs structure --tab)",
 			`agentio gdocs batch 1A2bCdEf... --requests-json '[{"insertText":{"location":{"index":1,"tabId":"t.4cykv13flp0m"},"text":"Hello"}}]'`,
+		},
+		ExampleNotes: []string{
 			"",
 			"In a multi-tab document every location/range must carry the tabId, otherwise",
 			"the request lands in the first tab.",

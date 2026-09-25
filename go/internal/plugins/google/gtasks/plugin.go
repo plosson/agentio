@@ -212,6 +212,7 @@ func addCmd() plugins.CommandSpec {
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name (optional if only one profile exists)"),
 			{Flags: "--title <title>", Required: true, Description: "Task title"},
 			{Flags: "--notes <text>", Description: "Task notes/description (or pipe via stdin)"},
 			{Flags: "--due <date>", Description: "Due date (RFC3339 or YYYY-MM-DD)"},
@@ -356,6 +357,9 @@ func clearCmd() plugins.CommandSpec {
 		Examples: []string{
 			"# hide all completed tasks from the list",
 			"agentio gtasks clear MTIzNDU2Nzg5MA",
+		},
+		ExampleNotes: []string{
+			"",
 			"Cleared tasks remain accessible via 'gtasks list --show-hidden'.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
@@ -392,6 +396,9 @@ func moveCmd() plugins.CommandSpec {
 			"agentio gtasks move MTIzNDU2Nzg5MA NjU0MzIxMA --previous ABCD1234EFGH",
 			"# promote subtask + reorder in one call",
 			"agentio gtasks move MTIzNDU2Nzg5MA NjU0MzIxMA --parent NEWP4R3NTID --previous ABCD1234EFGH",
+		},
+		ExampleNotes: []string{
+			"",
 			"At least one of --parent or --previous is required.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {

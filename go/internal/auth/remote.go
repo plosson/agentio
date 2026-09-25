@@ -44,7 +44,9 @@ type RemoteListing struct {
 	CanManageProfiles *bool           `json:"canManageProfiles"`
 }
 
-func tokenSource() string {
+// TokenSource is where the hub token comes from: "env", "file", or "" in
+// local mode.
+func TokenSource() string {
 	if strings.TrimSpace(os.Getenv("AGENTIO_TOKEN")) != "" {
 		return "env"
 	}
@@ -63,7 +65,7 @@ func tokenSource() string {
 }
 
 func RemoteToken() string {
-	switch tokenSource() {
+	switch TokenSource() {
 	case "env":
 		return strings.TrimSpace(os.Getenv("AGENTIO_TOKEN"))
 	case "file":
@@ -102,7 +104,7 @@ func IsRemote() bool {
 	if local {
 		return false
 	}
-	return tokenSource() != ""
+	return TokenSource() != ""
 }
 
 func Hub() (TokenParts, error) {

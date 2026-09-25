@@ -90,7 +90,7 @@ func TestProductionCatalogIsBunsServicesWithoutTheFixtures(t *testing.T) {
 func TestDocsDoNotNeedAVault(t *testing.T) {
 	initCLI(t)
 	code, out, errOut := run(t, "docs")
-	if code != 0 || !strings.Contains(out, `"service": "acme"`) || !strings.Contains(out, `"service": "ping"`) {
+	if code != 0 || !strings.Contains(out, "\n## agentio acme ") || !strings.Contains(out, "\n## agentio ping ") {
 		t.Fatalf("code %d\n%s\n%s", code, out, errOut)
 	}
 	code, out, errOut = run(t, "plugin", "list")

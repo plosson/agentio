@@ -103,6 +103,7 @@ func listCmd() plugins.CommandSpec {
 		Description: "List recent spreadsheets",
 		Access:      "read",
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--limit <n>", Description: "Number of spreadsheets", DefaultValue: "10"},
 			{Flags: "--query <query>", Description: "Drive search query filter"},
 		},
@@ -115,6 +116,8 @@ func listCmd() plugins.CommandSpec {
 			`agentio gsheets list --query "name contains 'budget'"`,
 			"# recently modified",
 			`agentio gsheets list --query "modifiedTime > '2024-01-01'"`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Query syntax: name contains '...', name = '...', 'me' in owners,",
 			"modifiedTime > 'YYYY-MM-DD'. Combine with 'and'/'or'.",
@@ -137,6 +140,7 @@ func getCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B10)")},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--dimension <dim>", Description: "Major dimension: ROWS or COLUMNS"},
 			{Flags: "--render <opt>", Description: "Value render: FORMATTED_VALUE, UNFORMATTED_VALUE, or FORMULA"},
 		},
@@ -170,6 +174,7 @@ func updateCmd() plugins.CommandSpec {
 		Operation:   "update values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B2)"), valuesArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--values-json <json>", Description: "Values as JSON 2D array"},
 			{Flags: "--input <opt>", Description: "Value input option: RAW or USER_ENTERED", DefaultValue: "USER_ENTERED"},
 		},
@@ -182,6 +187,8 @@ func updateCmd() plugins.CommandSpec {
 			`agentio gsheets update 1A2bCdEf... "Sheet1!A1" "=SUM(B:B)" --input RAW`,
 			"# write a formula that gets evaluated",
 			`agentio gsheets update 1A2bCdEf... "Sheet1!A1" "=SUM(B:B)" --input USER_ENTERED`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Input options: RAW (stored as-is), USER_ENTERED (parsed like typed in UI).",
 		},
@@ -205,6 +212,7 @@ func appendCmd() plugins.CommandSpec {
 		Operation:   "append values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A:C)"), valuesArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--values-json <json>", Description: "Values as JSON 2D array"},
 			{Flags: "--input <opt>", Description: "Value input option: RAW or USER_ENTERED", DefaultValue: "USER_ENTERED"},
 			{Flags: "--insert <opt>", Description: "Insert data option: OVERWRITE or INSERT_ROWS"},
@@ -216,6 +224,8 @@ func appendCmd() plugins.CommandSpec {
 			`agentio gsheets append 1A2bCdEf... "Sheet1!A:C" --values-json '[["a","b","c"],["d","e","f"]]'`,
 			"# insert new rows instead of overwriting blanks below the table",
 			`agentio gsheets append 1A2bCdEf... "Sheet1!A:C" "x|y|z" --insert INSERT_ROWS`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Insert: OVERWRITE writes into existing cells, INSERT_ROWS shifts rows down.",
 		},
@@ -234,6 +244,7 @@ func clearCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "clear",
 		Description: "Clear values in a range",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "write",
 		Operation:   "clear values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B10)")},
@@ -262,6 +273,7 @@ func formatCmd() plugins.CommandSpec {
 		Operation:   "format range",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B10)")},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--bold", Description: "Make text bold"},
 			{Flags: "--italic", Description: "Make text italic"},
 			{Flags: "--underline", Description: "Underline text"},
@@ -337,6 +349,7 @@ func resizeCmd() plugins.CommandSpec {
 		Operation:   "resize range",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Columns (Sheet1!A:C) or rows (Sheet1!1:10)")},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--size <pixels>", Description: "Pixel size"},
 			{Flags: "--auto", Description: "Auto-fit to content"},
 		},
@@ -347,6 +360,8 @@ func resizeCmd() plugins.CommandSpec {
 			`agentio gsheets resize 1A2bCdEf... "Sheet1!1:1" --auto`,
 			"# resize a single column",
 			`agentio gsheets resize 1A2bCdEf... "Sheet1!B:B" --size 150`,
+		},
+		ExampleNotes: []string{
 			"",
 			"Range must be columns-only (A:C) or rows-only (1:10).",
 			"--size and --auto are mutually exclusive.",
@@ -371,6 +386,7 @@ func batchCmd() plugins.CommandSpec {
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--requests-json <json>", Description: "Inline JSON array of batchUpdate requests"},
 			{Flags: "--file <path>", Description: "Path to a JSON file containing the requests array"},
 		},
@@ -379,6 +395,8 @@ func batchCmd() plugins.CommandSpec {
 			`agentio gsheets batch 1A2bCdEf... --requests-json '[{"updateSheetProperties":{"properties":{"sheetId":0,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]'`,
 			"# from a file",
 			"agentio gsheets batch 1A2bCdEf... --file ./requests.json",
+		},
+		ExampleNotes: []string{
 			"",
 			"Accepts an array of Sheets API Request objects. See:",
 			"https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request",
@@ -398,6 +416,7 @@ func metadataCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "metadata",
 		Description: "Get spreadsheet metadata",
+		Options:     []plugins.OptionSpec{plugins.ProfileOption("Profile name")},
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Examples: []string{
@@ -425,6 +444,7 @@ func createCmd() plugins.CommandSpec {
 		Operation:   "create spreadsheet",
 		Arguments:   []plugins.ArgumentSpec{{Name: "title", Description: "Spreadsheet title", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--sheets <names>", Description: "Comma-separated sheet names to create"},
 		},
 		Examples: []string{
@@ -458,6 +478,7 @@ func copyCmd() plugins.CommandSpec {
 		Operation:   "copy spreadsheet",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, {Name: "title", Description: "New spreadsheet title", Required: true}},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--parent <folder-id>", Description: "Destination folder ID"},
 		},
 		Examples: []string{
@@ -486,6 +507,7 @@ func exportCmd() plugins.CommandSpec {
 		Access:      "read",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Options: []plugins.OptionSpec{
+			plugins.ProfileOption("Profile name"),
 			{Flags: "--output <path>", Required: true, Description: "Output file path"},
 			{Flags: "--format <fmt>", Description: "Export format: xlsx, pdf, csv, ods, tsv", DefaultValue: "xlsx"},
 		},
@@ -496,6 +518,8 @@ func exportCmd() plugins.CommandSpec {
 			"agentio gsheets export 1A2bCdEf... --output data.csv --format csv",
 			"# PDF",
 			"agentio gsheets export 1A2bCdEf... --output report.pdf --format pdf",
+		},
+		ExampleNotes: []string{
 			"",
 			"Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.",
 		},

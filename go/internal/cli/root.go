@@ -3,10 +3,10 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -18,6 +18,7 @@ import (
 	"github.com/plosson/agentio/go/internal/daemon"
 	"github.com/plosson/agentio/go/internal/host"
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/oauth"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/confluence"
 	"github.com/plosson/agentio/go/internal/plugins/discourse"
@@ -50,6 +51,8 @@ import (
 var Version = "0.0.0-dev"
 
 func init() {
+	// Commander lists commands in registration order.
+	cobra.EnableCommandSorting = false
 	registerServices(plugins.Default)
 }
 
@@ -145,22 +148,20 @@ func NewRoot(reg *plugins.Registry) *cobra.Command {
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		return gate(cmd, reg)
 	}
-	root.AddCommand(vaultCmd())
-	root.AddCommand(profileCmd(reg))
-	root.AddCommand(keyCmd())
-	root.AddCommand(daemonCmd(reg))
-	root.AddCommand(loginCmd(), logoutCmd())
-	root.AddCommand(statusCmd(reg), reauthCmd(reg))
-	root.AddCommand(docsCmd(reg), skillCmd(reg), pluginCmd(reg))
+	// Bun's registration order, which `docs` and `skill` follow.
 	for _, p := range reg.Plugins() {
 		root.AddCommand(serviceCmd(reg, p))
 	}
 	addGitHubVaultSecretCommands(root, reg)
+	root.AddCommand(docsCmd(), daemonCmd(reg), keyCmd(), loginCmd(), logoutCmd(), pluginCmd(reg),
+		profileCmd(reg), reauthCmd(reg), skillCmd(reg), statusCmd(reg), vaultCmd())
 	return root
 }
 
 var (
-	bypass    = map[string]bool{"vault": true, "login": true, "logout": true, "plugin": true, "docs": true, "skill": true}
+	// bypass is Bun's BYPASS_COMMANDS, matched on the command's own name or
+	// its parent's, as Bun does: a service command named `update` skips it too.
+	bypass    = map[string]bool{"docs": true, "update": true, "doctor": true, "vault": true, "login": true, "logout": true, "plugin": true}
 	localOnly = map[string]bool{"vault": true, "key": true, "daemon": true, "reauth": true}
 	managed   = map[string]bool{"add": true, "rename": true, "remove": true}
 )
@@ -201,7 +202,7 @@ func gate(cmd *cobra.Command, _ *plugins.Registry) error {
 		}
 		return nil
 	}
-	if bypass[top] || bypass[name] || bypass[parent] {
+	if bypass[name] || bypass[parent] {
 		return nil
 	}
 	if !vault.Exists() {
@@ -245,18 +246,24 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 			}
 			group.Annotations[defaultCommand] = leaf.Name()
 		}
-		if len(spec.Examples) > 0 {
-			leaf.Example = strings.Join(spec.Examples, "\n")
+		if !describesArguments(spec.Arguments) {
+			if leaf.Annotations == nil {
+				leaf.Annotations = map[string]string{}
+			}
+			leaf.Annotations[argsUndescribed] = "true"
 		}
-		declareOptions(leaf.Flags(), spec.Options)
+		leaf.Example = examplesBlock(spec.Examples, spec.ExampleNotes)
+		options := spec.Options
 		if p.Profile != nil {
-			leaf.Flags().String("profile", "", "Profile name (optional if only one profile exists)")
+			options = plugins.WithProfileOption(options)
 		}
+		declareOptions(leaf.Flags(), options)
 		// A command that declares its own --json (gchat send --json [file]) has
 		// no output flag, as in Bun's declarative adapter.
 		hostJSON := leaf.Flags().Lookup("json") == nil
 		if hostJSON {
 			leaf.Flags().Bool("json", false, "Output structured JSON")
+			_ = leaf.Flags().SetAnnotation("json", hostOutput, []string{"true"})
 		}
 		specCopy := spec
 		pluginCopy := p
@@ -315,6 +322,17 @@ func serviceCmd(reg *plugins.Registry, p *plugins.Plugin) *cobra.Command {
 	return cmd
 }
 
+// describesArguments is Commander's visibleArguments test: arguments show in
+// the reference only when one of them has a description.
+func describesArguments(args []plugins.ArgumentSpec) bool {
+	for _, arg := range args {
+		if arg.Description != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // optionalBare is what pflag stores for a `[value]` flag given without a value.
 const optionalBare = "true"
 
@@ -342,6 +360,11 @@ func declareOptions(flags *pflag.FlagSet, opts []plugins.OptionSpec) {
 			flags.String(fname, def, opt.Description)
 		}
 		_ = flags.SetAnnotation(fname, flagSpecs, []string{opt.Flags})
+		if opt.Repeatable {
+			setDefault(flags, fname, "")
+		} else if opt.DefaultValue != nil && opt.DefaultValue != "" {
+			setDefault(flags, fname, jsvalue.String(opt.DefaultValue))
+		}
 		if opt.Required {
 			_ = flags.SetAnnotation(fname, cobra.BashCompOneRequiredFlag, []string{"true"})
 		}
@@ -750,6 +773,17 @@ func keyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "key", Short: "API keys that let remote agents read credentials from this vault"}
 	create := &cobra.Command{
 		Use: "create <name>", Short: "Create a key and print its token once",
+		Example: `  # a key for one agent, limited to two profiles
+  agentio key create claudiu --url https://vault.example.com --profiles gdrive/docunit,gmail/work
+
+  # everything, but read-only
+  agentio key create reporter --url https://vault.example.com --all --read-only
+
+  # a laptop that manages its own profiles in the vault
+  agentio key create laptop --url https://vault.example.com --all --can-manage-profiles
+
+  # capture the token for a deploy script
+  AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)`,
 		RunE: func(c *cobra.Command, args []string) error {
 			input, err := keyInput(c.Flags())
 			if err != nil {
@@ -773,8 +807,11 @@ func keyCmd() *cobra.Command {
 	keyScopeFlags(create.Flags())
 	create.Flags().Bool("read-only", false, "Force read-only on every profile the key can see")
 	create.Flags().Bool("can-manage-profiles", false, "Let the agent add, replace, rename and delete profiles from its machine")
+	setDefault(create.Flags(), "read-only", "false")
+	setDefault(create.Flags(), "can-manage-profiles", "false")
 	list := &cobra.Command{
 		Use: "list", Short: "List keys (never the secrets)",
+		Example: `  agentio key list`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			keys, err := profile.ListKeys()
 			if err != nil {
@@ -796,6 +833,9 @@ func keyCmd() *cobra.Command {
 	}
 	update := &cobra.Command{
 		Use: "update <id>", Short: "Rename a key or change its scope",
+		Example: `  agentio key update a1b2c3d4 --profiles gdrive/docunit
+  agentio key update a1b2c3d4 --no-read-only
+  agentio key update a1b2c3d4 --can-manage-profiles`,
 		RunE: func(c *cobra.Command, args []string) error {
 			patch, err := keyInput(c.Flags())
 			if err != nil {
@@ -820,6 +860,7 @@ func keyCmd() *cobra.Command {
 	addNegation(update.Flags(), "can-manage-profiles", "Stop the agent from managing profiles")
 	rotate := &cobra.Command{
 		Use: "rotate <id>", Short: "Replace the secret; the old token stops working at once",
+		Example: `  agentio key rotate a1b2c3d4 --url https://vault.example.com`,
 		RunE: func(c *cobra.Command, args []string) error {
 			hubURL, _ := c.Flags().GetString("url")
 			issued, err := profile.RotateKey(args[0], hubURL)
@@ -834,6 +875,7 @@ func keyCmd() *cobra.Command {
 	_ = rotate.MarkFlagRequired("url")
 	revoke := &cobra.Command{
 		Use: "revoke <id>", Short: "Delete a key; its token stops working at once",
+		Example: `  agentio key revoke a1b2c3d4`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := profile.RevokeKey(args[0]); err != nil {
 				return err
@@ -890,9 +932,11 @@ func printIssued(c *cobra.Command, issued profile.IssuedKey) {
 }
 
 func daemonCmd(reg *plugins.Registry) *cobra.Command {
-	cmd := &cobra.Command{Use: "daemon", Short: "Run the local credential hub"}
+	cmd := &cobra.Command{Use: "daemon", Short: "Run or probe the local HTTP daemon"}
 	start := &cobra.Command{
-		Use: "start", Short: "Start the daemon in the foreground",
+		Use: "start", Short: "Run the daemon in the foreground",
+		Example: `  # run the daemon in the foreground (Docker CMD, or a terminal for dev)
+  agentio daemon start`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			vault.SetMemoryOnly(true)
 			if pw, src := passFromEnv(); src == "env" {
@@ -912,7 +956,9 @@ func daemonCmd(reg *plugins.Registry) *cobra.Command {
 		},
 	}
 	status := &cobra.Command{
-		Use: "status", Short: "Check the daemon health endpoint",
+		Use: "status", Short: "Show daemon status",
+		Example: `  # show whether the daemon is running
+  agentio daemon status`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fmt.Fprintf(c.OutOrStdout(), "daemon http://127.0.0.1:%d/health\n", daemon.Port)
 			return nil
@@ -930,66 +976,80 @@ func passFromEnv() (string, string) {
 	return v, "env"
 }
 
+// openBrowser opens the approval page; tests replace it.
+var openBrowser = oauth.LaunchBrowser
+
+// loginPoll replaces the hub's poll interval when set, and loginSleep waits
+// between polls (tests).
+var (
+	loginPoll  time.Duration
+	loginSleep = time.Sleep
+)
+
 func loginCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "login <hub>",
-		Short: "Log in to a vault hub and store the token",
+	cmd := &cobra.Command{
+		Use:   "login <hub-url>",
+		Short: "Get a key from a vault hub by approving a code in its admin UI",
+		Example: `  # from a laptop: opens the approval page in the browser
+  agentio login https://vault.example.com
+
+  # from a VPS over SSH: approve from any device that can reach the hub
+  agentio login https://vault.example.com --no-browser --name build-box`,
 		RunE: func(c *cobra.Command, args []string) error {
-			origin, err := profile.ValidateHubURL(args[0])
-			if err != nil {
-				return err
+			if auth.TokenSource() == "env" {
+				return clierr.New(clierr.ConfigError, "AGENTIO_TOKEN is set, so a stored login would be ignored", "Unset AGENTIO_TOKEN first, or keep using it")
 			}
-			hostName, _ := os.Hostname()
-			if hostName == "" {
-				hostName = "agent"
-			}
-			raw, _, err := auth.HubCall(origin, "/v1/device", auth.Call{Method: http.MethodPost, Body: map[string]string{"name": hostName}})
-			if err != nil {
-				return err
-			}
-			var started daemon.DeviceStart
-			if err := json.Unmarshal(raw, &started); err != nil {
-				return err
-			}
-			fmt.Fprintf(c.ErrOrStderr(), "Approve code %s at %s/ui\n", started.UserCode, origin)
-			for {
-				body, _, err := auth.HubCall(origin, "/v1/device/token", auth.Call{Method: http.MethodPost, Body: map[string]string{"deviceCode": started.DeviceCode}})
-				if err != nil {
-					return err
-				}
-				var poll daemon.DevicePoll
-				if err := json.Unmarshal(body, &poll); err != nil {
-					return err
-				}
-				if poll.Status == "approved" {
-					if _, err := auth.SaveRemoteToken(poll.Token); err != nil {
-						return err
+			name, _ := c.Flags().GetString("name")
+			browser, _ := c.Flags().GetBool("browser")
+			stderr := c.ErrOrStderr()
+			result, err := profile.DeviceLogin(profile.DeviceLoginOptions{
+				URL:          args[0],
+				Name:         name,
+				PollInterval: loginPoll,
+				Sleep:        loginSleep,
+				OnCode: func(userCode, verifyURL string, expiresIn float64) {
+					fmt.Fprintf(stderr, "Your code: %s\n", userCode)
+					fmt.Fprintf(stderr, "Approve it at %s within %s minutes.\n", verifyURL, jsvalue.NumberString(math.Floor(expiresIn/60+0.5)))
+					if browser && openBrowser(verifyURL) {
+						fmt.Fprintln(stderr, "Opened it in your browser.")
 					}
-					fmt.Fprintln(c.OutOrStdout(), "Logged in")
-					return nil
-				}
-				if poll.Status == "denied" {
-					return clierr.New(clierr.AuthFailed, "Login denied", "")
-				}
-				time.Sleep(time.Duration(started.Interval) * time.Second)
+					fmt.Fprintln(stderr, "Waiting for approval…")
+				},
+			})
+			if err != nil {
+				return err
 			}
+			path, err := auth.SaveRemoteToken(result.Token)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Signed in to %s as key \"%s\" (%s): %s\n", result.URL, result.Key.Name, result.Key.ID, profile.DescribeScope(result.Key))
+			fmt.Fprintf(c.OutOrStdout(), "Token stored in %s. Every agentio command on this machine now uses the hub.\n", path)
+			return nil
 		},
 	}
+	cmd.Flags().String("name", "", "How this machine introduces itself (default: hostname)")
+	addNegation(cmd.Flags(), "browser", "Print the approval URL instead of opening it")
+	return cmd
 }
 
 func logoutCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "logout", Short: "Forget the stored hub token",
+		Use: "logout", Short: "Forget the stored hub token on this machine",
+		Example: `  agentio logout`,
 		RunE: func(c *cobra.Command, _ []string) error {
-			ok, err := auth.ClearRemoteToken()
+			removed, err := auth.ClearRemoteToken()
 			if err != nil {
 				return err
 			}
-			if !ok {
-				fmt.Fprintln(c.OutOrStdout(), "Not logged in")
-				return nil
+			switch {
+			case removed:
+				fmt.Fprintf(c.OutOrStdout(), "Removed %s. The key still exists on the hub; revoke it there if it should stop working.\n", vault.TokenPath())
+			case auth.TokenSource() == "env":
+				fmt.Fprintln(c.OutOrStdout(), "No stored login. This machine uses AGENTIO_TOKEN; unset it to leave remote mode.")
+			default:
+				fmt.Fprintln(c.OutOrStdout(), "No stored login on this machine.")
 			}
-			fmt.Fprintln(c.OutOrStdout(), "Logged out")
 			return nil
 		},
 	}
@@ -1000,6 +1060,14 @@ func statusCmd(reg *plugins.Registry) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show configured profiles and credential status",
+		Example: `  # show every configured profile and test its credentials
+  agentio status
+
+  # show profiles without making test API calls (fast; no network)
+  agentio status --no-test
+
+  # JSON output (good for piping to jq or another agent)
+  agentio status --json`,
 		RunE: func(c *cobra.Command, _ []string) error {
 			test, _ := c.Flags().GetBool("test")
 			render := statusText
@@ -1203,62 +1271,6 @@ func reauthCmd(reg *plugins.Registry) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Re-authenticate all invalid profiles without prompting")
 	return cmd
-}
-
-func docsCmd(reg *plugins.Registry) *cobra.Command {
-	return &cobra.Command{
-		Use:   "docs",
-		Short: "Machine-readable command index",
-		RunE: func(c *cobra.Command, _ []string) error {
-			type row struct {
-				Service string `json:"service"`
-				Path    string `json:"path"`
-				Summary string `json:"summary"`
-				Access  string `json:"access,omitempty"`
-				Example string `json:"example,omitempty"`
-			}
-			var rows []row
-			for _, p := range reg.Plugins() {
-				for _, spec := range p.Commands {
-					ex := ""
-					if len(spec.Examples) > 0 {
-						ex = spec.Examples[0]
-					}
-					rows = append(rows, row{Service: p.ID, Path: spec.Path, Summary: spec.Description, Access: spec.Access, Example: ex})
-				}
-			}
-			raw, _ := json.MarshalIndent(map[string]any{"version": Version, "commands": rows}, "", "  ")
-			fmt.Fprintln(c.OutOrStdout(), string(raw))
-			return nil
-		},
-	}
-}
-
-func skillCmd(reg *plugins.Registry) *cobra.Command {
-	return &cobra.Command{
-		Use:   "skill <service>",
-		Short: "Print a SKILL.md for one service",
-		RunE: func(c *cobra.Command, args []string) error {
-			p := reg.Find(args[0])
-			if p == nil {
-				return clierr.New(clierr.NotFound, "no commands found for service \""+args[0]+"\"", "")
-			}
-			var b strings.Builder
-			fmt.Fprintf(&b, "---\nname: agentio-%s\ndescription: %s\n---\n\n# %s via agentio\n\n", p.ID, p.Description, p.DisplayName)
-			for _, spec := range p.Commands {
-				fmt.Fprintf(&b, "## agentio %s %s\n\n%s\n\n", p.ID, spec.Path, spec.Description)
-				if len(spec.Examples) > 0 {
-					b.WriteString("```\n")
-					for _, ex := range spec.Examples {
-						b.WriteString(ex + "\n")
-					}
-					b.WriteString("```\n\n")
-				}
-			}
-			fmt.Fprint(c.OutOrStdout(), b.String())
-			return nil
-		},
-	}
 }
 
 func pluginCmd(reg *plugins.Registry) *cobra.Command {

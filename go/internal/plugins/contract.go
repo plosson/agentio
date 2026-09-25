@@ -162,6 +162,34 @@ func (o OptionSpec) Negates() string {
 	return strings.TrimPrefix(fields[0], "--no-")
 }
 
+// ProfileFlags is the --profile option the host puts on a command of a
+// service with profiles.
+const ProfileFlags = "--profile <name>"
+
+// ProfileOption places the host's --profile among a command's Options, with
+// Bun's description for it, where the Bun command declares it. Without one,
+// the host adds --profile after the leading Required options, with the usual
+// description.
+func ProfileOption(description string) OptionSpec {
+	return OptionSpec{Flags: ProfileFlags, Description: description}
+}
+
+// WithProfileOption is opts with the host's --profile in place.
+func WithProfileOption(opts []OptionSpec) []OptionSpec {
+	at := 0
+	for i, opt := range opts {
+		if opt.Flags == ProfileFlags {
+			return opts
+		}
+		if opt.Required && at == i {
+			at = i + 1
+		}
+	}
+	out := append([]OptionSpec(nil), opts[:at]...)
+	out = append(out, ProfileOption("Profile name (optional if only one profile exists)"))
+	return append(out, opts[at:]...)
+}
+
 type CommandInput struct {
 	Args    map[string]any
 	Options map[string]any
@@ -444,8 +472,13 @@ type CommandSpec struct {
 	// prepared and stops (no profile needed); otherwise prepared reaches Run
 	// as RunContext.Prepared, so nothing is parsed or read twice. A check
 	// that needs the client stays in Run, after the profile, as in Bun.
-	Prepare  func(ctx context.Context, in CommandInput, pre *PrepareContext) (prepared any, done bool, err error)
+	Prepare func(ctx context.Context, in CommandInput, pre *PrepareContext) (prepared any, done bool, err error)
+	// Examples are the example lines Bun's addExamples block lists, each
+	// comment opening a new example.
 	Examples []string
+	// ExampleNotes are the lines Bun prints after the examples, as they are:
+	// "" is an empty line.
+	ExampleNotes []string
 	// Run returns the value the host prints. A non-nil value returned together
 	// with an error is printed first, then the error is rendered (Bun: output,
 	// then throw).
