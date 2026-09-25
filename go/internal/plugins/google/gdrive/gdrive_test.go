@@ -53,14 +53,14 @@ func fresh(accessLevel string) map[string]any {
 func TestCommandTableMatchesBun(t *testing.T) {
 	type row struct {
 		args, flags, access, op string
-		accessFor, format       bool
+		prepare, format         bool
 	}
 	want := map[string]row{
 		"list":        {"", "--limit <n>=20 --folder <id> --query <query> --order <field>=modifiedTime desc --trash", "read", "", false, true},
 		"folders":     {"", "--limit <n>=20 --parent <id> --query <query>", "read", "", false, true},
 		"get":         {"<file-id-or-url>", "", "read", "", false, true},
-		"search":      {"", "--query <text> --limit <n>=20 --type <mime> --folder <id>", "read", "", false, true},
-		"download":    {"<file-id-or-url>", "--output <path> --export <format>", "read", "", false, true},
+		"search":      {"", "--query <text> --limit <n>=20 --type <mime> --folder <id>", "read", "", true, true},
+		"download":    {"<file-id-or-url>", "--output <path> --export <format>", "read", "", true, true},
 		"put":         {"<file-path>", "--name <name> --folder <id> --type <mime> --convert --public", "write", "upload file", false, true},
 		"copy":        {"<file-id-or-url>", "--name <name> --folder <id>", "write", "copy file", false, true},
 		"mkdir":       {"<name>", "--parent <id>", "write", "create folder", false, true},
@@ -109,7 +109,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 			flags = append(flags, f)
 		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.AccessFor != nil, c.Format != nil}
+		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Prepare != nil, c.Format != nil}
 		if got != w {
 			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
 		}

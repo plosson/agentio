@@ -32,7 +32,7 @@ func New() *plugins.Plugin {
 	}
 }
 
-// parseValues is Bun parseValues: --values-json as a JSON array, else the
+// parseValues is Bun parseValues, called before getGSheetsClient: --values-json as a JSON array, else the
 // words joined, split into rows on "," and cells on "|", each trimmed.
 func parseValues(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
 	if raw := in.Option("values-json"); raw != "" {
@@ -59,12 +59,6 @@ func parseValues(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) 
 		rows = append(rows, cells)
 	}
 	return rows, nil
-}
-
-// valuesInputError is the parseValues check Bun makes before it resolves the profile.
-func valuesInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, err := parseValues(in, fail)
-	return err
 }
 
 // choice is Bun parseAlign / parseValign / parseWrap / parseBorder: an empty
@@ -172,7 +166,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update values in a range",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(valuesInputError),
+		Prepare:     plugins.Parse(parseValues),
 		Operation:   "update values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A1:B2)"), valuesArg},
 		Options: []plugins.OptionSpec{
@@ -192,15 +186,11 @@ func updateCmd() plugins.CommandSpec {
 			"Input options: RAW (stored as-is), USER_ENTERED (parsed like typed in UI).",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			values, err := parseValues(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.update(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input")))
+			return plugins.Result(a.update(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), plugins.Prepared[[]any](run), in.Option("input")))
 		},
 		Format: formatUpdated,
 	}
@@ -211,7 +201,7 @@ func appendCmd() plugins.CommandSpec {
 		Path:        "append",
 		Description: "Append values to a range",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(valuesInputError),
+		Prepare:     plugins.Parse(parseValues),
 		Operation:   "append values",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg, rangeArg("Range in A1 notation (e.g., Sheet1!A:C)"), valuesArg},
 		Options: []plugins.OptionSpec{
@@ -230,15 +220,11 @@ func appendCmd() plugins.CommandSpec {
 			"Insert: OVERWRITE writes into existing cells, INSERT_ROWS shifts rows down.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			values, err := parseValues(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), values, in.Option("input"), in.OptionPtr("insert")))
+			return plugins.Result(a.append(in.Arg("spreadsheet-id-or-url"), in.Arg("range"), plugins.Prepared[[]any](run), in.Option("input"), in.OptionPtr("insert")))
 		},
 		Format: formatAppended,
 	}
@@ -381,7 +367,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw spreadsheets.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
+		Prepare:     plugins.Parse(google.BatchRequests),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{spreadsheetArg},
 		Options: []plugins.OptionSpec{
@@ -398,15 +384,11 @@ func batchCmd() plugins.CommandSpec {
 			"https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/request",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			requests, err := google.BatchRequests(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.batch(in.Arg("spreadsheet-id-or-url"), requests))
+			return plugins.Result(a.batch(in.Arg("spreadsheet-id-or-url"), plugins.Prepared[[]any](run)))
 		},
 		Format: formatBatch,
 	}
@@ -517,10 +499,8 @@ func exportCmd() plugins.CommandSpec {
 			"",
 			"Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.",
 		},
+		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

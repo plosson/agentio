@@ -45,14 +45,14 @@ func fresh() map[string]any { return storedCreds(time.Now().Add(time.Hour).UnixM
 func TestCommandTableMatchesBun(t *testing.T) {
 	type row struct {
 		args, flags, access, op, input string
-		format, accessFor, verbatim    bool
+		format, prepare, verbatim      bool
 	}
 	want := map[string]row{
 		"create":   {"", "--title <title> --parent <containerId>", "write", "create script project", "", true, true, false},
 		"metadata": {"<id>", "", "read", "", "", true, false, false},
 		"list":     {"", "--parent <containerId> --limit <n>=25", "read", "", "", true, false, false},
 		"delete":   {"<id>", "--force", "write", "delete script project", "", false, false, false},
-		"pull":     {"<id> [dir]", "--force", "read", "", "", true, false, false},
+		"pull":     {"<id> [dir]", "--force", "read", "", "", true, true, false},
 		"push":     {"[dir]", "--id <scriptId>", "write", "push script content", "", true, true, false},
 		"get":      {"<id> <file>", "", "read", "", "", true, false, true},
 		"put":      {"<id> <file>", "--source <text> --from <path>", "write", "update script content", "text", true, true, false},
@@ -91,7 +91,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 			flags = append(flags, f)
 		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input, c.Format != nil, c.AccessFor != nil, c.Verbatim}
+		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input, c.Format != nil, c.Prepare != nil, c.Verbatim}
 		if got != w {
 			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
 		}

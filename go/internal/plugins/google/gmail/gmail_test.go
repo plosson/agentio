@@ -50,7 +50,7 @@ func runDirect(t *testing.T, ctx context.Context, path string, in plugins.Comman
 			logs = append(logs, p.(string))
 		}
 	}
-	v, err := product.Spec(t, path).Run(ctx, in, run)
+	v, err := host.Invoke(ctx, product.Spec(t, path), in, run)
 	return v, err, logs
 }
 

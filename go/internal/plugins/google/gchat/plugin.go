@@ -190,15 +190,19 @@ func stringify(v any, indent string) ([]byte, error) {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
-// textOrJSON is Bun's `--format <format>` check.
-func textOrJSON(in plugins.CommandInput, run *plugins.RunContext) (bool, error) {
+// textOrJSON is Bun's `--space` requiredOption and `--format <format>`
+// check, made before getGChatClient; true is json.
+func textOrJSON(in plugins.CommandInput, fail plugins.FailFunc) (bool, error) {
+	if err := plugins.RequireOptions(in, fail, "--space <id>"); err != nil {
+		return false, err
+	}
 	switch format := in.Option("format"); format {
 	case "text":
 		return false, nil
 	case "json":
 		return true, nil
 	default:
-		return false, run.Fail("INVALID_PARAMS", "Unknown format: "+format, "Use --format text or --format json")
+		return false, fail("INVALID_PARAMS", "Unknown format: "+format, "Use --format text or --format json")
 	}
 }
 
@@ -236,14 +240,10 @@ func sendCmd() plugins.CommandSpec {
 		Path:        "send",
 		Description: "Send a message to Google Chat",
 		Access:      "write",
-		// Bun checks the message and --json input before enforceWriteAccess.
-		AccessFor: plugins.WriteUnlessInvalid(func(in plugins.CommandInput, fail plugins.FailFunc) error {
-			_, err := readSend(in, fail)
-			return err
-		}),
-		Operation: "send message",
-		Input:     "text",
-		Arguments: []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
+		Prepare:     plugins.Parse(readSend),
+		Operation:   "send message",
+		Input:       "text",
+		Arguments:   []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
 		Options: []plugins.OptionSpec{
 			{Flags: "--space <id>", Description: "Space ID (required for OAuth profiles)"},
 			{Flags: "--thread <id>", Description: "Thread ID (optional)"},
@@ -264,15 +264,11 @@ func sendCmd() plugins.CommandSpec {
 			"  agentio gchat send --json --space spaces/AAAA1234",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			o, err := readSend(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.send(o))
+			return plugins.Result(a.send(plugins.Prepared[sendOptions](run)))
 		},
 		Format: formatSendResult,
 	}
@@ -301,14 +297,9 @@ func listCmd() plugins.CommandSpec {
 			"# messages within a closed date range, as JSON for scripting",
 			"agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json",
 		},
+		Prepare: plugins.Parse(textOrJSON),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
-				return nil, err
-			}
-			asJSON, err := textOrJSON(in, run)
-			if err != nil {
-				return nil, err
-			}
+			asJSON := plugins.Prepared[bool](run)
 			limit := jsvalue.ParseInt(in.Option("limit"))
 			a, err := apiFrom(ctx, run)
 			if err != nil {
@@ -351,14 +342,9 @@ func getCmd() plugins.CommandSpec {
 			"# as JSON for scripting",
 			"agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json",
 		},
+		Prepare: plugins.Parse(textOrJSON),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--space <id>"); err != nil {
-				return nil, err
-			}
-			asJSON, err := textOrJSON(in, run)
-			if err != nil {
-				return nil, err
-			}
+			asJSON := plugins.Prepared[bool](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -433,10 +419,8 @@ func membersCmd() plugins.CommandSpec {
 			"# members by space display name (resolved against the space list)",
 			`agentio gchat members --space "Engineering"`,
 		},
+		Prepare: plugins.Required("--space <id-or-name>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--space <id-or-name>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

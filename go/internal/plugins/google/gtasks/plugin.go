@@ -42,21 +42,16 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: true, Info: "tasks access ok"}, nil
 }
 
-// addInputError is Commander's requiredOption check on --title.
-func addInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	return plugins.RequireOptions(in, fail, "--title <title>")
-}
-
-// updateInputError is Bun's --status check, made before enforceWriteAccess.
-func updateInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+// checkUpdate is Bun's --status check, made before getGTasksClient.
+func checkUpdate(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if status := in.Option("status"); status != "" && status != "needsAction" && status != "completed" {
 		return fail("INVALID_PARAMS", "Invalid status: "+status, "Use: needsAction or completed")
 	}
 	return nil
 }
 
-// moveInputError is Bun's --parent/--previous check, made before enforceWriteAccess.
-func moveInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+// checkMove is Bun's --parent/--previous check, made before getGTasksClient.
+func checkMove(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if in.Option("parent") == "" && in.Option("previous") == "" {
 		return fail("INVALID_PARAMS", "At least one of --parent or --previous is required", "")
 	}
@@ -213,7 +208,7 @@ func addCmd() plugins.CommandSpec {
 		Path:        "add",
 		Description: "Add a new task",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(addInputError),
+		Prepare:     plugins.Required("--title <title>"),
 		Operation:   "create task",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg},
@@ -235,9 +230,6 @@ func addCmd() plugins.CommandSpec {
 			`agentio gtasks add MTIzNDU2Nzg5MA --title "Step 2" --previous NjU0MzIxMA`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := addInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -262,7 +254,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update an existing task",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(updateInputError),
+		Prepare:     plugins.Check(checkUpdate),
 		Operation:   "update task",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg, taskArg},
@@ -283,9 +275,6 @@ func updateCmd() plugins.CommandSpec {
 			"agentio gtasks update MTIzNDU2Nzg5MA NjU0MzIxMA --status completed",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := updateInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -390,7 +379,7 @@ func moveCmd() plugins.CommandSpec {
 		Path:        "move",
 		Description: "Move a task (change parent or position)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(moveInputError),
+		Prepare:     plugins.Check(checkMove),
 		Operation:   "move task",
 		Arguments:   []plugins.ArgumentSpec{tasklistArg, taskArg},
 		Options: []plugins.OptionSpec{
@@ -407,9 +396,6 @@ func moveCmd() plugins.CommandSpec {
 			"At least one of --parent or --previous is required.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := moveInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

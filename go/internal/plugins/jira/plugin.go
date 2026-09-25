@@ -129,14 +129,18 @@ func getCmd() plugins.CommandSpec {
 	}
 }
 
-// commentBody is Bun's `body || await readStdin()`: readStdin decodes the
-// piped bytes as UTF-8 and trims them.
-func commentBody(in plugins.CommandInput) string {
+// commentBody is Bun's `body || await readStdin()` and its check, made
+// before getJiraClient: readStdin decodes the piped bytes as UTF-8 and trims
+// them.
+func commentBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	if body := in.Arg("body"); body != "" {
-		return body
+		return body, nil
 	}
 	piped, _ := in.Stdin.(string)
-	return jsvalue.Trim(jsvalue.BufferString([]byte(piped)))
+	if body := jsvalue.Trim(jsvalue.BufferString([]byte(piped))); body != "" {
+		return body, nil
+	}
+	return "", fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
 }
 
 func commentCmd() plugins.CommandSpec {
@@ -144,15 +148,9 @@ func commentCmd() plugins.CommandSpec {
 		Path:        "comment",
 		Description: "Add a comment to an issue",
 		Input:       "text",
-		// Bun checks the body before enforceWriteAccess, so a missing body is
-		// the input error even on a read-only profile.
-		AccessFor: func(in plugins.CommandInput) string {
-			if commentBody(in) == "" {
-				return "read"
-			}
-			return "write"
-		},
-		Operation: "add comment",
+		Access:      "write",
+		Prepare:     plugins.Parse(commentBody),
+		Operation:   "add comment",
 		Arguments: []plugins.ArgumentSpec{
 			issueKeyArg,
 			{Name: "body", Description: "Comment body (or pipe via stdin)"},
@@ -164,11 +162,7 @@ func commentCmd() plugins.CommandSpec {
 			"cat investigation.md | agentio jira comment PROJ-123",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			body := commentBody(in)
-			if body == "" {
-				return nil, run.Fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
-			}
-			added, err := apiFrom(ctx, run).addComment(in.Arg("issue-key"), body)
+			added, err := apiFrom(ctx, run).addComment(in.Arg("issue-key"), plugins.Prepared[string](run))
 			if err != nil {
 				return nil, err
 			}

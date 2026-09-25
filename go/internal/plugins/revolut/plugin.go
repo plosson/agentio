@@ -260,13 +260,16 @@ func clientOf(ctx context.Context, run *plugins.RunContext) *client {
 
 var formatOption = plugins.OptionSpec{Flags: "--format <format>", Description: "Output format: text or json", DefaultValue: "text"}
 
-// positiveInt is `parseInt(value, 10)` refusing NaN and anything below 1.
-func positiveInt(fail plugins.FailFunc, flag, value string) (float64, error) {
-	n := jsvalue.ParseInt(value)
-	if math.IsNaN(n) || n < 1 {
-		return 0, fail("INVALID_PARAMS", flag+" must be a positive number", "")
-	}
-	return n, nil
+// positiveInt is a Prepare reading the <flag> option as `parseInt(value, 10)`,
+// refusing NaN and anything below 1 before getRevolutClient, as Bun does.
+func positiveInt(flag string) func(context.Context, plugins.CommandInput, *plugins.PrepareContext) (any, bool, error) {
+	return plugins.Parse(func(in plugins.CommandInput, fail plugins.FailFunc) (float64, error) {
+		n := jsvalue.ParseInt(in.Option(strings.TrimPrefix(flag, "--")))
+		if math.IsNaN(n) || n < 1 {
+			return 0, fail("INVALID_PARAMS", flag+" must be a positive number", "")
+		}
+		return n, nil
+	})
 }
 
 // confirmed asks before a destructive call. A closed stdin never answers in
@@ -327,11 +330,9 @@ func transactionsCmd() plugins.CommandSpec {
 			"# card payments only, on one account",
 			"agentio revolut transactions --type card_payment --account 8f9d1e2a-0000-4c3b-9f21-7a5e6d4c3b2a",
 		},
+		Prepare: positiveInt("--count"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			count, err := positiveInt(run.Fail, "--count", in.Option("count"))
-			if err != nil {
-				return nil, err
-			}
+			count := plugins.Prepared[float64](run)
 			transactions, err := clientOf(ctx, run).listTransactions(transactionFilter{
 				from: in.Option("from"), to: in.Option("to"), account: in.Option("account"),
 				counterparty: in.Option("counterparty"), kind: in.Option("type"), count: count,
@@ -460,11 +461,9 @@ func expensesCmd() plugins.CommandSpec {
 			"# the same quarter, with every receipt file alongside it",
 			"agentio revolut expenses --from 2026-07-01 --to 2026-09-30 --format csv --receipts ./q3-receipts > q3.csv",
 		},
+		Prepare: positiveInt("--count"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			count, err := positiveInt(run.Fail, "--count", in.Option("count"))
-			if err != nil {
-				return nil, err
-			}
+			count := plugins.Prepared[float64](run)
 			c := clientOf(ctx, run)
 			expenses, err := c.listExpenses(in.Option("from"), in.Option("to"), count)
 			if err != nil {
@@ -607,7 +606,7 @@ func runReceipt(ctx context.Context, in plugins.CommandInput, run *plugins.RunCo
 
 var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// payInput is what Bun checks before resolving the profile.
+// payInput is what Bun runPay checks before getRevolutClient.
 type payInput struct {
 	amount       float64
 	currency     string
@@ -638,11 +637,6 @@ func payInputOf(in plugins.CommandInput, fail plugins.FailFunc) (payInput, error
 	return p, nil
 }
 
-func payCheck(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, err := payInputOf(in, fail)
-	return err
-}
-
 func describeAccount(a *jsvalue.Object) string {
 	if name := field(a, "name"); truthy(name) {
 		return `"` + text(name) + `"`
@@ -664,7 +658,7 @@ func payCmd() plugins.CommandSpec {
 		Path:        "pay",
 		Description: "Draft a payment to a counterparty, or move money between your own accounts",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(payCheck),
+		Prepare:     plugins.Parse(payInputOf),
 		Operation:   "move money",
 		Options: []plugins.OptionSpec{
 			{Flags: "--from <account-id>", Description: "Your account to pay from"},
@@ -707,10 +701,7 @@ func payCmd() plugins.CommandSpec {
 // transfer, so nothing leaves the business until a human approves it. The one
 // destination that acts immediately is another of your own accounts.
 func runPay(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	p, err := payInputOf(in, run.Fail)
-	if err != nil {
-		return nil, err
-	}
+	p := plugins.Prepared[payInput](run)
 	from, to, reference := in.Option("from"), in.Option("to"), in.Option("reference")
 	on, title, reasonCode := in.Option("on"), in.Option("title"), in.Option("reason-code")
 	asJSON := in.Option("format") == "json"
@@ -838,6 +829,7 @@ func counterpartiesGetCmd() plugins.CommandSpec {
 	}
 }
 
+// counterpartyCheck is Bun counterparties add before getRevolutClient.
 func counterpartyCheck(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if err := plugins.RequireOptions(in, fail, "--bank-country <code>", "--currency <code>"); err != nil {
 		return err
@@ -856,7 +848,7 @@ func counterpartiesAddCmd() plugins.CommandSpec {
 		Path:        "counterparties add",
 		Description: "Add a counterparty",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(counterpartyCheck),
+		Prepare:     plugins.Check(counterpartyCheck),
 		Operation:   "add a counterparty",
 		Options: []plugins.OptionSpec{
 			{Flags: "--company-name <name>", Description: "Company name (use instead of --first-name/--last-name)"},
@@ -881,9 +873,6 @@ func counterpartiesAddCmd() plugins.CommandSpec {
 			"  --bank-country BE --currency EUR --iban BE68539007547034",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := counterpartyCheck(in, run.Fail); err != nil {
-				return nil, err
-			}
 			cp, err := clientOf(ctx, run).createCounterparty(counterpartyInput{
 				companyName: in.Option("company-name"), firstName: in.Option("first-name"), lastName: in.Option("last-name"),
 				bankCountry: in.Option("bank-country"), currency: in.Option("currency"),
@@ -1052,11 +1041,9 @@ func linksListCmd() plugins.CommandSpec {
 			"# the next page, using the created_at of the last link on this one",
 			"agentio revolut links list --created-before 2026-07-11T13:55:54.834963Z",
 		},
+		Prepare: positiveInt("--limit"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			limit, err := positiveInt(run.Fail, "--limit", in.Option("limit"))
-			if err != nil {
-				return nil, err
-			}
+			limit := plugins.Prepared[float64](run)
 			links, err := clientOf(ctx, run).listPayoutLinks(in.Option("created-before"), limit)
 			if err != nil {
 				return nil, failed(run.Fail, err)

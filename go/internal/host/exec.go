@@ -19,7 +19,12 @@ func EnforceWrite(service, profileName, operation string) error {
 	if err != nil {
 		return err
 	}
-	if !ro {
+	return writeRefusal(service, profileName, operation, ro)
+}
+
+// writeRefusal is Bun enforceWriteAccess once the read-only flag is known.
+func writeRefusal(service, profileName, operation string, readOnly bool) error {
+	if !readOnly {
 		return nil
 	}
 	suggestion := fmt.Sprintf("To modify this profile's access: agentio %s profile update --profile %s --no-read-only", service, profileName)
@@ -31,47 +36,84 @@ func EnforceWrite(service, profileName, operation string) error {
 		suggestion)
 }
 
-// Execute runs one declarative command through host-owned profile and access policy.
+// Execute runs one command in Bun's order: Prepare (input checks, dry runs),
+// then getClient (require the profile, refresh and persist its token), then
+// enforceWriteAccess, then the handler.
 func Execute(ctx context.Context, reg *plugins.Registry, p *plugins.Plugin, spec *plugins.CommandSpec, in plugins.CommandInput) (any, error) {
+	prepared, done, err := prepare(ctx, spec, in, &plugins.PrepareContext{Log: logStderr, Fail: fail})
+	if err != nil || done {
+		return prepared, err
+	}
 	creds := map[string]any{}
 	profileName := ""
 	readOnly := false
-	if p.Profile != nil && (spec.NoProfileFor == nil || !spec.NoProfileFor(in)) {
+	if p.Profile != nil {
 		flag, _ := in.Options["profile"].(string)
 		name, err := profile.Require(p.ID, flag)
 		if err != nil {
 			return nil, err
 		}
 		profileName = name
-		access := spec.Access
-		if spec.AccessFor != nil {
-			access = spec.AccessFor(in)
-		}
-		if access == "write" {
-			operation := spec.Operation
-			if spec.OperationFor != nil {
-				operation = spec.OperationFor(in)
-			}
-			if operation == "" {
-				operation = spec.Path
-			}
-			if err := EnforceWrite(p.ID, profileName, operation); err != nil {
-				return nil, err
-			}
-		}
 		fresh, err := auth.GetFresh(ctx, reg, p.ID, profileName, auth.RefreshOptions{})
 		if err != nil {
 			return nil, err
 		}
 		creds = fresh.Credentials
-		// Bun reads the flag after the client is built (isProfileReadOnly).
 		if readOnly, err = profile.IsReadOnly(p.ID, profileName); err != nil {
 			return nil, err
+		}
+		if access(spec, in) == "write" {
+			if err := writeRefusal(p.ID, profileName, operation(spec, in), readOnly); err != nil {
+				return nil, err
+			}
 		}
 	}
 	run := NewRunContext(creds, profileName, ctx)
 	run.ReadOnly = readOnly
+	run.Prepared = prepared
 	return spec.Run(ctx, in, run)
+}
+
+// Invoke runs a command against a RunContext the caller built, with the same
+// Prepare phase as Execute (logging and failing through run) but no profile,
+// refresh or write check.
+func Invoke(ctx context.Context, spec *plugins.CommandSpec, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+	prepared, done, err := prepare(ctx, spec, in, &plugins.PrepareContext{Log: run.Log, Fail: run.Fail})
+	if err != nil || done {
+		return prepared, err
+	}
+	run.Prepared = prepared
+	return spec.Run(ctx, in, run)
+}
+
+// prepare is the pre-profile phase. A failure prints nothing.
+func prepare(ctx context.Context, spec *plugins.CommandSpec, in plugins.CommandInput, pre *plugins.PrepareContext) (any, bool, error) {
+	if spec.Prepare == nil {
+		return nil, false, nil
+	}
+	prepared, done, err := spec.Prepare(ctx, in, pre)
+	if err != nil {
+		return nil, false, err
+	}
+	return prepared, done, nil
+}
+
+func access(spec *plugins.CommandSpec, in plugins.CommandInput) string {
+	if spec.AccessFor != nil {
+		return spec.AccessFor(in)
+	}
+	return spec.Access
+}
+
+func operation(spec *plugins.CommandSpec, in plugins.CommandInput) string {
+	op := spec.Operation
+	if spec.OperationFor != nil {
+		op = spec.OperationFor(in)
+	}
+	if op == "" {
+		op = spec.Path
+	}
+	return op
 }
 
 // PrintResult writes a command result. --json wins; otherwise format, then JSON.

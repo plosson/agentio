@@ -84,16 +84,17 @@ func getCmd() plugins.CommandSpec {
 	}
 }
 
-// createInputError is the input Bun rejects before enforceWriteAccess
-// (plugins.WriteUnlessInvalid): the required --title, then the content.
-func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+// createContent is Bun's check before getGDocsClient: the required --title,
+// then the content, which it returns.
+func createContent(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
-		return err
+		return "", err
 	}
-	if content, _ := plugins.OptionOrStdin(in, "content", true); content == "" {
-		return fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
+	content, _ := plugins.OptionOrStdin(in, "content", true)
+	if content == "" {
+		return "", fail("INVALID_PARAMS", "No content provided", "Provide --content or pipe markdown via stdin")
 	}
-	return nil
+	return content, nil
 }
 
 func createCmd() plugins.CommandSpec {
@@ -101,7 +102,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new document from Markdown",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
+		Prepare:     plugins.Parse(createContent),
 		Operation:   "create document",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
@@ -118,15 +119,11 @@ func createCmd() plugins.CommandSpec {
 			`agentio gdocs create --title "Spec" --content "# Spec" --folder 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := createInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
-			content, _ := plugins.OptionOrStdin(in, "content", true)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.create(in.Option("title"), content, in.Option("folder")))
+			return plugins.Result(a.create(in.Option("title"), plugins.Prepared[string](run), in.Option("folder")))
 		},
 		Format: formatCreated,
 	}
@@ -193,10 +190,13 @@ func structureCmd() plugins.CommandSpec {
 			"Indices from --tab are relative to that tab: pass the same tabId in the",
 			"location/range of every batch request that writes to it.",
 		},
-		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+		Prepare: plugins.Check(func(in plugins.CommandInput, fail plugins.FailFunc) error {
 			if in.Option("tab") != "" && in.Flag("all-tabs") {
-				return nil, run.Fail("INVALID_PARAMS", "--tab and --all-tabs are mutually exclusive", "")
+				return fail("INVALID_PARAMS", "--tab and --all-tabs are mutually exclusive", "")
 			}
+			return nil
+		}),
+		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -239,7 +239,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw documents.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
+		Prepare:     plugins.Parse(google.BatchRequests),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{{Name: "doc-id-or-url", Description: "Document ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -261,15 +261,11 @@ func batchCmd() plugins.CommandSpec {
 			"https://developers.google.com/docs/api/reference/rest/v1/documents/request",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			requests, err := google.BatchRequests(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			result, err := a.batch(in.Arg("doc-id-or-url"), requests)
+			result, err := a.batch(in.Arg("doc-id-or-url"), plugins.Prepared[[]any](run))
 			if err != nil {
 				return nil, err
 			}

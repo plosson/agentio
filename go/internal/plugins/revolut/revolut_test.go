@@ -230,7 +230,7 @@ func runCmd(t *testing.T, path string, in plugins.CommandInput, configure func(*
 	if configure != nil {
 		configure(run)
 	}
-	return spec(t, path).Run(context.Background(), withDefaults(t, path, in), run)
+	return host.Invoke(context.Background(), spec(t, path), withDefaults(t, path, in), run)
 }
 
 func render(t *testing.T, path string, v any) string {

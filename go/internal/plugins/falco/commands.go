@@ -41,13 +41,37 @@ func failIfAnyFailed(run *plugins.RunContext, failedCount, total int) error {
 		"Everything else was written. Re-run to retry only what is missing.")
 }
 
-// requireOutput is Commander's requiredOption: a given "" is kept, and then
-// fails in mkdir as in Bun.
-func requireOutput(run *plugins.RunContext, in plugins.CommandInput) (string, error) {
-	if err := plugins.RequireOptions(in, run.Fail, "--output <dir>"); err != nil {
-		return "", err
+// syncInput is what a sync checks before the client. output is Commander's
+// requiredOption: a given "" is kept, and then fails in mkdir as in Bun.
+type syncInput struct {
+	output string
+	since  string
+	types  map[string]bool // invoices sync --include
+}
+
+func peppolSyncInput(in plugins.CommandInput, fail plugins.FailFunc) (syncInput, error) {
+	if err := plugins.RequireOptions(in, fail, "--output <dir>"); err != nil {
+		return syncInput{}, err
 	}
-	return in.Option("output"), nil
+	since, err := requireIsoDate(in, fail, "since")
+	return syncInput{output: in.Option("output"), since: since}, err
+}
+
+func invoicesSyncInput(in plugins.CommandInput, fail plugins.FailFunc) (syncInput, error) {
+	input, err := peppolSyncInput(in, fail)
+	if err != nil {
+		return input, err
+	}
+	input.types = map[string]bool{}
+	for _, v := range strings.Split(in.Option("include"), ",") {
+		if v = jsvalue.Trim(v); v != "" {
+			input.types[v] = true
+		}
+	}
+	if len(input.types) == 0 {
+		return input, fail("INVALID_PARAMS", "--include needs at least one document type", "")
+	}
+	return input, nil
 }
 
 // renameIfPresent moves <from><ext> to <to><ext> when the source exists.
@@ -64,14 +88,8 @@ func renameIfPresent(dir, from, to string, extensions ...string) error {
 }
 
 func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	output, err := requireOutput(run, in)
-	if err != nil {
-		return nil, err
-	}
-	since, err := requireIsoDate(run, in, "since")
-	if err != nil {
-		return nil, err
-	}
+	input := plugins.Prepared[syncInput](run)
+	output, since := input.output, input.since
 	c := clientOf(ctx, run)
 	if err := nodefs.MkdirAll(output); err != nil {
 		return nil, err
@@ -174,23 +192,8 @@ func runPeppolSync(ctx context.Context, in plugins.CommandInput, run *plugins.Ru
 }
 
 func runInvoicesSync(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	output, err := requireOutput(run, in)
-	if err != nil {
-		return nil, err
-	}
-	since, err := requireIsoDate(run, in, "since")
-	if err != nil {
-		return nil, err
-	}
-	types := map[string]bool{}
-	for _, v := range strings.Split(in.Option("include"), ",") {
-		if v = jsvalue.Trim(v); v != "" {
-			types[v] = true
-		}
-	}
-	if len(types) == 0 {
-		return nil, run.Fail("INVALID_PARAMS", "--include needs at least one document type", "")
-	}
+	input := plugins.Prepared[syncInput](run)
+	output, since, types := input.output, input.since, input.types
 
 	c := clientOf(ctx, run)
 	if err := nodefs.MkdirAll(output); err != nil {
@@ -426,24 +429,21 @@ func resolveMarkPaidTarget(ref string, invoices, peppolDocuments []*jsvalue.Obje
 	}
 }
 
-// checkStatus validates what was typed before --unpaid overrides it, so a bad
-// --status is never silently discarded by the shortcut. Bun checks it before
-// enforceWriteAccess (plugins.WriteUnlessInvalid).
-func checkStatus(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if status := in.Option("status"); status != "Paid" && status != "NotPaid" {
-		return fail("INVALID_PARAMS", "--status must be Paid or NotPaid, got: "+status, "")
-	}
-	return nil
-}
-
-func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-	if err := checkStatus(in, run.Fail); err != nil {
-		return nil, err
-	}
+// markPaidStatus validates what was typed before --unpaid overrides it, so a
+// bad --status is never silently discarded by the shortcut.
+func markPaidStatus(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	status := in.Option("status")
+	if status != "Paid" && status != "NotPaid" {
+		return "", fail("INVALID_PARAMS", "--status must be Paid or NotPaid, got: "+status, "")
+	}
 	if in.Flag("unpaid") {
 		status = "NotPaid"
 	}
+	return status, nil
+}
+
+func runMarkPaid(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+	status := plugins.Prepared[string](run)
 	asJSON := in.Option("format") == "json"
 	ref := in.Arg("ref")
 	c := clientOf(ctx, run)

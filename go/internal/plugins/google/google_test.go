@@ -715,15 +715,11 @@ func TestBatchRequestsReadsExactlyOneSourceAsAnArray(t *testing.T) {
 		if _, err := BatchRequests(in, fail); err == nil || err.Error() != c.want {
 			t.Fatalf("%v: %v", c.opts, err)
 		}
-		if plugins.WriteUnlessInvalid(BatchInputError)(in) != "read" {
-			t.Fatalf("%v: rejected input is not left to Run", c.opts)
-		}
 	}
-	if _, err := BatchRequests(plugins.CommandInput{Options: map[string]any{"file": filepath.Join(t.TempDir(), "missing.json")}}, fail); !errors.Is(err, os.ErrNotExist) {
+	// Bun readFile's rejection, as Node words it.
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	if _, err := BatchRequests(plugins.CommandInput{Options: map[string]any{"file": missing}}, fail); err == nil || err.Error() != "ENOENT: no such file or directory, open '"+missing+"'" {
 		t.Fatalf("missing file: %v", err)
-	}
-	if plugins.WriteUnlessInvalid(BatchInputError)(plugins.CommandInput{Options: map[string]any{"requests-json": "[]"}}) != "write" {
-		t.Fatal("an empty array is refused by the product after enforceWriteAccess")
 	}
 }
 

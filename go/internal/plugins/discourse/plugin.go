@@ -80,12 +80,9 @@ func getCmd() plugins.CommandSpec {
 			"# use a named profile",
 			"agentio discourse get 12345 --profile meta",
 		},
+		Prepare: plugins.Parse(topicID),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			id, ok := jsParseInt(in.Arg("topic-id"))
-			if !ok {
-				return nil, run.Fail("INVALID_PARAMS", "Topic ID must be a number", "")
-			}
-			detail, err := newAPI(ctx, run.Credentials, run.Fetch).getTopic(id)
+			detail, err := newAPI(ctx, run.Credentials, run.Fetch).getTopic(plugins.Prepared[int](run))
 			if err != nil {
 				return nil, failed(run, err)
 			}
@@ -93,6 +90,15 @@ func getCmd() plugins.CommandSpec {
 		},
 		Format: formatTopic,
 	}
+}
+
+// topicID is get's <topic-id>, checked before the client as in Bun.
+func topicID(in plugins.CommandInput, fail plugins.FailFunc) (int, error) {
+	id, ok := jsParseInt(in.Arg("topic-id"))
+	if !ok {
+		return 0, fail("INVALID_PARAMS", "Topic ID must be a number", "")
+	}
+	return id, nil
 }
 
 func categoriesCmd() plugins.CommandSpec {

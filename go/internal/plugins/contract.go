@@ -98,6 +98,39 @@ type RunContext struct {
 	// read-only profile under its own restrictions instead of being refused
 	// (Bun sql query: isProfileReadOnly, then a read-only transaction).
 	ReadOnly bool
+	// Prepared is what CommandSpec.Prepare returned; nil without a Prepare.
+	Prepared any
+}
+
+// Parse is a CommandSpec.Prepare that only parses: parse's value reaches Run
+// (read it with Prepared[T]) and the command never stops early.
+func Parse[T any](parse func(in CommandInput, fail FailFunc) (T, error)) func(context.Context, CommandInput, *PrepareContext) (any, bool, error) {
+	return func(_ context.Context, in CommandInput, pre *PrepareContext) (any, bool, error) {
+		v, err := parse(in, pre.Fail)
+		if err != nil {
+			return nil, false, err
+		}
+		return v, false, nil
+	}
+}
+
+// Check is a CommandSpec.Prepare that only checks: Run gets no value.
+func Check(check func(in CommandInput, fail FailFunc) error) func(context.Context, CommandInput, *PrepareContext) (any, bool, error) {
+	return func(_ context.Context, in CommandInput, pre *PrepareContext) (any, bool, error) {
+		return nil, false, check(in, pre.Fail)
+	}
+}
+
+// Required is a CommandSpec.Prepare that is only Commander's requiredOption
+// check (RequireOptions), which Bun runs before the action.
+func Required(flags ...string) func(context.Context, CommandInput, *PrepareContext) (any, bool, error) {
+	return Check(func(in CommandInput, fail FailFunc) error { return RequireOptions(in, fail, flags...) })
+}
+
+// Prepared is run.Prepared as the type the command's Prepare returns.
+func Prepared[T any](run *RunContext) T {
+	v, _ := run.Prepared.(T)
+	return v
 }
 
 type ArgumentSpec struct {
@@ -266,8 +299,15 @@ func Fetch(ctx context.Context, req *http.Request) (*http.Response, error) {
 	return bunClient.Do(req.WithContext(ctx))
 }
 
-// FailFunc is RunContext.Fail. Input checks take it so they also run from an
-// AccessFor, before a RunContext exists (WriteUnlessInvalid).
+// PrepareContext is what CommandSpec.Prepare receives: no profile, no
+// credentials, only stderr and the error constructor.
+type PrepareContext struct {
+	Log  func(parts ...any)
+	Fail FailFunc
+}
+
+// FailFunc is RunContext.Fail. Input checks take it so they also run from
+// CommandSpec.Prepare, before a RunContext exists.
 type FailFunc = func(code ErrorCode, message, suggestion string) error
 
 // Result drops a typed nil on failure: the host prints any non-nil value
@@ -340,20 +380,6 @@ func RequireOptions(in CommandInput, fail FailFunc, flags ...string) error {
 	return nil
 }
 
-// WriteUnlessInvalid is an AccessFor that lets input check rejects reach Run,
-// which reports it: a Bun command that validates its input before calling
-// enforceWriteAccess answers a read-only profile with the input error.
-func WriteUnlessInvalid(check func(CommandInput, FailFunc) error) func(CommandInput) string {
-	return func(in CommandInput) string {
-		if check(in, func(ErrorCode, string, string) error { return errInvalid }) != nil {
-			return "read"
-		}
-		return "write"
-	}
-}
-
-var errInvalid = errors.New("invalid")
-
 type CommandSpec struct {
 	Path        string
 	Description string
@@ -377,11 +403,15 @@ type CommandSpec struct {
 	// OperationFor, when set, names the action from the parsed input instead of
 	// Operation (Bun gmail draft: "update draft" with an id, else "create draft").
 	OperationFor func(in CommandInput) string
-	// NoProfileFor, when set and true for the input, runs Run with no profile
-	// and no credentials, for a Bun command that answers that input before it
-	// resolves a profile (gmail archive --dry-run prints its plan first).
-	NoProfileFor func(in CommandInput) bool
-	Examples     []string
+	// Prepare is the Bun action's work before get<X>Client: parse and check
+	// the input, read local files, print a dry run. The host calls it once,
+	// before it resolves the profile, refreshes the token or refuses a write
+	// on a read-only profile. An error is reported as is. done prints
+	// prepared and stops (no profile needed); otherwise prepared reaches Run
+	// as RunContext.Prepared, so nothing is parsed or read twice. A check
+	// that needs the client stays in Run, after the profile, as in Bun.
+	Prepare  func(ctx context.Context, in CommandInput, pre *PrepareContext) (prepared any, done bool, err error)
+	Examples []string
 	// Run returns the value the host prints. A non-nil value returned together
 	// with an error is printed first, then the error is rendered (Bun: output,
 	// then throw).

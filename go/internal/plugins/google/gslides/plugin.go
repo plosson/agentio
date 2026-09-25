@@ -142,10 +142,8 @@ func exportCmd() plugins.CommandSpec {
 			"",
 			"Formats: pptx (default), pdf, odp.",
 		},
+		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -224,7 +222,7 @@ func batchCmd() plugins.CommandSpec {
 		Path:        "batch",
 		Description: "Execute raw presentations.batchUpdate requests (escape hatch)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(google.BatchInputError),
+		Prepare:     plugins.Parse(google.BatchRequests),
 		Operation:   "execute batch update",
 		Arguments:   []plugins.ArgumentSpec{presentationArg},
 		Options: []plugins.OptionSpec{
@@ -241,15 +239,11 @@ func batchCmd() plugins.CommandSpec {
 			"https://developers.google.com/slides/api/reference/rest/v1/presentations/batchUpdate",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			requests, err := google.BatchRequests(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.batch(in.Arg("id-or-url"), requests))
+			return plugins.Result(a.batch(in.Arg("id-or-url"), plugins.Prepared[[]any](run)))
 		},
 		Format: formatBatch,
 	}

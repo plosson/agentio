@@ -88,6 +88,8 @@ func NewSetupContext(s Streams) *plugins.SetupContext {
 	}
 }
 
+func logStderr(parts ...any) { fmt.Fprintln(os.Stderr, parts...) }
+
 func NewRunContext(creds map[string]any, profileName string, ctx context.Context) *plugins.RunContext {
 	if ctx == nil {
 		ctx = context.Background()
@@ -97,7 +99,7 @@ func NewRunContext(creds map[string]any, profileName string, ctx context.Context
 		Profile:     profileName,
 		Signal:      ctx,
 		Fetch:       fetch,
-		Log:         func(parts ...any) { fmt.Fprintln(os.Stderr, parts...) },
+		Log:         logStderr,
 		Confirm:     func(q string) (bool, error) { return confirm(StdStreams(), lines.For(os.Stdin), q) },
 		Fail:        fail,
 	}

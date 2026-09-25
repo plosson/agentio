@@ -102,15 +102,11 @@ func sendCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "send",
 		Description: "Send a message to Slack",
-		// Bun checks the input before enforceWriteAccess, so a read-only
-		// profile given bad input sees the input error.
-		AccessFor: plugins.WriteUnlessInvalid(func(in plugins.CommandInput, fail plugins.FailFunc) error {
-			_, err := readMessage(in, fail)
-			return err
-		}),
-		Operation: "send message",
-		Input:     "text",
-		Arguments: []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
+		Access:      "write",
+		Prepare:     plugins.Parse(readMessage),
+		Operation:   "send message",
+		Input:       "text",
+		Arguments:   []plugins.ArgumentSpec{{Name: "message", Description: "Message text (or pipe via stdin)"}},
 		Options: []plugins.OptionSpec{
 			{Flags: "--json [file]", Description: "Send Block Kit message from JSON file (or stdin if no file specified)"},
 		},
@@ -125,11 +121,7 @@ func sendCmd() plugins.CommandSpec {
 			`agentio slack send --profile alerts "incident opened"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			m, err := readMessage(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
-			return plugins.Result(send(ctx, run, m))
+			return plugins.Result(send(ctx, run, plugins.Prepared[message](run)))
 		},
 		Format: formatSendResult,
 	}
@@ -142,7 +134,8 @@ type message struct {
 	isPayload bool
 }
 
-// readMessage is the send action's input handling, in Bun's order: --json
+// readMessage is the send action's input handling before getSlackClient, in
+// Bun's order: --json
 // reads a file (or stdin when bare) and parses it; otherwise the argument, or
 // stdin, is the text.
 func readMessage(in plugins.CommandInput, fail plugins.FailFunc) (message, error) {

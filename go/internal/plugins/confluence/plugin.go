@@ -56,31 +56,42 @@ func piped(content string, stdin any) string {
 	return strings.TrimSpace(text)
 }
 
-// checkCreate, checkPageBody and checkComment are the input checks Bun makes
-// before enforceWriteAccess (plugins.WriteUnlessInvalid): a read-only profile
-// gets the input error first.
-func checkCreate(in plugins.CommandInput, fail plugins.FailFunc) error {
+// createBody, bodyInput and commentBody are Bun's checks before
+// getConfluenceClient; each returns the body the command sends.
+func createBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	if err := plugins.RequireOptions(in, fail, "--title <title>"); err != nil {
-		return err
+		return "", err
 	}
 	if in.Option("space") == "" && in.Option("space-id") == "" {
-		return fail("INVALID_PARAMS", "--space or --space-id is required", "")
+		return "", fail("INVALID_PARAMS", "--space or --space-id is required", "")
 	}
-	return checkPageBody(in, fail)
+	return bodyInput(in, fail)
 }
 
-func checkPageBody(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if piped(in.Option("content"), in.Stdin) == "" {
-		return fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
+func bodyInput(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
+	body := piped(in.Option("content"), in.Stdin)
+	if body == "" {
+		return "", fail("INVALID_PARAMS", "Page body is required. Use --content or pipe via stdin.", "")
 	}
-	return nil
+	return body, nil
 }
 
-func checkComment(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if piped(in.Arg("body"), in.Stdin) == "" {
-		return fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
+func commentBody(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
+	text := piped(in.Arg("body"), in.Stdin)
+	if text == "" {
+		return "", fail("INVALID_PARAMS", "Comment body is required. Provide as argument or pipe via stdin.", "")
 	}
-	return nil
+	return text, nil
+}
+
+// pageFormat is get's --format, checked before the client as in Bun.
+func pageFormat(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
+	format := in.Option("format")
+	switch format {
+	case "storage", "atlas_doc_format", "view":
+		return format, nil
+	}
+	return "", fail("INVALID_PARAMS", fmt.Sprintf("Invalid format %q. Use storage, atlas_doc_format, or view.", format), "")
 }
 
 func spacesCmd() plugins.CommandSpec {
@@ -150,14 +161,9 @@ func getCmd() plugins.CommandSpec {
 			"# get as Atlas document format",
 			"agentio confluence get 123456 --format atlas_doc_format",
 		},
+		Prepare: plugins.Parse(pageFormat),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			format := in.Option("format")
-			switch format {
-			case "storage", "atlas_doc_format", "view":
-			default:
-				return nil, run.Fail("INVALID_PARAMS", fmt.Sprintf("Invalid format %q. Use storage, atlas_doc_format, or view.", format), "")
-			}
-			return apiFrom(ctx, run).getPage(in.Arg("page-id"), format)
+			return apiFrom(ctx, run).getPage(in.Arg("page-id"), plugins.Prepared[string](run))
 		},
 		Format: formatPage,
 	}
@@ -195,7 +201,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a Confluence page",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkCreate),
+		Prepare:     plugins.Parse(createBody),
 		Operation:   "create page",
 		Input:       "text",
 		Options: []plugins.OptionSpec{
@@ -214,10 +220,7 @@ func createCmd() plugins.CommandSpec {
 			`agentio confluence create --title "Sub Page" --space ENG --parent 123456 --content "<p>Content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkCreate(in, run.Fail); err != nil {
-				return nil, err
-			}
-			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.OptionPtr("parent"), piped(in.Option("content"), in.Stdin))
+			return apiFrom(ctx, run).createPage(in.Option("space"), in.Option("space-id"), in.Option("title"), in.OptionPtr("parent"), plugins.Prepared[string](run))
 		},
 		Format: formatCreated,
 	}
@@ -228,7 +231,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update a Confluence page (replaces body)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkPageBody),
+		Prepare:     plugins.Parse(bodyInput),
 		Operation:   "update page",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "page-id", Description: "Page ID", Required: true}},
@@ -245,10 +248,7 @@ func updateCmd() plugins.CommandSpec {
 			`agentio confluence update 123456 --title "New Title" --content "<p>New content</p>"`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkPageBody(in, run.Fail); err != nil {
-				return nil, err
-			}
-			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.OptionPtr("title"), piped(in.Option("content"), in.Stdin))
+			return apiFrom(ctx, run).updatePage(in.Arg("page-id"), in.OptionPtr("title"), plugins.Prepared[string](run))
 		},
 		Format: formatUpdated,
 	}
@@ -276,7 +276,7 @@ func commentCmd() plugins.CommandSpec {
 		Path:        "comment",
 		Description: "Add a footer comment to a page",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkComment),
+		Prepare:     plugins.Parse(commentBody),
 		Operation:   "add comment",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -290,10 +290,7 @@ func commentCmd() plugins.CommandSpec {
 			`echo "LGTM" | agentio confluence comment 123456`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkComment(in, run.Fail); err != nil {
-				return nil, err
-			}
-			return apiFrom(ctx, run).addComment(in.Arg("page-id"), piped(in.Arg("body"), in.Stdin))
+			return apiFrom(ctx, run).addComment(in.Arg("page-id"), plugins.Prepared[string](run))
 		},
 		Format: formatComment,
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/plosson/agentio/go/internal/jsvalue"
 	"github.com/plosson/agentio/go/internal/plugins"
 	"github.com/plosson/agentio/go/internal/plugins/google"
+	"google.golang.org/api/calendar/v3"
 )
 
 func New() *plugins.Plugin {
@@ -48,32 +49,48 @@ func validate(ctx context.Context, run *plugins.RunContext) (plugins.ValidationR
 	return plugins.ValidationResult{Valid: true, Info: info}, nil
 }
 
-// createInputError, updateInputError and respondInputError are the input
-// rejections Bun reports before enforceWriteAccess (plugins.WriteUnlessInvalid).
-func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+// createReminders, checkUpdate, respondStatus and freebusyIDs are Bun's
+// checks before getGCalClient; each returns what the command then uses.
+func createReminders(in plugins.CommandInput, fail plugins.FailFunc) ([]*calendar.EventReminder, error) {
 	if err := plugins.RequireOptions(in, fail, "--summary <title>", "--from <datetime>", "--to <datetime>"); err != nil {
-		return err
+		return nil, err
 	}
-	_, err := parseReminders(in.List("reminder"), fail)
-	return err
+	return parseReminders(in.List("reminder"), fail)
 }
 
-func updateInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+func checkUpdate(in plugins.CommandInput, fail plugins.FailFunc) error {
 	if len(in.List("attendee")) > 0 && len(in.List("add-attendee")) > 0 {
 		return fail("INVALID_PARAMS", "Cannot use both --attendee and --add-attendee", "")
 	}
 	return nil
 }
 
-func respondInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+func respondStatus(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 	if err := plugins.RequireOptions(in, fail, "--status <status>"); err != nil {
-		return err
+		return "", err
 	}
-	switch strings.ToLower(in.Option("status")) {
+	status := strings.ToLower(in.Option("status"))
+	switch status {
 	case "accepted", "declined", "tentative":
-		return nil
+		return status, nil
 	}
-	return fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
+	return "", fail("INVALID_PARAMS", "Invalid status: "+in.Option("status"), "Use: accepted, declined, or tentative")
+}
+
+func freebusyIDs(in plugins.CommandInput, fail plugins.FailFunc) ([]string, error) {
+	if err := plugins.RequireOptions(in, fail, "--from <datetime>", "--to <datetime>"); err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, id := range strings.Split(in.Arg("calendar-ids"), ",") {
+		if id = jsvalue.Trim(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fail("INVALID_PARAMS", "At least one calendar ID is required", "")
+	}
+	return ids, nil
 }
 
 // givenFields names the calendar.Event field of each option (pairs of option
@@ -199,7 +216,7 @@ func createCmd() plugins.CommandSpec {
 		Path:        "create",
 		Description: "Create a new event",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
+		Prepare:     plugins.Parse(createReminders),
 		Operation:   "create event",
 		Input:       "text",
 		Arguments:   []plugins.ArgumentSpec{{Name: "calendar-id", Description: "Calendar ID (default: primary)"}},
@@ -233,13 +250,6 @@ func createCmd() plugins.CommandSpec {
 			`  --to 2024-04-15T10:30:00-07:00 --visibility private --send-updates none`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := createInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
-			reminders, err := parseReminders(in.List("reminder"), run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -261,7 +271,7 @@ func createCmd() plugins.CommandSpec {
 				allDay:       in.Flag("all-day"),
 				attendees:    in.List("attendee"),
 				recurrence:   in.List("rrule"),
-				reminders:    reminders,
+				reminders:    plugins.Prepared[[]*calendar.EventReminder](run),
 				colorID:      in.Option("color"),
 				visibility:   in.Option("visibility"),
 				transparency: transparency(in.Option("show-as")),
@@ -278,7 +288,7 @@ func updateCmd() plugins.CommandSpec {
 		Path:        "update",
 		Description: "Update an existing event",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(updateInputError),
+		Prepare:     plugins.Check(checkUpdate),
 		Operation:   "update event",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -311,9 +321,6 @@ func updateCmd() plugins.CommandSpec {
 			"agentio gcal update primary abc123def456 --show-as free",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := updateInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -426,7 +433,7 @@ func respondCmd() plugins.CommandSpec {
 		Path:        "respond",
 		Description: "Respond to an event invitation",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(respondInputError),
+		Prepare:     plugins.Parse(respondStatus),
 		Operation:   "respond to event",
 		Arguments: []plugins.ArgumentSpec{
 			{Name: "calendar-id", Description: "Calendar ID", Required: true},
@@ -445,10 +452,7 @@ func respondCmd() plugins.CommandSpec {
 			"agentio gcal respond primary abc123def456 --status tentative",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := respondInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
-			status := strings.ToLower(in.Option("status"))
+			status := plugins.Prepared[string](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -480,24 +484,13 @@ func freebusyCmd() plugins.CommandSpec {
 			`agentio gcal freebusy alice@example.com,bob@example.com \`,
 			`  --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00`,
 		},
+		Prepare: plugins.Parse(freebusyIDs),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--from <datetime>", "--to <datetime>"); err != nil {
-				return nil, err
-			}
-			var ids []string
-			for _, id := range strings.Split(in.Arg("calendar-ids"), ",") {
-				if id = jsvalue.Trim(id); id != "" {
-					ids = append(ids, id)
-				}
-			}
-			if len(ids) == 0 {
-				return nil, run.Fail("INVALID_PARAMS", "At least one calendar ID is required", "")
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.freeBusy(ids, in.Option("from"), in.Option("to")))
+			return plugins.Result(a.freeBusy(plugins.Prepared[[]string](run), in.Option("from"), in.Option("to")))
 		},
 		Format: formatFreeBusy,
 	}

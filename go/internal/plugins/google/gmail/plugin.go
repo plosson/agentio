@@ -85,10 +85,10 @@ func chunkOptions(in plugins.CommandInput) (chunkSize, maxRetries int) {
 	return int(math.Min(math.Max(size, 1), 1000)), int(math.Max(retries, 0))
 }
 
-// dryRun is a NoProfileFor: Bun prints the dry-run plan before
-// getGmailClient, so it needs no profile.
-func dryRun(in plugins.CommandInput) bool {
-	return in.Flag("dry-run")
+// batchInput is what archive and label read before getGmailClient.
+type batchInput struct {
+	ids                   []string
+	chunkSize, maxRetries int
 }
 
 var composeOptions = []plugins.OptionSpec{
@@ -104,11 +104,6 @@ var composeOptions = []plugins.OptionSpec{
 	{Flags: "--reply-to <thread-id>", Description: "Thread ID to reply to (derives to/subject from thread)"},
 	{Flags: "--attachment <path>", Description: "File to attach (repeatable)", Repeatable: true},
 	{Flags: "--inline <cid:path>", Description: "Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)", Repeatable: true},
-}
-
-func checkCompose(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, err := parseSendOptions(in, fail)
-	return err
 }
 
 func listCmd() plugins.CommandSpec {
@@ -205,10 +200,8 @@ func searchCmd() plugins.CommandSpec {
 			"has:attachment, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, older_than:1m.",
 			"Combine with spaces (AND), OR, or - to negate.",
 		},
+		Prepare: plugins.Required("--query <query>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--query <query>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -235,7 +228,7 @@ func sendCmd() plugins.CommandSpec {
 		Path:        "send",
 		Description: "Send an email",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkCompose),
+		Prepare:     plugins.Parse(parseSendOptions),
 		Operation:   "send email",
 		Input:       "text",
 		Options:     composeOptions,
@@ -256,15 +249,11 @@ func sendCmd() plugins.CommandSpec {
 			"  --attachment ./report.pdf --inline chart1:./chart.png",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			o, err := parseSendOptions(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.send(o))
+			return plugins.Result(a.send(plugins.Prepared[*sendOptions](run)))
 		},
 		Format: render,
 	}
@@ -275,7 +264,7 @@ func draftCmd() plugins.CommandSpec {
 		Path:        "draft",
 		Description: "Create an email draft (or update an existing one with [draft-id])",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkCompose),
+		Prepare:     plugins.Parse(parseSendOptions),
 		Operation:   "create draft",
 		OperationFor: func(in plugins.CommandInput) string {
 			if in.Arg("draft-id") != "" {
@@ -303,15 +292,11 @@ func draftCmd() plugins.CommandSpec {
 			`  --subject "Notes" --attachment ./notes.pdf`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			o, err := parseSendOptions(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(a.saveDraft(in.Arg("draft-id"), o))
+			return plugins.Result(a.saveDraft(in.Arg("draft-id"), plugins.Prepared[*sendOptions](run)))
 		},
 		Format: render,
 	}
@@ -366,14 +351,15 @@ func eachID(ids []string, do func(string) error, logFailure func(string, error),
 	return value, nil
 }
 
-// checkIDs is Bun's "No ... IDs provided" check on the arguments or stdin.
-func checkIDs(argName, message string) func(plugins.CommandInput, plugins.FailFunc) error {
-	return func(in plugins.CommandInput, fail plugins.FailFunc) error {
-		if len(collectIDs(args(in, argName), in)) == 0 {
-			return fail("INVALID_PARAMS", message, "Pass IDs as args or pipe via stdin")
-		}
-		return nil
+// readBatch is Bun collectIds with its "No ... IDs provided" check, then
+// parseChunkOpts.
+func readBatch(in plugins.CommandInput, fail plugins.FailFunc, argName, message string) (batchInput, error) {
+	ids := collectIDs(args(in, argName), in)
+	if len(ids) == 0 {
+		return batchInput{}, fail("INVALID_PARAMS", message, "Pass IDs as args or pipe via stdin")
 	}
+	chunkSize, maxRetries := chunkOptions(in)
+	return batchInput{ids: ids, chunkSize: chunkSize, maxRetries: maxRetries}, nil
 }
 
 var chunkOptionSpecs = []plugins.OptionSpec{
@@ -383,17 +369,14 @@ var chunkOptionSpecs = []plugins.OptionSpec{
 }
 
 func archiveCmd() plugins.CommandSpec {
-	check := checkIDs("message-id", "No message IDs provided")
 	return plugins.CommandSpec{
-		Path:         "archive",
-		Description:  "Archive one or more messages (bulk-safe via batchModify)",
-		Access:       "write",
-		AccessFor:    plugins.WriteUnlessInvalid(check),
-		NoProfileFor: dryRun,
-		Operation:    "archive email",
-		Input:        "text",
-		Arguments:    []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s) (or pipe one-per-line via stdin)", Variadic: true}},
-		Options:      chunkOptionSpecs,
+		Path:        "archive",
+		Description: "Archive one or more messages (bulk-safe via batchModify)",
+		Access:      "write",
+		Operation:   "archive email",
+		Input:       "text",
+		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s) (or pipe one-per-line via stdin)", Variadic: true}},
+		Options:     chunkOptionSpecs,
 		Examples: []string{
 			"# archive one message",
 			"agentio gmail archive 18c4f1a2b3d",
@@ -405,16 +388,21 @@ func archiveCmd() plugins.CommandSpec {
 			"# preview the chunk plan without calling the API",
 			`echo "id1 id2 id3" | agentio gmail archive --dry-run`,
 		},
-		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := check(in, run.Fail); err != nil {
-				return nil, err
+		// Bun prints the dry-run plan before getGmailClient: no profile needed.
+		Prepare: func(_ context.Context, in plugins.CommandInput, pre *plugins.PrepareContext) (any, bool, error) {
+			b, err := readBatch(in, pre.Fail, "message-id", "No message IDs provided")
+			if err != nil {
+				return nil, false, err
 			}
-			ids := collectIDs(args(in, "message-id"), in)
-			chunkSize, maxRetries := chunkOptions(in)
 			if in.Flag("dry-run") {
-				return &dryRunPlan{Action: "archive", TotalIDs: len(ids), ChunkSize: chunkSize,
-					Chunks: (len(ids) + chunkSize - 1) / chunkSize, AddLabels: []string{}, RemoveLabels: []string{"INBOX"}}, nil
+				return &dryRunPlan{Action: "archive", TotalIDs: len(b.ids), ChunkSize: b.chunkSize,
+					Chunks: (len(b.ids) + b.chunkSize - 1) / b.chunkSize, AddLabels: []string{}, RemoveLabels: []string{"INBOX"}}, true, nil
 			}
+			return b, false, nil
+		},
+		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+			b := plugins.Prepared[batchInput](run)
+			ids, chunkSize, maxRetries := b.ids, b.chunkSize, b.maxRetries
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -455,7 +443,7 @@ func markCmd() plugins.CommandSpec {
 		Path:        "mark",
 		Description: "Mark one or more messages as read or unread",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkMark),
+		Prepare:     plugins.Check(checkMark),
 		Operation:   "mark email",
 		Arguments:   []plugins.ArgumentSpec{{Name: "message-id", Description: "Message ID(s)", Required: true, Variadic: true}},
 		Options: []plugins.OptionSpec{
@@ -469,9 +457,6 @@ func markCmd() plugins.CommandSpec {
 			"agentio gmail mark 18c4f1a2b3d 18c4f1a2b3e --unread",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkMark(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -696,20 +681,21 @@ func (c filterCriteria) empty() bool {
 	return c == filterCriteria{}
 }
 
-// checkFilterCreate is the Bun filters create input checks, before its write check.
-func checkFilterCreate(in plugins.CommandInput, fail plugins.FailFunc) error {
+// filterCreateCriteria is the Bun filters create input checks, before
+// getGmailClient; it returns the criteria.
+func filterCreateCriteria(in plugins.CommandInput, fail plugins.FailFunc) (filterCriteria, error) {
 	c, err := filterCriteriaFrom(in, fail)
 	if err != nil {
-		return err
+		return c, err
 	}
 	if c.empty() {
-		return fail("INVALID_PARAMS", "At least one criterion is required",
+		return c, fail("INVALID_PARAMS", "At least one criterion is required",
 			"Use --from, --to, --subject, --query, --negated-query, --has-attachment, --exclude-chats, or --size")
 	}
 	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 && in.Option("forward") == "" {
-		return fail("INVALID_PARAMS", "At least one action is required", "Use --apply, --remove, or --forward")
+		return c, fail("INVALID_PARAMS", "At least one action is required", "Use --apply, --remove, or --forward")
 	}
-	return nil
+	return c, nil
 }
 
 func filtersCreateCmd() plugins.CommandSpec {
@@ -717,7 +703,7 @@ func filtersCreateCmd() plugins.CommandSpec {
 		Path:        "filters create",
 		Description: "Create a Gmail filter",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkFilterCreate),
+		Prepare:     plugins.Parse(filterCreateCriteria),
 		Operation:   "create filter",
 		Options: []plugins.OptionSpec{
 			{Flags: "--from <email>", Description: "Match sender"},
@@ -748,10 +734,7 @@ func filtersCreateCmd() plugins.CommandSpec {
 			"agentio gmail filters create --size 5000000 --size-comparison larger --apply Large",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkFilterCreate(in, run.Fail); err != nil {
-				return nil, err
-			}
-			criteria, _ := filterCriteriaFrom(in, run.Fail)
+			criteria := plugins.Prepared[filterCriteria](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -811,23 +794,35 @@ func filtersDeleteCmd() plugins.CommandSpec {
 	}
 }
 
-func checkLabel(in plugins.CommandInput, fail plugins.FailFunc) error {
-	if len(in.List("apply")) == 0 && len(in.List("remove")) == 0 {
-		return fail("INVALID_PARAMS", "Specify at least one --apply or --remove", "")
+// prepareLabel is the label action before getGmailClient, the dry run included.
+func prepareLabel(_ context.Context, in plugins.CommandInput, pre *plugins.PrepareContext) (any, bool, error) {
+	apply, remove := in.List("apply"), in.List("remove")
+	if len(apply) == 0 && len(remove) == 0 {
+		return nil, false, pre.Fail("INVALID_PARAMS", "Specify at least one --apply or --remove", "")
 	}
-	return checkIDs("id", "No IDs provided")(in, fail)
+	b, err := readBatch(in, pre.Fail, "id", "No IDs provided")
+	if err != nil {
+		return nil, false, err
+	}
+	if !in.Flag("dry-run") {
+		return b, false, nil
+	}
+	if in.Flag("thread") {
+		pre.Log(fmt.Sprintf("would expand %d thread(s) to messages; chunk count below assumes 1 message/thread", len(b.ids)))
+	}
+	return &dryRunPlan{Action: "label", TotalIDs: len(b.ids), ChunkSize: b.chunkSize,
+		Chunks: max(1, (len(b.ids)+b.chunkSize-1)/b.chunkSize), AddLabels: apply, RemoveLabels: remove}, true, nil
 }
 
 func labelCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
-		Path:         "label",
-		Description:  "Apply and/or remove labels on messages or threads (bulk-safe via batchModify)",
-		Access:       "write",
-		AccessFor:    plugins.WriteUnlessInvalid(checkLabel),
-		NoProfileFor: dryRun,
-		Operation:    "modify labels",
-		Input:        "text",
-		Arguments:    []plugins.ArgumentSpec{{Name: "id", Description: "Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin", Variadic: true}},
+		Path:        "label",
+		Description: "Apply and/or remove labels on messages or threads (bulk-safe via batchModify)",
+		Access:      "write",
+		Prepare:     prepareLabel,
+		Operation:   "modify labels",
+		Input:       "text",
+		Arguments:   []plugins.ArgumentSpec{{Name: "id", Description: "Message ID(s) (or thread ID(s) with --thread); pipe one-per-line via stdin", Variadic: true}},
 		Options: append([]plugins.OptionSpec{
 			{Flags: "--apply <name>", Description: "Label to apply (name or ID, repeatable)", Repeatable: true},
 			{Flags: "--remove <name>", Description: "Label to remove (name or ID, repeatable)", Repeatable: true},
@@ -849,20 +844,10 @@ func labelCmd() plugins.CommandSpec {
 			`echo "id1 id2 id3" | agentio gmail label --apply receipts --dry-run`,
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := checkLabel(in, run.Fail); err != nil {
-				return nil, err
-			}
+			b := plugins.Prepared[batchInput](run)
 			apply, remove := in.List("apply"), in.List("remove")
-			ids := collectIDs(args(in, "id"), in)
+			ids, chunkSize, maxRetries := b.ids, b.chunkSize, b.maxRetries
 			isThread := in.Flag("thread")
-			chunkSize, maxRetries := chunkOptions(in)
-			if in.Flag("dry-run") {
-				if isThread {
-					run.Log(fmt.Sprintf("would expand %d thread(s) to messages; chunk count below assumes 1 message/thread", len(ids)))
-				}
-				return &dryRunPlan{Action: "label", TotalIDs: len(ids), ChunkSize: chunkSize,
-					Chunks: max(1, (len(ids)+chunkSize-1)/chunkSize), AddLabels: apply, RemoveLabels: remove}, nil
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

@@ -74,29 +74,41 @@ func queryCmd() plugins.CommandSpec {
 			"# run against a specific profile",
 			`agentio sql query --profile prod "SELECT count(*) FROM orders"`,
 		},
-		Run:    runQuery,
-		Format: formatResult,
+		Prepare: plugins.Parse(readQuery),
+		Run:     runQuery,
+		Format:  formatResult,
 	}
 }
 
-func runQuery(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+// queryInput is the query and --limit, read before getSqlClient as in Bun.
+type queryInput struct {
+	text  string
+	limit float64
+}
+
+func readQuery(in plugins.CommandInput, fail plugins.FailFunc) (queryInput, error) {
 	query := in.Arg("query")
 	if query == "" {
 		query = plugins.Stdin(in)
 	}
 	if query == "" {
-		return nil, run.Fail("INVALID_PARAMS", "Query is required. Provide as argument or pipe via stdin.", "")
+		return queryInput{}, fail("INVALID_PARAMS", "Query is required. Provide as argument or pipe via stdin.", "")
 	}
 	limit := jsvalue.ParseInt(in.Option("limit"))
 	if math.IsNaN(limit) || limit <= 0 {
-		return nil, run.Fail("INVALID_PARAMS", "Limit must be a positive number", "")
+		return queryInput{}, fail("INVALID_PARAMS", "Limit must be a positive number", "")
 	}
+	return queryInput{text: query, limit: limit}, nil
+}
+
+func runQuery(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
+	q := plugins.Prepared[queryInput](run)
 	c, err := newClient(run.Credentials)
 	if err != nil {
 		return nil, err
 	}
 	defer c.close()
-	return plugins.Result(c.query(ctx, query, limit, run.ReadOnly, run.Fail))
+	return plugins.Result(c.query(ctx, q.text, q.limit, run.ReadOnly, run.Fail))
 }
 
 // setup is sqlProfileAdd: the URL is checked with `SELECT 1` before the

@@ -33,18 +33,12 @@ func New() *plugins.Plugin {
 
 var idArg = plugins.ArgumentSpec{Name: "id", Description: "Script project ID", Required: true}
 
-// createInputError is Commander's requiredOption on --title, which Bun
-// reports before enforceWriteAccess (plugins.WriteUnlessInvalid).
-func createInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	return plugins.RequireOptions(in, fail, "--title <title>")
-}
-
 func createCmd() plugins.CommandSpec {
 	return plugins.CommandSpec{
 		Path:        "create",
 		Description: "Create a new Apps Script project (standalone or container-bound)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(createInputError),
+		Prepare:     plugins.Required("--title <title>"),
 		Operation:   "create script project",
 		Options: []plugins.OptionSpec{
 			{Flags: "--title <title>", Description: "Script project title"},
@@ -61,9 +55,6 @@ func createCmd() plugins.CommandSpec {
 			"The --parent ID is the container's Drive file ID (Sheet/Doc/Form/Slides).",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := createInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -181,12 +172,9 @@ func pullCmd() plugins.CommandSpec {
 			"",
 			"Writes Code.gs, appsscript.json, *.html files, plus .clasp.json with the scriptId.",
 		},
+		Prepare: plugins.Parse(preparePull),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			id := in.Arg("id")
-			root, claspPath, err := preparePull(in.Arg("dir"), id, in.Flag("force"), run.Fail)
-			if err != nil {
-				return nil, err
-			}
+			id, target := in.Arg("id"), plugins.Prepared[pullTarget](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -195,7 +183,7 @@ func pullCmd() plugins.CommandSpec {
 			if err != nil {
 				return nil, err
 			}
-			return plugins.Result(writePull(root, claspPath, id, files))
+			return plugins.Result(writePull(target.root, target.claspPath, id, files))
 		},
 		Format: formatPull,
 	}
@@ -206,7 +194,7 @@ func pushCmd() plugins.CommandSpec {
 		Path:        "push",
 		Description: "Upload all .gs/.html/appsscript.json files in a directory",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(pushInputError),
+		Prepare:     plugins.Parse(localProject),
 		Operation:   "push script content",
 		Arguments:   []plugins.ArgumentSpec{{Name: "dir", Description: "Local directory (default: cwd)"}},
 		Options: []plugins.OptionSpec{
@@ -223,19 +211,16 @@ func pushCmd() plugins.CommandSpec {
 			"Hidden files and .clasp.json are skipped. The push fails if appsscript.json is missing.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			scriptID, files, err := localProject(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
+			local := plugins.Prepared[localFiles](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			updated, err := a.updateContent(scriptID, files)
+			updated, err := a.updateContent(local.scriptID, local.files)
 			if err != nil {
 				return nil, err
 			}
-			return toPushed(scriptID, updated), nil
+			return toPushed(local.scriptID, updated), nil
 		},
 		Format: formatPush,
 	}
@@ -295,7 +280,7 @@ func putCmd() plugins.CommandSpec {
 		Path:        "put",
 		Description: "Replace or add a single script file (--source, --from <path>, or - for stdin)",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(putInputError),
+		Prepare:     plugins.Parse(putSource),
 		Operation:   "update script content",
 		Input:       "text",
 		Arguments: []plugins.ArgumentSpec{
@@ -321,10 +306,7 @@ func putCmd() plugins.CommandSpec {
 			"file already exists in the project, its existing type is reused.",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			source, err := putSource(in, run.Fail)
-			if err != nil {
-				return nil, err
-			}
+			source := plugins.Prepared[string](run)
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

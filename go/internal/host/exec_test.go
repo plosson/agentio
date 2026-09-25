@@ -40,6 +40,8 @@ func vaultUp(t *testing.T) *plugins.Registry {
 	return reg(t)
 }
 
+// Bun: getClient, then enforceWriteAccess, then the handler. The order
+// against the refresh is TestReadOnlyRefusalComesAfterTheRefresh.
 func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 	r := vaultUp(t)
 	if err := profile.Save("acme", "ada", map[string]any{
@@ -62,7 +64,7 @@ func TestWriteGateRunsBeforeTheHandler(t *testing.T) {
 	}
 	creds, _ := vault.Load()
 	if creds.Credentials["acme"]["ada"]["accessToken"] != "old" {
-		t.Fatal("refused write still refreshed the token")
+		t.Fatal("refused write changed a fresh token")
 	}
 	// Omitted access is read, so a read-only profile can still run it.
 	who := command(p, "whoami")
@@ -439,83 +441,6 @@ func TestOperationForNamesTheRefusalFromTheInput(t *testing.T) {
 		if !ok || ce.Code != clierr.PermissionDenied || ce.Message != want || ran != 0 {
 			t.Fatalf("id %q: %#v ran %d", id, err, ran)
 		}
-	}
-}
-
-// Bun gmail archive --dry-run prints its plan before getValidTokens: with no
-// profile, an ambiguous or unknown --profile, or a token that cannot refresh,
-// the plan still prints and nothing is refreshed.
-func TestNoProfileForRunsWithoutAProfile(t *testing.T) {
-	testbox.Isolate(t)
-	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
-	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
-		t.Fatal(err)
-	}
-	refreshed := 0
-	var seen []*plugins.RunContext
-	r, err := plugins.NewRegistry(&plugins.Plugin{
-		APIVersion: plugins.APIVersion, ID: "desk", DisplayName: "Desk", Description: "demo",
-		Profile: &plugins.ProfileSpec{
-			Setup: func(context.Context, plugins.SetupOptions, *plugins.SetupContext) (*plugins.SetupResult, error) {
-				return nil, nil
-			},
-			Validate: func(context.Context, *plugins.RunContext) (plugins.ValidationResult, error) {
-				return plugins.ValidationResult{Valid: true}, nil
-			},
-			Refresh: &plugins.RefreshSpec{
-				SecretFields: []string{"token"},
-				IsStale:      func(map[string]any, int64, int64) bool { return true },
-				Run: func(context.Context, map[string]any) (map[string]any, error) {
-					refreshed++
-					return nil, fmt.Errorf("offline")
-				},
-			},
-		},
-		Commands: []plugins.CommandSpec{{
-			Path: "archive", Description: "archive", Access: "write",
-			NoProfileFor: func(in plugins.CommandInput) bool { return TruthyOption(in.Options["dry-run"]) },
-			Examples:     []string{"agentio desk archive"},
-			Run: func(_ context.Context, _ plugins.CommandInput, run *plugins.RunContext) (any, error) {
-				seen = append(seen, run)
-				return "plan", nil
-			},
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := r.Find("desk")
-	dry := func(profileFlag string) {
-		t.Helper()
-		opts := map[string]any{"dry-run": true}
-		if profileFlag != "" {
-			opts["profile"] = profileFlag
-		}
-		res, err := Execute(context.Background(), r, p, command(p, "archive"), plugins.CommandInput{Options: opts})
-		if err != nil || res != "plan" {
-			t.Fatalf("dry run --profile %q: %#v %v", profileFlag, res, err)
-		}
-		last := seen[len(seen)-1]
-		if last.Profile != "" || len(last.Credentials) != 0 || last.ReadOnly {
-			t.Fatalf("dry run got a profile: %#v", last)
-		}
-	}
-	dry("")
-	dry("nope")
-	for _, name := range []string{"a", "b"} {
-		if err := profile.Save("desk", name, map[string]any{"token": "t"}, profile.SaveOptions{ReadOnlySet: true, ReadOnly: true}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	dry("")
-	dry("a")
-	if refreshed != 0 {
-		t.Fatalf("dry run refreshed %d times", refreshed)
-	}
-	// Without the flag the host still resolves the profile first.
-	_, err = Execute(context.Background(), r, p, command(p, "archive"), plugins.CommandInput{Options: map[string]any{}})
-	if _, ok := err.(*clierr.Error); !ok || len(seen) != 4 {
-		t.Fatalf("real run: %#v ran %d", err, len(seen))
 	}
 }
 

@@ -116,26 +116,51 @@ func TestRequireOptionsReportsTheFirstMissingInDeclarationOrder(t *testing.T) {
 	}
 }
 
-// A command that validates before enforceWriteAccess answers a read-only
-// profile with its input error: WriteUnlessInvalid reads "read" for that
-// input so the host lets Run report it.
-func TestWriteUnlessInvalidReadsOnlyForRejectedInput(t *testing.T) {
-	calls := 0
-	access := WriteUnlessInvalid(func(in CommandInput, fail func(ErrorCode, string, string) error) error {
-		calls++
-		if in.Options["to"] == "" {
-			return fail("INVALID_PARAMS", "--to is required", "")
+// Parse, Check and Required are Prepare adapters: a failure carries no
+// value and never stops the command early; Prepared reads the value back as
+// the type Parse produced, and a missing or other-typed value as its zero.
+func TestPrepareAdapters(t *testing.T) {
+	var failed []string
+	pre := &PrepareContext{Fail: func(code ErrorCode, m, s string) error {
+		failed = append(failed, code+"|"+m)
+		return errors.New(m)
+	}}
+	parse := Parse(func(in CommandInput, fail FailFunc) (int, error) {
+		if in.Option("n") == "" {
+			return 7, fail("INVALID_PARAMS", "n is required", "")
 		}
-		return nil
+		return 42, nil
 	})
-	if got := access(CommandInput{Options: map[string]any{"to": ""}}); got != "read" {
-		t.Fatalf("invalid input: %q", got)
+	if v, done, err := parse(context.Background(), CommandInput{}, pre); v != nil || done || err == nil {
+		t.Fatalf("rejected: %#v %v %v", v, done, err)
 	}
-	if got := access(CommandInput{Options: map[string]any{"to": "a@example.com"}}); got != "write" {
-		t.Fatalf("valid input: %q", got)
+	v, done, err := parse(context.Background(), CommandInput{Options: map[string]any{"n": "1"}}, pre)
+	if v != 42 || done || err != nil {
+		t.Fatalf("accepted: %#v %v %v", v, done, err)
 	}
-	if calls != 2 {
-		t.Fatalf("check ran %d times", calls)
+	if got := Prepared[int](&RunContext{Prepared: v}); got != 42 {
+		t.Fatalf("Prepared = %d", got)
+	}
+	if got := Prepared[string](&RunContext{Prepared: v}); got != "" {
+		t.Fatalf("other type = %q", got)
+	}
+	if got := Prepared[[]string](&RunContext{}); got != nil {
+		t.Fatalf("no value = %#v", got)
+	}
+	check := Check(func(in CommandInput, fail FailFunc) error { return fail("INVALID_PARAMS", "no", "") })
+	if v, done, err := check(context.Background(), CommandInput{}, pre); v != nil || done || err == nil {
+		t.Fatalf("check: %#v %v %v", v, done, err)
+	}
+	req := Required("--query <q>")
+	if _, _, err := req(context.Background(), CommandInput{Options: map[string]any{"query": ""}}, pre); err != nil {
+		t.Fatalf("given empty is present: %v", err)
+	}
+	if _, _, err := req(context.Background(), CommandInput{Options: map[string]any{}}, pre); err == nil {
+		t.Fatal("absent option passed")
+	}
+	want := "INVALID_PARAMS|n is required,INVALID_PARAMS|no,INVALID_PARAMS|required option '--query <q>' not specified"
+	if strings.Join(failed, ",") != want {
+		t.Fatalf("failures %v", failed)
 	}
 }
 
@@ -167,7 +192,7 @@ func TestJSONPayloadMatchesBun(t *testing.T) {
 	var got []string
 	fail := func(code ErrorCode, m, s string) error {
 		got = append(got, code+"|"+m+"|"+s)
-		return errInvalid
+		return errors.New(m)
 	}
 	ordered := write("ordered.json", "\n{\"z\":1,\"a\":[\"<&>\",1.50]}\n")
 	v, err := JSONPayload(CommandInput{}, ordered, fail, "hint")

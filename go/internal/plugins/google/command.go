@@ -1,9 +1,8 @@
 package google
 
 import (
-	"os"
-
 	"github.com/plosson/agentio/go/internal/jsvalue"
+	"github.com/plosson/agentio/go/internal/nodefs"
 	"github.com/plosson/agentio/go/internal/plugins"
 )
 
@@ -17,7 +16,7 @@ func EmailListInfo(creds map[string]any) string {
 }
 
 // BatchRequests is the input the Bun batchUpdate escape hatches (gdocs,
-// gsheets, gslides) read before they resolve the profile: exactly one of
+// gsheets, gslides) read before they resolve the profile (their Prepare): exactly one of
 // --requests-json and --file, holding a JSON array, kept in order. A given
 // empty --requests-json is still the source (Bun `requestsJson ?? readFile`).
 func BatchRequests(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error) {
@@ -31,7 +30,7 @@ func BatchRequests(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error
 	}
 	source := []byte(requestsJSON)
 	if !inline {
-		raw, err := os.ReadFile(file)
+		raw, err := nodefs.ReadFile(file)
 		if err != nil {
 			return nil, err
 		}
@@ -46,11 +45,4 @@ func BatchRequests(in plugins.CommandInput, fail plugins.FailFunc) ([]any, error
 		return nil, fail("INVALID_PARAMS", "Input must be a JSON array of Request objects", "")
 	}
 	return requests, nil
-}
-
-// BatchInputError is BatchRequests' rejection, for plugins.WriteUnlessInvalid: Bun
-// reports bad input before enforceWriteAccess.
-func BatchInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, err := BatchRequests(in, fail)
-	return err
 }

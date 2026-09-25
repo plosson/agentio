@@ -163,10 +163,8 @@ func searchCmd() plugins.CommandSpec {
 			"agentio dropbox search --query 2026 --filename-only --limit 50",
 			"# Newly uploaded files can take a few minutes to become searchable.",
 		},
+		Prepare: plugins.Required("--query <text>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
-				return nil, err
-			}
 			limit, err := parseLimit(run, in.Option("limit"))
 			if err != nil {
 				return nil, err

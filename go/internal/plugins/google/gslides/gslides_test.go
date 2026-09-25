@@ -46,13 +46,13 @@ func fresh() map[string]any { return storedCreds(time.Now().Add(time.Hour).UnixM
 func TestCommandTableMatchesBun(t *testing.T) {
 	type row struct {
 		args, flags, access, op string
-		format, accessFor       bool
+		format, prepare         bool
 	}
 	want := map[string]row{
 		"list":     {"", "--limit <n>=10 --query <query>", "read", "", true, false},
 		"metadata": {"<id-or-url>", "", "read", "", true, false},
 		"get":      {"<id-or-url>", "--slide <n>", "read", "", true, false},
-		"export":   {"<id-or-url>", "--output <path> --format <fmt>=pptx", "read", "", false, false},
+		"export":   {"<id-or-url>", "--output <path> --format <fmt>=pptx", "read", "", false, true},
 		"create":   {"<title>", "", "write", "create presentation", true, false},
 		"copy":     {"<id-or-url> <title>", "--parent <folder-id>", "write", "copy presentation", true, false},
 		"batch":    {"<id-or-url>", "--requests-json <json> --file <path>", "write", "execute batch update", true, true},
@@ -91,7 +91,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 			flags = append(flags, f)
 		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Format != nil, c.AccessFor != nil}
+		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Format != nil, c.Prepare != nil}
 		if got != w {
 			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
 		}

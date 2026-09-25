@@ -48,7 +48,7 @@ func fresh() map[string]any { return storedCreds(time.Now().Add(time.Hour).UnixM
 func TestCommandTableMatchesBun(t *testing.T) {
 	type row struct {
 		args, flags, access, op string
-		format, accessFor       bool
+		format, prepare         bool
 	}
 	want := map[string]row{
 		"list":     {"", "--limit <n>=10 --query <query>", "read", "", true, false},
@@ -62,7 +62,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"metadata": {"<spreadsheet-id-or-url>", "", "read", "", true, false},
 		"create":   {"<title>", "--sheets <names>", "write", "create spreadsheet", true, false},
 		"copy":     {"<spreadsheet-id-or-url> <title>", "--parent <folder-id>", "write", "copy spreadsheet", true, false},
-		"export":   {"<spreadsheet-id-or-url>", "--output <path> --format <fmt>=xlsx", "read", "", false, false},
+		"export":   {"<spreadsheet-id-or-url>", "--output <path> --format <fmt>=xlsx", "read", "", false, true},
 	}
 	p := New()
 	if p.ID != "gsheets" || p.DisplayName != "Google Sheets" || p.Description != "Use when interacting with Google Sheets via the agentio CLI." {
@@ -102,7 +102,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 			flags = append(flags, f)
 		}
-		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Format != nil, c.AccessFor != nil}
+		got := row{strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Format != nil, c.Prepare != nil}
 		if got != w {
 			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
 		}

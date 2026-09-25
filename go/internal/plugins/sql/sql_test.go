@@ -569,7 +569,8 @@ func TestQueryInputErrorsMatchBun(t *testing.T) {
 		if c.in.Options == nil {
 			c.in.Options = map[string]any{"limit": "100"}
 		}
-		res, err := runQuery(context.Background(), c.in, run)
+		spec := queryCmd()
+		res, err := host.Invoke(context.Background(), &spec, c.in, run)
 		if c.msg != "" {
 			if ce := cliErr(t, err); res != nil || ce.Code != clierr.InvalidParams || ce.Message != c.msg || ce.Suggestion != "" {
 				t.Errorf("%#v: %#v %#v", c.in, res, ce)

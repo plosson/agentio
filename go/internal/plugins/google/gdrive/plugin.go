@@ -255,10 +255,8 @@ func searchCmd() plugins.CommandSpec {
 			"# restrict to a folder, return more results",
 			`agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50`,
 		},
+		Prepare: plugins.Required("--query <text>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--query <text>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -292,10 +290,8 @@ func downloadCmd() plugins.CommandSpec {
 			"Export formats: Docs -> pdf|docx|odt|txt|html|rtf, Sheets -> xlsx|csv|pdf|ods|tsv,",
 			"Slides -> pptx|pdf|odp|txt, Drawing -> pdf|png|jpeg|svg.",
 		},
+		Prepare: plugins.Required("--output <path>"),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := plugins.RequireOptions(in, run.Fail, "--output <path>"); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
@@ -536,24 +532,24 @@ func shareTarget(in plugins.CommandInput) (kind string, count int) {
 	return kind, count
 }
 
-// shareInputError is the checks Bun makes before it resolves the profile.
-func shareInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, count := shareTarget(in)
+// shareKind is Bun's checks before getGDriveClient; it returns the target kind.
+func shareKind(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
+	kind, count := shareTarget(in)
 	if count == 0 {
-		return fail("INVALID_PARAMS", "Specify one of --anyone, --user, --domain, or --group", "")
+		return "", fail("INVALID_PARAMS", "Specify one of --anyone, --user, --domain, or --group", "")
 	}
 	if count > 1 {
-		return fail("INVALID_PARAMS", "--anyone, --user, --domain, and --group are mutually exclusive", "")
+		return "", fail("INVALID_PARAMS", "--anyone, --user, --domain, and --group are mutually exclusive", "")
 	}
 	if in.Flag("allow-discovery") && !in.Flag("anyone") {
-		return fail("INVALID_PARAMS", "--allow-discovery only applies with --anyone", "")
+		return "", fail("INVALID_PARAMS", "--allow-discovery only applies with --anyone", "")
 	}
 	switch role := in.Option("role"); role {
 	case "reader", "commenter", "writer":
+		return kind, nil
 	default:
-		return fail("INVALID_PARAMS", "Invalid role: "+role, "Use reader, commenter, or writer")
+		return "", fail("INVALID_PARAMS", "Invalid role: "+role, "Use reader, commenter, or writer")
 	}
-	return nil
 }
 
 var shareFileIDPatterns = []*regexp.Regexp{
@@ -577,7 +573,7 @@ func shareCmd() plugins.CommandSpec {
 		Path:        "share",
 		Description: "Share a file by creating a permission",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(shareInputError),
+		Prepare:     plugins.Parse(shareKind),
 		Operation:   "share file",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -603,14 +599,11 @@ func shareCmd() plugins.CommandSpec {
 			"agentio gdrive share 1A2bCdEf... --anyone --allow-discovery",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := shareInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err
 			}
-			kind, _ := shareTarget(in)
+			kind := plugins.Prepared[string](run)
 			email := in.Option("user")
 			if email == "" {
 				email = in.Option("group")
@@ -630,8 +623,8 @@ func shareCmd() plugins.CommandSpec {
 	}
 }
 
-// unshareInputError is the checks Bun makes before it resolves the profile.
-func unshareInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
+// checkUnshare is Bun's checks before getGDriveClient.
+func checkUnshare(in plugins.CommandInput, fail plugins.FailFunc) error {
 	byID, anyone := in.Option("permission-id") != "", in.Flag("anyone")
 	if !byID && !anyone {
 		return fail("INVALID_PARAMS", "Specify --permission-id or --anyone", "")
@@ -647,7 +640,7 @@ func unshareCmd() plugins.CommandSpec {
 		Path:        "unshare",
 		Description: "Remove a permission from a file",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(unshareInputError),
+		Prepare:     plugins.Check(checkUnshare),
 		Operation:   "remove permission",
 		Arguments:   []plugins.ArgumentSpec{{Name: "file-id-or-url", Description: "File ID or URL", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -661,9 +654,6 @@ func unshareCmd() plugins.CommandSpec {
 			"agentio gdrive unshare 1A2bCdEf... --permission-id AKioiA...",
 		},
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			if err := unshareInputError(in, run.Fail); err != nil {
-				return nil, err
-			}
 			a, err := apiFrom(ctx, run)
 			if err != nil {
 				return nil, err

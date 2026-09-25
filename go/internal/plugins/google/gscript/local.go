@@ -82,29 +82,32 @@ func claspJSON(scriptID string) []byte {
 	return append(jsvalue.StringifyIndent(o), '\n')
 }
 
+// pullTarget is the directory pull writes into and its .clasp.json path.
+type pullTarget struct{ root, claspPath string }
+
 // preparePull is what Bun pull does before it resolves the profile: create
 // the directory and refuse one whose .clasp.json names another script unless
-// force is set. It returns the directory and its .clasp.json path.
-func preparePull(dir, scriptID string, force bool, fail plugins.FailFunc) (string, string, error) {
-	root, err := targetDir(dir)
+// --force is set.
+func preparePull(in plugins.CommandInput, fail plugins.FailFunc) (pullTarget, error) {
+	root, err := targetDir(in.Arg("dir"))
 	if err != nil {
-		return "", "", err
+		return pullTarget{}, err
 	}
 	if err := nodefs.MkdirAll(root); err != nil {
-		return "", "", err
+		return pullTarget{}, err
 	}
 	claspPath := filepath.Join(root, claspFile)
-	if exists(claspPath) && !force {
+	if exists(claspPath) && !in.Flag("force") {
 		existing, err := claspScriptID(claspPath, "existing")
 		if err != nil {
-			return "", "", err
+			return pullTarget{}, err
 		}
-		if s, ok := existing.(string); jsvalue.Truthy(existing) && (!ok || s != scriptID) {
-			return "", "", fail("INVALID_PARAMS", claspPath+" already points to scriptId "+jsvalue.String(existing),
+		if s, ok := existing.(string); jsvalue.Truthy(existing) && (!ok || s != in.Arg("id")) {
+			return pullTarget{}, fail("INVALID_PARAMS", claspPath+" already points to scriptId "+jsvalue.String(existing),
 				"Pass --force to overwrite, or pull into a different directory")
 		}
 	}
-	return root, claspPath, nil
+	return pullTarget{root: root, claspPath: claspPath}, nil
 }
 
 // writePull writes each file under root with its local name, then .clasp.json.
@@ -123,32 +126,38 @@ func writePull(root, claspPath, scriptID string, files []file) (*pulled, error) 
 	return out, nil
 }
 
+// localFiles is a local script directory as push uploads it.
+type localFiles struct {
+	scriptID string
+	files    []file
+}
+
 // localProject is what Bun push reads before it resolves the profile: the
 // script id (--id, else .clasp.json) and every .gs, .html and .json file of
 // the directory, in directory order, hidden files skipped.
-func localProject(in plugins.CommandInput, fail plugins.FailFunc) (string, []file, error) {
+func localProject(in plugins.CommandInput, fail plugins.FailFunc) (localFiles, error) {
 	root, err := targetDir(in.Arg("dir"))
 	if err != nil {
-		return "", nil, err
+		return localFiles{}, err
 	}
 	scriptID := in.Option("id")
 	if scriptID == "" {
 		claspPath := filepath.Join(root, claspFile)
 		if !exists(claspPath) {
-			return "", nil, fail("INVALID_PARAMS", "No .clasp.json found in "+root, "Pass --id <scriptId>, or run `agentio gscript pull` first")
+			return localFiles{}, fail("INVALID_PARAMS", "No .clasp.json found in "+root, "Pass --id <scriptId>, or run `agentio gscript pull` first")
 		}
 		id, err := claspScriptID(claspPath, "config")
 		if err != nil {
-			return "", nil, err
+			return localFiles{}, err
 		}
 		if !jsvalue.Truthy(id) {
-			return "", nil, fail("INVALID_PARAMS", ".clasp.json missing scriptId field", "")
+			return localFiles{}, fail("INVALID_PARAMS", ".clasp.json missing scriptId field", "")
 		}
 		scriptID = jsvalue.String(id)
 	}
 	names, err := readdirNames(root)
 	if err != nil {
-		return "", nil, err
+		return localFiles{}, err
 	}
 	files := []file{}
 	manifest := false
@@ -159,7 +168,7 @@ func localProject(in plugins.CommandInput, fail plugins.FailFunc) (string, []fil
 		fullPath := filepath.Join(root, name)
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			return "", nil, nodefs.NodeFSError("stat", fullPath, err)
+			return localFiles{}, nodefs.NodeFSError("stat", fullPath, err)
 		}
 		if !info.Mode().IsRegular() {
 			continue
@@ -171,7 +180,7 @@ func localProject(in plugins.CommandInput, fail plugins.FailFunc) (string, []fil
 		}
 		raw, err := nodefs.ReadFile(fullPath)
 		if err != nil {
-			return "", nil, err
+			return localFiles{}, err
 		}
 		// basename(entry, ext) with the lowercased ext: "Code.GS" keeps its suffix.
 		bare := strings.TrimSuffix(name, ext)
@@ -179,10 +188,10 @@ func localProject(in plugins.CommandInput, fail plugins.FailFunc) (string, []fil
 		manifest = manifest || (typ == "JSON" && bare == "appsscript")
 	}
 	if !manifest {
-		return "", nil, fail("INVALID_PARAMS", "Apps Script API requires an appsscript.json manifest in "+root,
+		return localFiles{}, fail("INVALID_PARAMS", "Apps Script API requires an appsscript.json manifest in "+root,
 			"Pull the project first, or create appsscript.json manually")
 	}
-	return scriptID, files, nil
+	return localFiles{scriptID: scriptID, files: files}, nil
 }
 
 // readdirNames is fs.promises.readdir: the entries in the order the OS
@@ -223,16 +232,4 @@ func putSource(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
 		return "", fail("INVALID_PARAMS", "No content provided", "Pass --source <text>, --from <path>, or pipe content via stdin")
 	}
 	return plugins.Stdin(in), nil
-}
-
-// pushInputError and putInputError are the input rejections Bun reports
-// before enforceWriteAccess (plugins.WriteUnlessInvalid).
-func pushInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, _, err := localProject(in, fail)
-	return err
-}
-
-func putInputError(in plugins.CommandInput, fail plugins.FailFunc) error {
-	_, err := putSource(in, fail)
-	return err
 }

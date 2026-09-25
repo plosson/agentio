@@ -42,7 +42,7 @@ func storedCreds(expiry int64) map[string]any {
 func TestCommandTableMatchesBun(t *testing.T) {
 	type row struct {
 		aliases, args, flags, access, op, input string
-		def, accessFor                          bool
+		def, prepare                            bool
 	}
 	want := map[string]row{
 		"lists list":   {"", "", "--limit <n>=100", "read", "", "", true, false},
@@ -101,7 +101,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 			}
 			flags = append(flags, f)
 		}
-		got := row{strings.Join(c.Aliases, ","), strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input, c.Default, c.AccessFor != nil}
+		got := row{strings.Join(c.Aliases, ","), strings.Join(args, " "), strings.Join(flags, " "), c.Access, c.Operation, c.Input, c.Default, c.Prepare != nil}
 		if got != w {
 			t.Errorf("%s:\n got %#v\nwant %#v", c.Path, got, w)
 		}

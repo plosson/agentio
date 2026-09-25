@@ -46,12 +46,12 @@ var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // requireIsoDate is Bun requireIsoDate: an absent option is no filter, any
 // given value (even "") must be YYYY-MM-DD.
-func requireIsoDate(run *plugins.RunContext, in plugins.CommandInput, name string) (string, error) {
+func requireIsoDate(in plugins.CommandInput, fail plugins.FailFunc, name string) (string, error) {
 	value, given := in.LookupOption(name)
 	if !given || isoDate.MatchString(value) {
 		return value, nil
 	}
-	return "", run.Fail("INVALID_PARAMS", "--"+name+" must be YYYY-MM-DD, got: "+value, "")
+	return "", fail("INVALID_PARAMS", "--"+name+" must be YYYY-MM-DD, got: "+value, "")
 }
 
 func containsInsensitive(haystack *string, needle string) bool {
@@ -117,16 +117,15 @@ func peppolListCmd() plugins.CommandSpec {
 			"# machine-readable",
 			"agentio falco peppol list --format json",
 		},
+		Prepare: plugins.Parse(func(in plugins.CommandInput, fail plugins.FailFunc) (string, error) {
+			return requireIsoDate(in, fail, "since")
+		}),
 		Run: func(ctx context.Context, in plugins.CommandInput, run *plugins.RunContext) (any, error) {
-			since, err := requireIsoDate(run, in, "since")
-			if err != nil {
-				return nil, err
-			}
 			docs, err := clientOf(ctx, run).listPeppolDocuments(nil)
 			if err != nil {
 				return nil, failed(run.Fail, err)
 			}
-			return peppolList{documents: filterPeppolDocuments(docs, since, in.Option("sender")), asJSON: in.Option("format") == "json"}, nil
+			return peppolList{documents: filterPeppolDocuments(docs, plugins.Prepared[string](run), in.Option("sender")), asJSON: in.Option("format") == "json"}, nil
 		},
 		Format: formatPeppolList,
 	}
@@ -245,8 +244,9 @@ func peppolSyncCmd() plugins.CommandSpec {
 			"# re-download everything",
 			"agentio falco peppol sync --output ./peppol --force",
 		},
-		Run:    runPeppolSync,
-		Format: formatSync,
+		Prepare: plugins.Parse(peppolSyncInput),
+		Run:     runPeppolSync,
+		Format:  formatSync,
 	}
 }
 
@@ -255,7 +255,7 @@ func markPaidCmd() plugins.CommandSpec {
 		Path:        "peppol mark-paid",
 		Description: "Set the payment status of an invoice",
 		Access:      "write",
-		AccessFor:   plugins.WriteUnlessInvalid(checkStatus),
+		Prepare:     plugins.Parse(markPaidStatus),
 		Operation:   "mark an invoice as paid",
 		Arguments:   []plugins.ArgumentSpec{{Name: "ref", Description: "Peppol document ID, invoice ID, invoice reference, or fiduciary document ID", Required: true}},
 		Options: []plugins.OptionSpec{
@@ -327,7 +327,8 @@ func invoicesSyncCmd() plugins.CommandSpec {
 			"# one customer",
 			`agentio falco invoices sync --output ./sales --customer "Acme"`,
 		},
-		Run:    runInvoicesSync,
-		Format: formatSync,
+		Prepare: plugins.Parse(invoicesSyncInput),
+		Run:     runInvoicesSync,
+		Format:  formatSync,
 	}
 }

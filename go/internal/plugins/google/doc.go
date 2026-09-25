@@ -12,8 +12,9 @@
 //     beside the google.golang.org/api services it builds with NewService or
 //     DriveService. CallJSON serves the calls those services cannot make.
 //   - Commands: the generic input helpers (Stdin, OptionOrStdin,
-//     RequireOptions, WriteUnlessInvalid, Result) live in package plugins.
-//     BatchRequests (with BatchInputError) and the Drive helpers
+//     RequireOptions, Result, and the Prepare adapters Parse, Check,
+//     Required) live in package plugins. BatchRequests (a batch command's
+//     Prepare, through Parse) and the Drive helpers
 //     (ListDriveFiles, ExportDriveFile, CopyDriveFile, ValidateDriveFiles)
 //     cover what several products share.
 //

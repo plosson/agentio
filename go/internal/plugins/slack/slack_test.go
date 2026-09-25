@@ -123,7 +123,7 @@ func runSend(t *testing.T, f *fakeHook, creds map[string]any, in plugins.Command
 	run := host.NewRunContext(creds, "alerts", context.Background())
 	run.Fetch = f.fetch
 	spec := sendCmd()
-	return spec.Run(context.Background(), in, run)
+	return host.Invoke(context.Background(), &spec, in, run)
 }
 
 func cliErr(t *testing.T, err error) *clierr.Error {
@@ -155,7 +155,7 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		t.Fatalf("%d commands, want 1", len(p.Commands))
 	}
 	c := p.Commands[0]
-	if c.Path != "send" || c.Description != "Send a message to Slack" || c.Operation != "send message" || c.Input != "text" || c.Access != "" {
+	if c.Path != "send" || c.Description != "Send a message to Slack" || c.Operation != "send message" || c.Input != "text" || c.Access != "write" {
 		t.Fatalf("%#v", c)
 	}
 	if len(c.Arguments) != 1 || c.Arguments[0].Name != "message" || c.Arguments[0].Required || c.Arguments[0].Variadic {
@@ -164,8 +164,8 @@ func TestCommandTableMatchesBun(t *testing.T) {
 	if len(c.Options) != 1 || c.Options[0].Flags != "--json [file]" || c.Options[0].DefaultValue != nil {
 		t.Fatalf("options %#v", c.Options)
 	}
-	if c.AccessFor == nil || c.AccessFor(plugins.CommandInput{Args: map[string]any{"message": "hi"}, Options: map[string]any{}}) != "write" {
-		t.Fatal("a valid send is not a write")
+	if c.Prepare == nil || c.AccessFor != nil {
+		t.Fatal("send must read its input before the profile, and always be a write")
 	}
 	if len(c.Examples) == 0 || c.Format == nil {
 		t.Fatal("missing examples or format")
@@ -500,7 +500,7 @@ func TestSendInputErrorsMatchBun(t *testing.T) {
 		if res != nil || string(ce.Code) != c.code || ce.Message != c.msg || ce.Suggestion != c.suggestion {
 			t.Errorf("%s: %#v %#v", c.name, res, ce)
 		}
-		// Bun rejects these before enforceWriteAccess.
+		// Bun rejects these before getSlackClient: Prepare alone refuses them.
 		in := c.in
 		if in.Args == nil {
 			in.Args = map[string]any{}
@@ -508,8 +508,9 @@ func TestSendInputErrorsMatchBun(t *testing.T) {
 		if in.Options == nil {
 			in.Options = map[string]any{}
 		}
-		if got := spec.AccessFor(in); got != "read" {
-			t.Errorf("%s: access %q", c.name, got)
+		pre := &plugins.PrepareContext{Log: func(...any) {}, Fail: host.NewRunContext(nil, "", nil).Fail}
+		if _, done, err := spec.Prepare(context.Background(), in, pre); done || cliErr(t, err).Message != c.msg {
+			t.Errorf("%s: prepare %v %v", c.name, done, err)
 		}
 	}
 	if n := len(fake.recorded()); n != 0 {
@@ -569,7 +570,8 @@ func TestSendCredentialAndWebhookErrorsMatchBun(t *testing.T) {
 	run.Fetch = func(context.Context, *http.Request) (*http.Response, error) {
 		return nil, errors.New("dial tcp: connection refused")
 	}
-	res, err := sendCmd().Run(context.Background(), text, run)
+	spec := sendCmd()
+	res, err := host.Invoke(context.Background(), &spec, text, run)
 	ce := cliErr(t, err)
 	if res != nil || ce.Code != "NETWORK_ERROR" || ce.Message != "Webhook request failed: dial tcp: connection refused" || ce.Suggestion != "Verify the webhook URL is correct and accessible" {
 		t.Fatalf("%#v", ce)

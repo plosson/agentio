@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"sort"
@@ -45,16 +46,26 @@ func TestCommandTableMatchesBun(t *testing.T) {
 		"projects":    {Flags: "--limit <number>=50", Access: "read"},
 		"search":      {Flags: "--jql <query> --project <key> --status <status> --assignee <name> --limit <number>=50", Access: "read"},
 		"get":         {Args: "<issue-key>", Access: "read"},
-		"comment":     {Args: "<issue-key> [body]", Operation: "add comment", Input: "text"},
+		"comment":     {Args: "<issue-key> [body]", Access: "write", Operation: "add comment", Input: "text"},
 		"transitions": {Args: "<issue-key>", Access: "read"},
 		"transition":  {Args: "<issue-key> <transition-id>", Access: "write", Operation: "transition issue"},
 	})
-	// comment decides its access from the input: a body makes it a write.
+	// comment reads its body before the profile: the argument, else stdin
+	// trimmed; a blank one is the input error.
 	comment := product.Spec(t, "comment")
-	if comment.AccessFor(plugins.CommandInput{Args: map[string]any{"body": "x"}}) != "write" ||
-		comment.AccessFor(plugins.CommandInput{Stdin: "piped"}) != "write" ||
-		comment.AccessFor(plugins.CommandInput{Stdin: " \n"}) != "read" {
-		t.Fatal("comment access")
+	fail := func(code, message, _ string) error { return errors.New(code + ": " + message) }
+	for in, want := range map[*plugins.CommandInput]string{
+		{Args: map[string]any{"body": "x"}, Stdin: "ignored"}: "x",
+		{Stdin: " piped\n"}: "piped",
+	} {
+		got, done, err := comment.Prepare(context.Background(), *in, &plugins.PrepareContext{Fail: fail})
+		if got != want || done || err != nil {
+			t.Fatalf("%#v: %#v %v %v", in, got, done, err)
+		}
+	}
+	if _, _, err := comment.Prepare(context.Background(), plugins.CommandInput{Stdin: " \n"}, &plugins.PrepareContext{Fail: fail}); err == nil ||
+		err.Error() != "INVALID_PARAMS: Comment body is required. Provide as argument or pipe via stdin." {
+		t.Fatalf("blank body: %v", err)
 	}
 }
 
