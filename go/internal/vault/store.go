@@ -310,8 +310,7 @@ func Unlock(passphrase string) error {
 // Lock forgets the in-memory passphrase and the decrypted cache.
 // An AGENTIO_PASSPHRASE env var still counts as resident, matching Bun.
 func Lock() {
-	memPass = ""
-	memSet = false
+	setMemory("", false)
 	storeMu.Lock()
 	clearCache()
 	storeMu.Unlock()
@@ -336,8 +335,7 @@ func Create(vaultPath, passphrase string, contents *Contents) error {
 	// AGENTIO_PASSPHRASE wins over memory, so point it at the new passphrase,
 	// as Bun does: the file must be encrypted with what gets stored.
 	prevEnv, hadEnv := os.LookupEnv("AGENTIO_PASSPHRASE")
-	prev := memPass
-	prevSet := memSet
+	prev, prevSet, _ := memory()
 	os.Setenv("AGENTIO_PASSPHRASE", passphrase)
 	SetMemoryPassphrase(passphrase)
 	if err := Save(contents); err != nil {
@@ -347,8 +345,7 @@ func Create(vaultPath, passphrase string, contents *Contents) error {
 		} else {
 			os.Unsetenv("AGENTIO_PASSPHRASE")
 		}
-		memPass = prev
-		memSet = prevSet
+		setMemory(prev, prevSet)
 		return err
 	}
 	if err := StorePassphrase(passphrase); err != nil {

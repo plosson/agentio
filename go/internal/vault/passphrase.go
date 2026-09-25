@@ -3,6 +3,7 @@ package vault
 import (
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/plosson/agentio/go/internal/clierr"
 )
@@ -13,13 +14,18 @@ const MinPassphraseLen = 8
 // AGENTIO_PASSPHRASE, then the in-process cache, then the passphrase file.
 // The daemon installs a memory-only provider so the file is never consulted.
 
+// passMu guards the in-process state below: daemon handlers lock, unlock and
+// look up credentials concurrently.
 var (
+	passMu     sync.Mutex
 	memPass    string
 	memSet     bool
 	memoryOnly bool
 )
 
 func ResetPassphrase() {
+	passMu.Lock()
+	defer passMu.Unlock()
 	memPass = ""
 	memSet = false
 	memoryOnly = false
@@ -27,18 +33,35 @@ func ResetPassphrase() {
 
 // SetMemoryOnly makes getPassphrase ignore the passphrase file. The daemon
 // uses this so it stays locked until someone unlocks it.
-func SetMemoryOnly(on bool) { memoryOnly = on }
+func SetMemoryOnly(on bool) {
+	passMu.Lock()
+	defer passMu.Unlock()
+	memoryOnly = on
+}
 
-func SetMemoryPassphrase(p string) {
-	memPass = p
-	memSet = true
+func SetMemoryPassphrase(p string) { setMemory(p, true) }
+
+// memory returns the in-process passphrase, whether one is set, and whether
+// the passphrase file is ignored.
+func memory() (pass string, set, only bool) {
+	passMu.Lock()
+	defer passMu.Unlock()
+	return memPass, memSet, memoryOnly
+}
+
+func setMemory(pass string, set bool) {
+	passMu.Lock()
+	defer passMu.Unlock()
+	memPass = pass
+	memSet = set
 }
 
 func HasResidentPassphrase() bool {
 	if strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE")) != "" {
 		return true
 	}
-	return memSet
+	_, set, _ := memory()
+	return set
 }
 
 type passSource string
@@ -54,10 +77,11 @@ func lookupPassphrase() (string, passSource) {
 	if v := strings.TrimSpace(os.Getenv("AGENTIO_PASSPHRASE")); v != "" {
 		return v, fromEnv
 	}
-	if memSet {
-		return memPass, fromMemory
+	pass, set, only := memory()
+	if set {
+		return pass, fromMemory
 	}
-	if memoryOnly {
+	if only {
 		return "", fromNone
 	}
 	if store := os.Getenv("AGENTIO_PASSPHRASE_STORE"); strings.HasPrefix(store, "memory:") {
@@ -94,7 +118,7 @@ func readMemoryStore(path string) (string, passSource) {
 
 func StorePassphrase(passphrase string) error {
 	SetMemoryPassphrase(passphrase)
-	if memoryOnly {
+	if _, _, only := memory(); only {
 		return nil
 	}
 	if store := os.Getenv("AGENTIO_PASSPHRASE_STORE"); strings.HasPrefix(store, "memory:") {
@@ -124,9 +148,8 @@ func StorePassphrase(passphrase string) error {
 }
 
 func ClearPassphrase() error {
-	memPass = ""
-	memSet = false
-	if memoryOnly {
+	setMemory("", false)
+	if _, _, only := memory(); only {
 		return nil
 	}
 	if store := os.Getenv("AGENTIO_PASSPHRASE_STORE"); strings.HasPrefix(store, "memory:") {

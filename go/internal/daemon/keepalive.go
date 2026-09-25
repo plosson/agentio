@@ -34,6 +34,8 @@ var (
 	passing bool
 	timer   *time.Timer
 	gap     time.Duration
+	// keepaliveUnit is what one AGENTIO_KEEPALIVE_HOURS is worth. Tests shorten it.
+	keepaliveUnit = time.Hour
 )
 
 func IntervalHours(raw string) int {
@@ -131,35 +133,44 @@ func walk(ctx context.Context, reg *plugins.Registry, preferred []string) (PassR
 }
 
 func StartKeepalive(ctx context.Context, reg *plugins.Registry, preferred []string, hours int) {
-	StopKeepalive()
+	keepMu.Lock()
+	defer keepMu.Unlock()
+	stopLocked()
 	if hours == 0 {
 		log.Printf("Token keepalive is off (AGENTIO_KEEPALIVE_HOURS=0)")
 		return
 	}
-	gap = time.Duration(hours) * time.Hour
+	gap = time.Duration(hours) * keepaliveUnit
 	log.Printf("Token keepalive every %dh", hours)
 	schedule(ctx, reg, preferred, 0)
 }
 
+// schedule arms the next pass. The caller holds keepMu.
 func schedule(ctx context.Context, reg *plugins.Registry, preferred []string, delay time.Duration) {
-	timer = time.AfterFunc(delay, func() {
+	var t *time.Timer
+	t = time.AfterFunc(delay, func() {
 		RunRefreshPass(ctx, reg, preferred)
 		keepMu.Lock()
-		alive := timer != nil
-		keepMu.Unlock()
-		if alive {
+		defer keepMu.Unlock()
+		// Only carry on if nothing stopped or restarted the loop while the pass ran.
+		if timer == t {
 			schedule(ctx, reg, preferred, gap)
 		}
 	})
+	timer = t
 }
 
 func StopKeepalive() {
 	keepMu.Lock()
+	defer keepMu.Unlock()
+	stopLocked()
+}
+
+func stopLocked() {
 	if timer != nil {
 		timer.Stop()
 		timer = nil
 	}
-	keepMu.Unlock()
 }
 
 func KeepaliveRunning() bool {

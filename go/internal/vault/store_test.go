@@ -176,3 +176,35 @@ process.stdout.write(JSON.stringify(await loadVault()));
 		t.Fatalf("vault escaped the temp dir: %s", path)
 	}
 }
+
+// The daemon locks and unlocks from one handler while others, /health among
+// them, ask whether it is unlocked. The resident passphrase must survive that
+// under -race.
+func TestResidentPassphraseIsSafeAcrossGoroutines(t *testing.T) {
+	testbox.Isolate(t)
+	if err := vault.Create(vault.DefaultVaultPath(), testPass, vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTIO_PASSPHRASE", "")
+	vault.SetMemoryOnly(true)
+	t.Cleanup(vault.ResetPassphrase)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 5; i++ {
+			if err := vault.Unlock(testPass); err != nil {
+				t.Error(err)
+			}
+			vault.Lock()
+		}
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			_ = vault.Unlocked()
+		}
+	}
+}

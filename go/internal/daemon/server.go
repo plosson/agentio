@@ -70,7 +70,9 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth.EnterHub()
 		defer auth.LeaveHub()
-		path := r.URL.Path
+		// Routes match the path as sent, as Bun's URL pathname does; each
+		// segment is decoded once, where it is parsed.
+		path := r.URL.EscapedPath()
 		if path == "/health" && r.Method == http.MethodGet {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status": "ok", "timestamp": s.now().UnixMilli(),
@@ -97,7 +99,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) handleV1(w http.ResponseWriter, r *http.Request) {
 	ip := ClientIP(r)
-	path := r.URL.Path
+	path := r.URL.EscapedPath()
 	defer func() { recoverLog(w) }()
 	if r.Method == http.MethodPost && (path == "/v1/device" || path == "/v1/device/token") {
 		if err := deviceLimiter.Check(ip, s.now()); err != nil {
@@ -493,7 +495,7 @@ func securityHeaders(nonce string) map[string]string {
 }
 
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := r.URL.EscapedPath()
 	if r.Method == http.MethodGet && (path == "/ui" || path == "/ui/") {
 		s.page(w)
 		return

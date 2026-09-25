@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,6 +121,33 @@ func TestCredentialsAreRefreshedThenRedacted(t *testing.T) {
 	}
 	if stored["refreshToken"] != "rot:rt" {
 		t.Fatalf("hub did not persist the rotation: %#v", stored)
+	}
+}
+
+// Clients encode each path segment once, so the hub decodes it once. A name
+// that looks encoded must reach exactly that profile.
+func TestProfileNamesAreDecodedExactlyOnce(t *testing.T) {
+	srv, _, issued := setup(t)
+	names := []string{"50%off", "a%41", "aA", "sp ace", "%zz"}
+	for _, name := range names {
+		if err := profile.Save("acme", name, map[string]any{"account": name}, profile.SaveOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range names {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/profiles/acme/"+url.PathEscape(name)+"/credentials", strings.NewReader("{}"))
+		req.Header.Set("Authorization", "Bearer "+issued.Token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		creds, _ := body["credentials"].(map[string]any)
+		if res.StatusCode != 200 || creds["account"] != name {
+			t.Errorf("profile %q: %d %#v", name, res.StatusCode, body)
+		}
 	}
 }
 
@@ -366,5 +397,89 @@ func TestTrustedIPHeaderUsesTheLastHop(t *testing.T) {
 	t.Setenv("AGENTIO_TRUSTED_IP_HEADER", "")
 	if got := ClientIP(req); got != "9.9.9.9" {
 		t.Fatal(got)
+	}
+}
+
+// lockedLog collects log output written from timer goroutines.
+type lockedLog struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *lockedLog) take() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := l.buf.String()
+	l.buf.Reset()
+	return out
+}
+
+// Unlocking again while a pass is running restarts the loop. The pass that was
+// running must not start a second chain of its own: two chains show up as a
+// pass that finds another one already running, and stopping reaches only one.
+func TestRestartDuringAPassLeavesOneChain(t *testing.T) {
+	isolate(t)
+	t.Setenv("AGENTIO_PASSPHRASE", "test-pass-123")
+	if err := vault.Create(vault.DefaultVaultPath(), "test-pass-123", vault.EmptyContents()); err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save("acme", "ada", map[string]any{
+		"account": "ada", "accessToken": "old", "refreshToken": "rt", "expiryDate": int64(1),
+	}, profile.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	logs := &lockedLog{}
+	log.SetOutput(logs)
+	keepMu.Lock()
+	keepaliveUnit = 10 * time.Millisecond
+	keepMu.Unlock()
+	entered := make(chan struct{}, 100)
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		StopKeepalive()
+		close(release)
+		// The parked pass must finish before the next test resets the vault.
+		for {
+			keepMu.Lock()
+			busy := passing
+			keepaliveUnit = time.Hour
+			keepMu.Unlock()
+			if !busy {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		log.SetOutput(os.Stderr)
+	})
+
+	p := acme.New()
+	run := p.Profile.Refresh.Run
+	// Always stale, so every pass reaches the refresher and parks there.
+	p.Profile.Refresh.IsStale = func(map[string]any, int64, int64) bool { return true }
+	p.Profile.Refresh.Run = func(ctx context.Context, creds map[string]any) (map[string]any, error) {
+		entered <- struct{}{}
+		<-release
+		return run(ctx, creds)
+	}
+	reg, err := plugins.NewRegistry(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	StartKeepalive(context.Background(), reg, []string{"acme"}, 1)
+	<-entered // the first pass is parked inside a refresh
+	StartKeepalive(context.Background(), reg, []string{"acme"}, 1)
+	release <- struct{}{} // let the first pass finish
+	<-entered             // the next pass is parked
+	logs.take()
+	time.Sleep(100 * time.Millisecond) // ten gaps: any other chain fires meanwhile
+	if out := logs.take(); strings.Contains(out, "already running") {
+		t.Fatalf("a second keepalive chain is running:\n%s", out)
 	}
 }
