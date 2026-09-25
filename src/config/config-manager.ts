@@ -144,7 +144,7 @@ export function putProfileEntry(
 /** The entry at `index`, renamed in place, keeping every other field it carries. */
 export function renameProfileEntry(config: Config, service: ServiceName, index: number, to: string): void {
   const entry = config.profiles[service]![index];
-  config.profiles[service]![index] = profileEntry(to, optionsOf(entry));
+  config.profiles[service]![index] = typeof entry === 'string' ? to : { ...entry, name: to };
 }
 
 /** The `service/name` form a key's allow-list holds. */
@@ -194,6 +194,8 @@ export function setProfileReadOnly(
     const index = findProfileIndex(config, service, profileName);
     if (index === -1) return false;
     const serviceProfiles = config.profiles[service]!;
+    // Already writable: leave the entry in the form it is stored in.
+    if (!readOnly && !normalizeProfile(serviceProfiles[index]).readOnly) return true;
 
     const entry = normalizeProfile(serviceProfiles[index]);
     if (readOnly) {
