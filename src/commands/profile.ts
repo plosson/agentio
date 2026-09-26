@@ -33,14 +33,15 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
 
 export function registerProfileCommands(program: Command, registry: PluginRegistry = getPluginRegistry()): void {
   const knownServices = registry.profilePlugins().map((plugin) => plugin.id);
+  const unknownService = (service: string) =>
+    new CliError('INVALID_PARAMS', `Unknown service: "${service}"`, `Known services: ${knownServices.join(', ')}`);
   function assertKnownService(service: string): asserts service is ServiceName {
-    if (!registry.find(service)?.profile) {
-      throw new CliError(
-        'INVALID_PARAMS',
-        `Unknown service: "${service}"`,
-        `Known services: ${knownServices.join(', ')}`,
-      );
-    }
+    if (!registry.find(service)?.profile) throw unknownService(service);
+  }
+  /** A known service, or one this build no longer has whose profiles the vault still holds, so they can be listed and removed. */
+  async function assertListedService(service: string): Promise<void> {
+    if (registry.find(service)?.profile) return;
+    if (!(await listProfileRefs()).some((ref) => ref.service === service)) throw unknownService(service);
   }
 
   const profile = program
@@ -53,7 +54,7 @@ export function registerProfileCommands(program: Command, registry: PluginRegist
     .description('List configured profiles')
     .action(async (service?: string) => {
       try {
-        if (service) assertKnownService(service);
+        if (service) await assertListedService(service);
         const refs = await listProfileRefs();
         console.log(formatProfileList(service ? refs.filter((r) => r.service === service) : refs));
       } catch (e) {
@@ -100,8 +101,8 @@ export function registerProfileCommands(program: Command, registry: PluginRegist
     .description('Remove a profile')
     .action(async (service: string, name: string) => {
       try {
-        assertKnownService(service);
-        await removeProfileForService(service as ServiceName, name);
+        await assertListedService(service);
+        await removeProfileForService(service, name);
       } catch (e) {
         handleError(e);
       }
