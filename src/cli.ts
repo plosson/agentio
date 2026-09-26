@@ -18,7 +18,8 @@ import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
 import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
-import { handleError } from './utils/errors';
+import { CliError, handleError } from './utils/errors';
+import { enterJsonMode } from './utils/output';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -86,6 +87,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
+    enterJsonMode(actionCommand);
     const name = actionCommand.name();
     const parent = actionCommand.parent?.name();
 
@@ -129,9 +131,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
       handleError(err);
     }
     if (!exists) {
-      console.error('Error [VAULT_NOT_CONFIGURED]: No vault configured');
-      console.error('Suggestion: Run: agentio vault init');
-      process.exit(2);
+      handleError(new CliError('VAULT_NOT_CONFIGURED', 'No vault configured', 'Run: agentio vault init'));
     }
   });
 
