@@ -129,7 +129,24 @@ export function optionsOf(entry: ProfileValue): SetProfileOptions {
   return { readOnly: normalizeProfile(entry).readOnly };
 }
 
-/** Add or replace a profile entry in `config`, in place. */
+/**
+ * `entry` with its read-only flag set, changing nothing else: an entry whose
+ * flag already agrees stays in the form it is stored in (a bare string, an
+ * explicit `readOnly: false`, keys agentio does not model).
+ */
+function withReadOnly(entry: ProfileValue, readOnly: boolean): ProfileValue {
+  if ((normalizeProfile(entry).readOnly === true) === readOnly) return entry;
+  const changed = { ...normalizeProfile(entry) };
+  if (readOnly) changed.readOnly = true;
+  else delete changed.readOnly;
+  return changed;
+}
+
+/**
+ * Add or replace a profile entry in `config`, in place. A new entry is built
+ * afresh; an existing one keeps its stored form, and only its read-only flag
+ * follows `options`.
+ */
 export function putProfileEntry(
   config: Config,
   service: ServiceName,
@@ -138,7 +155,10 @@ export function putProfileEntry(
 ): void {
   const existingIndex = findProfileIndex(config, service, profileName);
   if (existingIndex === -1) (config.profiles[service] ??= []).push(profileEntry(profileName, options));
-  else config.profiles[service]![existingIndex] = profileEntry(profileName, options);
+  else {
+    const serviceProfiles = config.profiles[service]!;
+    serviceProfiles[existingIndex] = withReadOnly(serviceProfiles[existingIndex], !!options?.readOnly);
+  }
 }
 
 /** The entry at `index`, renamed in place, keeping every other field it carries. */
@@ -194,16 +214,7 @@ export function setProfileReadOnly(
     const index = findProfileIndex(config, service, profileName);
     if (index === -1) return false;
     const serviceProfiles = config.profiles[service]!;
-    // Already writable: leave the entry in the form it is stored in.
-    if (!readOnly && !normalizeProfile(serviceProfiles[index]).readOnly) return true;
-
-    const entry = normalizeProfile(serviceProfiles[index]);
-    if (readOnly) {
-      entry.readOnly = true;
-    } else {
-      delete entry.readOnly;
-    }
-    serviceProfiles[index] = entry;
+    serviceProfiles[index] = withReadOnly(serviceProfiles[index], readOnly);
     return true;
   });
 }
