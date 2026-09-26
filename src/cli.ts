@@ -107,7 +107,12 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
         (parent === 'profile' && name !== 'list');
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
-        handleError(remoteModeError(`\`agentio ${full}\``));
+        // Naming the hub decodes the token, which throws when it is malformed.
+        try {
+          throw remoteModeError(`\`agentio ${full}\``);
+        } catch (err) {
+          handleError(err);
+        }
       }
       return;
     }
