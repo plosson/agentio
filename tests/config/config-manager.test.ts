@@ -50,11 +50,11 @@ describe('resolveProfile multi-profile case', () => {
 
   test('returns names array when multiple profiles exist and none specified', async () => {
     await updateConfig((config) => {
-      putProfileEntry(config, 'telegram', 'work');
-      putProfileEntry(config, 'telegram', 'personal');
+      putProfileEntry(config, 'discourse', 'work');
+      putProfileEntry(config, 'discourse', 'personal');
     });
     clearVaultCache();
-    const r = await resolveProfile('telegram');
+    const r = await resolveProfile('discourse');
     if (r.profile === null && r.error === 'multiple') {
       expect(r.names).toEqual(['work', 'personal']);
     } else {

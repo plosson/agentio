@@ -35,10 +35,10 @@ describe('chooseProfileName', () => {
 
 describe('saveProfile', () => {
   test('writes the entry and the credentials together', async () => {
-    await saveProfile('telegram', 'bot', { botToken: 't', chatId: '1' }, { readOnly: true });
+    await saveProfile('discourse', 'bot', { botToken: 't', chatId: '1' }, { readOnly: true });
     const vault = await loadVault();
-    expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
-    expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't', chatId: '1' } });
+    expect(vault.config.profiles.discourse).toEqual([{ name: 'bot', readOnly: true }]);
+    expect(vault.credentials.discourse).toEqual({ bot: { botToken: 't', chatId: '1' } });
   });
 
   test('replaces an existing profile in place, legacy string entries included', async () => {
@@ -68,11 +68,11 @@ describe('the keyed operations', () => {
 
   test('save creates a free name and grants it to the key in one write', async () => {
     const key = await keyFor(['gmail/me@example.com']);
-    expect(await saveProfileForKey(key, 'telegram', 'bot', { botToken: 't' }, { readOnly: true })).toBe('ok');
+    expect(await saveProfileForKey(key, 'discourse', 'bot', { botToken: 't' }, { readOnly: true })).toBe('ok');
     const vault = await loadVault();
-    expect(vault.config.profiles.telegram).toEqual([{ name: 'bot', readOnly: true }]);
-    expect(vault.credentials.telegram).toEqual({ bot: { botToken: 't' } });
-    expect((await listApiKeys())[0].allowedProfiles).toEqual(['gmail/me@example.com', 'telegram/bot']);
+    expect(vault.config.profiles.discourse).toEqual([{ name: 'bot', readOnly: true }]);
+    expect(vault.credentials.discourse).toEqual({ bot: { botToken: 't' } });
+    expect((await listApiKeys())[0].allowedProfiles).toEqual(['gmail/me@example.com', 'discourse/bot']);
   });
 
   test('save replaces a name the key reaches, and refuses one it does not', async () => {

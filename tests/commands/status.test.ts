@@ -18,13 +18,14 @@ withTempVault('agentio-status-test-', () => ({
     profiles: {
       // Alphabetical by service in ALL_SERVICES order: the broken one sits in the middle.
       jira: [{ name: 'dead' }],
-      telegram: [{ name: 'bot' }],
+      discourse: [{ name: 'bot' }],
       slack: [{ name: 'nocreds' }],
     },
   },
   credentials: {
     jira: { dead: { accessToken: 'old', refreshToken: 'rt', expiryDate: Date.now() - HOUR, cloudId: 'c', siteUrl: 's' } },
-    telegram: { bot: { botToken: 'bot-secret', channelId: '1' } },
+    // Unreachable on purpose: testing it fails fast and never leaves this machine.
+    discourse: { bot: { baseUrl: 'http://127.0.0.1:1', apiKey: 'bot-secret', username: 'bot' } },
   },
 }));
 
@@ -38,7 +39,7 @@ describe('getProfileStatuses', () => {
 
     // Every configured profile is present; the dead one did not abandon the run.
     expect(statuses.map((s) => `${s.service}/${s.profile}`).sort()).toEqual([
-      'jira/dead', 'slack/nocreds', 'telegram/bot',
+      'discourse/bot', 'jira/dead', 'slack/nocreds',
     ]);
 
     const dead = statuses.find((s) => s.profile === 'dead')!;
