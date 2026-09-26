@@ -153,13 +153,14 @@ export function startKeepalive(hours = intervalHours()): void {
 }
 
 function schedule(delayMs: number): void {
-  timer = setTimeout(() => {
+  const handle = setTimeout(() => {
     void runRefreshPass().finally(() => {
-      // Only carry on if nothing stopped the loop while the pass ran.
-      if (timer) schedule(gapMs);
+      // Only carry on if nothing stopped or restarted the loop while the pass ran.
+      if (timer === handle) schedule(gapMs);
     });
   }, delayMs);
-  timer.unref?.();
+  handle.unref?.();
+  timer = handle;
 }
 
 export function stopKeepalive(): void {

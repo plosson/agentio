@@ -107,7 +107,12 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
         (parent === 'profile' && name !== 'list');
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
-        handleError(remoteModeError(`\`agentio ${full}\``));
+        // Naming the hub decodes the token, which throws when it is malformed.
+        try {
+          throw remoteModeError(`\`agentio ${full}\``);
+        } catch (err) {
+          handleError(err);
+        }
       }
       return;
     }
@@ -117,7 +122,13 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
       return;
     }
 
-    if (!(await vaultExists())) {
+    let exists: boolean;
+    try {
+      exists = await vaultExists();
+    } catch (err) {
+      handleError(err);
+    }
+    if (!exists) {
       console.error('Error [VAULT_NOT_CONFIGURED]: No vault configured');
       console.error('Suggestion: Run: agentio vault init');
       process.exit(2);

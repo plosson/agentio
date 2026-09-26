@@ -100,6 +100,15 @@ describe('remote mode end to end', () => {
     }
   });
 
+  test('a malformed token refuses an owner-only command with the token error, not a crash', async () => {
+    for (const args of [['daemon', 'status'], ['vault', 'status'], ['profile', 'reauth', 'telegram']]) {
+      const res = await cli(args, { AGENTIO_TOKEN: 'agio1.xx' });
+      expect(res.exitCode).toBe(3);
+      expect(res.stdout).toBe('');
+      expect(res.stderr).toBe('Error [CONFIG_ERROR]: Malformed AGENTIO_TOKEN\nSuggestion: Paste the token exactly as the hub showed it\n');
+    }
+  });
+
   test('a profile write is refused up front, before any prompt, without the managing right', async () => {
     const res = await cli(['sql', 'profile', 'add'], {}, 'sqlite://:memory:\n');
     expect(res.exitCode).toBe(2);
