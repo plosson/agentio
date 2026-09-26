@@ -9,14 +9,14 @@ describe('reauthProfile fallback', () => {
     });
 
     try {
-      await reauthProfile('telegram', 'alerts');
+      await reauthProfile('discourse', 'alerts');
       await reauthProfile('sql', 'work');
     } finally {
       error.mockRestore();
     }
 
     expect(messages).toEqual([
-      '\nSkipping telegram / alerts: no automatic reauthentication is registered. Run \'agentio telegram profile add --profile alerts\' to update.',
+      '\nSkipping discourse / alerts: no automatic reauthentication is registered. Run \'agentio discourse profile add --profile alerts\' to update.',
       '\nSkipping sql / work: no automatic reauthentication is registered. Run \'agentio sql profile add --profile work\' to update.',
     ]);
   });

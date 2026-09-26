@@ -40,8 +40,8 @@ async function cookieFrom(res: Response): Promise<string> {
 
 withTempVault('agentio-api-test-', () => ({
   passphrase: PASSPHRASE,
-  config: { profiles: { telegram: [{ name: 'bot', readOnly: true }], slack: [{ name: 'empty' }] } },
-  credentials: { telegram: { bot: { botToken: 't', channelId: '1' } } },
+  config: { profiles: { discourse: [{ name: 'bot', readOnly: true }], slack: [{ name: 'empty' }] } },
+  credentials: { discourse: { bot: { botToken: 't', channelId: '1' } } },
 }));
 
 beforeEach(() => {
@@ -146,14 +146,14 @@ describe('daemon HTTP surface', () => {
     const profiles = await call('/ui/api/profiles', { headers: { cookie } });
     expect(profiles.status).toBe(200);
     expect(await profiles.json()).toEqual({
-      profiles: [{ service: 'slack', name: 'empty', readOnly: false }, { service: 'telegram', name: 'bot', readOnly: true }],
+      profiles: [{ service: 'slack', name: 'empty', readOnly: false }, { service: 'discourse', name: 'bot', readOnly: true }],
     });
 
     const status = await call('/ui/api/status?test=false', { headers: { cookie } });
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({
       version: 'test',
-      services: { slack: [{ profile: 'empty', status: 'no-creds' }], telegram: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
+      services: { slack: [{ profile: 'empty', status: 'no-creds' }], discourse: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
     });
   });
 
@@ -200,19 +200,19 @@ describe('daemon HTTP surface', () => {
 
   test('read-only can be toggled from the UI', async () => {
     const cookie = await cookieFrom(await unlock());
-    const off = await call('/ui/api/profiles/telegram/bot', {
+    const off = await call('/ui/api/profiles/discourse/bot', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: false }),
     });
     expect(off.status).toBe(200);
-    expect(await off.json()).toEqual({ service: 'telegram', name: 'bot', readOnly: false });
+    expect(await off.json()).toEqual({ service: 'discourse', name: 'bot', readOnly: false });
     const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
     expect(list.profiles[0].readOnly).toBe(false);
 
-    const bad = await call('/ui/api/profiles/telegram/bot', {
+    const bad = await call('/ui/api/profiles/discourse/bot', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: 'yes' }),
     });
     expect(bad.status).toBe(400);
-    const missing = await call('/ui/api/profiles/telegram/nope', {
+    const missing = await call('/ui/api/profiles/discourse/nope', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ readOnly: true }),
     });
     expect(missing.status).toBe(404);
@@ -220,42 +220,42 @@ describe('daemon HTTP surface', () => {
 
   test('delete removes the profile and its credentials', async () => {
     const cookie = await cookieFrom(await unlock());
-    const gone = await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } });
+    const gone = await call('/ui/api/profiles/discourse/bot', { method: 'DELETE', headers: { cookie } });
     expect(gone.status).toBe(204);
     const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
     expect(list.profiles).toEqual([{ service: 'slack', name: 'empty', readOnly: false }]);
-    expect(await getCredentials('telegram', 'bot')).toBeNull();
+    expect(await getCredentials('discourse', 'bot')).toBeNull();
 
-    expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE', headers: { cookie } })).status).toBe(404);
+    expect((await call('/ui/api/profiles/discourse/bot', { method: 'DELETE', headers: { cookie } })).status).toBe(404);
     expect((await call('/ui/api/profiles/notaservice/x', { method: 'DELETE', headers: { cookie } })).status).toBe(404);
   });
 
   test('mutations need a session too', async () => {
-    expect((await call('/ui/api/profiles/telegram/bot', { method: 'DELETE' })).status).toBe(401);
-    expect((await call('/ui/api/profiles/telegram/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
+    expect((await call('/ui/api/profiles/discourse/bot', { method: 'DELETE' })).status).toBe(401);
+    expect((await call('/ui/api/profiles/discourse/bot', { method: 'PATCH', body: '{}' })).status).toBe(401);
   });
 
   test('profiles: PATCH renames, carrying credentials and key scopes, and refuses a taken name', async () => {
     const cookie = await cookieFrom(await unlock());
-    const renamed = await call('/ui/api/profiles/telegram/bot', {
+    const renamed = await call('/ui/api/profiles/discourse/bot', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'alerts' }),
     });
     expect(renamed.status).toBe(200);
-    expect(await renamed.json()).toEqual({ service: 'telegram', name: 'alerts' });
+    expect(await renamed.json()).toEqual({ service: 'discourse', name: 'alerts' });
 
     const list = await (await call('/ui/api/profiles', { headers: { cookie } })).json();
-    expect(list.profiles).toContainEqual({ service: 'telegram', name: 'alerts', readOnly: true });
+    expect(list.profiles).toContainEqual({ service: 'discourse', name: 'alerts', readOnly: true });
     // A collision has to be inside the same service; slack/empty is a different namespace.
-    await saveProfile('telegram', 'second', { botToken: 'x' });
-    const taken = await call('/ui/api/profiles/telegram/alerts', {
+    await saveProfile('discourse', 'second', { botToken: 'x' });
+    const taken = await call('/ui/api/profiles/discourse/alerts', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'second' }),
     });
     expect(taken.status).toBe(400);
-    const bad = await call('/ui/api/profiles/telegram/alerts', {
+    const bad = await call('/ui/api/profiles/discourse/alerts', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 7 }),
     });
     expect(bad.status).toBe(400);
-    const missing = await call('/ui/api/profiles/telegram/nope', {
+    const missing = await call('/ui/api/profiles/discourse/nope', {
       method: 'PATCH', headers: { cookie }, body: JSON.stringify({ name: 'x' }),
     });
     expect(missing.status).toBe(404);
@@ -265,7 +265,7 @@ describe('daemon HTTP surface', () => {
     const cookie = await cookieFrom(await unlock());
     const created = await call('/ui/api/keys', {
       method: 'POST', headers: { cookie },
-      body: JSON.stringify({ name: 'agent', allowedProfiles: ['telegram/bot'], readOnly: true, canManageProfiles: true, url: 'https://hub.example.com' }),
+      body: JSON.stringify({ name: 'agent', allowedProfiles: ['discourse/bot'], readOnly: true, canManageProfiles: true, url: 'https://hub.example.com' }),
     });
     expect(created.status).toBe(201);
     const { key, token } = await created.json();
@@ -320,11 +320,11 @@ describe('daemon HTTP surface', () => {
 
     const approved = await call(`/ui/api/authorize/${userCode}`, {
       method: 'POST', headers: { cookie },
-      body: JSON.stringify({ approve: true, name: 'laptop', allowedProfiles: ['telegram/bot'], readOnly: true, url: 'https://hub.example.com' }),
+      body: JSON.stringify({ approve: true, name: 'laptop', allowedProfiles: ['discourse/bot'], readOnly: true, url: 'https://hub.example.com' }),
     });
     expect(approved.status).toBe(201);
     const { key } = await approved.json();
-    expect(key).toMatchObject({ name: 'laptop', allowedProfiles: ['telegram/bot'], readOnly: true });
+    expect(key).toMatchObject({ name: 'laptop', allowedProfiles: ['discourse/bot'], readOnly: true });
 
     const got = await (await poll()).json();
     expect(got.status).toBe('approved');

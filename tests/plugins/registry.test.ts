@@ -33,7 +33,6 @@ const SERVICE_ORDER = [
   'rss',
   'slack',
   'sql',
-  'telegram',
 ];
 
 describe('service plugin registry', () => {

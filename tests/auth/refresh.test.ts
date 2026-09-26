@@ -20,14 +20,14 @@ const { getFreshCredentials, REFRESH_BUFFER_MS } = await import('../../src/auth/
 const HOUR = 60 * 60 * 1000;
 
 withTempVault('agentio-refresh-test-', () => ({
-    config: { profiles: { jira: [{ name: 'stale' }, { name: 'fresh' }], revolut: [{ name: 'noexp' }], telegram: [{ name: 'bot' }], gchat: [{ name: 'hook' }] } },
+    config: { profiles: { jira: [{ name: 'stale' }, { name: 'fresh' }], revolut: [{ name: 'noexp' }], discourse: [{ name: 'bot' }], gchat: [{ name: 'hook' }] } },
     credentials: {
       jira: {
         stale: { accessToken: 'jira-old', refreshToken: 'r1', expiryDate: Date.now() + 60_000, cloudId: 'c', siteUrl: 's' },
         fresh: { accessToken: 'jira-ok', refreshToken: 'r2', expiryDate: Date.now() + HOUR, cloudId: 'c', siteUrl: 's' },
       },
       revolut: { noexp: { accessToken: 'rev-old', refreshToken: 'rr', clientId: 'id', privateKey: 'k', redirectUri: 'u', environment: 'sandbox' } },
-      telegram: { bot: { botToken: 't', channelId: '1' } },
+      discourse: { bot: { botToken: 't', channelId: '1' } },
       gchat: { hook: { type: 'webhook', webhookUrl: 'https://chat.example/hook' } },
     },
 }));
@@ -83,7 +83,7 @@ describe('getFreshCredentials', () => {
   });
 
   test('static credentials come back as stored', async () => {
-    const { credentials, refreshed } = await getFreshCredentials('telegram', 'bot');
+    const { credentials, refreshed } = await getFreshCredentials('discourse', 'bot');
     expect(refreshed).toBe(false);
     expect(credentials).toEqual({ botToken: 't', channelId: '1' });
   });

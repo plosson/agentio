@@ -2,13 +2,13 @@
 
 **Run LLM agent workflows in GitHub Actions. No servers. No Zapier. Just cron.**
 
-agentio is a CLI that lets LLM agents interact with Gmail, Slack, JIRA, Telegram, Google Chat, and RSS feeds. Designed for CI/CD pipelines and scheduled automation.
+agentio is a CLI that lets LLM agents interact with Gmail, Slack, JIRA, Google Chat, and RSS feeds. Designed for CI/CD pipelines and scheduled automation.
 
 ## Why agentio?
 
 You want your AI agent to:
 - Send a daily Slack summary of unread emails
-- Monitor RSS feeds and post to Telegram
+- Monitor RSS feeds and post to Slack
 - Update JIRA tickets based on email threads
 - Run on a schedule, without managing servers
 
@@ -173,7 +173,6 @@ Done. Your agent can now access all your services securely in CI/CD.
 |---------|------|----------|
 | **Gmail** | OAuth | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
 | **Slack** | Webhook | `send` |
-| **Telegram** | Bot Token | `send` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
 | **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
@@ -217,19 +216,6 @@ agentio slack send "Deployment complete ✓"
 
 # Send rich Block Kit message
 agentio slack send --json blocks.json
-```
-
-</details>
-
-<details>
-<summary><strong>Telegram</strong></summary>
-
-```bash
-# Send to channel
-agentio telegram send "Alert: New items found"
-
-# With markdown
-agentio telegram send --parse-mode markdown "**Bold** and _italic_"
 ```
 
 </details>

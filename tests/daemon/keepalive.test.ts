@@ -20,7 +20,7 @@ withTempVault('agentio-keepalive-test-', () => ({
   config: {
     profiles: {
       jira: [{ name: 'idle' }, { name: 'broken' }],
-      telegram: [{ name: 'bot' }],
+      discourse: [{ name: 'bot' }],
       slack: [{ name: 'nocreds' }],
     },
   },
@@ -31,7 +31,7 @@ withTempVault('agentio-keepalive-test-', () => ({
       broken: { accessToken: 'old', refreshToken: 'dead', expiryDate: Date.now() - HOUR, cloudId: 'c', siteUrl: 's' },
     },
     // Static: no refresher, so a pass must leave it alone.
-    telegram: { bot: { botToken: 'bot-secret', channelId: '1' } },
+    discourse: { bot: { botToken: 'bot-secret', channelId: '1' } },
   },
 }));
 
@@ -55,13 +55,13 @@ describe('the keepalive pass', () => {
     });
 
     const result = await runRefreshPass();
-    // telegram/bot is static so it is fresh; slack/nocreds has nothing stored so it is skipped, not failed.
+    // discourse/bot is static so it is fresh; slack/nocreds has nothing stored so it is skipped, not failed.
     expect(result).toEqual({ refreshed: 1, fresh: 1, skipped: 1, failed: 1 });
 
     // The rotated refresh token is persisted; losing it would strand the profile.
     const { credentials } = await loadVault();
     expect(credentials.jira!.idle).toMatchObject({ accessToken: 'jira-new', refreshToken: 'rt-rotated' });
-    expect(credentials.telegram!.bot).toEqual({ botToken: 'bot-secret', channelId: '1' });
+    expect(credentials.discourse!.bot).toEqual({ botToken: 'bot-secret', channelId: '1' });
   });
 
   test('one broken profile does not abandon the rest', async () => {

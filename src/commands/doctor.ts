@@ -77,7 +77,7 @@ async function checkProfiles(): Promise<Check> {
       name: 'Profiles',
       status: 'warn',
       detail: 'no services configured',
-      fix: 'agentio <service> profile add (e.g. gmail, slack, telegram)',
+      fix: 'agentio <service> profile add (e.g. gmail, slack, jira)',
     };
   }
   return { name: 'Profiles', status: 'ok', detail: `${total} configured` };

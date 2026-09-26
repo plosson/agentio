@@ -46,13 +46,13 @@ async function runCli(
   return { exitCode, stdout, stderr };
 }
 
-/** Write an encrypted vault file containing `profileCount` telegram profiles. */
+/** Write an encrypted vault file containing `profileCount` discourse profiles. */
 async function writeVault(path: string, passphrase: string, profileCount = 0): Promise<void> {
   const contents = {
     version: 1,
     config: {
       profiles: {
-        telegram: Array.from({ length: profileCount }, (_, i) => ({ name: `p${i}` })),
+        discourse: Array.from({ length: profileCount }, (_, i) => ({ name: `p${i}` })),
       },
     },
     credentials: {},

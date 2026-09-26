@@ -16,9 +16,9 @@ import { createRequestHandler } from '../../src/daemon/api';
 const PASSPHRASE = 'hub-pw-12345';
 withTempVault('agentio-remote-hub-', () => ({
   passphrase: PASSPHRASE,
-  config: { profiles: { telegram: [{ name: 'alerts' }, { name: 'bare' }], slack: [{ name: 'ops', readOnly: true }], gdrive: [{ name: 'docs' }] } },
+  config: { profiles: { discourse: [{ name: 'alerts' }, { name: 'bare' }], slack: [{ name: 'ops', readOnly: true }], gdrive: [{ name: 'docs' }] } },
   credentials: {
-    telegram: { alerts: { botToken: 'bot-secret', channelId: '1' } },
+    discourse: { alerts: { botToken: 'bot-secret', channelId: '1' } },
     slack: { ops: { type: 'webhook', webhookUrl: 'https://hooks.slack.com/x' } },
     gdrive: { docs: { accessToken: 'at', refreshToken: 'rt', expiryDate: Date.now() + 3_600_000, tokenType: 'Bearer', email: 'x@y' } },
   },
@@ -35,7 +35,7 @@ beforeEach(async () => {
   const handle = createRequestHandler({ version: 'test' });
   server = Bun.serve({ port: 0, fetch: (req, srv) => handle(req, srv) });
   url = `http://127.0.0.1:${server.port}`;
-  token = (await createApiKey({ name: 'agent', allowedProfiles: ['telegram/alerts', 'telegram/bare', 'slack/ops'], readOnly: false }, url)).token;
+  token = (await createApiKey({ name: 'agent', allowedProfiles: ['discourse/alerts', 'discourse/bare', 'slack/ops'], readOnly: false }, url)).token;
   clientHome = await mkdtemp(join(tmpdir(), 'agentio-remote-client-'));
 });
 
@@ -57,7 +57,7 @@ describe('remote mode end to end', () => {
     const res = await cli(['status', '--no-test']);
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toContain(`Hub: ${url}`);
-    expect(res.stdout).toContain('telegram');
+    expect(res.stdout).toContain('discourse');
     expect(res.stdout).toContain('alerts');
     expect(res.stdout).toContain('ops');
     expect(res.stdout).not.toContain('docs');
@@ -65,10 +65,10 @@ describe('remote mode end to end', () => {
     const json = await cli(['status', '--no-test', '--json']);
     const parsed = JSON.parse(json.stdout);
     expect(parsed.hub).toBe(url);
-    expect(Object.keys(parsed.services).sort()).toEqual(['slack', 'telegram']);
+    expect(Object.keys(parsed.services).sort()).toEqual(['discourse', 'slack']);
     expect(parsed.services.slack[0].readOnly).toBe(true);
     // The hub says which profiles hold nothing; no credential fetch was needed to know.
-    expect(parsed.services.telegram.find((p: { profile: string }) => p.profile === 'bare').status).toBe('no-creds');
+    expect(parsed.services.discourse.find((p: { profile: string }) => p.profile === 'bare').status).toBe('no-creds');
   });
 
   test('profile list works; doctor reports the hub', async () => {
@@ -92,7 +92,7 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'export'], ['profile', 'reauth', 'telegram'], ['telegram', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
+    for (const args of [['vault', 'export'], ['profile', 'reauth', 'discourse'], ['discourse', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -101,7 +101,7 @@ describe('remote mode end to end', () => {
   });
 
   test('a malformed token refuses an owner-only command with the token error, not a crash', async () => {
-    for (const args of [['daemon', 'status'], ['vault', 'status'], ['profile', 'reauth', 'telegram']]) {
+    for (const args of [['daemon', 'status'], ['vault', 'status'], ['profile', 'reauth', 'discourse']]) {
       const res = await cli(args, { AGENTIO_TOKEN: 'agio1.xx' });
       expect(res.exitCode).toBe(3);
       expect(res.stdout).toBe('');
@@ -142,22 +142,22 @@ describe('remote mode end to end', () => {
   });
 
   test('a managing key renames and removes a profile on the hub', async () => {
-    const manager = (await createApiKey({ name: 'manager', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+    const manager = (await createApiKey({ name: 'manager', allowedProfiles: ['discourse/alerts'], canManageProfiles: true }, url)).token;
 
-    const renamed = await cli(['profile', 'rename', 'telegram', 'alerts', 'sirens'], { AGENTIO_TOKEN: manager });
+    const renamed = await cli(['profile', 'rename', 'discourse', 'alerts', 'sirens'], { AGENTIO_TOKEN: manager });
     expect(renamed.exitCode).toBe(0);
     expect(renamed.stdout).toContain('Renamed profile "alerts" to "sirens"');
     const afterRename = await loadVault();
-    expect(afterRename.config.profiles.telegram).toEqual([{ name: 'sirens' }, { name: 'bare' }]);
-    expect(afterRename.credentials.telegram?.sirens).toMatchObject({ botToken: 'bot-secret' });
+    expect(afterRename.config.profiles.discourse).toEqual([{ name: 'sirens' }, { name: 'bare' }]);
+    expect(afterRename.credentials.discourse?.sirens).toMatchObject({ botToken: 'bot-secret' });
 
-    const removed = await cli(['profile', 'remove', 'telegram', 'sirens'], { AGENTIO_TOKEN: manager });
+    const removed = await cli(['profile', 'remove', 'discourse', 'sirens'], { AGENTIO_TOKEN: manager });
     expect(removed.exitCode).toBe(0);
-    expect((await loadVault()).config.profiles.telegram).toEqual([{ name: 'bare' }]);
+    expect((await loadVault()).config.profiles.discourse).toEqual([{ name: 'bare' }]);
   });
 
   test('a managing key cannot touch a profile outside its allow-list', async () => {
-    const manager = (await createApiKey({ name: 'narrow', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+    const manager = (await createApiKey({ name: 'narrow', allowedProfiles: ['discourse/alerts'], canManageProfiles: true }, url)).token;
     // Out of the key's list is refused, not silently reported as done, and nothing is written.
     for (const args of [['profile', 'remove', 'slack', 'ops'], ['profile', 'rename', 'slack', 'ops', 'mine']]) {
       const res = await cli(args, { AGENTIO_TOKEN: manager });
@@ -182,7 +182,7 @@ describe('remote mode end to end', () => {
   });
 
   test('profile add on the agent lands on the hub, and the key can use it at once', async () => {
-    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['telegram/alerts'], canManageProfiles: true }, url)).token;
+    const adder = (await createApiKey({ name: 'adder', allowedProfiles: ['discourse/alerts'], canManageProfiles: true }, url)).token;
     const added = await cli(['sql', 'profile', 'add', '--profile', 'mem', '--read-only'], { AGENTIO_TOKEN: adder }, 'sqlite://:memory:\n');
     expect(added.exitCode).toBe(0);
 

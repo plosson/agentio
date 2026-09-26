@@ -18,7 +18,6 @@ import revolut from './revolut';
 import rss from './rss';
 import slack from './slack';
 import sql from './sql';
-import telegram from './telegram';
 import { isLegacyServicePlugin, type RegisteredServicePlugin } from './types';
 import { PluginRegistry } from './plugin-registry';
 import { registerDeclarativePlugin } from './declarative';
@@ -44,7 +43,6 @@ export const SERVICE_PLUGINS = [
   rss,
   slack,
   sql,
-  telegram,
 ] as const satisfies readonly RegisteredServicePlugin[];
 
 /**
