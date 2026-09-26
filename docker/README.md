@@ -67,7 +67,7 @@ This is the deployment the remote-vault design targets: this container on a publ
 
 ### Where the TLS proxy runs
 
-The daemon always binds `0.0.0.0:7890` inside the container; what matters is how the host publishes it.
+The daemon binds `0.0.0.0:7890` inside the container, its default (`--host`/`--port` or `AGENTIO_DAEMON_HOST`/`AGENTIO_DAEMON_PORT` change it, and the image sets neither); what matters is how the host publishes it.
 
 - **Proxy on the same host** (the common case): keep `-p 127.0.0.1:7890:7890` and point the proxy at `http://127.0.0.1:7890`.
 - **Proxy on another machine**: publish with `-p 7890:7890`, allow inbound 7890 from the proxy's address only, for example `ufw allow from <proxy-ip> to any port 7890`, and point the proxy at `http://<vps-ip>:7890`.

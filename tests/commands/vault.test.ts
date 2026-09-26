@@ -207,3 +207,88 @@ describe('agentio vault set', () => {
     expect(res.stderr).not.toContain('VAULT_NOT_CONFIGURED');
   });
 });
+
+describe('agentio vault status --json', () => {
+  // Neither a developer's passphrase nor a hub token may leak into these runs.
+  const clean = { AGENTIO_PASSPHRASE: '', AGENTIO_TOKEN: '' };
+
+  async function status(env: Record<string, string> = {}) {
+    const res = await runCli(['vault', 'status', '--json'], { env: { ...clean, ...env } });
+    expect(res.stdout.trimEnd().split('\n')).toHaveLength(1);
+    return { ...res, json: JSON.parse(res.stdout) };
+  }
+
+  test('no vault is a state, not an error', async () => {
+    const res = await status();
+    expect(res.exitCode).toBe(0);
+    expect(res.json).toEqual({ v: 1, event: 'vault', mode: 'local', configured: false });
+  });
+
+  test('an unlocked vault reports its path and profile count', async () => {
+    const vault = join(tempHome, 'work.vault');
+    await writeVault(vault, PASSPHRASE, 3);
+    await writeFile(pointerPath(), vault);
+    const res = await status({ AGENTIO_PASSPHRASE: PASSPHRASE });
+    expect(res.exitCode).toBe(0);
+    expect(res.json).toEqual({
+      v: 1, event: 'vault', mode: 'local', configured: true, path: vault, exists: true, locked: false, profiles: 3,
+    });
+  });
+
+  test('a vault without a passphrase is locked, and no profile count leaks', async () => {
+    const vault = join(tempHome, 'work.vault');
+    await writeVault(vault, PASSPHRASE, 3);
+    await writeFile(pointerPath(), vault);
+    const res = await status();
+    expect(res.exitCode).toBe(0);
+    expect(res.json).toEqual({ v: 1, event: 'vault', mode: 'local', configured: true, path: vault, exists: true, locked: true });
+  });
+
+  test('a wrong passphrase is also locked', async () => {
+    const vault = join(tempHome, 'work.vault');
+    await writeVault(vault, PASSPHRASE, 3);
+    await writeFile(pointerPath(), vault);
+    const res = await status({ AGENTIO_PASSPHRASE: OTHER_PASSPHRASE });
+    expect(res.json.locked).toBe(true);
+    expect(res.json.profiles).toBeUndefined();
+  });
+
+  test('a pointer to a missing file says so without trying to unlock it', async () => {
+    const vault = join(tempHome, 'gone.vault');
+    await writeFile(pointerPath(), vault);
+    const res = await status({ AGENTIO_PASSPHRASE: PASSPHRASE });
+    expect(res.exitCode).toBe(0);
+    expect(res.json).toEqual({ v: 1, event: 'vault', mode: 'local', configured: true, path: vault, exists: false });
+  });
+
+  test('a corrupt vault file is reported as an error field, not as locked', async () => {
+    const vault = join(tempHome, 'bad.vault');
+    await writeFile(vault, 'not a vault');
+    await writeFile(pointerPath(), vault);
+    const res = await status({ AGENTIO_PASSPHRASE: PASSPHRASE });
+    expect(res.exitCode).toBe(0);
+    expect(res.json.locked).toBeUndefined();
+    expect(res.json.error.code).toBe('VAULT_CORRUPT');
+  });
+
+  test('never waits for input, even with an open stdin and no passphrase', async () => {
+    const vault = join(tempHome, 'work.vault');
+    await writeVault(vault, PASSPHRASE);
+    await writeFile(pointerPath(), vault);
+    const res = await runCli(['vault', 'status', '--json'], { stdin: '', env: clean });
+    expect(res.exitCode).toBe(0);
+    expect(JSON.parse(res.stdout).locked).toBe(true);
+  });
+
+  test('without --json no vault stays an error, and a missing file prints no profile line', async () => {
+    const none = await runCli(['vault', 'status'], { env: clean });
+    expect(none.exitCode).toBe(2);
+    expect(none.stderr).toContain('VAULT_NOT_CONFIGURED');
+
+    const vault = join(tempHome, 'gone.vault');
+    await writeFile(pointerPath(), vault);
+    const missing = await runCli(['vault', 'status'], { env: clean });
+    expect(missing.exitCode).toBe(0);
+    expect(missing.stdout).toBe(`Path: ${vault}\nExists: no (file is missing)\n`);
+  });
+});

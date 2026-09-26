@@ -1,4 +1,5 @@
 import type { ServiceName } from '../types/config';
+import { isJsonMode, printJson } from './output';
 
 export type ErrorCode =
   | 'AUTH_FAILED'
@@ -92,6 +93,15 @@ export function cannotManageProfilesError(hubUrl?: string): CliError {
 }
 
 export function handleError(error: unknown): never {
+  if (isJsonMode()) {
+    if (error instanceof CliError) {
+      printJson({ event: 'error', code: error.code, message: error.message, suggestion: error.suggestion });
+      process.exit(exitCodeForError(error.code));
+    }
+    printJson({ event: 'error', message: error instanceof Error ? error.message : 'An unexpected error occurred' });
+    process.exit(1);
+  }
+
   if (error instanceof CliError) {
     console.error(`Error [${error.code}]: ${error.message}`);
     if (error.suggestion) {

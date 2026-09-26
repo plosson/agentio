@@ -33,6 +33,14 @@ export function hubOrigin(input: string): string {
   return validateHubUrl(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`);
 }
 
+/** A login that ended without a token: the owner said no, or nobody decided in time. */
+export class LoginNotApproved extends CliError {
+  constructor(public readonly outcome: 'denied' | 'expired', message: string, suggestion?: string) {
+    super('AUTH_FAILED', message, suggestion);
+    this.name = 'LoginNotApproved';
+  }
+}
+
 type Poll = { status: 'pending' } | { status: 'denied' } | { status: 'approved'; token: string; key: ApiKeyView };
 
 const code = (err: unknown) => (err instanceof CliError ? err.code : null);
@@ -68,7 +76,7 @@ export async function deviceLogin(options: DeviceLoginOptions): Promise<DeviceLo
       throw err;
     }
     if (answer.status === 'approved') return { url, token: answer.token, key: answer.key };
-    if (answer.status === 'denied') throw new CliError('AUTH_FAILED', 'The hub owner denied this login');
+    if (answer.status === 'denied') throw new LoginNotApproved('denied', 'The hub owner denied this login');
   }
-  throw new CliError('AUTH_FAILED', 'The login code expired before it was approved', 'Run `agentio login` again and approve within ten minutes');
+  throw new LoginNotApproved('expired', 'The login code expired before it was approved', 'Run `agentio login` again and approve within ten minutes');
 }

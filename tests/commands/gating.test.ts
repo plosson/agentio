@@ -81,3 +81,53 @@ describe('command gating', () => {
     expect(res.stderr).toBe('Error: EISDIR: illegal operation on a directory, read\n');
   });
 });
+
+describe('errors under --json', () => {
+  test('a gate error is one JSON line on stdout, with nothing on stderr and the usual exit code', async () => {
+    const res = await runCli(['status', '--json']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toBe('');
+    expect(res.stdout.endsWith('\n')).toBe(true);
+    expect(res.stdout.trimEnd().split('\n')).toHaveLength(1);
+    expect(JSON.parse(res.stdout)).toEqual({
+      v: 1,
+      event: 'error',
+      code: 'VAULT_NOT_CONFIGURED',
+      message: 'No vault configured',
+      suggestion: 'Run: agentio vault init',
+    });
+  });
+
+  test('without --json the same error stays text on stderr', async () => {
+    const res = await runCli(['status']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toBe('Error [VAULT_NOT_CONFIGURED]: No vault configured\nSuggestion: Run: agentio vault init\n');
+  });
+
+  test('an error that is not a CliError has no code and exits 1', async () => {
+    await mkdir(join(tempHome, '.config', 'agentio', 'vault.path'));
+    const res = await runCli(['status', '--json']);
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr).toBe('');
+    expect(JSON.parse(res.stdout)).toEqual({
+      v: 1,
+      event: 'error',
+      message: 'EISDIR: illegal operation on a directory, read',
+    });
+  });
+
+  test("a service's own --json input option does not switch errors to JSON", async () => {
+    const res = await runCli(['slack', 'send', '--json']);
+    expect(res.exitCode).toBe(2);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('Error [VAULT_NOT_CONFIGURED]');
+  });
+
+  test('--json on a command that does not offer it is rejected without printing to stdout', async () => {
+    const res = await runCli(['gmail', 'list', '--json']);
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain("unknown option '--json'");
+  });
+});

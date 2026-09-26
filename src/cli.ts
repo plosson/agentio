@@ -18,7 +18,8 @@ import { registerUpdateCommand } from './commands/update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
 import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
-import { handleError } from './utils/errors';
+import { CliError, handleError } from './utils/errors';
+import { enterJsonMode } from './utils/output';
 
 declare const BUILD_VERSION: string | undefined;
 
@@ -86,6 +87,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
+    enterJsonMode(actionCommand);
     const name = actionCommand.name();
     const parent = actionCommand.parent?.name();
 
@@ -101,10 +103,13 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
         }
         return;
       }
+      // `vault status` only reports, and in remote mode it names the hub.
+      const reportsOnly = parent === 'vault' && name === 'status';
       const localOnly =
-        LOCAL_ONLY_COMMANDS.has(name) ||
-        (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
-        (parent === 'profile' && name !== 'list');
+        !reportsOnly &&
+        (LOCAL_ONLY_COMMANDS.has(name) ||
+          (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
+          (parent === 'profile' && name !== 'list'));
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
         // Naming the hub decodes the token, which throws when it is malformed.
@@ -121,6 +126,10 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
     if (BYPASS_COMMANDS.has(name) || (parent && BYPASS_COMMANDS.has(parent))) {
       return;
     }
+    // Probing the daemon reads nothing from the vault.
+    if (parent === 'daemon' && name === 'status') {
+      return;
+    }
 
     let exists: boolean;
     try {
@@ -129,9 +138,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
       handleError(err);
     }
     if (!exists) {
-      console.error('Error [VAULT_NOT_CONFIGURED]: No vault configured');
-      console.error('Suggestion: Run: agentio vault init');
-      process.exit(2);
+      handleError(new CliError('VAULT_NOT_CONFIGURED', 'No vault configured', 'Run: agentio vault init'));
     }
   });
 

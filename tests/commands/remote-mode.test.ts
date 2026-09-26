@@ -92,7 +92,7 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'status'], ['profile', 'reauth', 'telegram'], ['telegram', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
+    for (const args of [['vault', 'export'], ['profile', 'reauth', 'telegram'], ['telegram', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -107,6 +107,29 @@ describe('remote mode end to end', () => {
       expect(res.stdout).toBe('');
       expect(res.stderr).toBe('Error [CONFIG_ERROR]: Malformed AGENTIO_TOKEN\nSuggestion: Paste the token exactly as the hub showed it\n');
     }
+  });
+
+  test('vault status names the hub instead of refusing', async () => {
+    const json = await cli(['vault', 'status', '--json']);
+    expect(json.exitCode).toBe(0);
+    expect(JSON.parse(json.stdout)).toEqual({ v: 1, event: 'vault', mode: 'remote', hub: url, tokenSource: 'env' });
+
+    const text = await cli(['vault', 'status']);
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout).toBe(`Hub: ${url}\nToken: AGENTIO_TOKEN\n`);
+  });
+
+  test('vault status --json with a malformed token is a JSON error', async () => {
+    const res = await cli(['vault', 'status', '--json'], { AGENTIO_TOKEN: 'agio1.xx' });
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toBe('');
+    expect(JSON.parse(res.stdout)).toEqual({
+      v: 1,
+      event: 'error',
+      code: 'CONFIG_ERROR',
+      message: 'Malformed AGENTIO_TOKEN',
+      suggestion: 'Paste the token exactly as the hub showed it',
+    });
   });
 
   test('a profile write is refused up front, before any prompt, without the managing right', async () => {
