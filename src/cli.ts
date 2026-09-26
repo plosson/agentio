@@ -122,7 +122,13 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
       return;
     }
 
-    if (!(await vaultExists())) {
+    let exists: boolean;
+    try {
+      exists = await vaultExists();
+    } catch (err) {
+      handleError(err);
+    }
+    if (!exists) {
       console.error('Error [VAULT_NOT_CONFIGURED]: No vault configured');
       console.error('Suggestion: Run: agentio vault init');
       process.exit(2);
