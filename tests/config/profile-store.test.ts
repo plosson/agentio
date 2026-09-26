@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { withTempVault } from '../helpers/vault';
-import { loadVault } from '../../src/vault/vault';
+import { loadVault, updateVault } from '../../src/vault/vault';
+import { setProfileReadOnly } from '../../src/config/config-manager';
 import { createApiKey, listApiKeys, revokeApiKey } from '../../src/auth/api-keys';
 import { chooseProfileName, deleteProfile, deleteProfileForKey, renameProfile, renameProfileForKey, saveProfile, saveProfileForKey } from '../../src/config/profile-store';
 
@@ -43,7 +44,7 @@ describe('saveProfile', () => {
   test('replaces an existing profile in place, legacy string entries included', async () => {
     await saveProfile('github', 'octocat', { accessToken: 'new' });
     const vault = await loadVault();
-    expect(vault.config.profiles.github).toEqual([{ name: 'octocat' }]);
+    expect(vault.config.profiles.github).toEqual(['octocat']);
     expect(vault.credentials.github).toEqual({ octocat: { accessToken: 'new' } });
   });
 
@@ -157,7 +158,118 @@ describe('renameProfile', () => {
   test('a profile with no credentials stored still renames', async () => {
     expect(await renameProfile('github', 'octocat', 'hubber')).toBe('ok');
     const vault = await loadVault();
-    expect(vault.config.profiles.github).toEqual([{ name: 'hubber' }]);
+    expect(vault.config.profiles.github).toEqual(['hubber']);
     expect(vault.credentials.github).toBeUndefined();
+  });
+});
+
+// An entry keeps the form it was stored in: a bare string stays one, an
+// explicit `readOnly: false` stays, and keys agentio does not model survive.
+// The Go port does the same.
+describe('entries keep their stored form', () => {
+  const seed = () => updateVault((vault) => {
+    vault.config.profiles.slack = [
+      'bare',
+      { name: 'obj', readOnly: true, note: 'keep' } as never,
+      { name: 'writable', readOnly: false, note: { x: 1 } } as never,
+    ];
+  });
+
+  test('a rename changes only the name', async () => {
+    await seed();
+    expect(await renameProfile('slack', 'bare', 'bare2')).toBe('ok');
+    expect(await renameProfile('slack', 'obj', 'obj2')).toBe('ok');
+    expect(await renameProfile('slack', 'writable', 'writable2')).toBe('ok');
+    expect((await loadVault()).config.profiles.slack).toEqual([
+      'bare2',
+      { name: 'obj2', readOnly: true, note: 'keep' },
+      { name: 'writable2', readOnly: false, note: { x: 1 } },
+    ] as never);
+  });
+
+  test('making an entry writable that already is changes nothing', async () => {
+    await seed();
+    expect(await setProfileReadOnly('slack', 'bare', false)).toBe(true);
+    expect(await setProfileReadOnly('slack', 'writable', false)).toBe(true);
+    expect((await loadVault()).config.profiles.slack).toEqual([
+      'bare',
+      { name: 'obj', readOnly: true, note: 'keep' },
+      { name: 'writable', readOnly: false, note: { x: 1 } },
+    ] as never);
+  });
+
+  test('flipping the flag keeps every other key', async () => {
+    await seed();
+    await setProfileReadOnly('slack', 'bare', true);
+    await setProfileReadOnly('slack', 'obj', false);
+    await setProfileReadOnly('slack', 'writable', true);
+    expect((await loadVault()).config.profiles.slack).toEqual([
+      { name: 'bare', readOnly: true },
+      { name: 'obj', note: 'keep' },
+      { name: 'writable', readOnly: true, note: { x: 1 } },
+    ] as never);
+  });
+
+  // JSON text, so key order counts too: the vault is written as this text.
+  const stored = async () => JSON.stringify((await loadVault()).config.profiles.slack);
+
+  test('a save that replaces a profile, saying nothing of the flag, leaves every entry as stored', async () => {
+    await seed();
+    await saveProfile('slack', 'bare', { webhookUrl: 'a' });
+    await saveProfile('slack', 'obj', { webhookUrl: 'b' });
+    await saveProfile('slack', 'writable', { webhookUrl: 'c' });
+    expect(await stored()).toBe(JSON.stringify([
+      'bare',
+      { name: 'obj', readOnly: true, note: 'keep' },
+      { name: 'writable', readOnly: false, note: { x: 1 } },
+    ]));
+    expect((await loadVault()).credentials.slack).toEqual({ bare: { webhookUrl: 'a' }, obj: { webhookUrl: 'b' }, writable: { webhookUrl: 'c' } });
+  });
+
+  test('a save that states the flag changes the flag and nothing else', async () => {
+    await seed();
+    await saveProfile('slack', 'bare', { webhookUrl: 'a' }, { readOnly: true });
+    await saveProfile('slack', 'obj', { webhookUrl: 'b' }, { readOnly: false });
+    await saveProfile('slack', 'writable', { webhookUrl: 'c' }, { readOnly: false });
+    expect(await stored()).toBe(JSON.stringify([
+      { name: 'bare', readOnly: true },
+      { name: 'obj', note: 'keep' },
+      { name: 'writable', readOnly: false, note: { x: 1 } },
+    ]));
+    await saveProfile('slack', 'writable', { webhookUrl: 'd' }, { readOnly: true });
+    await saveProfile('slack', 'obj', { webhookUrl: 'e' }, { readOnly: true });
+    expect(await stored()).toBe(JSON.stringify([
+      { name: 'bare', readOnly: true },
+      { name: 'obj', note: 'keep', readOnly: true },
+      { name: 'writable', readOnly: true, note: { x: 1 } },
+    ]));
+  });
+
+  test('a hub save that replaces a profile keeps its entry too', async () => {
+    await seed();
+    const key = (await createApiKey({ name: 'k', allowedProfiles: '*', canManageProfiles: true }, 'https://hub')).key.id;
+    expect(await saveProfileForKey(key, 'slack', 'bare', { webhookUrl: 'a' }, {})).toBe('ok');
+    expect(await saveProfileForKey(key, 'slack', 'obj', { webhookUrl: 'b' }, {})).toBe('ok');
+    expect(await saveProfileForKey(key, 'slack', 'writable', { webhookUrl: 'c' }, { readOnly: false })).toBe('ok');
+    expect(await stored()).toBe(JSON.stringify([
+      'bare',
+      { name: 'obj', readOnly: true, note: 'keep' },
+      { name: 'writable', readOnly: false, note: { x: 1 } },
+    ]));
+  });
+
+  test('a new profile is still built afresh and goes last', async () => {
+    await seed();
+    await saveProfile('slack', 'new', { webhookUrl: 'a' });
+    await saveProfile('slack', 'locked', { webhookUrl: 'b' }, { readOnly: true });
+    await saveProfile('slack', 'open', { webhookUrl: 'c' }, { readOnly: false });
+    expect(await stored()).toBe(JSON.stringify([
+      'bare',
+      { name: 'obj', readOnly: true, note: 'keep' },
+      { name: 'writable', readOnly: false, note: { x: 1 } },
+      { name: 'new' },
+      { name: 'locked', readOnly: true },
+      { name: 'open' },
+    ]));
   });
 });

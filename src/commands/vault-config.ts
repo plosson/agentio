@@ -13,12 +13,14 @@ import { confirm } from '../utils/stdin';
 import { isInteractive, interactiveCheckbox, interactiveSelect } from '../utils/interactive';
 import { encryptVault, decryptVault } from '../vault/crypto';
 import { addExamples } from '../utils/command-tree';
-import type { Config, ServiceName } from '../types/config';
+import type { Config, ProfileValue, ServiceName } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
 
 interface ProfileSelection {
   service: ServiceName;
   profile: string;
+  /** The config entry as stored, so its read-only flag and unknown keys travel with it. */
+  entry: ProfileValue;
 }
 
 /** The export blob has the vault's own shape, minus anything not selected. */
@@ -85,8 +87,7 @@ export function registerVaultConfigCommands(vault: Command): void {
         for (const [service, profiles] of Object.entries(configData.profiles)) {
           if (profiles) {
             for (const entry of profiles) {
-              const profileName = typeof entry === 'string' ? entry : entry.name;
-              allProfiles.push({ service: service as ServiceName, profile: profileName });
+              allProfiles.push({ service: service as ServiceName, profile: getProfileName(entry), entry });
             }
           }
         }
@@ -135,12 +136,9 @@ export function registerVaultConfigCommands(vault: Command): void {
         const filteredConfig: Config = { profiles: {} };
         const filteredCredentials: StoredCredentials = {};
 
-        for (const { service, profile } of selectedProfiles) {
-          // Add to filtered config
-          if (!filteredConfig.profiles[service]) {
-            (filteredConfig.profiles as Record<string, string[]>)[service] = [];
-          }
-          (filteredConfig.profiles as Record<string, string[]>)[service].push(profile);
+        for (const { service, profile, entry } of selectedProfiles) {
+          // Add to filtered config, in the form the vault stores it
+          (filteredConfig.profiles[service] ??= []).push(entry);
 
           // Add credentials if they exist
           if (credentials[service]?.[profile]) {
