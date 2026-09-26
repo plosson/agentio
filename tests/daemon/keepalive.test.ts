@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { withTempVault } from '../helpers/vault';
 import { lockVault, loadVault, unlockVault } from '../../src/vault/vault';
 
@@ -150,6 +150,38 @@ describe('the interval', () => {
     expect(keepaliveRunning()).toBe(false);
     stopKeepalive();
     expect(keepaliveRunning()).toBe(false);
+  });
+
+  test('restarting while a pass runs leaves one chain, not a second that stopping cannot reach', async () => {
+    // Every refresh parks until released, so a pass is held for as long as the test wants.
+    const releases: Array<() => void> = [];
+    jiraRefresh.mockImplementation(async (refreshToken: string) => {
+      await new Promise<void>((resolve) => { releases.push(resolve); });
+      return { accessToken: 'jira-new', refreshToken, expiresIn: 0 };
+    });
+    const logged: string[] = [];
+    const log = spyOn(console, 'log').mockImplementation((line: string) => { logged.push(line); });
+    const parked = async () => { while (releases.length === 0) await Bun.sleep(1); };
+    const gap = 10 / HOUR; // ten milliseconds, in hours
+    try {
+      startKeepalive(gap);
+      await parked(); // the first pass is parked inside a refresh
+      startKeepalive(gap); // unlocked again
+      while (!logged.some((line) => line.includes('outcome=pass'))) {
+        releases.splice(0).forEach((release) => release());
+        await Bun.sleep(1);
+      }
+      await parked(); // the next pass is parked
+      logged.length = 0;
+      await Bun.sleep(100); // ten gaps: any other chain fires meanwhile
+      expect(logged.filter((line) => line.includes('already running'))).toEqual([]);
+    } finally {
+      stopKeepalive();
+      jiraRefresh.mockImplementation(async (refreshToken: string) => ({ accessToken: 'jira-new', refreshToken, expiresIn: 3600 }));
+      while (releases.length) releases.shift()!();
+      await Bun.sleep(20);
+      log.mockRestore();
+    }
   });
 
   test('starting passes immediately rather than waiting out the first gap', async () => {
