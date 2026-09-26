@@ -5,6 +5,8 @@ import { resolve } from 'path';
 import { password } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { addExamples } from '../utils/command-tree';
+import { addJsonOption, printJson } from '../utils/output';
+import { hub, isRemoteMode, tokenFilePath, tokenSource } from '../auth/remote';
 import { readPointer, writePointer } from '../vault/pointer';
 import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
@@ -21,6 +23,39 @@ function countProfiles(contents: VaultContents): number {
   );
 }
 
+export type VaultStatus =
+  | { mode: 'remote'; hub: string; tokenSource: 'env' | 'file' }
+  | { mode: 'local'; configured: false }
+  | {
+      mode: 'local';
+      configured: true;
+      path: string;
+      exists: boolean;
+      locked?: boolean;
+      profiles?: number;
+      error?: { code: string; message: string };
+    };
+
+/** Which vault this machine uses and whether it can be read. Never prompts. */
+export async function getVaultStatus(): Promise<VaultStatus> {
+  if (isRemoteMode()) return { mode: 'remote', hub: hub().url, tokenSource: tokenSource()! };
+
+  const path = await readPointer();
+  if (!path) return { mode: 'local', configured: false };
+  if (!existsSync(path)) return { mode: 'local', configured: true, path, exists: false };
+  try {
+    const contents = await loadVault();
+    return { mode: 'local', configured: true, path, exists: true, locked: false, profiles: countProfiles(contents) };
+  } catch (error) {
+    if (error instanceof CliError && (error.code === 'VAULT_LOCKED' || error.code === 'AUTH_FAILED')) {
+      return { mode: 'local', configured: true, path, exists: true, locked: true };
+    }
+    const code = error instanceof CliError ? error.code : 'VAULT_CORRUPT';
+    const message = error instanceof Error ? error.message : String(error);
+    return { mode: 'local', configured: true, path, exists: true, error: { code, message } };
+  }
+}
+
 export function registerVaultCommands(program: Command): void {
   const vault = program
     .command('vault')
@@ -30,31 +65,41 @@ export function registerVaultCommands(program: Command): void {
   registerVaultConfigCommands(vault);
 
   addExamples(
-    vault
-      .command('status')
-      .description('Show the active vault and what it holds')
-      .action(async () => {
-        try {
-          const current = await readPointer();
-          if (!current) {
-            throw new CliError('VAULT_NOT_CONFIGURED', 'No vault configured', 'Run: agentio vault init');
-          }
-          console.log(`Path: ${current}`);
-          console.log(`Exists: ${existsSync(current) ? 'yes' : 'no (file is missing)'}`);
-          try {
-            const contents = await loadVault();
-            console.log(`Profiles: ${countProfiles(contents)}`);
-          } catch {
-            console.log('Profiles: unreadable (wrong or missing passphrase)');
-          }
-        } catch (error) {
-          handleError(error);
+    addJsonOption(
+      vault
+        .command('status')
+        .description('Show the active vault and what it holds'),
+    ).action(async (options: { json?: boolean }) => {
+      try {
+        const status = await getVaultStatus();
+        if (options.json) {
+          printJson({ event: 'vault', ...status });
+          return;
         }
-      }),
+        if (status.mode === 'remote') {
+          console.log(`Hub: ${status.hub}`);
+          console.log(`Token: ${status.tokenSource === 'env' ? 'AGENTIO_TOKEN' : tokenFilePath()}`);
+          return;
+        }
+        if (!status.configured) {
+          throw new CliError('VAULT_NOT_CONFIGURED', 'No vault configured', 'Run: agentio vault init');
+        }
+        console.log(`Path: ${status.path}`);
+        console.log(`Exists: ${status.exists ? 'yes' : 'no (file is missing)'}`);
+        if (status.exists) {
+          console.log(status.profiles === undefined ? 'Profiles: unreadable (wrong or missing passphrase)' : `Profiles: ${status.profiles}`);
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    }),
     `Examples:
 
   # show the active vault path and profile count
-  agentio vault status`,
+  agentio vault status
+
+  # the same, as JSON for programs (also reports a vault hub in remote mode)
+  agentio vault status --json`,
   );
 
   addExamples(

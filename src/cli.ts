@@ -103,10 +103,13 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
         }
         return;
       }
+      // `vault status` only reports, and in remote mode it names the hub.
+      const reportsOnly = parent === 'vault' && name === 'status';
       const localOnly =
-        LOCAL_ONLY_COMMANDS.has(name) ||
-        (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
-        (parent === 'profile' && name !== 'list');
+        !reportsOnly &&
+        (LOCAL_ONLY_COMMANDS.has(name) ||
+          (parent && LOCAL_ONLY_COMMANDS.has(parent)) ||
+          (parent === 'profile' && name !== 'list'));
       if (localOnly) {
         const full = parent && parent !== 'agentio' ? `${parent} ${name}` : name;
         // Naming the hub decodes the token, which throws when it is malformed.
