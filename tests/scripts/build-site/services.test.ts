@@ -10,7 +10,8 @@ describe('loadServices', () => {
     expect(services.length).toBeGreaterThanOrEqual(17);
     const slugs = services.map((s) => s.meta.slug);
     expect(slugs).toContain('gmail');
-    expect(slugs).toContain('telegram');
+    expect(slugs).toContain('slack');
+    expect(slugs).not.toContain('telegram');
     expect(slugs).not.toContain('mcp');
   });
 

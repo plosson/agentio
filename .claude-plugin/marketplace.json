@@ -11,7 +11,7 @@
     {
       "name": "agentio",
       "source": "./claude",
-      "description": "Skills for Gmail, Telegram, and Google Chat operations via the agentio CLI"
+      "description": "Skills for Gmail, Slack, and Google Chat operations via the agentio CLI"
     }
   ]
 }

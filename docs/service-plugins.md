@@ -59,7 +59,6 @@ src/plugins/
 ├── github/
 ├── revolut/
 ├── sql/
-├── telegram/
 └── slack/
     ├── index.ts
     ├── commands.ts

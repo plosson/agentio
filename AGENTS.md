@@ -3,7 +3,7 @@
 ## What this is
 
 A CLI that gives LLM agents access to communication, productivity and tracking
-services — Gmail, Google Drive/Docs/Calendar, Slack, Telegram, JIRA, GitHub,
+services — Gmail, Google Drive/Docs/Calendar, Slack, JIRA, GitHub,
 Dropbox, Revolut, SQL and more — as plain commands that pipe and script.
 
 Three ideas hold it together:
