@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { seedVault } from '../helpers/vault';
 import { loadVault, clearVaultCache } from '../../src/vault/vault';
-import { encryptVault } from '../../src/vault/crypto';
+import { decryptVault, encryptVault } from '../../src/vault/crypto';
+import { generateExportData } from '../../src/commands/vault-config';
 import { existsSync } from 'fs';
 
 /**
@@ -293,5 +294,89 @@ describe('config import on a machine with no vault', () => {
     expect(res.exitCode).not.toBe(0);
     expect(res.stderr).toContain('INVALID_PARAMS');
     expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* profile entries travel in their stored form                         */
+/* ------------------------------------------------------------------ */
+
+describe('export and import keep profile entries as stored', () => {
+  const ENTRIES = [
+    'bare',
+    { name: 'locked', readOnly: true, note: 'keep' },
+    { name: 'open', readOnly: false, extra: { x: 1 } },
+  ];
+  // JSON text, so key order counts too.
+  const profilesText = async () => JSON.stringify((await readConfig()).profiles);
+
+  async function exportToFile(): Promise<{ key: string; file: string }> {
+    const file = join(tempHome, 'export.enc');
+    const res = await runCli(['vault', 'export', '--all', '--file', file]);
+    expect(res.exitCode).toBe(0);
+    return { key: res.stdout.match(/AGENTIO_KEY=(\S+)/)![1], file };
+  }
+
+  test('--file writes read-only flags and unknown keys, not bare names', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES } });
+    const { key, file } = await exportToFile();
+    const blob = JSON.parse(await decryptVault((await readFile(file, 'utf-8')).trim(), key));
+    expect(JSON.stringify(blob.config.profiles)).toBe(JSON.stringify({ slack: ENTRIES }));
+  });
+
+  test('the environment-variable export carries the same entries', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES } });
+    const { key, blob } = await exportCurrentConfig();
+    const data = JSON.parse(await decryptVault(blob, key));
+    expect(JSON.stringify(data.config.profiles)).toBe(JSON.stringify({ slack: ENTRIES }));
+  });
+
+  test('a replace import restores the read-only flag over a writable profile of the same name', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES } });
+    const { key, file } = await exportToFile();
+    await writeConfig({ profiles: { slack: ['locked', 'bare', { name: 'open' }] } });
+    expect((await runCli(['vault', 'import', file, '--key', key])).exitCode).toBe(0);
+    expect(await profilesText()).toBe(JSON.stringify({ slack: ENTRIES }));
+  });
+
+  test('a merge import adds missing entries as stored, and leaves an existing one alone', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES } });
+    const { key, file } = await exportToFile();
+    await writeConfig({ profiles: { slack: [{ name: 'open', mine: true }] } });
+    expect((await runCli(['vault', 'import', file, '--key', key, '--merge'])).exitCode).toBe(0);
+    expect(await profilesText()).toBe(JSON.stringify({ slack: [{ name: 'open', mine: true }, ENTRIES[0], ENTRIES[1]] }));
+  });
+
+  test('an import with no vault yet keeps the entries as exported', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES } });
+    const { key, file } = await exportToFile();
+    await rm(join(tempHome, '.config'), { recursive: true, force: true });
+    expect((await runCli(['vault', 'import', file, '--key', key])).exitCode).toBe(0);
+    expect(await profilesText()).toBe(JSON.stringify({ slack: ENTRIES }));
+  });
+
+  test('an export in the old form, bare names only, imports as it always did', async () => {
+    const oldKey = 'cd'.repeat(32);
+    const oldBlob = await encryptVault(JSON.stringify({
+      version: 1,
+      config: { profiles: { slack: ['locked', 'fresh'] } },
+      credentials: { slack: { locked: { webhookUrl: 'w' } } },
+    }), oldKey);
+    await writeConfig({ profiles: { slack: [{ name: 'locked', readOnly: true }] } });
+    expect((await runCli(['vault', 'import'], { AGENTIO_KEY: oldKey, AGENTIO_CONFIG: oldBlob })).exitCode).toBe(0);
+    expect(await profilesText()).toBe(JSON.stringify({ slack: ['locked', 'fresh'] }));
+
+    await writeConfig({ profiles: { slack: [{ name: 'locked', readOnly: true }] } });
+    expect((await runCli(['vault', 'import', '--merge'], { AGENTIO_KEY: oldKey, AGENTIO_CONFIG: oldBlob })).exitCode).toBe(0);
+    expect(await profilesText()).toBe(JSON.stringify({ slack: [{ name: 'locked', readOnly: true }, 'fresh'] }));
+  });
+
+  test('vault export and the github-install export write the same entries', async () => {
+    await writeConfig({ profiles: { slack: ENTRIES }, apiKeys: [] });
+    const { key, blob } = await exportCurrentConfig();
+    const fromExport = JSON.parse(await decryptVault(blob, key));
+    const full = await generateExportData();
+    const fromInstall = JSON.parse(await decryptVault(full.config, full.key));
+    expect(JSON.stringify(fromExport.config.profiles)).toBe(JSON.stringify(fromInstall.config.profiles));
   });
 });
