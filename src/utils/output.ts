@@ -24,16 +24,28 @@ export function addJsonOption(cmd: Command, description = 'Output JSON for progr
   return cmd.option('--json', description);
 }
 
-/** Turn on JSON mode when `cmd` was added through `addJsonOption` and `--json` was passed. */
+/**
+ * Turn on JSON mode when `cmd` was added through `addJsonOption` and `--json`
+ * was passed. Stdout then carries only what `writeJson` writes: any other log,
+ * from the command or the code under it, goes to stderr.
+ */
 export function enterJsonMode(cmd: Command): void {
-  if (JSON_COMMANDS.has(cmd) && cmd.opts().json === true) jsonMode = true;
+  if (!JSON_COMMANDS.has(cmd) || cmd.opts().json !== true) return;
+  jsonMode = true;
+  console.log = console.error;
+  console.info = console.error;
 }
 
 export function isJsonMode(): boolean {
   return jsonMode;
 }
 
+/** Write JSON text to stdout, bypassing console.log, which JSON mode sends to stderr. */
+export function writeJson(value: unknown, space?: number): void {
+  process.stdout.write(JSON.stringify(value, null, space) + '\n');
+}
+
 /** Print one JSON object on its own line of stdout, tagged with the output version. */
 export function printJson(object: Record<string, unknown>): void {
-  console.log(JSON.stringify({ v: JSON_OUTPUT_VERSION, ...object }));
+  writeJson({ v: JSON_OUTPUT_VERSION, ...object });
 }

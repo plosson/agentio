@@ -1,5 +1,5 @@
 import type { Server } from 'bun';
-import { DAEMON_HOST, DAEMON_PORT, type HealthResponse } from './types';
+import type { DaemonAddress, HealthResponse } from './types';
 import { isVaultUnlocked } from '../vault/vault';
 import { clientIp } from './rate-limit';
 import { handleUiRequest, type UiContext } from './routes-ui';
@@ -51,18 +51,17 @@ export function createRequestHandler(ctx: UiContext) {
   };
 }
 
-export function startApiServer(ctx: UiContext): void {
+/** Start listening and return the port bound, which differs from `address.port` when that is 0. */
+export function startApiServer(ctx: UiContext, address: DaemonAddress): number {
   startTime = Date.now();
   const handle = createRequestHandler(ctx);
 
   server = Bun.serve({
-    port: DAEMON_PORT,
-    hostname: DAEMON_HOST,
+    port: address.port,
+    hostname: address.host,
     fetch: (request, srv) => handle(request, srv),
   });
-
-  console.log(`Daemon API listening on ${DAEMON_HOST}:${DAEMON_PORT}`);
-  console.log(`Admin UI at http://127.0.0.1:${DAEMON_PORT}/ui`);
+  return server.port!;
 }
 
 export function stopApiServer(): void {

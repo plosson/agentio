@@ -6,7 +6,7 @@ import { CliError, profileNotFoundError, type ErrorCode } from '../utils/errors'
 import type { ServiceClient, ValidationResult } from '../types/service';
 import type { ServiceName } from '../types/config';
 import { addExamples } from '../utils/command-tree';
-import { addJsonOption } from '../utils/output';
+import { addJsonOption, writeJson } from '../utils/output';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { findServicePlugin } from '../plugins/registry';
 import { createRunContext } from '../plugins/host-context';
@@ -226,7 +226,7 @@ export function registerStatusCommand(program: Command): void {
             ? { hub: hub().url, canManageProfiles: await remoteCanManageProfiles() }
             : { configDir: CONFIG_DIR };
           const output = { version, ...where, services };
-          console.log(JSON.stringify(output, null, 2));
+          writeJson(output, 2);
           return;
         }
 

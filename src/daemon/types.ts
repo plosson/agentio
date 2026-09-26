@@ -1,6 +1,12 @@
-/** Fixed bind: the daemon runs in a container, so the port is mapped there. */
+/** Default bind: the daemon runs in a container, so the port is mapped there. */
 export const DAEMON_HOST = '0.0.0.0';
 export const DAEMON_PORT = 7890;
+
+/** Where the daemon listens; port 0 lets the system pick a free one. */
+export interface DaemonAddress {
+  host: string;
+  port: number;
+}
 
 export interface HealthResponse {
   status: 'ok';

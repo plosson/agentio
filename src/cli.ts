@@ -126,6 +126,10 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
     if (BYPASS_COMMANDS.has(name) || (parent && BYPASS_COMMANDS.has(parent))) {
       return;
     }
+    // Probing the daemon reads nothing from the vault.
+    if (parent === 'daemon' && name === 'status') {
+      return;
+    }
 
     let exists: boolean;
     try {
