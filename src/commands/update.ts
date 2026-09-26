@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { CliError, handleError } from '../utils/errors';
 import { prompt } from '../utils/stdin';
 import { addExamples } from '../utils/command-tree';
+import { addJsonOption, printJson } from '../utils/output';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -96,13 +97,22 @@ async function fetchLatestTagViaRedirect(): Promise<string | null> {
 
 async function fetchLatestRelease(): Promise<GitHubRelease> {
   const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-  const response = await fetch(url, {
-    headers: {
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': USER_AGENT,
-      ...githubAuthHeaders(),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': USER_AGENT,
+        ...githubAuthHeaders(),
+      },
+    });
+  } catch (error) {
+    throw new CliError(
+      'NETWORK_ERROR',
+      `Could not reach GitHub: ${error instanceof Error ? error.message : String(error)}`,
+      'Check your network connection and try again',
+    );
+  }
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -156,6 +166,20 @@ async function resolveDownloadUrl(release: LatestRelease, assetName: string, pla
     );
   }
   return url;
+}
+
+export interface UpdateCheck {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+}
+
+/** Compare the running version with the latest release, without downloading anything. */
+export async function checkForUpdate(current: string = getCurrentVersion()): Promise<UpdateCheck & { release: LatestRelease; comparison: number }> {
+  const release = await resolveLatestRelease();
+  const latest = release.tag.replace(/^v/, '');
+  const comparison = compareVersions(current, latest);
+  return { current, latest, updateAvailable: comparison > 0, release, comparison };
 }
 
 function compareVersions(current: string, latest: string): number {
@@ -337,9 +361,19 @@ export function registerUpdateCommand(program: Command): void {
     .description('Update agentio to the latest version')
     .option('--check', 'Only check for updates, don\'t install')
     .option('--force', 'Force update even if already on latest version')
-    .option('-y, --yes', 'Skip confirmation prompt')
+    .option('-y, --yes', 'Skip confirmation prompt');
+  addJsonOption(updateCmd, 'With --check: print the result as JSON')
     .action(async (options) => {
       try {
+        if (options.json) {
+          if (!options.check) {
+            throw new CliError('INVALID_PARAMS', '--json works only with --check', 'Run: agentio update --check --json');
+          }
+          const { current, latest, updateAvailable } = await checkForUpdate();
+          printJson({ event: 'version', current, latest, updateAvailable });
+          return;
+        }
+
         const currentVersion = getCurrentVersion();
         const platform = getPlatform();
         const assetName = getAssetName(platform);
@@ -349,10 +383,7 @@ export function registerUpdateCommand(program: Command): void {
         console.error('');
         console.error('Checking for updates...');
 
-        const release = await resolveLatestRelease();
-        const latestVersion = release.tag.replace(/^v/, '');
-
-        const comparison = compareVersions(currentVersion, latestVersion);
+        const { release, latest: latestVersion, comparison } = await checkForUpdate(currentVersion);
 
         if (comparison === 0 && !options.force) {
           console.log(`Already on the latest version (${currentVersion})`);
@@ -414,6 +445,9 @@ export function registerUpdateCommand(program: Command): void {
 
   # only check (no download)
   agentio update --check
+
+  # only check, as JSON for programs
+  agentio update --check --json
 
   # non-interactive update (skip confirmation; useful in scripts)
   agentio update --yes
