@@ -262,7 +262,7 @@ describe('pairing', () => {
     await settled();
     expect((await poll(manager, 'new')).body).toEqual({ state: 'paired', account: '+33600000001' });
     const credentials = await getCredentials<Record<string, string>>('fakechat', 'new');
-    expect(credentials).toMatchObject({ account: '+33600000001' });
+    expect(Object.keys(credentials!)).toEqual([STORE_KEY_FIELD]);
     // The store the pairing wrote to is the one the vault's key opens.
     const store = await openStore('fakechat', 'new', credentials![STORE_KEY_FIELD]);
     expect(await store.get('generation')).toBe('new');

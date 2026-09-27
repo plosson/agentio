@@ -120,7 +120,7 @@ describe('profile add', () => {
       { v: 1, event: 'qr', qr: 'QR-2' },
       { v: 1, event: 'paired', profile: 'work', number: '+33600000000' },
     ]);
-    expect(await getCredentials('whatsapp', 'work')).toMatchObject({ account: '+33600000000' });
+    expect(Object.keys((await getCredentials('whatsapp', 'work'))!)).toEqual(['storeKey']);
   });
 
   test('--json with --phone prints the pairing code once instead of QR codes', async () => {

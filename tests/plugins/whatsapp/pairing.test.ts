@@ -177,7 +177,7 @@ describe('pairing through the daemon', () => {
     await startSessions();
   });
 
-  test('pair, scan, then send: the profile is recorded with only its store key and number', async () => {
+  test('pair, scan, then send: the vault records the profile and its store key, nothing else', async () => {
     const started = await call('/v1/sessions/whatsapp/work/pair', 'POST', {});
     expect(started.status).toBe(202);
     api.last.emit('connection.update', { qr: 'QR-1' });
@@ -187,7 +187,7 @@ describe('pairing through the daemon', () => {
     await tick(20);
     expect(await (await call('/v1/sessions/whatsapp/work/pair')).json()).toEqual({ state: 'paired', account: '+33600000000' });
     const credentials = await getCredentials<Record<string, unknown>>('whatsapp', 'work');
-    expect(Object.keys(credentials!).sort()).toEqual(['account', 'storeKey']);
+    expect(Object.keys(credentials!)).toEqual(['storeKey']);
     expect(await (await call('/v1/sessions/whatsapp/work')).json()).toEqual({ state: 'open', account: '+33600000000', readOnly: false });
 
     api.last.registered.set('33611111111', '33611111111@s.whatsapp.net');

@@ -311,7 +311,8 @@ async function finishPairing(entry: PairingEntry, result: { session: Session; ac
 
   if (result && active && !entry.dropAside) {
     try {
-      const credentials = { [STORE_KEY_FIELD]: entry.key, ...(result.account ? { account: result.account } : {}) };
+      // The vault gets the profile and its store's key, nothing else; the account is the session's to report.
+      const credentials = { [STORE_KEY_FIELD]: entry.key };
       const refused = writeFailure(await saveProfileForKey(entry.keyId, service, name, credentials, { readOnly: entry.readOnly }), service, name);
       if (refused) failure = refused.message;
     } catch (error) {

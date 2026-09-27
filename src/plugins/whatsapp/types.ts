@@ -68,10 +68,9 @@ export type PairState =
   | { state: 'expired' }
   | { state: 'error'; message: string };
 
-/** Stored in the vault with the profile, next to its store key. */
+/** All the vault holds for a profile: the key of its store. */
 export interface WhatsAppCredentials {
   storeKey: string;
-  account?: string;
 }
 
 /**

@@ -361,7 +361,7 @@ Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-u
 - `agentio whatsapp profile add` shows a QR code to scan on the phone. With `--phone`, it shows an 8-character code to type on the phone instead, which is easier over SSH.
 - The agentio daemon holds the connection, locally or on the hub. The CLI never opens one, so the daemon must be running.
 
-**What the vault stores:** the key of the profile's store, and the linked number. Nothing else, and the vault is not written when messages arrive.
+**What the vault stores:** the profile, and the key of its store. Nothing else, and the vault is not written when messages arrive.
 
 **What the store holds:** the auth state (Signal keys), the chat index, the last 100 text messages of each chat, and the names known. It is encrypted, lives next to the vault at `stores/whatsapp/<profile>/`, and only the daemon opens it. It is not part of `vault export`. If it is lost, the profile must be paired again.
 

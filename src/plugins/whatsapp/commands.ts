@@ -254,7 +254,6 @@ export function registerWhatsAppCommands(program: Command): void {
   const profile = createProfileCommands<WhatsAppCredentials>(whatsapp, {
     service: 'whatsapp',
     displayName: 'WhatsApp',
-    getExtraInfo: (credentials) => (credentials?.account ? ` - ${credentials.account}` : ''),
   });
 
   addExamples(
