@@ -11,7 +11,16 @@ import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 import { findServicePlugin } from '../plugins/registry';
-import { sessionProfileRemoved, sessionProfileRenamed } from './sessions';
+import {
+  cancelPairing,
+  pairingStatus,
+  requireSession,
+  sessionPluginFor,
+  sessionProfileRemoved,
+  sessionProfileRenamed,
+  sessionStatus,
+  startPairing,
+} from './sessions';
 
 /**
  * The credential API remote agents call with `Authorization: Bearer agio1.…`.
@@ -131,8 +140,21 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
   }
 }
 
+/**
+ * A session's state never leaves the daemon: a copy of it would open a second
+ * connection for the same account, and would stop matching the daemon's copy
+ * as soon as the session wrote to it. NOT_FOUND, so a client reads it as
+ * "nothing to hand out" rather than as a broken hub.
+ */
+function refuseSessionCredentials(service: ServiceName): void {
+  if (sessionPluginFor(service)) {
+    throw new CliError('NOT_FOUND', `${service} credentials never leave the daemon`, `Use agentio ${service} commands, which run through the daemon`);
+  }
+}
+
 async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
+  refuseSessionCredentials(service);
   await requireStoredCredentials(service, name);
   if (!findServicePlugin(service)?.profile) {
     throw new CliError(
@@ -169,6 +191,9 @@ async function applyWrite(
  */
 async function handleSave(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   requireManage(key);
+  if (sessionPluginFor(service)) {
+    throw new CliError('INVALID_PARAMS', `${service} profiles are added by pairing`, `Run: agentio ${service} profile add --profile ${name}`);
+  }
   // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
   // Undefined means "not stated", which a replace answers by keeping the owner's flag.
@@ -200,6 +225,88 @@ async function handleDelete(key: ApiKeyView, service: ServiceName, name: string)
   return new Response(null, { status: 204 });
 }
 
+/** The session capability of a profile's plugin, or NOT_FOUND. */
+function requireSessionPlugin(service: ServiceName) {
+  const plugin = sessionPluginFor(service);
+  if (!plugin) throw new CliError('NOT_FOUND', `${service} has no session`);
+  return plugin;
+}
+
+async function handleSessionStatus(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  requireSessionPlugin(service);
+  const readOnly = await allowedProfile(key, service, name);
+  return json({ ...sessionStatus(service, name), readOnly });
+}
+
+/**
+ * Pairing adds a profile or replaces an existing one's account, so it needs
+ * the managing right, and an existing profile must be one the key reaches.
+ * The QR code or pairing code is the key's alone to read.
+ */
+async function requirePairingRight(key: ApiKeyView, service: ServiceName, name: string): Promise<void> {
+  requireSessionPlugin(service);
+  requireManage(key);
+  const resolved = await resolveProfile(service, name);
+  if (resolved.profile !== null && !keyAllows(key, service, name)) {
+    throw new CliError('PERMISSION_DENIED', `This token is not allowed to use ${service}/${name}`);
+  }
+}
+
+/** E.164, the only form WhatsApp takes a pairing number in: digits, no leading zero. */
+function phoneDigits(phone: unknown): string | undefined {
+  if (phone === undefined) return undefined;
+  const digits = typeof phone === 'string' ? phone.replace(/[\s()-]/g, '').replace(/^\+/, '') : '';
+  if (!/^[1-9]\d{6,14}$/.test(digits)) {
+    throw new CliError('INVALID_PARAMS', 'phone must be a number in international format', 'For example: +33612345678');
+  }
+  return digits;
+}
+
+async function handlePairStart(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  await requirePairingRight(key, service, name);
+  const body = await readJson<{ phone?: unknown; readOnly?: unknown }>(request);
+  const phone = phoneDigits(body.phone);
+  const readOnly = body.readOnly === undefined ? undefined : validateFlag('readOnly', body.readOnly);
+  await audited(key, 'pair', service, name, () => startPairing(service, name, { keyId: key.id, phone, readOnly }));
+  return json({ state: 'waiting' }, 202);
+}
+
+async function handlePairPoll(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  await requirePairingRight(key, service, name);
+  return json(pairingStatus(service, name, key.id));
+}
+
+async function handlePairCancel(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+  await requirePairingRight(key, service, name);
+  await audited(key, 'pair.cancel', service, name, () => cancelPairing(service, name, key.id));
+  return new Response(null, { status: 204 });
+}
+
+/** One of the service's own operations, run by the profile's session. */
+async function handleSessionOperation(request: Request, key: ApiKeyView, service: ServiceName, name: string, operation: string): Promise<Response> {
+  const plugin = requireSessionPlugin(service);
+  const readOnly = await allowedProfile(key, service, name);
+  if (readOnly && plugin.writeOperations.includes(operation)) {
+    audit(key, `session.${operation}`, service, name, 'read_only');
+    throw new CliError('PERMISSION_DENIED', `Cannot ${operation}: profile "${name}" is read-only`);
+  }
+  const text = await request.text();
+  let params: unknown = {};
+  if (text.trim()) {
+    try {
+      params = JSON.parse(text);
+    } catch {
+      throw new CliError('INVALID_PARAMS', 'Body must be JSON');
+    }
+  }
+  if (typeof params !== 'object' || params === null || Array.isArray(params)) {
+    throw new CliError('INVALID_PARAMS', 'Body must be a JSON object');
+  }
+  const result = await audited(key, `session.${operation}`, service, name,
+    () => requireSession(service, name).handle({ operation, params: params as Record<string, unknown>, readOnly }));
+  return json(result ?? null);
+}
+
 /** Routes under /v1. Returns null for anything else. */
 export async function handleV1Request(request: Request, ip: string): Promise<Response | null> {
   const { pathname } = new URL(request.url);
@@ -226,6 +333,15 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     if (ref && ref.action === null && method === 'PUT') return await handleSave(request, key, ref.service, ref.name);
     if (ref && ref.action === null && method === 'PATCH') return await handleRename(request, key, ref.service, ref.name);
     if (ref && ref.action === null && method === 'DELETE') return await handleDelete(key, ref.service, ref.name);
+
+    const session = profilePath(pathname, '/v1/sessions');
+    if (session && session.action === null && method === 'GET') return await handleSessionStatus(key, session.service, session.name);
+    if (session && session.action === 'pair' && method === 'POST') return await handlePairStart(request, key, session.service, session.name);
+    if (session && session.action === 'pair' && method === 'GET') return await handlePairPoll(key, session.service, session.name);
+    if (session && session.action === 'pair' && method === 'DELETE') return await handlePairCancel(key, session.service, session.name);
+    if (session && session.action && session.action !== 'pair' && method === 'POST') {
+      return await handleSessionOperation(request, key, session.service, session.name, session.action);
+    }
 
     throw new CliError('NOT_FOUND', 'Not found');
   } catch (err) {

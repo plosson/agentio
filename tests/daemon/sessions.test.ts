@@ -79,6 +79,12 @@ async function addPaired(name: string, seed: Record<string, unknown> = {}): Prom
   return key;
 }
 
+// Registered before the vault helper's, so sessions stop while HOME is still the temp one.
+afterEach(async () => {
+  stopKeepalive();
+  await stopSessions();
+  activatePluginRegistry(DEFAULT_PLUGIN_REGISTRY);
+});
 withTempVault('agentio-sessions-test-', () => ({
   passphrase: PASSPHRASE,
   config: { profiles: { slack: [{ name: 'hook' }] } },
@@ -98,11 +104,7 @@ beforeEach(async () => {
   await unlockVault(PASSPHRASE);
 });
 
-afterEach(async () => {
-  stopKeepalive();
-  await stopSessions();
-  activatePluginRegistry(DEFAULT_PLUGIN_REGISTRY);
-});
+
 
 describe('session supervisor', () => {
   test('nothing runs until the vault is unlocked and sessions are started', async () => {

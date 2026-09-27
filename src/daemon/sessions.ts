@@ -1,9 +1,31 @@
 import { listProfileRefs } from '../config/config-manager';
+import { saveProfileForKey, validateProfileName, writeFailure } from '../config/profile-store';
 import { getPluginRegistry } from '../plugins/registry';
-import { isLegacyServicePlugin, type Session, type SessionHost, type SessionPlugin, type SessionStatus } from '../plugins/types';
+import {
+  isLegacyServicePlugin,
+  type Pairing,
+  type PairingStatus,
+  type Session,
+  type SessionHost,
+  type SessionPlugin,
+  type SessionStatus,
+} from '../plugins/types';
 import { CliError } from '../utils/errors';
 import { daemonLog } from './http';
-import { deleteStore, openProfileStore, renameStore, StoreUnavailable, type OpenStore, type PluginStore } from './plugin-store';
+import {
+  createStore,
+  deleteStore,
+  discardStore,
+  openProfileStore,
+  renameStore,
+  restoreStore,
+  setAsideStore,
+  storeSegment,
+  StoreUnavailable,
+  STORE_KEY_FIELD,
+  type OpenStore,
+  type PluginStore,
+} from './plugin-store';
 
 /**
  * The session supervisor. A plugin with `session` has one long-lived
@@ -110,13 +132,17 @@ async function reconcile(): Promise<void> {
   for (const { service, name } of wanted) {
     // A lock may have landed while an earlier profile was starting.
     if (!active) return;
-    if (!entries.has(refOf(service, name))) await startOne(sessionPluginFor(service)!, service, name);
+    const ref = refOf(service, name);
+    // A profile being paired again has a new, not yet recorded, store.
+    if (!entries.has(ref) && !pairingInProgress(ref)) await startOne(sessionPluginFor(service)!, service, name);
   }
 }
 
 /** On unlock: start a session for every profile of every plugin with `session`. */
 export function startSessions(): Promise<void> {
   active = true;
+  // Outcomes of pairings from before the lock are nobody's to read any more.
+  for (const [ref, entry] of pairings) if (entry.final) pairings.delete(ref);
   return serialized(reconcile);
 }
 
@@ -124,9 +150,13 @@ export function startSessions(): Promise<void> {
 export function stopSessions(): Promise<void> {
   // Set at once, so a start queued behind this cannot run against a locked vault.
   active = false;
-  return serialized(async () => {
+  // A pairing cannot be recorded in a locked vault; each ends, and is waited for, so its store is gone too.
+  const ending = [...pairings.values()].filter((entry) => !entry.final);
+  for (const entry of ending) void entry.pairing.cancel();
+  const stopped = serialized(async () => {
     for (const ref of [...entries.keys()]) await stopOne(ref);
   });
+  return stopped.then(() => Promise.all(ending.map((entry) => entry.finished))).then(() => {});
 }
 
 /** After a profile change the daemon made: start new profiles' sessions, stop removed ones'. */
@@ -149,6 +179,12 @@ export function sessionProfileRenamed(service: string, from: string, to: string)
 /** After a removal: the account is logged out, best effort, and the store is deleted with the profile. */
 export function sessionProfileRemoved(service: string, name: string): Promise<void> {
   if (!sessionPluginFor(service)) return Promise.resolve();
+  const pairing = pairings.get(refOf(service, name));
+  if (pairing && !pairing.final) {
+    // Nothing to put back for a profile that is gone.
+    pairing.dropAside = true;
+    void pairing.pairing.cancel();
+  }
   return serialized(async () => {
     await stopOne(refOf(service, name), { logout: true });
     await deleteStore(service, name);
@@ -178,4 +214,171 @@ export function requireSession(service: string, name: string): Session {
 /** Whether the supervisor is running sessions, for tests and status. */
 export function sessionsActive(): boolean {
   return active;
+}
+
+/**
+ * Pairing. A pairing links a new account into a fresh store. An existing
+ * profile's store is set aside first, with its session stopped, and comes back
+ * if the pairing fails, so pairing again never loses a working account to a
+ * QR code nobody scanned. Once paired, the profile and its store key are
+ * written to the vault in one write, and the pairing's socket becomes the
+ * profile's session.
+ */
+
+/** Long enough to scan a few rotating QR codes or type a pairing code; WhatsApp gives up sooner. */
+export const PAIRING_TIMEOUT_MS = 3 * 60_000;
+/** How long the outcome stays readable, so a client polling slowly still learns it. */
+const PAIRING_KEPT_MS = 10 * 60_000;
+
+interface PairingEntry {
+  service: string;
+  name: string;
+  /** Only the key that started a pairing may read or cancel it: its QR code links an account. */
+  keyId: string;
+  readOnly?: boolean;
+  pairing: Pairing;
+  key: string;
+  store: OpenStore;
+  aside: string | null;
+  timer: ReturnType<typeof setTimeout>;
+  timedOut: boolean;
+  dropAside: boolean;
+  final: PairingStatus | null;
+  endedAt: number;
+  /** Settles once the outcome is recorded and everything the pairing left is cleaned up. */
+  finished: Promise<void>;
+}
+
+const pairings = new Map<string, PairingEntry>();
+
+function pairingInProgress(ref: string): boolean {
+  const entry = pairings.get(ref);
+  return !!entry && !entry.final;
+}
+
+export interface PairingRequest {
+  keyId: string;
+  phone?: string;
+  readOnly?: boolean;
+  timeoutMs?: number;
+}
+
+/** Start pairing a profile, new or existing. The caller has checked the key may manage it. */
+export function startPairing(service: string, name: string, request: PairingRequest): Promise<void> {
+  const plugin = sessionPluginFor(service);
+  if (!plugin) throw new CliError('NOT_FOUND', `${service} has no session to pair`);
+  validateProfileName(name);
+  storeSegment(name);
+  const ref = refOf(service, name);
+  return serialized(async () => {
+    if (!active) throw new CliError('VAULT_LOCKED', 'Vault is locked');
+    if (pairingInProgress(ref)) {
+      throw new CliError('INVALID_PARAMS', `A pairing is already in progress for ${ref}`, 'Finish it, or wait for it to expire');
+    }
+    await stopOne(ref);
+    const aside = await setAsideStore(service, name);
+    const { key, store } = await createStore(service, name);
+    let pairing: Pairing;
+    try {
+      pairing = await plugin.pair(name, { phone: request.phone }, sessionHost(service, name, store));
+    } catch (err) {
+      store.close();
+      await deleteStore(service, name);
+      if (aside) await restoreStore(service, name, aside);
+      await reconcile();
+      throw err;
+    }
+    const entry: PairingEntry = {
+      service, name, keyId: request.keyId, readOnly: request.readOnly, pairing, key, store, aside,
+      timedOut: false, dropAside: false, final: null, endedAt: 0, finished: Promise.resolve(),
+      timer: setTimeout(() => {
+        entry.timedOut = true;
+        void pairing.cancel();
+      }, request.timeoutMs ?? PAIRING_TIMEOUT_MS),
+    };
+    entry.timer.unref?.();
+    pairings.set(ref, entry);
+    daemonLog('session', { service, profile: name, outcome: 'pairing', method: request.phone ? 'code' : 'qr' });
+    entry.finished = pairing.done.then(
+      (result) => serialized(() => finishPairing(entry, result)),
+      (err) => serialized(() => finishPairing(entry, null, err)),
+    ).catch((err) => {
+      daemonLog('session', { service, profile: name, outcome: 'pairing_cleanup_failed', reason: reasonText(err) });
+    });
+  });
+}
+
+async function finishPairing(entry: PairingEntry, result: { session: Session; account?: string } | null, err?: unknown): Promise<void> {
+  clearTimeout(entry.timer);
+  const { service, name } = entry;
+  const ref = refOf(service, name);
+  let failure: string | null = null;
+
+  if (result && active && !entry.dropAside) {
+    try {
+      const credentials = { [STORE_KEY_FIELD]: entry.key, ...(result.account ? { account: result.account } : {}) };
+      const refused = writeFailure(await saveProfileForKey(entry.keyId, service, name, credentials, { readOnly: entry.readOnly }), service, name);
+      if (refused) failure = refused.message;
+    } catch (error) {
+      failure = reasonText(error);
+    }
+    if (!failure) {
+      await stopOne(ref);
+      entries.set(ref, { service, name, store: entry.store, session: result.session, status: { state: 'open' } });
+      if (entry.aside) await discardStore(entry.aside);
+      entry.final = { state: 'paired', account: result.account };
+      entry.endedAt = Date.now();
+      daemonLog('session', { service, profile: name, outcome: 'paired' });
+      return;
+    }
+  } else if (result) {
+    failure = entry.dropAside ? 'the profile was removed' : 'the vault was locked';
+  }
+
+  // Not paired, or paired but not kept: nothing of the new link survives.
+  if (result) {
+    try {
+      await result.session.stop({ logout: true });
+    } catch {
+      // Best effort: the store holding it is deleted next.
+    }
+  }
+  entry.store.close();
+  await deleteStore(service, name);
+  if (entry.aside) {
+    if (entry.dropAside) await discardStore(entry.aside);
+    else await restoreStore(service, name, entry.aside);
+  }
+  const status = entry.pairing.status();
+  entry.final = failure !== null ? { state: 'error', message: failure }
+    : entry.timedOut ? { state: 'expired' }
+    : err !== undefined ? { state: 'error', message: reasonText(err) }
+    : status.state === 'expired' || status.state === 'error' ? status
+    : { state: 'error', message: 'pairing was cancelled' };
+  entry.endedAt = Date.now();
+  daemonLog('session', { service, profile: name, outcome: `pairing_${entry.final.state}` });
+  await reconcile();
+}
+
+/** The pairing this key started for a profile, or NOT_FOUND. */
+function ownPairing(service: string, name: string, keyId: string): PairingEntry {
+  const ref = refOf(service, name);
+  const entry = pairings.get(ref);
+  if (entry?.final && Date.now() - entry.endedAt > PAIRING_KEPT_MS) pairings.delete(ref);
+  const kept = pairings.get(ref);
+  if (!kept || kept.keyId !== keyId) throw new CliError('NOT_FOUND', `No pairing in progress for ${ref}`);
+  return kept;
+}
+
+/** Where a pairing stands. Linked but not yet recorded still reads as waiting. */
+export function pairingStatus(service: string, name: string, keyId: string): PairingStatus {
+  const entry = ownPairing(service, name, keyId);
+  if (entry.final) return entry.final;
+  const status = entry.pairing.status();
+  return status.state === 'waiting' ? status : { state: 'waiting' };
+}
+
+export async function cancelPairing(service: string, name: string, keyId: string): Promise<void> {
+  const entry = ownPairing(service, name, keyId);
+  if (!entry.final) await entry.pairing.cancel();
 }

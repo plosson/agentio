@@ -259,6 +259,35 @@ export async function renameStore(plugin: string, from: string, to: string): Pro
   await rename(source, target);
 }
 
+/**
+ * Move a profile's store out of the way while it is paired again, so a
+ * pairing that fails can put it back. Returns where it went, or null when
+ * there was none. The name starts with a dot, which no encoded profile name
+ * does, so it can never be taken for a profile's store.
+ */
+export async function setAsideStore(plugin: string, profile: string): Promise<string | null> {
+  const dir = await storeDir(plugin, profile);
+  if (!existsSync(dir)) return null;
+  const aside = join(dirname(dir), `.aside-${storeSegment(profile)}-${randomBytes(4).toString('hex')}`);
+  assertTestWritable(dir, 'plugin store');
+  await rename(dir, aside);
+  return aside;
+}
+
+/** Put a store set aside back, replacing whatever is there now. */
+export async function restoreStore(plugin: string, profile: string, aside: string): Promise<void> {
+  const dir = await storeDir(plugin, profile);
+  assertTestWritable(dir, 'plugin store');
+  await rm(dir, { recursive: true, force: true });
+  await rename(aside, dir);
+}
+
+/** Drop a store set aside, once the pairing that replaced it succeeded. */
+export async function discardStore(aside: string): Promise<void> {
+  assertTestWritable(aside, 'plugin store');
+  await rm(aside, { recursive: true, force: true });
+}
+
 export async function deleteStore(plugin: string, profile: string): Promise<void> {
   const dir = await storeDir(plugin, profile);
   assertTestWritable(dir, 'plugin store');
