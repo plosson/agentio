@@ -15,6 +15,16 @@ const SRC = `${REPO_ROOT}site/src`;
 const PUBLIC = `${REPO_ROOT}site/public`;
 const DIST = `${REPO_ROOT}site/dist`;
 
+/** Services the home page names; the rest are counted. Only registered ones are ever named. */
+const FEATURED = [['gmail', 'Gmail'], ['slack', 'Slack'], ['jira', 'JIRA'], ['whatsapp', 'WhatsApp']] as const;
+
+/** Derived from the registry, so the page can neither advertise a service that is not there nor miscount. */
+function homeDescription(): string {
+  const named = FEATURED.filter(([slug]) => SERVICE_SLUGS.includes(slug)).map(([, name]) => name);
+  const more = SERVICE_SLUGS.length - named.length;
+  return `Run LLM agents against ${named.join(', ')}, and ${more} more. Daemon, encrypted vault, GitHub Actions ready.`;
+}
+
 async function main(): Promise<void> {
   console.log('build-site: starting');
 
@@ -104,7 +114,7 @@ async function main(): Promise<void> {
 
   await writePage(DIST, 'index.html', layout, {
     title: 'agentio — CLI for LLM agent workflows',
-    description: 'Run LLM agents against Gmail, Slack, JIRA, WhatsApp, and 14 more. Daemon, encrypted vault, GitHub Actions ready.',
+    description: homeDescription(),
     path: '/',
     nav_services: navServicesHtml,
     slot: indexBody

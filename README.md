@@ -173,6 +173,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 |---------|------|----------|
 | **Gmail** | OAuth | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
 | **Slack** | Webhook | `send` |
+| **WhatsApp** | Linked device, through the daemon | `status`, `conversations`, `send`, `read`, `contacts` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
 | **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
@@ -216,6 +217,30 @@ agentio slack send "Deployment complete ✓"
 
 # Send rich Block Kit message
 agentio slack send --json blocks.json
+```
+
+</details>
+
+<details>
+<summary><strong>WhatsApp</strong></summary>
+
+WhatsApp goes through an unofficial library, and Meta can ban a number used for automation: use a dedicated number. The daemon holds the connection, so start it first.
+
+```bash
+# In another terminal: the daemon runs in the foreground
+agentio daemon start
+
+# Link the account: scan the QR code, or add --phone +33612345678 for a code
+agentio whatsapp profile add --profile work
+
+# What is waiting to be read
+agentio whatsapp conversations --unread-only
+
+# Read without sending blue ticks
+agentio whatsapp read "Alice Martin" --no-read-receipts
+
+# Send
+agentio whatsapp send +33612345678 "On my way"
 ```
 
 </details>
