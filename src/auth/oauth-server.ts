@@ -10,14 +10,16 @@ const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Find an available port in the range 3000-3010.
  */
-export async function findAvailablePort(): Promise<number> {
+export async function findAvailablePort(host?: string): Promise<number> {
   for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
     try {
       await new Promise<void>((resolve, reject) => {
         const server = createServer();
-        server.listen(port, () => {
+        const onListen = () => {
           server.close(() => resolve());
-        });
+        };
+        if (host) server.listen(port, host, onListen);
+        else server.listen(port, onListen);
         server.on('error', reject);
       });
       return port;
@@ -77,6 +79,8 @@ export interface OAuthServerConfig {
   port: number;
   serviceName: string;
   expectedState?: string;
+  /** Bind address. Spotify requires 127.0.0.1 (not localhost). */
+  host?: string;
   /** Closes the server when the code arrived some other way. */
   signal?: AbortSignal;
 }
@@ -90,7 +94,7 @@ export interface OAuthServerConfig {
 export function startOAuthCallbackServer(
   config: OAuthServerConfig
 ): Promise<OAuthCallbackResult> {
-  const { port, serviceName, expectedState } = config;
+  const { port, serviceName, expectedState, host } = config;
 
   return new Promise((resolve, reject) => {
     let server: Server;
@@ -101,7 +105,7 @@ export function startOAuthCallbackServer(
     }, TIMEOUT_MS);
 
     const handleCallback = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      const url = new URL(req.url || '', `http://localhost:${port}`);
+      const url = new URL(req.url || '', `http://${host ?? 'localhost'}:${port}`);
 
       if (url.pathname !== '/callback') {
         res.writeHead(404);
@@ -161,9 +165,11 @@ export function startOAuthCallbackServer(
       });
     });
 
-    server.listen(port, () => {
+    const onReady = () => {
       // Server is ready for callback
-    });
+    };
+    if (host) server.listen(port, host, onReady);
+    else server.listen(port, onReady);
 
     server.on('error', (err) => {
       clearTimeout(timeout);

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { assertTestWritable } from './pointer';
+import { assertTestWritable, configDir } from './pointer';
 
 export interface PassphraseProvider {
   get(account: string): Promise<string | null>;
@@ -15,7 +14,7 @@ let provider: PassphraseProvider | null = null;
 let cached: string | null = null;
 
 function passphraseFilePath(): string {
-  return join(process.env.HOME || homedir(), '.config', 'agentio', 'vault.passphrase');
+  return join(configDir(), 'vault.passphrase');
 }
 
 function fileProvider(): PassphraseProvider {

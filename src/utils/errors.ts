@@ -3,13 +3,18 @@ import { isJsonMode, printJson } from './output';
 
 export type ErrorCode =
   | 'AUTH_FAILED'
+  | 'AUTH_EXPIRED'
   | 'TOKEN_EXPIRED'
   | 'PROFILE_NOT_FOUND'
   | 'INVALID_PARAMS'
   | 'API_ERROR'
   | 'NETWORK_ERROR'
   | 'PERMISSION_DENIED'
+  | 'READ_ONLY_PROFILE'
+  | 'PREMIUM_REQUIRED'
+  | 'NO_ACTIVE_DEVICE'
   | 'RATE_LIMITED'
+  | 'QUOTA_EXCEEDED'
   | 'NOT_FOUND'
   | 'CONFIG_ERROR'
   | 'VAULT_NOT_CONFIGURED'
@@ -42,8 +47,11 @@ export class CliError extends Error {
 export function exitCodeForError(code: ErrorCode): number {
   switch (code) {
     case 'AUTH_FAILED':
+    case 'AUTH_EXPIRED':
     case 'TOKEN_EXPIRED':
     case 'PERMISSION_DENIED':
+    case 'READ_ONLY_PROFILE':
+    case 'PREMIUM_REQUIRED':
     case 'VAULT_NOT_CONFIGURED':
     case 'VAULT_LOCKED':
     case 'VAULT_CORRUPT':
@@ -55,7 +63,9 @@ export function exitCodeForError(code: ErrorCode): number {
       return 4;
     case 'API_ERROR':
     case 'RATE_LIMITED':
+    case 'QUOTA_EXCEEDED':
     case 'NOT_FOUND':
+    case 'NO_ACTIVE_DEVICE':
       return 5;
     default:
       return 1;

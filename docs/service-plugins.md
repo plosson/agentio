@@ -58,6 +58,7 @@ src/plugins/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
 ├── revolut/
+├── spotify/
 ├── sql/
 └── slack/
     ├── index.ts

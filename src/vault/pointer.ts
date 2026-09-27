@@ -1,9 +1,16 @@
 import { readFile, writeFile, unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
-import { join, dirname, isAbsolute, relative } from 'path';
+import { join, dirname, isAbsolute, relative, resolve } from 'path';
 
+/**
+ * The directory that holds the vault, passphrase, pointer, token and caches.
+ * AGENTIO_HOME replaces it outright, so a dev checkout can keep its own vault
+ * away from the installed CLI's.
+ */
 export function configDir(): string {
+  const override = process.env.AGENTIO_HOME?.trim();
+  if (override) return resolve(override);
   return join(process.env.HOME || homedir(), '.config', 'agentio');
 }
 

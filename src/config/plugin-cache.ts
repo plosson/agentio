@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'fs/promises';
-import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { configDir } from '../vault/pointer';
 
 const SAFE_SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 function cacheRoot(): string {
-  return join(process.env.HOME || homedir(), '.config', 'agentio', 'cache');
+  return join(configDir(), 'cache');
 }
 
 function segment(value: string, label: string): string {
