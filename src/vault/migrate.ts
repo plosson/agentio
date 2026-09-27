@@ -1,16 +1,12 @@
 import { readFile, rename } from 'fs/promises';
 import { existsSync } from 'fs';
-import { homedir, hostname, userInfo } from 'os';
+import { hostname, userInfo } from 'os';
 import { join } from 'path';
 import { createDecipheriv, scryptSync } from 'crypto';
 import { CliError } from '../utils/errors';
 import type { Config } from '../types/config';
 import type { StoredCredentials } from '../types/tokens';
-import { assertTestWritable } from './pointer';
-
-function configDir(): string {
-  return join(process.env.HOME || homedir(), '.config', 'agentio');
-}
+import { assertTestWritable, configDir } from './pointer';
 
 export function legacyPaths(): { configPath: string; tokensPath: string } {
   const dir = configDir();

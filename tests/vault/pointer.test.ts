@@ -91,3 +91,55 @@ describe('test write guard', () => {
     }
   });
 });
+
+describe('AGENTIO_HOME override', () => {
+  let savedAgentioHome: string | undefined;
+
+  beforeEach(() => {
+    savedAgentioHome = process.env.AGENTIO_HOME;
+  });
+
+  afterEach(() => {
+    if (savedAgentioHome === undefined) delete process.env.AGENTIO_HOME;
+    else process.env.AGENTIO_HOME = savedAgentioHome;
+  });
+
+  test('replaces the whole config directory, ignoring HOME', async () => {
+    const { configDir } = await import('../../src/vault/pointer');
+    process.env.AGENTIO_HOME = join(tempHome, 'dev');
+    expect(configDir()).toBe(join(tempHome, 'dev'));
+    expect(pointerPath()).toBe(join(tempHome, 'dev', 'vault.path'));
+  });
+
+  test('a relative value resolves against the working directory, not HOME', async () => {
+    const { configDir } = await import('../../src/vault/pointer');
+    process.env.AGENTIO_HOME = '.dev-home';
+    expect(configDir()).toBe(join(process.cwd(), '.dev-home'));
+  });
+
+  test('empty or blank values fall back to HOME, never to the working directory', async () => {
+    const { configDir } = await import('../../src/vault/pointer');
+    for (const value of ['', '   ', '\t\n']) {
+      process.env.AGENTIO_HOME = value;
+      expect(configDir()).toBe(join(tempHome, '.config', 'agentio'));
+    }
+  });
+
+  test('surrounding whitespace is not kept as part of the path', async () => {
+    const { configDir } = await import('../../src/vault/pointer');
+    process.env.AGENTIO_HOME = `  ${join(tempHome, 'dev')}  `;
+    expect(configDir()).toBe(join(tempHome, 'dev'));
+  });
+
+  test('pointer writes land in the override and leave HOME untouched', async () => {
+    process.env.AGENTIO_HOME = join(tempHome, 'dev');
+    await writePointer('/some/vault.enc');
+    expect(existsSync(join(tempHome, 'dev', 'vault.path'))).toBe(true);
+    expect(existsSync(join(tempHome, '.config', 'agentio', 'vault.path'))).toBe(false);
+  });
+
+  test('the test-write guard still applies to an override outside the temp directory', async () => {
+    process.env.AGENTIO_HOME = '/definitely/not/a/temp/dir';
+    await expect(writePointer('/x/vault.enc')).rejects.toThrow(/Refusing/);
+  });
+});

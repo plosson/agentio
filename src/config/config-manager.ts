@@ -1,13 +1,13 @@
-import { homedir } from 'os';
 import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { loadVault, updateVault } from '../vault/vault';
 import { isRemoteMode, remoteProfiles } from '../auth/remote';
+import { configDir } from '../vault/pointer';
 import { ALL_SERVICES } from '../types/config';
 import type { Config, ServiceName, ProfileEntry, ProfileValue } from '../types/config';
 
-const CONFIG_DIR = join(process.env.HOME || homedir(), '.config', 'agentio');
+const CONFIG_DIR = configDir();
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json'); // kept for backward-compat imports elsewhere
 
 /**

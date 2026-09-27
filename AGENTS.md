@@ -20,7 +20,7 @@ Bun and TypeScript throughout, with Commander.js for the CLI.
 
 | Command | What it does |
 | --- | --- |
-| `bun run dev [args]` | Run the CLI from source |
+| `bun run dev [args]` | Run the CLI from source, with its own vault in `.dev-home/` (`AGENTIO_HOME`) |
 | `bun run typecheck` | `tsc --noEmit` over both source and tests |
 | `bun test` | Run the test suite |
 | `bun run build` | JS bundle to `dist/index.js` |
