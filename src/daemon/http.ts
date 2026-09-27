@@ -4,12 +4,17 @@ import type { ServiceName } from '../types/config';
 /** How the CLI's error codes surface over HTTP. Anything unlisted is a 500. */
 const HTTP_STATUS: Partial<Record<ErrorCode, number>> = {
   AUTH_FAILED: 401,
+  AUTH_EXPIRED: 409,
   PERMISSION_DENIED: 403,
+  READ_ONLY_PROFILE: 403,
+  PREMIUM_REQUIRED: 403,
   INVALID_PARAMS: 400,
   NOT_FOUND: 404,
+  NO_ACTIVE_DEVICE: 404,
   PROFILE_NOT_FOUND: 404,
   TOKEN_EXPIRED: 409,
   RATE_LIMITED: 429,
+  QUOTA_EXCEEDED: 429,
   VAULT_LOCKED: 503,
 };
 

@@ -32,6 +32,7 @@ const SERVICE_ORDER = [
   'revolut',
   'rss',
   'slack',
+  'spotify',
   'sql',
 ];
 
@@ -108,7 +109,7 @@ describe('service plugin registry', () => {
     const falco = findServicePlugin('falco');
     expect(findServicePlugin('rss')?.profile).toBeUndefined();
     expect(slack && isLegacyServicePlugin(slack) && slack.profile?.createClient).toBeFunction();
-    for (const id of ['gmail', 'gslides', 'jira', 'confluence', 'dropbox', 'github', 'revolut', 'falco']) {
+    for (const id of ['gmail', 'gslides', 'jira', 'confluence', 'dropbox', 'github', 'revolut', 'falco', 'spotify']) {
       const plugin = findServicePlugin(id);
       expect(plugin?.profile?.reauthenticate).toBeFunction();
     }
@@ -129,6 +130,7 @@ describe('service plugin registry', () => {
     expect(findCredentialLifecycle('dropbox')).toBe(lifecycle('dropbox'));
     expect(findCredentialLifecycle('revolut')).toBe(lifecycle('revolut'));
     expect(findCredentialLifecycle('falco')).toBe(lifecycle('falco'));
+    expect(findCredentialLifecycle('spotify')).toBe(lifecycle('spotify'));
     expect(findCredentialLifecycle('slack')).toBeUndefined();
   });
 });

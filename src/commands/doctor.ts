@@ -7,6 +7,9 @@ import { readPointer } from '../vault/pointer';
 import { getDaemonHealth } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
+import { getCredentials } from '../auth/token-store';
+import { listProfileRefs } from '../config/config-manager';
+import { authExpiryStatus, authExpiresAt, type SpotifyCredentials } from '../plugins/spotify/types';
 
 export interface Check {
   name: string;
@@ -83,6 +86,44 @@ async function checkProfiles(): Promise<Check> {
   return { name: 'Profiles', status: 'ok', detail: `${total} configured` };
 }
 
+
+async function checkSpotifyAuth(): Promise<Check | null> {
+  if (isRemoteMode()) return null;
+  const refs = (await listProfileRefs()).filter((r) => r.service === 'spotify');
+  if (refs.length === 0) return null;
+
+  const items: string[] = [];
+  let worst: Check['status'] = 'ok';
+  for (const ref of refs) {
+    const creds = await getCredentials<SpotifyCredentials>('spotify', ref.name);
+    if (!creds?.authorizedAt) {
+      items.push(`${ref.name}: missing authorizedAt`);
+      worst = 'warn';
+      continue;
+    }
+    const status = authExpiryStatus(creds.authorizedAt);
+    const expires = authExpiresAt(creds.authorizedAt).toISOString();
+    if (status === 'expired') {
+      items.push(`${ref.name}: expired ${expires}`);
+      worst = 'error';
+    } else if (status === 'warn') {
+      items.push(`${ref.name}: expires ${expires}`);
+      if (worst === 'ok') worst = 'warn';
+    }
+  }
+
+  if (items.length === 0) {
+    return { name: 'Spotify auth', status: 'ok', detail: `${refs.length} profile(s), sign-in fresh` };
+  }
+  return {
+    name: 'Spotify auth',
+    status: worst,
+    detail: worst === 'error' ? 'sign-in expired' : 'sign-in expiring soon',
+    items,
+    fix: 'agentio profile reauth spotify',
+  };
+}
+
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = program
     .command('doctor')
@@ -92,6 +133,8 @@ export function registerDoctorCommand(program: Command): void {
         const checks: Check[] = isRemoteMode()
           ? [await checkHub()]
           : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
+        const spotifyAuth = await checkSpotifyAuth();
+        if (spotifyAuth) checks.push(spotifyAuth);
 
         console.log(renderChecks(checks));
 

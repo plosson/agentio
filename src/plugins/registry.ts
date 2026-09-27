@@ -17,6 +17,7 @@ import jira from './jira';
 import revolut from './revolut';
 import rss from './rss';
 import slack from './slack';
+import spotify from './spotify';
 import sql from './sql';
 import { isLegacyServicePlugin, type RegisteredServicePlugin } from './types';
 import { PluginRegistry } from './plugin-registry';
@@ -42,6 +43,7 @@ export const SERVICE_PLUGINS = [
   revolut,
   rss,
   slack,
+  spotify,
   sql,
 ] as const satisfies readonly RegisteredServicePlugin[];
 

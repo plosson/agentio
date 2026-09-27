@@ -95,6 +95,9 @@ export function getFreshCredentials<T = Record<string, unknown>>(
     try {
       fresh = await refresher!.refresh(stored);
     } catch (err) {
+      if (err instanceof CliError && (err.code === 'AUTH_EXPIRED' || err.code === 'TOKEN_EXPIRED')) {
+        throw err;
+      }
       const reason = err instanceof Error ? err.message : String(err);
       throw new CliError(
         'TOKEN_EXPIRED',
