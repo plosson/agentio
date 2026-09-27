@@ -14,6 +14,18 @@ Three ideas hold it together:
 - **A daemon.** A long-lived HTTP process serves credentials to remote agents
   that have no vault of their own, and hosts the admin UI.
 
+So the CLI runs in one of two modes:
+
+- **Local mode.** The machine owns a vault, unlocked with the passphrase.
+  `~/.config/agentio/vault.path` points to it (`src/vault/pointer.ts`).
+- **Remote mode.** The machine has no vault. A token names a hub (a daemon in
+  local mode) and a key, and every profile or credential read is an HTTPS call
+  to that hub. Adding a profile is the only write. The token comes from
+  `AGENTIO_TOKEN`, else from `~/.config/agentio/token`, which `agentio login`
+  writes; the env var wins (`src/auth/remote.ts`).
+
+A token, if present, puts the CLI in remote mode; otherwise it is in local mode.
+
 Bun and TypeScript throughout, with Commander.js for the CLI.
 
 ## Running and building
