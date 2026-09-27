@@ -11,6 +11,7 @@ import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 import { findServicePlugin } from '../plugins/registry';
+import { sessionProfileRemoved, sessionProfileRenamed } from './sessions';
 
 /**
  * The credential API remote agents call with `Authorization: Bearer agio1.…`.
@@ -187,6 +188,7 @@ async function handleRename(request: Request, key: ApiKeyView, service: ServiceN
   const { name: to } = await readJson<Partial<Record<keyof RemoteRenameBody, unknown>>>(request);
   if (typeof to !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
   await applyWrite(key, 'rename', service, name, () => renameProfileForKey(key.id, service, name, to), to);
+  await sessionProfileRenamed(service, name, to);
   return json({ service, name: to });
 }
 
@@ -194,6 +196,7 @@ async function handleRename(request: Request, key: ApiKeyView, service: ServiceN
 async function handleDelete(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   requireManage(key);
   await applyWrite(key, 'delete', service, name, () => deleteProfileForKey(key.id, service, name));
+  await sessionProfileRemoved(service, name);
   return new Response(null, { status: 204 });
 }
 
