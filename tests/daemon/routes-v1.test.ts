@@ -8,7 +8,7 @@ const realJira = await import('../../src/plugins/jira/oauth');
 mock.module('../../src/plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
 const { createRequestHandler } = await import('../../src/daemon/api');
-const { createApiKey, listApiKeys } = await import('../../src/auth/api-keys');
+const { createApiKey, issueLocalToken, listApiKeys, LOCAL_OWNER } = await import('../../src/auth/api-keys');
 const { v1AuthLimiter, v1KeyLimiter, V1_REQUESTS_PER_MINUTE } = await import('../../src/daemon/routes-v1');
 
 // Tests inject the client IP via X-Forwarded-For; trust it here as a fronting proxy would.
@@ -287,5 +287,48 @@ describe('managing profiles over /v1', () => {
     expect((await put('/v1/profiles/discourse/a%2Fb', addToken, { credentials: { a: 1 } })).status).toBe(400);
     expect((await put('/v1/profiles/discourse/bot/credentials', addToken, { credentials: { a: 1 } })).status).toBe(404);
     expect((await del('/v1/profiles/discourse/bot/credentials', addToken)).status).toBe(404);
+  });
+});
+
+describe('the local token', () => {
+  test('authenticates as the owner: every profile, as flagged in the vault, and the managing right', async () => {
+    const local = issueLocalToken();
+    const res = await call('/v1/profiles', { token: local });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.canManageProfiles).toBe(true);
+    expect(body.profiles.map((p: { service: string; name: string }) => `${p.service}/${p.name}`).sort())
+      .toEqual(['discourse/bot', 'gmail/work', 'jira/fresh', 'jira/stale', 'revolut/biz', 'slack/empty']);
+    // The owner is not a read-only key: only the profile's own flag counts.
+    expect(body.profiles.find((p: { name: string }) => p.name === 'work').readOnly).toBe(true);
+    expect(body.profiles.find((p: { name: string }) => p.name === 'bot').readOnly).toBe(false);
+  });
+
+  test('a new daemon run retires the previous token', async () => {
+    const old = issueLocalToken();
+    issueLocalToken();
+    expect((await call('/v1/profiles', { token: old })).status).toBe(401);
+  });
+
+  test('a token of the same length that differs is refused, and so is an empty one', async () => {
+    const local = issueLocalToken();
+    const forged = (local[0] === 'A' ? 'B' : 'A') + local.slice(1);
+    expect((await call('/v1/profiles', { token: forged })).status).toBe(401);
+    expect((await call('/v1/profiles', { token: '' })).status).toBe(401);
+    expect((await call('/v1/profiles', { token: `${local} ` })).status).toBe(200);
+  });
+
+  test('a locked vault still refuses the owner', async () => {
+    const local = issueLocalToken();
+    lockVault();
+    expect((await call('/v1/profiles', { token: local })).status).toBe(503);
+  });
+
+  test('the owner may add, rename and delete profiles, and is never written into the vault as a key', async () => {
+    const local = issueLocalToken();
+    expect((await put('/v1/profiles/discourse/new', local, { credentials: { botToken: 't', channelId: '2' } })).status).toBe(201);
+    expect((await patch('/v1/profiles/discourse/new', local, { name: 'renamed' })).status).toBe(200);
+    expect((await del('/v1/profiles/discourse/renamed', local)).status).toBe(204);
+    expect((await listApiKeys()).map((k) => k.id)).not.toContain(LOCAL_OWNER.id);
   });
 });

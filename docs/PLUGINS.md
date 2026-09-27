@@ -15,6 +15,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | spotify | OAuth 2.0 with PKCE, browser, `127.0.0.1` callback | **The user's own Spotify app** | No | 5-user Development Mode limit. Sign-in expires after 6 months. |
 | revolut | OAuth 2.0 with a signed JWT (private key); the user pastes the redirect URL | **The user's own Business API certificate** | No | None |
 | slack | Incoming webhook URL (send only) | **The user's own Slack app** | No | None |
+| whatsapp | A linked device (QR code or 8-character code), through the unofficial Baileys library; the daemon holds the connection | **The user's own WhatsApp account**, no app | No | **Meta may ban the number.** Use a dedicated one. |
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
@@ -351,6 +352,32 @@ Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-u
 
 ---
 
+## WhatsApp
+
+**Code:** `src/plugins/whatsapp/`
+
+**Sign-in**
+- A linked device, as WhatsApp Web is, through [Baileys](https://github.com/WhiskeySockets/Baileys), an unofficial library.
+- `agentio whatsapp profile add` shows a QR code to scan on the phone. With `--phone`, it shows an 8-character code to type on the phone instead, which is easier over SSH.
+- The agentio daemon holds the connection, locally or on the hub. The CLI never opens one, so the daemon must be running.
+
+**What the vault stores:** the profile, and the key of its store. Nothing else, and the vault is not written when messages arrive.
+
+**What the store holds:** the auth state (Signal keys), the chat index, the last 100 text messages of each chat, and the names known. It is encrypted, lives next to the vault at `stores/whatsapp/<profile>/`, and only the daemon opens it. It is not part of `vault export`. If it is lost, the profile must be paired again.
+
+Notes:
+- **Ban risk.** Baileys is not WhatsApp's own API, and Meta can ban a number used for automation. **Use a dedicated number**, not your personal one.
+- **One connection per link.** If two daemons use the same link, WhatsApp drops one of them. That session shows `replaced` and stops reconnecting.
+- **Read receipts.** `read` marks the messages it returns as read (blue ticks), unless you pass `--no-read-receipts`. A read-only profile never sends receipts and cannot send messages.
+- **Hidden IDs.** WhatsApp increasingly identifies people by a hidden ID (`…@lid`) instead of their number, especially group members and people who are not in your contacts. Such a person is shown by name and ID, without a number. Sending to them still works.
+- **Names.** Names come from the contacts saved on the phone, the names people set for themselves, and group names. `send` and `read` accept a name only when it matches exactly one of these. `contacts` lists them.
+- **Media** is stored as a placeholder such as `[image]`. agentio sends text only.
+- **Not confirmed:** whether a reconnecting device receives the chat list again or only the messages sent while it was offline, and whether contact names come back on each connection. agentio keeps everything it receives and asks for the contact sync on each connection, so either way works.
+
+**What's needed:** nothing from Meta, and no app. The WhatsApp Business Cloud API would avoid the ban risk; it is future work.
+
+---
+
 ## Discourse
 
 **Code:** `src/plugins/discourse/`
@@ -431,5 +458,5 @@ Source: [create and configure an API key](https://meta.discourse.org/t/create-an
 - [#94](https://github.com/plosson/agentio/issues/94): vault key slots, so agent keys can unlock the vault after a restart.
 - [#95](https://github.com/plosson/agentio/issues/95): GitHub device flow, removing the GitHub secret.
 - [#96](https://github.com/plosson/agentio/issues/96): Atlassian, bringing your own app and keeping the secret off users' machines.
-- [#84](https://github.com/plosson/agentio/issues/84): planned WhatsApp connector. It uses an unofficial client library (Baileys), so it carries a risk of account bans. Add it here when it ships.
+- [#84](https://github.com/plosson/agentio/issues/84): the WhatsApp connector, with the daemon-owned connection described above.
 - How to write a plugin: `docs/service-plugins.md` and `docs/plugin-sdk.md`.

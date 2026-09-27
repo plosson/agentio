@@ -1,11 +1,13 @@
 import { startApiServer, stopApiServer } from './api';
 import { daemonUrlFor, forgetDaemon, recordDaemon } from './client';
 import { startKeepalive, stopKeepalive } from './keepalive';
+import { startSessions, stopSessions } from './sessions';
 import { DAEMON_HOST, DAEMON_PORT, type DaemonAddress } from './types';
 import { getPassphrase, memoryOnlyProvider, setPassphraseProvider } from '../vault/passphrase';
 import { isVaultUnlocked, unlockVault } from '../vault/vault';
 import { CliError } from '../utils/errors';
 import { printJson } from '../utils/output';
+import { issueLocalToken } from '../auth/api-keys';
 
 /**
  * The address from `--host`/`--port`, else AGENTIO_DAEMON_HOST/AGENTIO_DAEMON_PORT,
@@ -40,15 +42,22 @@ export function resolveDaemonAddress(
  *
  * Unlocking, here or at /ui, starts the token keepalive loop, and locking
  * stops it; see keepalive.ts for why that is the hub's job and nothing else's.
+ * The same moments start and stop the sessions of plugins with `session`
+ * (sessions.ts), and shutdown waits for them to write their state.
  */
 export async function startDaemon(options: { version: string; address: DaemonAddress; json?: boolean }): Promise<void> {
   const { host } = options.address;
   console.log(`agentio-daemon starting (PID ${process.pid})`);
 
-  const shutdown = (signal: string) => {
+  let stopping = false;
+  const shutdown = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
     console.log(`\nReceived ${signal}, shutting down...`);
     stopKeepalive();
     stopApiServer();
+    // Every session writes its last state before its store closes.
+    await stopSessions();
     forgetDaemon(process.pid);
     console.log('Daemon stopped');
     if (options.json) printJson({ event: 'stopped' });
@@ -67,6 +76,7 @@ export async function startDaemon(options: { version: string; address: DaemonAdd
     delete process.env.AGENTIO_PASSPHRASE;
     console.log('Vault unlocked from AGENTIO_PASSPHRASE');
     startKeepalive();
+    void startSessions();
   } else {
     // Nothing to refresh while locked; unlocking at /ui starts the loop.
     console.log('Vault is locked');
@@ -77,6 +87,7 @@ export async function startDaemon(options: { version: string; address: DaemonAdd
     port = startApiServer({ version: options.version }, options.address);
   } catch (error) {
     stopKeepalive();
+    await stopSessions();
     throw new CliError(
       'CONFIG_ERROR',
       `Cannot listen on ${host}:${options.address.port}: ${error instanceof Error ? error.message : String(error)}`,
@@ -88,7 +99,8 @@ export async function startDaemon(options: { version: string; address: DaemonAdd
   console.log(`Admin UI at ${url}/ui`);
 
   try {
-    await recordDaemon({ url, pid: process.pid });
+    // A new token every run, so a stale daemon.json never authenticates anyone.
+    await recordDaemon({ url, pid: process.pid, token: issueLocalToken() });
   } catch (error) {
     // The daemon still serves; only `daemon status` falls back to the default address.
     console.error(`Could not record the daemon address: ${error instanceof Error ? error.message : String(error)}`);

@@ -1,0 +1,4 @@
+[install]
+# Baileys lists sharp as a required peer, but only needs it for media thumbnails,
+# which agentio never sends. Peers are declared explicitly instead.
+peer = false

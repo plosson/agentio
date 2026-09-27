@@ -4,16 +4,21 @@ import { createSetupContext } from './host-context';
 import { isDeclarativePlugin, type RegisteredServicePlugin } from './types';
 import type { SetupResult } from '../plugin-sdk';
 
+/**
+ * The name a new profile gets: `--profile` when given, else `derived`, made
+ * unique the same way for every service. For a plugin that stores its
+ * profiles itself, such as through the daemon's pairing.
+ */
+export function newProfileName(service: string, options: ProfileAddOptions, derived: string): Promise<string> {
+  return chooseProfileName(service, { explicit: options.profile, derived, readOnly: options.readOnly });
+}
+
 async function persistSetupResult<TCredentials extends object>(
   service: string,
   result: SetupResult<TCredentials>,
   options: ProfileAddOptions,
 ): Promise<void> {
-  const profileName = await chooseProfileName(service, {
-    explicit: options.profile,
-    derived: result.suggestedProfileName,
-    readOnly: options.readOnly,
-  });
+  const profileName = await newProfileName(service, options, result.suggestedProfileName);
   await saveProfile(service, profileName, result.credentials, { readOnly: options.readOnly });
   console.log(`Profile "${profileName}" configured!`);
   if (result.info) console.log(result.info);

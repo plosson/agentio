@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { startKeepalive, stopKeepalive } from './keepalive';
+import { sessionProfileRemoved, sessionProfileRenamed, sessionStatus, startSessions, stopSessions } from './sessions';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
@@ -72,16 +73,19 @@ async function handleUnlock(request: Request, ip: string): Promise<Response> {
   await unlockVault(passphrase);
   // Tokens are reachable again, so the keepalive starts here and passes at once.
   startKeepalive();
+  await startSessions();
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(createSession(), isSecureRequest(request)) });
 }
 
 const signedOut = (request: Request) =>
   new Response(null, { status: 204, headers: { 'Set-Cookie': expiredSessionCookie(isSecureRequest(request)) } });
 
-function handleLock(request: Request): Response {
+async function handleLock(request: Request): Promise<Response> {
   lockVault();
   // Nothing to refresh once locked, and a pass would only log that every time.
   stopKeepalive();
+  // Their stores are unreadable from now on, which is what locking means.
+  await stopSessions();
   clearSessions();
   return signedOut(request);
 }
@@ -101,6 +105,7 @@ const noProfile = (ref: { service: ServiceName; name: string }) => profileNotFou
 
 async function handleDeleteProfile(ref: { service: ServiceName; name: string }): Promise<Response> {
   if (!(await deleteProfile(ref.service, ref.name))) throw noProfile(ref);
+  await sessionProfileRemoved(ref.service, ref.name);
   return new Response(null, { status: 204 });
 }
 
@@ -111,6 +116,7 @@ async function handlePatchProfile(request: Request, ref: { service: ServiceName;
     if (typeof body.name !== 'string') throw new CliError('INVALID_PARAMS', 'name must be a string');
     const failure = writeFailure(await renameProfile(ref.service, ref.name, body.name), ref.service, ref.name, body.name);
     if (failure) throw failure;
+    await sessionProfileRenamed(ref.service, ref.name, body.name);
     return json({ service: ref.service, name: body.name });
   }
   const readOnly = validateFlag('readOnly', body.readOnly);
@@ -161,10 +167,13 @@ async function handleAuthorize(request: Request, code: string): Promise<Response
   return json({ key: await approveDeviceAuth(code, body, body.url) }, 201);
 }
 
+/** Sessions run in this very process, so their state is read here rather than over HTTP. */
+const inDaemon = async (service: ServiceName, name: string) => sessionStatus(service, name);
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
-  const statuses = await getProfileStatuses({ test });
+  const statuses = await getProfileStatuses({ test, sessionStatus: inDaemon });
   const services: Record<string, Array<Omit<ProfileStatus, 'service'>>> = {};
   for (const { service, ...rest } of statuses) {
     (services[service] ??= []).push(rest);
@@ -193,7 +202,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     if (!hasSession(request)) throw new CliError('AUTH_FAILED', 'Unauthorized');
 
-    if (method === 'POST' && pathname === '/ui/api/lock') return handleLock(request);
+    if (method === 'POST' && pathname === '/ui/api/lock') return await handleLock(request);
     if (method === 'POST' && pathname === '/ui/api/logout') return handleLogout(request);
 
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked');
@@ -203,7 +212,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     const ref = profilePath(pathname, '/ui/api/profiles');
     if (ref?.action === 'status' && method === 'GET') {
-      const { service: _s, ...rest } = await getProfileStatus(ref.service, ref.name);
+      const { service: _s, ...rest } = await getProfileStatus(ref.service, ref.name, { sessionStatus: inDaemon });
       return json(rest);
     }
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');

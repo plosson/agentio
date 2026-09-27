@@ -60,10 +60,18 @@ src/plugins/
 ├── revolut/
 ├── spotify/
 ├── sql/
-└── slack/
+├── slack/
+│   ├── index.ts
+│   ├── commands.ts
+│   ├── client.ts
+│   ├── output.ts
+│   └── types.ts
+└── whatsapp/            # a plugin with `session`: the daemon holds its connection
     ├── index.ts
     ├── commands.ts
-    ├── client.ts
+    ├── client.ts        # calls the daemon's session routes, never WhatsApp
+    ├── session.ts       # the Baileys socket, run by the daemon only
+    ├── records.ts       # what the session keeps in its store, and name resolution
     ├── output.ts
     └── types.ts
 ```
@@ -118,6 +126,25 @@ service-name list.
 `profile` is omitted for services such as RSS that need no stored credentials.
 All hooks are optional, so static-token services can adopt the folder layout
 without implementing OAuth behavior.
+
+A service that needs a connection that stays open declares `session`
+instead of `profile`. WhatsApp is the first. The daemon then holds one
+connection per profile while the vault is unlocked (`src/daemon/sessions.ts`):
+
+- It starts every session on unlock, and stops them on lock and on shutdown,
+  after each has written its state.
+- When the daemon renames a profile, the session's store moves with it and
+  the session restarts. When it removes one, the session logs out and the
+  store is deleted.
+- A session keeps its state in its own encrypted store next to the vault
+  (`src/daemon/plugin-store.ts`), through `get`, `set`, `delete` and
+  `list(prefix)`. The vault holds only the store's key.
+- A profile is added by `session.pair`, which the daemon runs and records.
+- The CLI reaches a session only through the daemon's
+  `/v1/sessions/<service>/<profile>` routes, locally with the daemon's local
+  token or remotely with a hub key. A session's credentials never leave the
+  daemon.
+- Operations listed in `writeOperations` are refused on a read-only profile.
 
 Google plugins are grouped under `plugins/google` rather than nine parallel
 top-level folders. Each Google service has its own folder and `ServicePlugin`

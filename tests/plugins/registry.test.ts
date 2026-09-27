@@ -34,6 +34,7 @@ const SERVICE_ORDER = [
   'slack',
   'spotify',
   'sql',
+  'whatsapp',
 ];
 
 describe('service plugin registry', () => {

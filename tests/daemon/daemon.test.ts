@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { networkInterfaces, tmpdir } from 'os';
 import { join } from 'path';
 import { encryptVault } from '../../src/vault/crypto';
 import { resolveDaemonAddress } from '../../src/daemon/daemon';
-import { daemonRecordPath, daemonUrlFor, forgetDaemon, localDaemonUrl, recordDaemon } from '../../src/daemon/client';
+import { daemonRecordPath, daemonUrlFor, forgetDaemon, localDaemon, localDaemonUrl, recordDaemon } from '../../src/daemon/client';
 import { CliError } from '../../src/utils/errors';
 
 const PASSPHRASE = 'daemon-test-passphrase-1';
@@ -92,6 +92,20 @@ describe('daemon record', () => {
       await writeFile(daemonRecordPath(), content);
       expect(localDaemonUrl()).toBe('http://127.0.0.1:7890');
     }
+  });
+
+  test('the local token is offered only for a live daemon that recorded one', async () => {
+    expect(localDaemon()).toBeNull();
+    await recordDaemon({ url: 'http://127.0.0.1:5555', pid: process.pid });
+    expect(localDaemon()).toBeNull();
+    await recordDaemon({ url: 'http://127.0.0.1:5555', pid: process.pid, token: 'tok' });
+    expect(localDaemon()).toEqual({ url: 'http://127.0.0.1:5555', token: 'tok' });
+    for (const token of ['', 5, null]) {
+      await writeFile(daemonRecordPath(), JSON.stringify({ url: 'http://127.0.0.1:5555', pid: process.pid, token }));
+      expect(localDaemon()).toBeNull();
+    }
+    await recordDaemon({ url: 'http://127.0.0.1:5555', pid: Bun.spawnSync(['true']).pid, token: 'tok' });
+    expect(localDaemon()).toBeNull();
   });
 
   test("a daemon removes only its own record, never a newer daemon's", async () => {
@@ -198,6 +212,14 @@ describe('agentio daemon start --json', () => {
       expect(listening.locked).toBe(false);
       expect(listening.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
       expect(listening.url).not.toBe('http://127.0.0.1:7890');
+
+      // The record carries a local token, private to the user, that the daemon accepts as the owner.
+      expect(statSync(daemonRecordPath()).mode & 0o777).toBe(0o600);
+      const { token } = JSON.parse(readFileSync(daemonRecordPath(), 'utf8'));
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const owner = await fetch(`${listening.url}/v1/profiles`, { headers: { authorization: `Bearer ${token}` } });
+      expect(owner.status).toBe(200);
+      expect(await owner.json()).toMatchObject({ canManageProfiles: true });
 
       // An unlocked daemon starts the keepalive loop, which logs; none of it may reach stdout.
       proc.kill('SIGTERM');

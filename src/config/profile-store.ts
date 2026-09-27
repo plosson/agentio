@@ -67,7 +67,7 @@ export function saveProfile(
  * entry, so it cannot be empty or contain "/". Checked once, here, for the
  * local and the remote add alike.
  */
-function validateProfileName(profileName: string): void {
+export function validateProfileName(profileName: string): void {
   if (!profileName.trim() || profileName.includes('/')) {
     throw new CliError('INVALID_PARAMS', `Invalid profile name "${profileName}"`, 'A name cannot be empty or contain "/"');
   }
