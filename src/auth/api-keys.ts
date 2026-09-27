@@ -54,6 +54,37 @@ export function newKeyId(): string {
   return id;
 }
 const findKey = (config: Config, id: string) => config.apiKeys?.find((k) => k.id === id);
+
+/**
+ * The owner, as a CLI on the daemon's own machine proves to be: it read the
+ * token the daemon wrote into the config directory, which is the same trust
+ * the vault pointer gets. Every profile, writable, allowed to manage profiles.
+ * Minted ids are 8 characters, so this one cannot collide with a key.
+ */
+export const LOCAL_OWNER: ApiKeyView = Object.freeze({
+  id: 'local',
+  name: 'local owner',
+  allowedProfiles: '*',
+  readOnly: false,
+  canManageProfiles: true,
+  createdAt: new Date(0).toISOString(),
+});
+
+let localTokenHash: Buffer | null = null;
+
+/** A new local token for this daemon run; the previous one stops working. */
+export function issueLocalToken(): string {
+  const token = newSecret();
+  localTokenHash = Buffer.from(hashSecret(token), 'hex');
+  return token;
+}
+
+/** The owner when `token` is this run's local token, compared in constant time; else null. */
+export function authenticateLocalToken(token: string): ApiKeyView | null {
+  if (!localTokenHash) return null;
+  const candidate = Buffer.from(hashSecret(token), 'hex');
+  return timingSafeEqual(candidate, localTokenHash) ? LOCAL_OWNER : null;
+}
 const noKey = (id: string) => new CliError('NOT_FOUND', `No key with id ${id}`, 'Run: agentio key list');
 
 export const MAX_KEY_NAME = 64;
@@ -218,6 +249,7 @@ export function grantProfileToKey(config: Config, keyId: string, service: Servic
  * this instead.
  */
 export function keyInConfig(config: Config, keyId: string): ApiKeyView | null {
+  if (keyId === LOCAL_OWNER.id) return LOCAL_OWNER;
   const key = findKey(config, keyId);
   return key ? view(key) : null;
 }
@@ -264,7 +296,7 @@ const touchDue = (key: { lastUsedAt?: string }, at: Date) =>
  * the check is repeated under the lock so concurrent first touches write once.
  */
 export async function touchApiKey(key: ApiKeyView, at = new Date()): Promise<void> {
-  if (!touchDue(key, at)) return;
+  if (key.id === LOCAL_OWNER.id || !touchDue(key, at)) return;
   await updateConfig((config) => {
     const stored = findKey(config, key.id);
     if (stored && touchDue(stored, at)) stored.lastUsedAt = at.toISOString();

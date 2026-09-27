@@ -7,6 +7,7 @@ import { getPassphrase, memoryOnlyProvider, setPassphraseProvider } from '../vau
 import { isVaultUnlocked, unlockVault } from '../vault/vault';
 import { CliError } from '../utils/errors';
 import { printJson } from '../utils/output';
+import { issueLocalToken } from '../auth/api-keys';
 
 /**
  * The address from `--host`/`--port`, else AGENTIO_DAEMON_HOST/AGENTIO_DAEMON_PORT,
@@ -98,7 +99,8 @@ export async function startDaemon(options: { version: string; address: DaemonAdd
   console.log(`Admin UI at ${url}/ui`);
 
   try {
-    await recordDaemon({ url, pid: process.pid });
+    // A new token every run, so a stale daemon.json never authenticates anyone.
+    await recordDaemon({ url, pid: process.pid, token: issueLocalToken() });
   } catch (error) {
     // The daemon still serves; only `daemon status` falls back to the default address.
     console.error(`Could not record the daemon address: ${error instanceof Error ? error.message : String(error)}`);

@@ -10,11 +10,15 @@ const DEFAULT_DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`;
 export interface DaemonRecord {
   url: string;
   pid: number;
+  /** This run's local token: the owner's credential for a CLI on this machine. */
+  token?: string;
 }
 
 /**
  * The daemon records its address here, so the CLI finds a daemon started on
  * another host or port (or on `--port 0`). Per HOME, like the vault pointer.
+ * The file is 0600 because it carries the local token: whoever can read the
+ * config directory is trusted, as for the vault pointer.
  */
 export function daemonRecordPath(): string {
   return join(configDir(), 'daemon.json');
@@ -60,6 +64,13 @@ function isRunning(pid: number): boolean {
 export function localDaemonUrl(): string {
   const record = readDaemonRecord();
   return record && isRunning(record.pid) ? record.url : DEFAULT_DAEMON_URL;
+}
+
+/** The running daemon and its local token, or null when none is running or it recorded no token. */
+export function localDaemon(): { url: string; token: string } | null {
+  const record = readDaemonRecord();
+  if (!record || !isRunning(record.pid) || typeof record.token !== 'string' || !record.token) return null;
+  return { url: record.url, token: record.token };
 }
 
 /** The URL a client on this machine uses to reach a daemon bound to `host`. */

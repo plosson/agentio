@@ -3,7 +3,7 @@ import { isVaultUnlocked } from '../vault/vault';
 import { isProfileReadOnly, listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials, hasStored } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
-import { authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
+import { authenticateLocalToken, authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
 import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
 import type { RemoteAddBody, RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
@@ -57,7 +57,7 @@ async function handleDevicePoll(request: Request): Promise<Response> {
 async function authenticate(request: Request, ip: string): Promise<ApiKeyView> {
   const header = request.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
-  const key = token ? await authenticateToken(token) : null;
+  const key = token ? (authenticateLocalToken(token) ?? await authenticateToken(token)) : null;
   if (!key) {
     v1AuthLimiter.check(ip);
     throw new CliError('AUTH_FAILED', 'Invalid or missing token', 'Set AGENTIO_TOKEN to a token from the hub');
