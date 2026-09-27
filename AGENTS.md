@@ -71,6 +71,8 @@ Services are in-tree plugins. The contract a plugin implements and the
 step-by-step for adding one are in `docs/service-plugins.md` — follow that
 rather than a copy of it here.
 
+Whenever you add, remove or change a plugin's authentication (sign-in flow, scopes, app or key setup), update `docs/PLUGINS.md` and its "Last reviewed" date in the same change.
+
 ## Conventions
 
 - TypeScript, ES modules, 2-space indentation, semicolons. No formatter or
