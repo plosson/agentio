@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import { CliError, profileNotFoundError } from '../utils/errors';
 import { isVaultUnlocked, lockVault, unlockVault } from '../vault/vault';
 import { startKeepalive, stopKeepalive } from './keepalive';
-import { sessionProfileRemoved, sessionProfileRenamed, startSessions, stopSessions } from './sessions';
+import { sessionProfileRemoved, sessionProfileRenamed, sessionStatus, startSessions, stopSessions } from './sessions';
 import { listProfileRefs, setProfileReadOnly } from '../config/config-manager';
 import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
@@ -167,10 +167,13 @@ async function handleAuthorize(request: Request, code: string): Promise<Response
   return json({ key: await approveDeviceAuth(code, body, body.url) }, 201);
 }
 
+/** Sessions run in this very process, so their state is read here rather than over HTTP. */
+const inDaemon = async (service: ServiceName, name: string) => sessionStatus(service, name);
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
-  const statuses = await getProfileStatuses({ test });
+  const statuses = await getProfileStatuses({ test, sessionStatus: inDaemon });
   const services: Record<string, Array<Omit<ProfileStatus, 'service'>>> = {};
   for (const { service, ...rest } of statuses) {
     (services[service] ??= []).push(rest);
@@ -209,7 +212,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     const ref = profilePath(pathname, '/ui/api/profiles');
     if (ref?.action === 'status' && method === 'GET') {
-      const { service: _s, ...rest } = await getProfileStatus(ref.service, ref.name);
+      const { service: _s, ...rest } = await getProfileStatus(ref.service, ref.name, { sessionStatus: inDaemon });
       return json(rest);
     }
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');

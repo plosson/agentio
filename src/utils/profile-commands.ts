@@ -4,6 +4,16 @@ import { getCredentials } from '../auth/token-store';
 import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
 import { handleError, CliError, profileNotFoundError } from './errors';
 import type { ServiceName } from '../types/config';
+import { isRemoteMode } from '../auth/remote';
+import { findSessionPlugin } from '../plugins/registry';
+import { daemonDeleteProfile, daemonRenameProfile } from '../daemon/client';
+
+/**
+ * A profile with a session lives in the daemon, so on this machine it is
+ * renamed and removed there: the daemon moves or deletes its store and
+ * restarts or logs out its session. Remotely, the hub already does that.
+ */
+const throughDaemon = (service: ServiceName) => !isRemoteMode() && !!findSessionPlugin(service);
 
 /**
  * Shared remove logic used both by the per-service `profile remove` command
@@ -12,7 +22,10 @@ import type { ServiceName } from '../types/config';
 export async function removeProfileForService(service: ServiceName, profileName: string): Promise<void> {
   // Nothing removed has to fail: remotely it also covers a profile the key
   // cannot reach, and a script must not read that as a removal.
-  if (!(await deleteProfile(service, profileName))) throw profileNotFoundError(service, profileName);
+  const removed = throughDaemon(service)
+    ? (await daemonDeleteProfile(service, profileName)) === 'ok'
+    : await deleteProfile(service, profileName);
+  if (!removed) throw profileNotFoundError(service, profileName);
   console.log(`Removed profile "${profileName}"`);
 }
 
@@ -21,7 +34,8 @@ export async function removeProfileForService(service: ServiceName, profileName:
  * per-service one. The credentials and every key scope follow the new name.
  */
 export async function renameProfileForService(service: ServiceName, from: string, to: string): Promise<void> {
-  const failure = writeFailure(await renameProfile(service, from, to), service, from, to);
+  const outcome = throughDaemon(service) ? await daemonRenameProfile(service, from, to) : await renameProfile(service, from, to);
+  const failure = writeFailure(outcome, service, from, to);
   if (failure) throw failure;
   console.log(`Renamed profile "${from}" to "${to}"`);
 }

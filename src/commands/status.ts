@@ -8,7 +8,9 @@ import type { ServiceName } from '../types/config';
 import { addExamples } from '../utils/command-tree';
 import { addJsonOption, writeJson } from '../utils/output';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
-import { findServicePlugin } from '../plugins/registry';
+import { findServicePlugin, findSessionPlugin } from '../plugins/registry';
+import { daemonCall } from '../daemon/client';
+import type { SessionStatus } from '../plugins/types';
 import { createRunContext } from '../plugins/host-context';
 import { isDeclarativePlugin } from '../plugins/types';
 
@@ -80,7 +82,28 @@ function failureText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<ProfileStatus> {
+/**
+ * Where a session profile's state comes from: the daemon that holds it. The
+ * admin UI runs inside that daemon and passes its own state instead of
+ * calling itself.
+ */
+export type SessionStatusSource = (service: ServiceName, profile: string) => Promise<SessionStatus>;
+
+const sessionStatusFromDaemon: SessionStatusSource = (service, profile) =>
+  daemonCall(`/v1/sessions/${encodeURIComponent(service)}/${encodeURIComponent(profile)}`);
+
+/** A session profile is healthy when its connection is open; a daemon that cannot say is this row's problem only. */
+async function checkSession(ref: ProfileRef, source: SessionStatusSource): Promise<ProfileStatus> {
+  try {
+    const session = await source(ref.service, ref.profile);
+    if (session.state === 'open') return { ...ref, status: 'ok', ...(session.account ? { info: session.account } : {}) };
+    return { ...ref, status: 'invalid', error: `session ${session.state}${session.detail ? `: ${session.detail}` : ''}` };
+  } catch (err) {
+    return { ...ref, status: 'invalid', error: failureText(err) };
+  }
+}
+
+async function checkProfile(ref: ProfileRef, shouldTest: boolean, sessionSource = sessionStatusFromDaemon): Promise<ProfileStatus> {
   if (!(await hasStoredCredentials(ref))) {
     return { ...ref, status: 'no-creds' };
   }
@@ -88,6 +111,8 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
   if (!shouldTest) {
     return { ...ref, status: 'skipped' };
   }
+
+  if (findSessionPlugin(ref.service)) return checkSession(ref, sessionSource);
 
   if (!findServicePlugin(ref.service)?.profile) {
     return { ...ref, status: 'invalid', error: 'plugin is not installed in this agentio build' };
@@ -116,19 +141,23 @@ async function checkProfile(ref: ProfileRef, shouldTest: boolean): Promise<Profi
 }
 
 /** Test one configured profile now; PROFILE_NOT_FOUND when it is not configured. */
-export async function getProfileStatus(service: ServiceName, profile: string): Promise<ProfileStatus> {
+export async function getProfileStatus(
+  service: ServiceName,
+  profile: string,
+  options?: { sessionStatus?: SessionStatusSource },
+): Promise<ProfileStatus> {
   const ref = (await listProfileRefs()).find((r) => r.service === service && r.profile === profile);
   if (!ref) throw profileNotFoundError(service, profile);
-  return checkProfile(ref, true);
+  return checkProfile(ref, true, options?.sessionStatus);
 }
 
-export async function getProfileStatuses(options?: { test?: boolean }): Promise<ProfileStatus[]> {
+export async function getProfileStatuses(options?: { test?: boolean; sessionStatus?: SessionStatusSource }): Promise<ProfileStatus[]> {
   const shouldTest = options?.test !== false;
   const refs = await listProfileRefs();
   const statuses: ProfileStatus[] = [];
 
   for (const ref of refs) {
-    statuses.push(await checkProfile(ref, shouldTest));
+    statuses.push(await checkProfile(ref, shouldTest, options?.sessionStatus));
   }
 
   return statuses;

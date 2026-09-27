@@ -277,7 +277,7 @@ export function remoteDeleteProfile(service: ServiceName, name: string): Promise
  * reports it the way the local path does. Everything else, a refusal or a
  * taken name included, keeps the hub's own error and wording.
  */
-async function absentAsOutcome(call: Promise<unknown>): Promise<WriteOutcome> {
+export async function absentAsOutcome(call: Promise<unknown>): Promise<WriteOutcome> {
   try {
     await call;
     return 'ok';

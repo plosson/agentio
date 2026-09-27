@@ -10,12 +10,11 @@ import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
-import { findServicePlugin } from '../plugins/registry';
+import { findServicePlugin, findSessionPlugin } from '../plugins/registry';
 import {
   cancelPairing,
   pairingStatus,
   requireSession,
-  sessionPluginFor,
   sessionProfileRemoved,
   sessionProfileRenamed,
   sessionStatus,
@@ -147,7 +146,7 @@ async function handleStatus(key: ApiKeyView, service: ServiceName, name: string)
  * "nothing to hand out" rather than as a broken hub.
  */
 function refuseSessionCredentials(service: ServiceName): void {
-  if (sessionPluginFor(service)) {
+  if (findSessionPlugin(service)) {
     throw new CliError('NOT_FOUND', `${service} credentials never leave the daemon`, `Use agentio ${service} commands, which run through the daemon`);
   }
 }
@@ -191,7 +190,7 @@ async function applyWrite(
  */
 async function handleSave(request: Request, key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
   requireManage(key);
-  if (sessionPluginFor(service)) {
+  if (findSessionPlugin(service)) {
     throw new CliError('INVALID_PARAMS', `${service} profiles are added by pairing`, `Run: agentio ${service} profile add --profile ${name}`);
   }
   // The client's body type with every field unvalidated: the shapes stay in step, and each known field is checked below.
@@ -227,7 +226,7 @@ async function handleDelete(key: ApiKeyView, service: ServiceName, name: string)
 
 /** The session capability of a profile's plugin, or NOT_FOUND. */
 function requireSessionPlugin(service: ServiceName) {
-  const plugin = sessionPluginFor(service);
+  const plugin = findSessionPlugin(service);
   if (!plugin) throw new CliError('NOT_FOUND', `${service} has no session`);
   return plugin;
 }

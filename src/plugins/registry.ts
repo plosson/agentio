@@ -19,7 +19,8 @@ import rss from './rss';
 import slack from './slack';
 import spotify from './spotify';
 import sql from './sql';
-import { isLegacyServicePlugin, type RegisteredServicePlugin } from './types';
+import whatsapp from './whatsapp';
+import { isLegacyServicePlugin, type RegisteredServicePlugin, type SessionPlugin } from './types';
 import { PluginRegistry } from './plugin-registry';
 import { registerDeclarativePlugin } from './declarative';
 
@@ -45,6 +46,7 @@ export const SERVICE_PLUGINS = [
   slack,
   spotify,
   sql,
+  whatsapp,
 ] as const satisfies readonly RegisteredServicePlugin[];
 
 /**
@@ -75,4 +77,10 @@ export function registerServiceCommands(program: Command, registry: PluginRegist
 
 export function findServicePlugin(id: string): RegisteredServicePlugin | undefined {
   return activePluginRegistry.find(id);
+}
+
+/** The session capability of a registered plugin, when it has one: its profiles live in the daemon. */
+export function findSessionPlugin(id: string): SessionPlugin | undefined {
+  const plugin = activePluginRegistry.find(id);
+  return plugin && isLegacyServicePlugin(plugin) ? plugin.session : undefined;
 }

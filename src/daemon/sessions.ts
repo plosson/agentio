@@ -1,6 +1,6 @@
 import { listProfileRefs } from '../config/config-manager';
 import { saveProfileForKey, validateProfileName, writeFailure } from '../config/profile-store';
-import { getPluginRegistry } from '../plugins/registry';
+import { findSessionPlugin, getPluginRegistry } from '../plugins/registry';
 import {
   isLegacyServicePlugin,
   type Pairing,
@@ -52,11 +52,6 @@ let active = false;
 
 const refOf = (service: string, name: string) => `${service}/${name}`;
 
-/** The session capability of a registered plugin, if it has one. */
-export function sessionPluginFor(service: string): SessionPlugin | undefined {
-  const plugin = getPluginRegistry().find(service);
-  return plugin && isLegacyServicePlugin(plugin) ? plugin.session : undefined;
-}
 
 function sessionServices(): string[] {
   return getPluginRegistry().plugins.filter((p) => isLegacyServicePlugin(p) && p.session).map((p) => p.id);
@@ -134,7 +129,7 @@ async function reconcile(): Promise<void> {
     if (!active) return;
     const ref = refOf(service, name);
     // A profile being paired again has a new, not yet recorded, store.
-    if (!entries.has(ref) && !pairingInProgress(ref)) await startOne(sessionPluginFor(service)!, service, name);
+    if (!entries.has(ref) && !pairingInProgress(ref)) await startOne(findSessionPlugin(service)!, service, name);
   }
 }
 
@@ -166,7 +161,7 @@ export function reconcileSessions(): Promise<void> {
 
 /** After a rename: the session stops, its store moves with the profile, and it starts again under the new name. */
 export function sessionProfileRenamed(service: string, from: string, to: string): Promise<void> {
-  if (!sessionPluginFor(service)) return Promise.resolve();
+  if (!findSessionPlugin(service)) return Promise.resolve();
   return serialized(async () => {
     await stopOne(refOf(service, from));
     // A reconcile between the vault write and this call may have tried the new name before its store moved.
@@ -178,7 +173,7 @@ export function sessionProfileRenamed(service: string, from: string, to: string)
 
 /** After a removal: the account is logged out, best effort, and the store is deleted with the profile. */
 export function sessionProfileRemoved(service: string, name: string): Promise<void> {
-  if (!sessionPluginFor(service)) return Promise.resolve();
+  if (!findSessionPlugin(service)) return Promise.resolve();
   const pairing = pairings.get(refOf(service, name));
   if (pairing && !pairing.final) {
     // Nothing to put back for a profile that is gone.
@@ -265,7 +260,7 @@ export interface PairingRequest {
 
 /** Start pairing a profile, new or existing. The caller has checked the key may manage it. */
 export function startPairing(service: string, name: string, request: PairingRequest): Promise<void> {
-  const plugin = sessionPluginFor(service);
+  const plugin = findSessionPlugin(service);
   if (!plugin) throw new CliError('NOT_FOUND', `${service} has no session to pair`);
   validateProfileName(name);
   storeSegment(name);

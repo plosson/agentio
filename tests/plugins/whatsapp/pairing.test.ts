@@ -167,7 +167,8 @@ describe('pairing through the daemon', () => {
   withTempVault('agentio-whatsapp-pairing-', () => ({ passphrase: PASSPHRASE }));
   beforeEach(async () => {
     api = new FakeBaileys();
-    activatePluginRegistry(new PluginRegistry([...SERVICE_PLUGINS, whatsapp]));
+    // The real plugin, with the fake Baileys in place of the real one.
+    activatePluginRegistry(new PluginRegistry([...SERVICE_PLUGINS.filter((p) => p.id !== 'whatsapp'), whatsapp]));
     delete process.env.AGENTIO_PASSPHRASE;
     lockVault();
     await unlockVault(PASSPHRASE);

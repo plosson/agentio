@@ -7,6 +7,7 @@ import { reauthProfile } from './reauth';
 import { getPluginRegistry } from '../plugins/registry';
 import { addProfileFromPlugin } from '../plugins/profile-host';
 import type { PluginRegistry } from '../plugins/plugin-registry';
+import { isLegacyServicePlugin } from '../plugins/types';
 
 export type ProfileSummary = ProfileRef;
 
@@ -32,15 +33,21 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
 }
 
 export function registerProfileCommands(program: Command, registry: PluginRegistry = getPluginRegistry()): void {
-  const knownServices = registry.profilePlugins().map((plugin) => plugin.id);
+  /** A plugin with a session keeps its profiles in the daemon: added by pairing, renamed and removed like any other. */
+  const hasSession = (service: string) => {
+    const plugin = registry.find(service);
+    return !!plugin && isLegacyServicePlugin(plugin) && !!plugin.session;
+  };
+  const hasProfiles = (service: string) => !!registry.find(service)?.profile || hasSession(service);
+  const knownServices = registry.plugins.filter((plugin) => hasProfiles(plugin.id)).map((plugin) => plugin.id);
   const unknownService = (service: string) =>
     new CliError('INVALID_PARAMS', `Unknown service: "${service}"`, `Known services: ${knownServices.join(', ')}`);
   function assertKnownService(service: string): asserts service is ServiceName {
-    if (!registry.find(service)?.profile) throw unknownService(service);
+    if (!hasProfiles(service)) throw unknownService(service);
   }
   /** A known service, or one this build no longer has whose profiles the vault still holds, so they can be listed and removed. */
   async function assertListedService(service: string): Promise<void> {
-    if (registry.find(service)?.profile) return;
+    if (hasProfiles(service)) return;
     if (!(await listProfileRefs()).some((ref) => ref.service === service)) throw unknownService(service);
   }
 
@@ -71,6 +78,9 @@ export function registerProfileCommands(program: Command, registry: PluginRegist
     .action(async (service: string, opts: { profile?: string; readOnly?: boolean }) => {
       try {
         assertKnownService(service);
+        if (hasSession(service)) {
+          throw new CliError('INVALID_PARAMS', `${service} profiles are added by pairing`, `Run: agentio ${service} profile add`);
+        }
         const plugin = registry.find(service);
         if (!plugin?.profile) throw new Error(`No profile setup registered for ${service}`);
         await addProfileFromPlugin(plugin, opts);
