@@ -2,7 +2,6 @@ import { createHash, randomBytes } from 'crypto';
 import { URL } from 'url';
 import {
   awaitOAuthCode,
-  findAvailablePort,
   launchBrowser,
   parseOAuthRedirect,
 } from '../../auth/oauth-server';
@@ -173,6 +172,9 @@ export async function refreshSpotifyToken(
   };
 }
 
+export const SPOTIFY_OAUTH_PORT = 3010;
+export const SPOTIFY_REDIRECT_URI = `http://${LOOPBACK_HOST}:${SPOTIFY_OAUTH_PORT}${REDIRECT_PATH}`;
+
 export interface AuthorizeOptions {
   clientId: string;
   readOnly: boolean;
@@ -181,8 +183,8 @@ export interface AuthorizeOptions {
 
 export async function authorizeSpotify(options: AuthorizeOptions): Promise<SpotifyTokenResult> {
   const scopes = scopesFor(options.readOnly);
-  const port = await findAvailablePort(LOOPBACK_HOST);
-  const redirectUri = `http://${LOOPBACK_HOST}:${port}${REDIRECT_PATH}`;
+  const port = SPOTIFY_OAUTH_PORT;
+  const redirectUri = SPOTIFY_REDIRECT_URI;
   const { verifier, challenge } = createPkcePair();
   const state = randomBytes(16).toString('hex');
   const authUrl = buildAuthorizeUrl({
@@ -203,14 +205,25 @@ export async function authorizeSpotify(options: AuthorizeOptions): Promise<Spoti
     const pasted = await prompt('? Paste the redirect URL (or just the code): ');
     ({ code } = parseOAuthRedirect(pasted, 'Spotify', state));
   } else {
-    const result = await awaitOAuthCode({
-      port,
-      host: LOOPBACK_HOST,
-      serviceName: 'Spotify',
-      expectedState: state,
-      authUrl,
-    });
-    code = result.code;
+    try {
+      const result = await awaitOAuthCode({
+        port,
+        host: LOOPBACK_HOST,
+        serviceName: 'Spotify',
+        expectedState: state,
+        authUrl,
+      });
+      code = result.code;
+    } catch (error) {
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+        throw new CliError(
+          'CONFIG_ERROR',
+          `Spotify OAuth callback port ${SPOTIFY_OAUTH_PORT} is already in use.`,
+          `Stop the process using ${LOOPBACK_HOST}:${SPOTIFY_OAUTH_PORT} and try again.`,
+        );
+      }
+      throw error;
+    }
   }
 
   return exchangeCodeForTokens(code, options.clientId, verifier, redirectUri);
@@ -220,7 +233,7 @@ export const SPOTIFY_APP_SETUP_STEPS = `
 Create a Spotify app (Development Mode; Premium required for the app owner):
 
   1. Go to https://developer.spotify.com/dashboard and click Create app.
-  2. Under Redirect URIs, add http://127.0.0.1/callback exactly (no port).
+  2. Under Redirect URIs, add http://127.0.0.1:3010/callback exactly.
   3. Under Which API/SDKs are you planning to use, select Web API.
   4. Copy the Client ID. agentio does not need the client secret.
   5. To let another person use the app, add their Spotify email under User Management (max 5).

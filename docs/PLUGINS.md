@@ -33,7 +33,7 @@ library, listening history / top items, and playback control.
 Development Mode apps are what every agentio user will have.
 
 1. Go to <https://developer.spotify.com/dashboard> and click **Create app**. You need Spotify Premium (the app owner must keep Premium).
-2. Under **Redirect URIs**, add `http://127.0.0.1/callback` exactly as written, without a port. Spotify rejects `localhost`.
+2. Under **Redirect URIs**, add `http://127.0.0.1:3010/callback` exactly as written. Spotify rejects `localhost`.
 3. Under **Which API/SDKs are you planning to use**, select **Web API**.
 4. Copy the **Client ID**. agentio does not need the client secret.
 5. To let another person use the app, add their Spotify email under **User Management**. The limit is 5 people.
