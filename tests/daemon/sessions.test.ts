@@ -197,7 +197,8 @@ describe('session supervisor', () => {
     let release!: () => void;
     gate = new Promise((r) => { release = r; });
     const starting = startSessions();
-    await Bun.sleep(5);
+    // Wait until `a` is inside the plugin's start, however slow the machine.
+    while (!calls.includes('start:a')) await Bun.sleep(1);
     const stopping = stopSessions();
     release();
     await Promise.all([starting, stopping]);

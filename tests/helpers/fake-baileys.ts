@@ -138,5 +138,14 @@ export function fakeHost(store: PluginStore = memoryStore()): SessionHost & { lo
   return { store, logs, log: (fields) => { logs.push(fields); } };
 }
 
+/** Wait until `check` holds, however slow the machine; fail with `what` after `timeoutMs`. */
+export async function until(check: () => boolean | Promise<boolean>, what: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await Bun.sleep(2);
+  }
+}
+
 /** Let queued store writes and timers run. */
 export const tick = (ms = 5) => Bun.sleep(ms);

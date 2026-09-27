@@ -356,6 +356,11 @@ async function finishPairing(entry: PairingEntry, result: { session: Session; ac
   await reconcile();
 }
 
+/** Settles once a profile's current or last pairing is recorded and cleaned up; at once when there is none. */
+export function whenPairingEnds(service: string, name: string): Promise<void> {
+  return pairings.get(refOf(service, name))?.finished ?? Promise.resolve();
+}
+
 /** The pairing this key started for a profile, or NOT_FOUND. */
 function ownPairing(service: string, name: string, keyId: string): PairingEntry {
   const ref = refOf(service, name);

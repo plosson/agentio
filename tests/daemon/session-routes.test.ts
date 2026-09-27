@@ -18,7 +18,7 @@ import {
   type SessionStatus,
 } from '../../src/plugins/types';
 import { createStore, openStore, storeDir, STORE_KEY_FIELD } from '../../src/daemon/plugin-store';
-import { sessionStatus, startPairing, startSessions, stopSessions } from '../../src/daemon/sessions';
+import { sessionStatus, startPairing, startSessions, stopSessions, whenPairingEnds } from '../../src/daemon/sessions';
 import { createRequestHandler } from '../../src/daemon/api';
 import { v1AuthLimiter, v1KeyLimiter } from '../../src/daemon/routes-v1';
 
@@ -259,7 +259,7 @@ describe('pairing', () => {
     expect((await poll(manager, 'new')).body).toEqual({ state: 'waiting', qr: 'QR-SECRET-2' });
 
     await current!.link('+33600000001');
-    await settled();
+    await whenPairingEnds('fakechat', 'new');
     expect((await poll(manager, 'new')).body).toEqual({ state: 'paired', account: '+33600000001' });
     const credentials = await getCredentials<Record<string, string>>('fakechat', 'new');
     expect(Object.keys(credentials!)).toEqual([STORE_KEY_FIELD]);
@@ -276,7 +276,7 @@ describe('pairing', () => {
       await start(manager, 'new');
       await poll(manager, 'new');
       await current!.link('+33600000001');
-      await settled();
+      await whenPairingEnds('fakechat', 'new');
       expect(log.mock.calls.flat().join('\n')).not.toContain('QR-SECRET');
     } finally {
       log.mockRestore();
@@ -294,7 +294,7 @@ describe('pairing', () => {
     expect(current).toBeNull();
     expect((await start(scoped, 'fresh')).status).toBe(202);
     await current!.link('+1');
-    await settled();
+    await whenPairingEnds('fakechat', 'fresh');
     expect((await call('/v1/sessions/fakechat/fresh', scoped)).status).toBe(200);
   });
 
@@ -315,7 +315,7 @@ describe('pairing', () => {
   test('an expired pairing records nothing and leaves no store behind', async () => {
     await start(manager, 'new');
     current!.expire();
-    await settled();
+    await whenPairingEnds('fakechat', 'new');
     expect((await poll(manager, 'new')).body).toEqual({ state: 'expired' });
     expect(await getCredentials('fakechat', 'new')).toBeNull();
     expect(existsSync(await storeDir('fakechat', 'new'))).toBe(false);
@@ -323,14 +323,14 @@ describe('pairing', () => {
 
   test('a pairing nobody finishes times out as expired', async () => {
     await startPairing('fakechat', 'slow', { keyId: 'local', timeoutMs: 10 });
-    await Bun.sleep(40);
+    await whenPairingEnds('fakechat', 'slow');
     expect((await poll(owner, 'slow')).body).toEqual({ state: 'expired' });
   });
 
   test('a cancelled pairing ends as an error and records nothing', async () => {
     await start(manager, 'new');
     expect((await call('/v1/sessions/fakechat/new/pair', manager, { method: 'DELETE' })).status).toBe(204);
-    await settled();
+    await whenPairingEnds('fakechat', 'new');
     expect((await poll(manager, 'new')).body).toMatchObject({ state: 'error' });
     expect(await getCredentials('fakechat', 'new')).toBeNull();
   });
@@ -341,7 +341,7 @@ describe('pairing', () => {
     // The old session stops while the new account is linked.
     expect(stops).toEqual(['a']);
     await current!.link('+33600000002');
-    await settled();
+    await whenPairingEnds('fakechat', 'a');
     const after = await getCredentials<Record<string, string>>('fakechat', 'a');
     expect(after![STORE_KEY_FIELD]).not.toBe(before![STORE_KEY_FIELD]);
     const res = await call('/v1/sessions/fakechat/a/echo', owner, { method: 'POST', body: {} });
@@ -353,7 +353,7 @@ describe('pairing', () => {
   test('pairing an existing profile again that fails gives it back its old store and session', async () => {
     await start(owner, 'a');
     current!.expire();
-    await settled();
+    await whenPairingEnds('fakechat', 'a');
     const res = await call('/v1/sessions/fakechat/a/echo', owner, { method: 'POST', body: {} });
     expect(await res.json()).toEqual({ profile: 'a', generation: 'old' });
     expect(await getCredentials('fakechat', 'a')).toMatchObject({ account: '+a' });
@@ -362,7 +362,7 @@ describe('pairing', () => {
   test('locking the vault mid-pairing ends it, records nothing, and restores the old store', async () => {
     await start(owner, 'a');
     await stopSessions();
-    await settled();
+    await whenPairingEnds('fakechat', 'a');
     await unlockVault(PASSPHRASE);
     await startSessions();
     const res = await call('/v1/sessions/fakechat/a/echo', owner, { method: 'POST', body: {} });
@@ -373,7 +373,7 @@ describe('pairing', () => {
     await start(owner, 'new');
     lockVault();
     await current!.link('+1');
-    await settled();
+    await whenPairingEnds('fakechat', 'new');
     expect(stops).toEqual(['new:logout']);
     await stopSessions();
     await unlockVault(PASSPHRASE);
@@ -384,7 +384,7 @@ describe('pairing', () => {
   test('removing a profile mid-pairing leaves nothing of it', async () => {
     await start(owner, 'a');
     expect((await call('/v1/profiles/fakechat/a', owner, { method: 'DELETE' })).status).toBe(204);
-    await settled();
+    await whenPairingEnds('fakechat', 'a');
     expect(existsSync(await storeDir('fakechat', 'a'))).toBe(false);
     expect(readdirSync(dirname(await storeDir('fakechat', 'a'))).filter((f) => f.startsWith('.'))).toEqual([]);
   });
@@ -413,7 +413,7 @@ describe('pairing', () => {
   test('a pairing asked for read-only records a read-only profile', async () => {
     expect((await start(owner, 'new', { readOnly: true })).status).toBe(202);
     await current!.link('+1');
-    await settled();
+    await whenPairingEnds('fakechat', 'new');
     expect(await (await call('/v1/sessions/fakechat/new', owner)).json()).toMatchObject({ readOnly: true });
     expect((await start(owner, 'other', { readOnly: 'yes' })).status).toBe(400);
   });

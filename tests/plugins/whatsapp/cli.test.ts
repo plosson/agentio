@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync } from 'fs';
 import type { Server } from 'bun';
 import { withTempVault } from '../../helpers/vault';
-import { FakeBaileys, tick } from '../../helpers/fake-baileys';
+import { FakeBaileys, tick, until } from '../../helpers/fake-baileys';
 import { lockVault, unlockVault } from '../../../src/vault/vault';
 import { setProfileReadOnly, listProfileRefs } from '../../../src/config/config-manager';
 import { getCredentials } from '../../../src/auth/token-store';
@@ -107,9 +107,9 @@ describe('profile add', () => {
     try {
       const { pairing } = await pairWork({ json: true });
       api.last.emit('connection.update', { qr: 'QR-1' });
-      await tick(20);
+      await until(() => out.lines().some((l) => l.includes('QR-1')), 'QR-1');
       api.last.emit('connection.update', { qr: 'QR-2' });
-      await tick(20);
+      await until(() => out.lines().some((l) => l.includes('QR-2')), 'QR-2');
       scan();
       await pairing;
     } finally {
@@ -128,7 +128,7 @@ describe('profile add', () => {
     try {
       const { pairing } = await pairWork({ json: true, phone: '+33 6 12 34 56 78' });
       api.last.emit('connection.update', { qr: 'QR-1' });
-      await tick(20);
+      await until(() => out.lines().some((l) => l.includes('ABCD-1234')), 'ABCD-1234');
       api.last.emit('connection.update', { qr: 'QR-2' });
       await tick(20);
       scan();
@@ -149,7 +149,7 @@ describe('profile add', () => {
     try {
       const { pairing } = await pairWork({ json: true });
       api.last.emit('connection.update', { qr: 'QR-1' });
-      await tick(20);
+      await until(() => out.lines().some((l) => l.includes('QR-1')), 'QR-1');
       api.last.close(408);
       await pairing.catch((e) => { error = e; });
     } finally {
@@ -174,7 +174,7 @@ describe('profile add', () => {
     try {
       const { pairing } = await pairWork();
       api.last.emit('connection.update', { qr: 'QR-TEXT' });
-      await tick(20);
+      await until(() => err.mock.calls.flat().join('').includes('▄'), 'the QR code drawn');
       scan();
       await pairing;
       expect(err.mock.calls.flat().join('')).toContain('▄');
@@ -208,8 +208,9 @@ describe('commands through the daemon', () => {
       { id: '777@lid', notify: 'Ghost' },
     ]);
     api.last.emit('messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '33611111111@s.whatsapp.net', id: 'a1', fromMe: false }, message: { conversation: 'hi' }, messageTimestamp: 10 }] });
-    await tick(10);
-    return new WhatsAppClient('work');
+    const client = new WhatsAppClient('work');
+    await until(async () => (await client.contacts()).length === 4 && (await client.conversations({})).length === 1, 'the names and the message stored');
+    return client;
   }
 
   test('status, conversations, send, read and contacts all go to the daemon with the local token', async () => {
@@ -257,8 +258,7 @@ describe('commands through the daemon', () => {
     await renameProfileForService('whatsapp', 'work', 'job');
     await sockets(3);
     api.last.open(ME);
-    await tick(10);
-    expect(await new WhatsAppClient('job').status()).toMatchObject({ state: 'open' });
+    await until(async () => (await new WhatsAppClient('job').status()).state === 'open', 'the renamed session open');
     expect((await new WhatsAppClient('job').conversations({})).map((c) => c.name)).toEqual(['Alice']);
   });
 

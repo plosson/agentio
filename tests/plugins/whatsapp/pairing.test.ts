@@ -11,7 +11,7 @@ import { getCredentials } from '../../../src/auth/token-store';
 import { issueLocalToken } from '../../../src/auth/api-keys';
 import { activatePluginRegistry, DEFAULT_PLUGIN_REGISTRY, SERVICE_PLUGINS } from '../../../src/plugins/registry';
 import { PluginRegistry } from '../../../src/plugins/plugin-registry';
-import { startSessions, stopSessions } from '../../../src/daemon/sessions';
+import { startSessions, stopSessions, whenPairingEnds } from '../../../src/daemon/sessions';
 import { createRequestHandler } from '../../../src/daemon/api';
 import { v1KeyLimiter } from '../../../src/daemon/routes-v1';
 
@@ -184,7 +184,7 @@ describe('pairing through the daemon', () => {
     expect(await (await call('/v1/sessions/whatsapp/work/pair')).json()).toEqual({ state: 'waiting', qr: 'QR-1' });
 
     scan(api);
-    await tick(20);
+    await whenPairingEnds('whatsapp', 'work');
     expect(await (await call('/v1/sessions/whatsapp/work/pair')).json()).toEqual({ state: 'paired', account: '+33600000000' });
     const credentials = await getCredentials<Record<string, unknown>>('whatsapp', 'work');
     expect(Object.keys(credentials!)).toEqual(['storeKey']);
@@ -199,7 +199,7 @@ describe('pairing through the daemon', () => {
   test('messages arriving are not a vault write', async () => {
     await call('/v1/sessions/whatsapp/work/pair', 'POST', {});
     scan(api);
-    await tick(20);
+    await whenPairingEnds('whatsapp', 'work');
     const path = (await readPointer())!;
     const before = Bun.file(path).lastModified;
     await Bun.sleep(15);
@@ -214,7 +214,7 @@ describe('pairing through the daemon', () => {
   test('a restarted daemon reconnects the paired profile from its store', async () => {
     await call('/v1/sessions/whatsapp/work/pair', 'POST', {});
     scan(api);
-    await tick(20);
+    await whenPairingEnds('whatsapp', 'work');
     api.last.emit('messages.upsert', { type: 'notify', messages: [{ key: { remoteJid: '33611111111@s.whatsapp.net', id: 'x', fromMe: false }, message: { conversation: 'kept' }, messageTimestamp: 5 }] });
     await tick();
     await stopSessions();
@@ -228,7 +228,7 @@ describe('pairing through the daemon', () => {
   test('a pairing that expires records no profile', async () => {
     await call('/v1/sessions/whatsapp/work/pair', 'POST', {});
     api.last.close(408);
-    await tick(20);
+    await whenPairingEnds('whatsapp', 'work');
     expect(await (await call('/v1/sessions/whatsapp/work/pair')).json()).toEqual({ state: 'expired' });
     expect(await getCredentials('whatsapp', 'work')).toBeNull();
   });
@@ -240,7 +240,7 @@ describe('pairing through the daemon', () => {
       api.last.emit('connection.update', { qr: 'QR-NEVER-LOGGED' });
       await call('/v1/sessions/whatsapp/work/pair');
       scan(api);
-      await tick(20);
+      await whenPairingEnds('whatsapp', 'work');
       expect(log.mock.calls.flat().join('\n')).not.toContain('QR-NEVER-LOGGED');
     } finally {
       log.mockRestore();
