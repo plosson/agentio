@@ -9,7 +9,7 @@ export default defineServicePlugin<GDocsCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
   id: 'gdocs',
   displayName: 'Google Docs',
-  description: 'Use when interacting with Google Docs via the agentio CLI - list, read, create.',
+  description: 'Use when interacting with Google Docs via the agentio CLI - list, read, create, update from Markdown.',
   registerCommands: registerGDocsCommands,
   profile: {
     setup: gdocsProfileAdd,

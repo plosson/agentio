@@ -6,7 +6,7 @@ import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GDocsClient } from './client';
-import { printGDocsList, printGDocCreated, printGDocsBatchResult, printGDocsTabs, raw } from './output';
+import { printGDocsList, printGDocCreated, printGDocUpdated, printGDocsBatchResult, printGDocsTabs, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
 import { enforceWriteAccess } from '../../../utils/read-only';
@@ -112,6 +112,70 @@ export function registerGDocsCommands(program: Command): void {
 
   # create inside a specific Drive folder
   agentio gdocs create --title "Spec" --content "# Spec" --folder 1A2bCdEfGhIjKlMnOpQrStUvWxYz`,
+  );
+
+  addExamples(
+    gdocs
+      .command('update')
+      .argument('<doc-id-or-url>', 'Document ID or URL')
+      .description('Replace the whole document with Markdown (same document ID and link)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--content <text>', 'Markdown content (or pipe via stdin)')
+      .option('--file <path>', 'Path to a Markdown file')
+      .option('--title <title>', 'Also rename the document')
+      .option('--force', 'Allow empty content, and replacing a document that has several tabs')
+      .action(async (docIdOrUrl: string, options) => {
+        try {
+          if (options.content !== undefined && options.file) {
+            throw new CliError('INVALID_PARAMS', '--content and --file are mutually exclusive');
+          }
+
+          let content: string | null = options.content ?? null;
+          if (options.file) {
+            content = await readFile(options.file, 'utf8');
+          }
+          if (content === null) {
+            content = await readStdin();
+          }
+          if (content === null) {
+            throw new CliError('INVALID_PARAMS', 'No content provided', 'Provide --content, --file, or pipe markdown via stdin');
+          }
+
+          const { client, profile } = await getGDocsClient(options.profile);
+          await enforceWriteAccess('gdocs', profile, 'update document');
+          const result = await client.updateFromMarkdown(docIdOrUrl, content, {
+            title: options.title,
+            force: options.force,
+          });
+
+          printGDocUpdated(result);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # replace a document with a local markdown file
+  agentio gdocs update 1A2bCdEf... --file draft.md
+
+  # round trip: export, edit locally, push back to the same document
+  agentio gdocs get 1A2bCdEf... --output doc.md
+  agentio gdocs update 1A2bCdEf... --file doc.md
+
+  # pipe markdown and rename the document at the same time
+  cat v2.md | agentio gdocs update 1A2bCdEf... --title "Q4 Plan v2"
+
+The document keeps its ID, link, sharing and revision history; the whole
+content is replaced. Google converts the Markdown, as for 'create'.
+
+What survives the Markdown path: headings, bold, italic, strikethrough,
+inline code, links, bullet and numbered lists, tables, code blocks,
+blockquotes, horizontal rules. What is lost: comments and suggestions,
+headers and footers, footnotes, smart chips, drawings, exact fonts and
+colours, and every tab but one (a multi-tab document needs --force).
+
+To change part of a document without touching the rest, use 'structure'
+and 'batch'.`,
   );
 
   addExamples(

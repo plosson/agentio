@@ -27,6 +27,13 @@ export interface GDocsCreateResult {
   webViewLink: string;
 }
 
+export interface GDocsUpdateOptions {
+  title?: string;
+  force?: boolean;
+}
+
+export type GDocsUpdateResult = GDocsCreateResult;
+
 export interface GDocsBatchResult {
   documentId: string;
   replies: unknown[];

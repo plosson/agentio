@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../../utils/errors';
 import type { ServiceClient, ValidationResult } from '../../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../../config/credentials';
-import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult, GDocsBatchResult, GDocsTab, GDocsStructureOptions } from './types';
+import type { GDocsCredentials, GDocsDocument, GDocsListOptions, GDocsCreateResult, GDocsBatchResult, GDocsTab, GDocsStructureOptions, GDocsUpdateOptions, GDocsUpdateResult } from './types';
 
 export class GDocsClient implements ServiceClient {
   private credentials: GDocsCredentials;
@@ -84,6 +84,55 @@ export class GDocsClient implements ServiceClient {
       };
     } catch (err) {
       this.throwApiError(err, 'create document');
+    }
+  }
+
+  /**
+   * Replace the whole document with Markdown, keeping the same Drive file
+   * (ID, sharing, revision history). Google's importer does the conversion,
+   * exactly as for create. The import rewrites the file with a single tab, so
+   * any extra tab is deleted: multi-tab documents are refused unless forced.
+   */
+  async updateFromMarkdown(docIdOrUrl: string, markdown: string, options: GDocsUpdateOptions = {}): Promise<GDocsUpdateResult> {
+    const documentId = this.extractDocId(docIdOrUrl);
+
+    if (!markdown.trim() && !options.force) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        'Markdown content is empty: this would erase the document',
+        'Pass --force to clear the document on purpose'
+      );
+    }
+
+    if (!options.force) {
+      const tabs = await this.listTabs(documentId);
+      if (tabs.length > 1) {
+        throw new CliError(
+          'INVALID_PARAMS',
+          `Document has ${tabs.length} tabs: a Markdown update keeps only one tab and deletes the others`,
+          'Pass --force to replace the whole document anyway'
+        );
+      }
+    }
+
+    try {
+      const response = await this.drive.files.update({
+        fileId: documentId,
+        requestBody: options.title ? { name: options.title } : undefined,
+        media: {
+          mimeType: 'text/markdown',
+          body: Readable.from(Buffer.from(markdown, 'utf-8')),
+        },
+        fields: 'id,name,webViewLink',
+      });
+
+      return {
+        id: response.data.id!,
+        title: response.data.name || '',
+        webViewLink: response.data.webViewLink || `https://docs.google.com/document/d/${response.data.id}`,
+      };
+    } catch (err) {
+      this.throwApiError(err, 'update document');
     }
   }
 

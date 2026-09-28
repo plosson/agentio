@@ -1,4 +1,4 @@
-import type { GDocsDocument, GDocsCreateResult, GDocsBatchResult, GDocsTab } from './types';
+import type { GDocsDocument, GDocsCreateResult, GDocsUpdateResult, GDocsBatchResult, GDocsTab } from './types';
 export { raw } from '../format';
 
 // Google Docs specific formatters
@@ -23,6 +23,13 @@ export function printGDocsList(docs: GDocsDocument[]): void {
 
 export function printGDocCreated(result: GDocsCreateResult): void {
   console.log('Document created');
+  console.log(`ID: ${result.id}`);
+  console.log(`Title: ${result.title}`);
+  console.log(`Link: ${result.webViewLink}`);
+}
+
+export function printGDocUpdated(result: GDocsUpdateResult): void {
+  console.log('Document updated');
   console.log(`ID: ${result.id}`);
   console.log(`Title: ${result.title}`);
   console.log(`Link: ${result.webViewLink}`);
