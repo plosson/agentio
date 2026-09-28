@@ -90,8 +90,12 @@ export class GDocsClient implements ServiceClient {
   /**
    * Replace the whole document with Markdown, keeping the same Drive file
    * (ID, sharing, revision history). Google's importer does the conversion,
-   * exactly as for create. The import rewrites the file with a single tab, so
-   * any extra tab is deleted: multi-tab documents are refused unless forced.
+   * exactly as for create.
+   *
+   * Write access is always checked first: without it Drive answers 403 but
+   * still applies the new content. Unless forced, the update is also refused
+   * when it would lose something the Markdown cannot carry: extra tabs,
+   * pending suggestions, open comments.
    */
   async updateFromMarkdown(docIdOrUrl: string, markdown: string, options: GDocsUpdateOptions = {}): Promise<GDocsUpdateResult> {
     const documentId = this.extractDocId(docIdOrUrl);
@@ -104,15 +108,16 @@ export class GDocsClient implements ServiceClient {
       );
     }
 
-    if (!options.force) {
-      const tabs = await this.listTabs(documentId);
-      if (tabs.length > 1) {
-        throw new CliError(
-          'INVALID_PARAMS',
-          `Document has ${tabs.length} tabs: a Markdown update keeps only one tab and deletes the others`,
-          'Pass --force to replace the whole document anyway'
-        );
-      }
+    const [, losses] = await Promise.all([
+      this.assertCanWrite(documentId),
+      options.force ? [] : this.replaceLosses(documentId),
+    ]);
+    if (losses.length > 0) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Replacing the whole document would affect ${losses.join(', ')}`,
+        "Edit with 'gdocs batch' instead, or pass --force to replace the document anyway"
+      );
     }
 
     try {
@@ -134,6 +139,77 @@ export class GDocsClient implements ServiceClient {
     } catch (err) {
       this.throwApiError(err, 'update document');
     }
+  }
+
+  /**
+   * Probe write access with an empty metadata update, which changes nothing
+   * (not even the modified time) and fails cleanly when access is missing.
+   */
+  private async assertCanWrite(documentId: string): Promise<void> {
+    try {
+      await this.drive.files.update({ fileId: documentId, requestBody: {}, fields: 'id' });
+    } catch (err) {
+      const reason = this.getErrorReason(err);
+      if (reason === 'appNotAuthorizedToFile') {
+        throw new CliError(
+          'PERMISSION_DENIED',
+          'agentio may not write this document: the profile was signed in with the older drive.file scope',
+          'Run: agentio profile reauth gdocs <profile>'
+        );
+      }
+      if (reason === 'insufficientFilePermissions') {
+        throw new CliError('PERMISSION_DENIED', 'You do not have edit access to this document');
+      }
+      this.throwApiError(err, 'check write access to document');
+    }
+  }
+
+  /** What a whole-document Markdown replace would destroy, one phrase per kind. */
+  private async replaceLosses(documentId: string): Promise<string[]> {
+    let document: docs_v1.Schema$Document;
+    let comments: drive_v3.Schema$Comment[];
+    try {
+      [document, comments] = await Promise.all([
+        this.docsApi.documents
+          .get({ documentId, includeTabsContent: true, suggestionsViewMode: 'SUGGESTIONS_INLINE' })
+          .then((response) => response.data),
+        this.listComments(documentId),
+      ]);
+    } catch (err) {
+      this.throwApiError(err, 'inspect document before update');
+    }
+
+    const losses: string[] = [];
+    const tabs = this.flattenTabs(document.tabs ?? []).length;
+    if (tabs > 1) {
+      losses.push(`${tabs} tabs (all but one are deleted)`);
+    }
+    const suggestions = new Set<string>();
+    collectSuggestionIds(document, suggestions);
+    if (suggestions.size > 0) {
+      losses.push(`${plural(suggestions.size, 'pending suggestion')} (discarded; 'get' exports them as plain text)`);
+    }
+    const open = comments.filter((comment) => !comment.resolved).length;
+    if (open > 0) {
+      losses.push(`${plural(open, 'open comment')} (may be detached from their text)`);
+    }
+    return losses;
+  }
+
+  private async listComments(fileId: string): Promise<drive_v3.Schema$Comment[]> {
+    const comments: drive_v3.Schema$Comment[] = [];
+    let pageToken: string | undefined;
+    do {
+      const response = await this.drive.comments.list({
+        fileId,
+        pageSize: 100,
+        pageToken,
+        fields: 'nextPageToken,comments(resolved)',
+      });
+      comments.push(...(response.data.comments ?? []));
+      pageToken = response.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return comments;
   }
 
   async list(options: GDocsListOptions = {}): Promise<GDocsDocument[]> {
@@ -276,6 +352,11 @@ export class GDocsClient implements ServiceClient {
     throw new CliError(code, `Failed to ${operation}: ${message}`);
   }
 
+  private getErrorReason(err: unknown): string | undefined {
+    const response = (err as { response?: { data?: { error?: { errors?: { reason?: string }[] } } } })?.response;
+    return response?.data?.error?.errors?.[0]?.reason;
+  }
+
   private getErrorCode(err: unknown): ErrorCode {
     if (err && typeof err === 'object') {
       const error = err as Record<string, unknown>;
@@ -297,4 +378,30 @@ export class GDocsClient implements ServiceClient {
     }
     return err instanceof Error ? err.message : String(err);
   }
+}
+
+/**
+ * Gather suggestion IDs anywhere in a Docs API document: `suggested*Ids`
+ * arrays hold them, `suggested*Changes` maps are keyed by them.
+ */
+function collectSuggestionIds(node: unknown, ids: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectSuggestionIds(item, ids);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith('suggested')) {
+      if (Array.isArray(value)) {
+        for (const id of value) if (typeof id === 'string') ids.add(id);
+      } else if (value && typeof value === 'object') {
+        for (const id of Object.keys(value)) ids.add(id);
+      }
+    }
+    collectSuggestionIds(value, ids);
+  }
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

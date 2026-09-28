@@ -22,8 +22,8 @@ const SCOPES = {
   ],
   gdocs: [
     'https://www.googleapis.com/auth/documents',
-    'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/drive.readonly',
+    // Full drive, not drive.file: `gdocs update` rewrites docs agentio did not create.
+    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/userinfo.email',
   ],
   'gdrive-readonly': [

@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-09-27. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-09-28. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -55,7 +55,7 @@ The **"Create your own app"** steps below were checked against each provider's o
 | gmail | gmail.readonly **R**, gmail.compose **R**, gmail.modify **R**, gmail.settings.basic **R**, gmail.send **S**, userinfo.email NS |
 | gdrive (read-only) | drive.readonly **R**, userinfo.email NS |
 | gdrive (full) | drive **R**, userinfo.email NS |
-| gdocs | documents **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |
+| gdocs | documents **S**, drive **R**, userinfo.email NS. Full drive because `gdocs update` rewrites docs agentio did not create; profiles signed in with the older drive.file scopes must sign in again (`agentio profile reauth gdocs`) |
 | gsheets | spreadsheets **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |
 | gslides | presentations **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |
 | gcal | calendar **S**, userinfo.email NS |

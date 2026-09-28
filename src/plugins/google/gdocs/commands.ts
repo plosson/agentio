@@ -123,7 +123,7 @@ export function registerGDocsCommands(program: Command): void {
       .option('--content <text>', 'Markdown content (or pipe via stdin)')
       .option('--file <path>', 'Path to a Markdown file')
       .option('--title <title>', 'Also rename the document')
-      .option('--force', 'Allow empty content, and replacing a document that has several tabs')
+      .option('--force', 'Replace even when content is empty, or the document has tabs, suggestions or open comments')
       .action(async (docIdOrUrl: string, options) => {
         try {
           if (options.content !== undefined && options.file) {
@@ -168,11 +168,24 @@ export function registerGDocsCommands(program: Command): void {
 The document keeps its ID, link, sharing and revision history; the whole
 content is replaced. Google converts the Markdown, as for 'create'.
 
+Without --force, update refuses empty content, and a document where the
+replace would lose something Markdown cannot carry: extra tabs (all but one
+are deleted), pending suggestions (discarded), open comments (may be
+detached from their text). Write access is always checked first; a profile
+signed in before gdocs asked for full Drive access must sign in again:
+agentio profile reauth gdocs <profile>.
+
 What survives the Markdown path: headings, bold, italic, strikethrough,
-inline code, links, bullet and numbered lists, tables, code blocks,
-blockquotes, horizontal rules. What is lost: comments and suggestions,
-headers and footers, footnotes, smart chips, drawings, exact fonts and
-colours, and every tab but one (a multi-tab document needs --force).
+inline code, links, bullet, numbered and check lists, tables, code blocks,
+blockquotes, horizontal rules, footnotes. What is lost or changed:
+comments and suggestions, headers and footers, smart chips, drawings,
+exact fonts and colours; consecutive blockquotes merge into one, nested
+checklist items become plain text, and an escaped pipe in a table cell (a \\| b) comes
+back unescaped, which drops the rest of the cell on the next update.
+
+'get' exports pending suggestions as plain text, both the inserted and the
+deleted words: accept or reject them before a get/update round trip.
+Images come back embedded as base64 data.
 
 To change part of a document without touching the rest, use 'structure'
 and 'batch'.`,
