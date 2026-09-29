@@ -530,13 +530,16 @@ export class SpotifyClient implements ServiceClient {
 
   async librarySave(uris: string[]): Promise<void> {
     for (const batch of chunk(uris, LIBRARY_BATCH_SIZE)) {
-      await this.request('PUT', '/me/library', { uris: batch });
+      // Spotify expects `uris` as a query param (not JSON body) on PUT/DELETE /me/library.
+      const params = new URLSearchParams({ uris: batch.join(',') });
+      await this.requestAllowEmpty('PUT', `/me/library?${params}`);
     }
   }
 
   async libraryRemove(uris: string[]): Promise<void> {
     for (const batch of chunk(uris, LIBRARY_BATCH_SIZE)) {
-      await this.request('DELETE', '/me/library', { uris: batch });
+      const params = new URLSearchParams({ uris: batch.join(',') });
+      await this.requestAllowEmpty('DELETE', `/me/library?${params}`);
     }
   }
 
