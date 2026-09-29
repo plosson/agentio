@@ -49,16 +49,47 @@ function client(overrides: Partial<SpotifyCredentials> = {}): SpotifyClient {
 }
 
 describe('library batching', () => {
-  test.each([0, 40, 41, 100, 101])('librarySave batches %i uris', async (n) => {
-    stubSequence([() => json({})]);
+  test.each([0, 40, 41, 100, 101])('librarySave batches %i uris as query param', async (n) => {
+    stubSequence([() => new Response(null, { status: 200 })]);
     const uris = Array.from({ length: n }, (_, i) => `spotify:track:${String(i).padStart(22, '0')}`);
     await client().librarySave(uris);
+    const putCalls = calls.filter((c) => c.method === 'PUT');
     const expectedCalls = n === 0 ? 0 : Math.ceil(n / LIBRARY_BATCH_SIZE);
-    expect(calls.filter((c) => c.method === 'PUT').length).toBe(expectedCalls);
+    expect(putCalls.length).toBe(expectedCalls);
     if (n > 0) {
-      const first = JSON.parse(calls[0].body!);
-      expect(first.uris.length).toBe(Math.min(n, LIBRARY_BATCH_SIZE));
+      expect(putCalls[0].body).toBeUndefined();
+      const url = new URL(putCalls[0].url);
+      expect(url.pathname).toBe('/v1/me/library');
+      const queryUris = url.searchParams.get('uris')!.split(',');
+      expect(queryUris.length).toBe(Math.min(n, LIBRARY_BATCH_SIZE));
+      expect(queryUris[0]).toBe(uris[0]);
     }
+  });
+
+  test('libraryRemove sends DELETE with uris query (no body)', async () => {
+    stubSequence([() => new Response(null, { status: 200 })]);
+    const uris = [
+      'spotify:show:4rOoJ6Egrf8K2IrywzwOMk',
+      'spotify:track:7a3LWj5xSFhFRYmztS8wgK',
+    ];
+    await client().libraryRemove(uris);
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe('DELETE');
+    expect(calls[0].body).toBeUndefined();
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe('/v1/me/library');
+    expect(url.searchParams.get('uris')).toBe(uris.join(','));
+  });
+
+  test('libraryContains keeps uris as query param', async () => {
+    stubSequence([() => json([true, false])]);
+    const uris = ['spotify:show:abc', 'spotify:album:def'];
+    const flags = await client().libraryContains(uris);
+    expect(flags).toEqual([true, false]);
+    expect(calls[0].method).toBe('GET');
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe('/v1/me/library/contains');
+    expect(url.searchParams.get('uris')).toBe(uris.join(','));
   });
 
   test('playlist add batches 100', async () => {
