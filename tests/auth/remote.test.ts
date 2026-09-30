@@ -1,10 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { encodeToken } from '../../src/auth/token';
-import { clearRemoteToken, hub, isRemoteMode, remoteDeleteProfile, remoteProfiles, remoteSaveProfile, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
+import { clearRemoteToken, hub, isRemoteMode, NO_STORED_CREDENTIALS, remoteDeleteProfile, remoteProfiles, remoteSaveProfile, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
 import { CliError } from '../../src/utils/errors';
 import { getCredentials, setCredentials } from '../../src/auth/token-store';
 import { isProfileReadOnly, listProfileRefs, loadConfig, resolveProfile } from '../../src/config/config-manager';
 import { enforceWriteAccess } from '../../src/utils/read-only';
+import { getFreshCredentials } from '../../src/auth/refresh';
 
 /**
  * The client side of remote mode against a scripted hub. The real hub is
@@ -171,6 +172,50 @@ describe('remote mode', () => {
     expect(await getCredentials<{ accessToken: string }>('gdrive', 'docs')).toEqual({ accessToken: 'at' });
     expect(await getCredentials('gmail', 'home')).toBeNull();
     await expect(getCredentials('slack', 'nope')).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
+  });
+
+  describe('credentials the hub holds but cannot hand out', () => {
+    const NOT_INSTALLED = { status: 404, body: { error: 'Plugin "kite" is not installed on this hub', code: 'NOT_FOUND', suggestion: 'Update the hub to an agentio version that includes this plugin' } };
+
+    test('a command that needs them gets the hub\'s reason, not "run profile add"', async () => {
+      script['POST /v1/profiles/gmail/work/credentials'] = NOT_INSTALLED;
+      const error = (await getFreshCredentials('gmail', 'work').catch((e) => e)) as CliError;
+      expect(error).toBeInstanceOf(CliError);
+      expect(error.code).toBe('NOT_FOUND');
+      expect(error.message).toContain(url);
+      expect(error.message).toContain('is not installed on this hub');
+      expect(error.suggestion).toBe('Update the hub to an agentio version that includes this plugin');
+      expect(`${error.message} ${error.suggestion}`).not.toContain('profile add');
+    });
+
+    test('a session\'s credentials that never leave the daemon are explained the same way', async () => {
+      script['POST /v1/profiles/gmail/work/credentials'] = { status: 404, body: { error: 'whatsapp credentials never leave the daemon', code: 'NOT_FOUND' } };
+      await expect(getFreshCredentials('gmail', 'work')).rejects.toMatchObject({ code: 'NOT_FOUND', message: expect.stringContaining('never leave the daemon') });
+    });
+
+    test('nothing stored is still "run profile add"', async () => {
+      script['POST /v1/profiles/gmail/home/credentials'] = { status: 404, body: { error: `${NO_STORED_CREDENTIALS} for gmail/home`, code: 'NOT_FOUND' } };
+      await expect(getFreshCredentials('gmail', 'home')).rejects.toMatchObject({
+        code: 'AUTH_FAILED',
+        suggestion: expect.stringContaining('agentio gmail profile add'),
+      });
+    });
+
+    test('the wording must lead the message; mentioning it later is not "nothing stored"', async () => {
+      script['POST /v1/profiles/gmail/work/credentials'] = { status: 404, body: { error: `Plugin broken: ${NO_STORED_CREDENTIALS} is not the reason`, code: 'NOT_FOUND' } };
+      await expect(getFreshCredentials('gmail', 'work')).rejects.toMatchObject({ code: 'NOT_FOUND', message: expect.stringContaining('Plugin broken') });
+    });
+
+    test('a lenient read, such as profile list, still answers null and does not fail', async () => {
+      script['POST /v1/profiles/gmail/work/credentials'] = NOT_INSTALLED;
+      expect(await getCredentials('gmail', 'work')).toBeNull();
+    });
+
+    test('other errors are unchanged by strict reads', async () => {
+      script['POST /v1/profiles/gmail/work/credentials'] = { status: 403, body: { error: 'This token is not allowed to use gmail/work', code: 'PERMISSION_DENIED' } };
+      await expect(getCredentials('gmail', 'work', { strict: true })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(getCredentials('slack', 'nope', { strict: true })).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
+    });
   });
 
   test('the hub\'s own code and suggestion survive the hop', async () => {

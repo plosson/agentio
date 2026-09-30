@@ -287,13 +287,34 @@ export async function absentAsOutcome(call: Promise<unknown>): Promise<WriteOutc
   }
 }
 
+/**
+ * How every hub, old and new, words "the profile exists but holds no
+ * credentials". The hub also answers NOT_FOUND when it cannot hand them out
+ * (its build lacks the plugin, or a session keeps them), and only this wording
+ * tells the cases apart.
+ */
+export const NO_STORED_CREDENTIALS = 'No credentials stored';
+
+export interface CredentialReadOptions {
+  /**
+   * Throw the hub's reason when it has credentials it cannot hand out, rather
+   * than answering null as if none were stored. For a caller about to use them.
+   */
+  strict?: boolean;
+}
+
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
-export async function remoteCredentials<T = Record<string, unknown>>(service: ServiceName, name: string): Promise<T | null> {
+export async function remoteCredentials<T = Record<string, unknown>>(
+  service: ServiceName,
+  name: string,
+  options: CredentialReadOptions = {},
+): Promise<T | null> {
   try {
     return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials`, 'POST')).credentials;
   } catch (err) {
-    // NOT_FOUND is "profile exists, nothing stored"; an unknown profile stays PROFILE_NOT_FOUND.
-    if (err instanceof CliError && err.code === 'NOT_FOUND') return null;
-    throw err;
+    // NOT_FOUND is "nothing to hand out"; an unknown profile stays PROFILE_NOT_FOUND.
+    if (!(err instanceof CliError) || err.code !== 'NOT_FOUND') throw err;
+    if (!options.strict || err.message.startsWith(NO_STORED_CREDENTIALS)) return null;
+    throw new CliError('NOT_FOUND', `The vault hub at ${hub().url} cannot hand out ${service}/${name}: ${err.message}`, err.suggestion);
   }
 }

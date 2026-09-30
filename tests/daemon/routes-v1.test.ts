@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { withTempVault } from '../helpers/vault';
 import { lockVault, unlockVault } from '../../src/vault/vault';
+import { NO_STORED_CREDENTIALS } from '../../src/auth/remote';
 
 // Only the Atlassian exchange is replaced; bun's module mocks are process-wide.
 const jiraRefresh = mock(async (refreshToken: string) => ({ accessToken: 'jira-new', refreshToken: `${refreshToken}-rotated`, expiresIn: 3600 }));
@@ -120,6 +121,15 @@ describe('/v1 credential API', () => {
     expect((await creds('/v1/profiles/gmail/nope/credentials', allToken)).status).toBe(404);
     expect((await creds('/v1/profiles/notaservice/x/credentials', allToken)).status).toBe(404);
     expect((await call('/v1/nope', { token: allToken })).status).toBe(404);
+  });
+
+  test('a profile with nothing stored says so in the wording clients rely on', async () => {
+    // Remote clients tell "nothing stored" from "stored but not handed out" by this prefix alone.
+    const res = await creds('/v1/profiles/slack/empty/credentials', allToken);
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.code).toBe('NOT_FOUND');
+    expect(body.error.startsWith(NO_STORED_CREDENTIALS)).toBe(true);
   });
 
   test('static credentials come back whole; refresh secrets are stripped from OAuth ones', async () => {

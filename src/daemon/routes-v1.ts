@@ -5,7 +5,7 @@ import { getAllCredentials, getCredentials, hasStored } from '../auth/token-stor
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
 import { authenticateLocalToken, authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
 import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
-import type { RemoteAddBody, RemoteRenameBody } from '../auth/remote';
+import { NO_STORED_CREDENTIALS, type RemoteAddBody, type RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
@@ -123,7 +123,7 @@ async function handleList(key: ApiKeyView): Promise<Response> {
 /** Distinct from a bad token on the wire: 404 NOT_FOUND, not 401. */
 async function requireStoredCredentials(service: ServiceName, name: string): Promise<void> {
   if (!(await getCredentials(service, name))) {
-    throw new CliError('NOT_FOUND', `No credentials stored for ${service}/${name}`, 'Add them on the hub host');
+    throw new CliError('NOT_FOUND', `${NO_STORED_CREDENTIALS} for ${service}/${name}`, 'Add them on the hub host');
   }
 }
 
@@ -159,7 +159,7 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
     throw new CliError(
       'NOT_FOUND',
       `Plugin "${service}" is not installed on this hub`,
-      'Install a compatible plugin on the hub before requesting its credentials',
+      'Update the hub to an agentio version that includes this plugin',
     );
   }
   const { credentials, refreshed } = await audited(key, 'credentials', service, name, () => hubCredentials(service, name), (r) => r.refreshed);

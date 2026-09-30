@@ -82,7 +82,8 @@ export function getFreshCredentials<T = Record<string, unknown>>(
   options: RefreshOptions = {},
 ): Promise<FreshCredentials<T>> {
   return serialized(`${service}/${profile}`, async () => {
-    const stored = await getCredentials<T>(service, profile);
+    // Strict: a hub that holds credentials but cannot hand them out says why.
+    const stored = await getCredentials<T>(service, profile, { strict: true });
     if (!stored) throw noCredentialsError(service, profile);
 
     const refresher = refresherFor(service) as Refresher<T> | undefined;
