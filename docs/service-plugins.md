@@ -57,6 +57,7 @@ src/plugins/
 ├── dropbox/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
+├── kite/             # device sign-in, owned by the service folder
 ├── revolut/
 ├── spotify/
 ├── sql/

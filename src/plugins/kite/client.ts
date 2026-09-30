@@ -376,7 +376,8 @@ export class KiteClient implements ServiceClient {
     const path = this.sharingPath(id, t.kind === 'email' ? '/people' : '/domains');
     const res = await this.raw('POST', path, { body: t.kind === 'email' ? { email: t.value } : { domain: t.value } });
     if (res.status !== 200 && res.status !== 201) throw this.errorFor(res);
-    return { ...toSharing(res.data as KiteRawSharingState), notified: res.status === 201 };
+    // A new share with a person emails them; a domain share emails nobody.
+    return { ...toSharing(res.data as KiteRawSharingState), notified: t.kind === 'email' && res.status === 201 };
   }
 
   async unshare(id: string, target: string): Promise<KiteSharing> {

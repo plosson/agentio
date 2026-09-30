@@ -348,6 +348,13 @@ describe('sharing', () => {
     expect(again.people).toEqual([{ email: 'p@x.com', pending: true }]);
   });
 
+  test('a domain share never counts as notified, new or not', async () => {
+    const doc = fake.seedDoc(ME);
+    expect((await client.share(doc.id, 'example.org')).notified).toBe(false);
+    expect(fake.requests('POST')[0].body).toEqual({ domain: 'example.org' });
+    expect((await client.share(doc.id, '@example.org')).notified).toBe(false);
+  });
+
   test('a public mail provider domain is INVALID_PARAMS', async () => {
     const doc = fake.seedDoc(ME);
     const e = await caught(client.share(doc.id, 'gmail.com'));

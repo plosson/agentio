@@ -54,12 +54,10 @@ export function printSharing(sharing: KiteSharing & { notified?: boolean }, json
     console.log(`Sharing for ${sharing.id}`);
     console.log(`  Public: ${sharing.isPublic ? 'yes, anyone with the link' : 'no'}`);
     console.log(`  Expires: ${sharing.expiresAt ?? 'never'}`);
-    const people = sharing.people.map((p) => (p.pending ? `${p.email} (not opened yet)` : p.email));
+    const people = sharing.people.map((p) => (p.pending ? `${p.email} (no Kite account yet)` : p.email));
     console.log(`  People: ${people.length ? people.join(', ') : 'none'}`);
     console.log(`  Domains: ${sharing.domains.length ? sharing.domains.join(', ') : 'none'}`);
-    if (sharing.notified !== undefined) {
-      console.log(sharing.notified ? '  Newly shared; they were emailed.' : '  Already shared; nobody was emailed.');
-    }
+    if (sharing.notified) console.log('  They were emailed a link.');
   });
 }
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { createProgram } from '../../../src/cli';
@@ -49,7 +50,14 @@ afterEach(() => {
   other.stop();
 });
 
+/** Never run or write anything without a temp home: an empty one would mean the repo folder. */
+function requireHome(): string {
+  if (!home.startsWith(tmpdir())) throw new Error(`no temp home for this test: "${home}"`);
+  return home;
+}
+
 async function cli(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const home = requireHome();
   const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
@@ -72,7 +80,7 @@ function onlyJson(stdout: string): any {
 }
 
 function file(name: string, content: string): string {
-  const path = join(home, name);
+  const path = join(requireHome(), name);
   writeFileSync(path, content);
   return path;
 }
