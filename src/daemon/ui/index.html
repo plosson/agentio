@@ -136,6 +136,8 @@
   dialog .row { margin-top: 20px; }
   .token-box { display: flex; gap: 8px; align-items: stretch; margin-top: 16px; }
   .token-box code { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--code-bg); font-size: .8125rem; word-break: break-all; }
+  .setup-step { margin: 16px 0 0; font-size: .8125rem; }
+  .setup-step + .token-box { margin-top: 6px; }
   .warn-box { margin-top: 16px; padding: 10px 12px; border-radius: var(--radius); background: var(--warning-bg); color: var(--warning); font-size: .8125rem; font-weight: 500; }
   #toasts { position: fixed; right: 24px; bottom: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
   .toast { padding: 10px 14px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: .875rem; box-shadow: var(--shadow-lg); max-width: 360px; }
@@ -190,7 +192,8 @@
 
   <section id="view-keys" hidden>
     <div class="page-head">
-      <div><h2>API keys</h2><p>Each key is a token an agent machine sets as <span class="mono">AGENTIO_TOKEN</span>. It reads the profiles it is scoped to and nothing else.</p></div>
+      <div><h2>API keys</h2><p>Each key is a token an agent machine uses to reach this hub. It reads the profiles it is scoped to and nothing else.</p>
+        <p class="note">Setting up a new machine? After installing agentio there, run <span class="mono">agentio login <span class="hub-url"></span></span> and approve the code on this page: no token to copy. Or create a key here and follow the steps it shows.</p></div>
       <div class="actions"><button class="primary" id="key-new-btn">Create key</button></div>
     </div>
     <section class="card" id="key-panel" hidden>
@@ -284,8 +287,13 @@
 
 <dialog id="token-dialog">
   <h3>Keep this token safe</h3>
-  <p>Set it on the agent machine as <span class="mono">AGENTIO_TOKEN</span>.</p>
-  <div class="token-box"><code id="token-value"></code><button id="copy-btn" type="button">Copy</button></div>
+  <p>On the agent machine, after installing agentio, run one of these.</p>
+  <p class="setup-step"><strong>Save it for this user</strong> (every <span class="mono">agentio</span> command then uses this hub):</p>
+  <div class="token-box"><code id="token-save-cmd"></code><button class="copy-btn" data-copy="token-save-cmd" type="button">Copy</button></div>
+  <p class="setup-step"><strong>Or set it for one shell or a CI job:</strong></p>
+  <div class="token-box"><code id="token-env-cmd"></code><button class="copy-btn" data-copy="token-env-cmd" type="button">Copy</button></div>
+  <p class="setup-step">Check it with <span class="mono">agentio status</span>: it names this hub and lists the profiles the key can use. The token alone:</p>
+  <div class="token-box"><code id="token-value"></code><button class="copy-btn" data-copy="token-value" type="button">Copy</button></div>
   <div class="warn-box">You won't be able to see it again. If it is lost, rotate the key.</div>
   <form method="dialog" class="row right"><button class="primary" value="done">Done</button></form>
 </dialog>
@@ -637,17 +645,24 @@
     if (res.ok) renderKeys(res.body.keys);
   }
 
+  // The token file is what `agentio login` writes (src/auth/remote.ts): readable by the user alone.
+  const TOKEN_FIELDS = ['token-value', 'token-save-cmd', 'token-env-cmd'];
   function showToken(token) {
-    $('copy-btn').textContent = 'Copy';
+    for (const b of document.querySelectorAll('#token-dialog .copy-btn')) b.textContent = 'Copy';
     $('token-value').textContent = token;
+    $('token-save-cmd').textContent =
+      "(umask 077 && mkdir -p ~/.config/agentio && printf '%s\\n' '" + token + "' > ~/.config/agentio/token)";
+    $('token-env-cmd').textContent = "export AGENTIO_TOKEN='" + token + "'";
     $('token-dialog').showModal();
   }
-  $('token-dialog').addEventListener('close', () => { $('token-value').textContent = ''; });
+  $('token-dialog').addEventListener('close', () => { for (const id of TOKEN_FIELDS) $(id).textContent = ''; });
 
-  $('copy-btn').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText($('token-value').textContent); $('copy-btn').textContent = 'Copied'; }
-    catch { $('copy-btn').textContent = 'Select and copy manually'; }
-  });
+  for (const btn of document.querySelectorAll('#token-dialog .copy-btn')) {
+    btn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($(btn.dataset.copy).textContent); btn.textContent = 'Copied'; }
+      catch { btn.textContent = 'Select and copy manually'; }
+    });
+  }
 
   // The Create key form and the sign-in approval share the key fields (see the template).
   const scopeIsSome = (form) => form.querySelector('input[name=scope]:checked').value === 'some';
@@ -663,6 +678,7 @@
   const busyForm = (form, on) => form.querySelectorAll('button').forEach((b) => { b.disabled = on; });
   document.querySelectorAll('input[name=scope]').forEach((r) => r.addEventListener('change', () => syncScope(r.form)));
   $('hub-origin').textContent = window.location.origin;
+  for (const el of document.querySelectorAll('.hub-url')) el.textContent = window.location.origin;
   $('settings-origin').textContent = window.location.origin;
   $('unlock-host').textContent = window.location.host;
 
