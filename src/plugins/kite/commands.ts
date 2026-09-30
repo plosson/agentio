@@ -12,7 +12,7 @@ import { prompt } from '../../utils/stdin';
 import { addProfileWithSetup } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
-import { KiteClient, normaliseBaseUrl, readDocumentFile, requireDocumentId } from './client';
+import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
 import {
   printDeleted,
@@ -147,7 +147,7 @@ export function registerKiteCommands(program: Command): void {
       .option('--id <id>', 'Update this document (art_…) instead of publishing a new one')
       .option('--title <title>', 'Document title')
       .action(run(async (file: string, options) => {
-        const id = options.id !== undefined ? requireDocumentId(options.id) : undefined;
+        const id: string | undefined = options.id;
         const document = await readDocumentFile(file);
         const client = await getWritableClient(options.profile, id ? 'update a document' : 'publish a document');
         const input = { ...document, title: options.title };
@@ -211,13 +211,12 @@ read it again with \`agentio kite get\` and re-apply your change.`,
       .argument('<id>', 'Document id (art_…)')
       .option('--confirm', 'Required: deleting cannot be undone')
       .action(run(async (id: string, options) => {
-        const docId = requireDocumentId(id);
         if (!options.confirm) {
           throw new CliError('INVALID_PARAMS', 'Deleting a document cannot be undone', 'Pass --confirm to delete it');
         }
         const client = await getWritableClient(options.profile, 'delete a document');
-        await client.delete(docId);
-        printDeleted(docId, options.json);
+        await client.delete(id);
+        printDeleted(id.trim(), options.json);
       })),
     `Examples:
 
@@ -243,13 +242,9 @@ read it again with \`agentio kite get\` and re-apply your change.`,
         .option('--profile <name>', 'Profile name (defaults to the account email)')
         .option('--read-only', 'Create as read-only profile (blocks write operations)')
         .option('--no-browser', 'Print the sign-in link without opening a browser'),
-    ).action(async (options: KiteProfileAddOptions) => {
-      try {
-        await addProfileWithSetup('kite', (o) => kiteProfileAdd(o as KiteProfileAddOptions), options);
-      } catch (error) {
-        handleError(error);
-      }
-    }),
+    ).action(run(async (options: KiteProfileAddOptions) => {
+      await addProfileWithSetup('kite', (o) => kiteProfileAdd(o as KiteProfileAddOptions), options);
+    })),
     `Examples:
 
   # sign in to a Kite server; the browser opens on the approval page
@@ -270,9 +265,8 @@ function registerShareCommands(kite: Command): void {
     leaf(share, 'show', 'Show who can open a document')
       .argument('<id>', 'Document id (art_…)')
       .action(run(async (id: string, options) => {
-        const docId = requireDocumentId(id);
         const { client } = await getKiteClient(options.profile);
-        printSharing(await client.sharing(docId), options.json);
+        printSharing(await client.sharing(id), options.json);
       })),
     `Examples:
 
@@ -284,9 +278,8 @@ function registerShareCommands(kite: Command): void {
       .argument('<id>', 'Document id (art_…)')
       .argument('<email-or-domain>', 'An email address, or a domain such as example.com')
       .action(run(async (id: string, target: string, options) => {
-        const docId = requireDocumentId(id);
         const client = await getWritableClient(options.profile, 'share a document');
-        printSharing(await client.share(docId, target), options.json);
+        printSharing(await client.share(id, target), options.json);
       })),
     `Examples:
 
@@ -302,9 +295,8 @@ function registerShareCommands(kite: Command): void {
       .argument('<id>', 'Document id (art_…)')
       .argument('<email-or-domain>', 'The email address or domain to remove')
       .action(run(async (id: string, target: string, options) => {
-        const docId = requireDocumentId(id);
         const client = await getWritableClient(options.profile, 'unshare a document');
-        printSharing(await client.unshare(docId, target), options.json);
+        printSharing(await client.unshare(id, target), options.json);
       })),
     `Examples:
 
@@ -319,9 +311,8 @@ function registerShareCommands(kite: Command): void {
       leaf(share, name, description)
         .argument('<id>', 'Document id (art_…)')
         .action(run(async (id: string, options) => {
-          const docId = requireDocumentId(id);
-          const client = await getWritableClient(options.profile, `make a document ${name}`);
-          printSharing(await client.setPublic(docId, isPublic), options.json);
+            const client = await getWritableClient(options.profile, `make a document ${name}`);
+          printSharing(await client.setPublic(id, isPublic), options.json);
         })),
       `Examples:
 
@@ -334,9 +325,8 @@ function registerShareCommands(kite: Command): void {
       .argument('<id>', 'Document id (art_…)')
       .argument('<duration>', 'Hours or days from now (12h, 30d, 2 days), or forever')
       .action(run(async (id: string, duration: string, options) => {
-        const docId = requireDocumentId(id);
         const client = await getWritableClient(options.profile, 'change when sharing ends');
-        printSharing(await client.setExpiry(docId, duration), options.json);
+        printSharing(await client.setExpiry(id, duration), options.json);
       })),
     `Examples:
 
@@ -357,9 +347,8 @@ function registerCommentCommands(kite: Command): void {
       .option('--status <status>', 'open or resolved')
       .option('--since <timestamp>', 'Only threads with a comment after this ISO 8601 time')
       .action(run(async (id: string, options) => {
-        const docId = requireDocumentId(id);
         const { client } = await getKiteClient(options.profile);
-        printThreads(await client.comments(docId, { status: options.status, since: options.since }), options.json);
+        printThreads(await client.comments(id, { status: options.status, since: options.since }), options.json);
       })),
     `Examples:
 
@@ -378,10 +367,9 @@ function registerCommentCommands(kite: Command): void {
       .option('--heading <id>', 'Search for the snippet only under this heading id (needs --snippet)')
       .option('--element-id <id>', 'HTML documents: the id of the element to comment on')
       .action(run(async (id: string, options) => {
-        const docId = requireDocumentId(id);
         const client = await getWritableClient(options.profile, 'comment');
         const input = { body: options.body, snippet: options.snippet, heading: options.heading, elementId: options.elementId };
-        printThread(await client.comment(docId, input), options.json);
+        printThread(await client.comment(id, input), options.json);
       })),
     `Examples:
 

@@ -5,6 +5,20 @@
  * opt-in contract test keeps it honest against a real Kite.
  */
 
+import { expect } from 'bun:test';
+import { CliError } from '../../../src/utils/errors';
+
+/** The CliError a promise rejects with; fails the test when it resolves or throws anything else. */
+export async function caught(p: Promise<unknown>): Promise<CliError> {
+  try {
+    await p;
+  } catch (e) {
+    expect(e).toBeInstanceOf(CliError);
+    return e as CliError;
+  }
+  throw new Error('expected a CliError, got success');
+}
+
 export interface LoggedRequest {
   method: string;
   path: string;
@@ -72,7 +86,6 @@ export class FakeKite {
   private server: ReturnType<typeof Bun.serve>;
   private queued: Canned[] = [];
   private hooks: Array<{ match: (r: LoggedRequest) => boolean; run: () => void }> = [];
-  private delayMs = 0;
   private seq = 0;
   private clock = Date.parse('2026-01-01T00:00:00Z');
 
@@ -106,18 +119,22 @@ export class FakeKite {
   }
 
   approve(userCode: string, email: string): void {
-    const d = [...this.devices.values()].find((x) => x.userCode === userCode);
-    if (d && d.state === 'pending') Object.assign(d, { state: 'approved', email });
+    const d = this.device(userCode);
+    if (d?.state === 'pending') Object.assign(d, { state: 'approved', email });
   }
 
   deny(userCode: string): void {
-    const d = [...this.devices.values()].find((x) => x.userCode === userCode);
+    const d = this.device(userCode);
     if (d) d.state = 'denied';
   }
 
   expire(userCode: string): void {
-    const d = [...this.devices.values()].find((x) => x.userCode === userCode);
+    const d = this.device(userCode);
     if (d) d.state = 'expired';
+  }
+
+  private device(userCode: string): Device | undefined {
+    return [...this.devices.values()].find((d) => d.userCode === userCode);
   }
 
   /** The next request, whatever it is, gets this answer instead. */
@@ -132,10 +149,6 @@ export class FakeKite {
 
   rateLimitNext(seconds: number): void {
     this.failNext(429, { error: { code: 'rate_limited', message: 'Too many requests.' } }, { 'Retry-After': String(seconds) });
-  }
-
-  delay(ms: number): void {
-    this.delayMs = ms;
   }
 
   /** Run `fn` once, right after the first request that matches has been answered. */
@@ -187,7 +200,6 @@ export class FakeKite {
       method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers, body, rawBody,
     };
     this.log.push(entry);
-    if (this.delayMs) await Bun.sleep(this.delayMs);
 
     let response: Response;
     const canned = this.queued.shift();
@@ -297,10 +309,17 @@ export class FakeKite {
     }
   }
 
-  private publish(me: string, b: Record<string, any>): Response {
+  /** The checks publish and update share; undefined when the body is acceptable. */
+  private invalidDocument(b: Record<string, any>): Response | undefined {
     if (b.type !== 'markdown' && b.type !== 'html') return err(400, 'unsupported_type', 'Only markdown and html artifacts are supported.');
     if (typeof b.content !== 'string' || b.content.length === 0) return err(400, 'validation_failed', 'Artifact content must not be empty.');
     if (Buffer.byteLength(b.content) > this.maxBytes) return err(413, 'payload_too_large', 'Artifact too large.', { maxBytes: this.maxBytes });
+    return undefined;
+  }
+
+  private publish(me: string, b: Record<string, any>): Response {
+    const invalid = this.invalidDocument(b);
+    if (invalid) return invalid;
     const doc = this.newDoc(me, b.type, b.content, typeof b.title === 'string' ? b.title : 'Untitled');
     this.docs.set(doc.id, doc);
     return json(201, this.view(doc, true));
@@ -312,9 +331,8 @@ export class FakeKite {
       return json(200, this.view(doc, true));
     }
     if (method === 'PUT') {
-      if (b.type !== 'markdown' && b.type !== 'html') return err(400, 'unsupported_type', 'Only markdown and html artifacts are supported.');
-      if (typeof b.content !== 'string' || b.content.length === 0) return err(400, 'validation_failed', 'Artifact content must not be empty.');
-      if (Buffer.byteLength(b.content) > this.maxBytes) return err(413, 'payload_too_large', 'Artifact too large.', { maxBytes: this.maxBytes });
+      const invalid = this.invalidDocument(b);
+      if (invalid) return invalid;
       if (b.baseVersion !== doc.version) {
         return err(409, 'version_conflict', 'The artifact changed.', { currentVersion: doc.version, baseVersion: b.baseVersion });
       }

@@ -87,6 +87,14 @@ export interface KiteSharing {
   expiresAt: string | null;
 }
 
+export interface KiteReply {
+  id: string;
+  author: string | null;
+  body: string;
+  createdAt: string;
+  mentions: unknown;
+}
+
 export interface KiteThread {
   id: string;
   status: 'open' | 'resolved';

@@ -15,7 +15,7 @@ import {
   shareTarget,
 } from '../../../src/plugins/kite/client';
 import { CliError, exitCodeForError, type ErrorCode } from '../../../src/utils/errors';
-import { FakeKite } from './fake-kite';
+import { FakeKite, caught } from './fake-kite';
 
 const ME = 'me@example.com';
 let fake: FakeKite;
@@ -29,16 +29,6 @@ beforeEach(() => {
 });
 
 afterEach(() => fake.stop());
-
-async function caught(p: Promise<unknown>): Promise<CliError> {
-  try {
-    await p;
-  } catch (e) {
-    expect(e).toBeInstanceOf(CliError);
-    return e as CliError;
-  }
-  throw new Error('expected a CliError, got success');
-}
 
 function expectCode(e: CliError, code: ErrorCode, exit: number) {
   expect(e.code).toBe(code);

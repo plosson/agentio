@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { deviceLabel, kiteDeviceLogin, type KiteDeviceCode } from '../../../src/plugins/kite/device-auth';
 import { CliError } from '../../../src/utils/errors';
-import { FakeKite } from './fake-kite';
+import { FakeKite, caught } from './fake-kite';
 
 const EMAIL = 'me@example.com';
 let fake: FakeKite;
@@ -20,16 +20,6 @@ function login(onCode: (c: KiteDeviceCode) => void = () => {}) {
     now,
     onCode: (c) => { codes.push(c); onCode(c); },
   });
-}
-
-async function caught(p: Promise<unknown>): Promise<CliError> {
-  try {
-    await p;
-  } catch (e) {
-    expect(e).toBeInstanceOf(CliError);
-    return e as CliError;
-  }
-  throw new Error('expected a CliError, got success');
 }
 
 const polls = () => fake.requests('POST', '/api/auth/device/token');

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
+import { getCredentials } from '../../../src/auth/token-store';
 import { createProgram } from '../../../src/cli';
 import { collectCommands } from '../../../src/utils/command-tree';
 import { generateSkill } from '../../../src/commands/skill';
@@ -17,17 +17,19 @@ import { FakeKite } from './fake-kite';
 
 const ME = 'me@example.com';
 let fake: FakeKite;
-let other: FakeKite;
-let home = '';
+/** A second server, started only by the tests that need one. */
+let other: FakeKite | undefined;
+/** The vault of the running test's describe. */
+let vault: ReturnType<typeof withTempVault>;
+const home = () => vault.home();
 
 function creds(server: FakeKite, email = ME): KiteCredentials {
   return { baseUrl: server.url, token: server.issueToken(email), email, expiresAt: '2026-04-01T00:00:00Z' };
 }
 
-// Servers start before the vault is seeded, so the seeded credentials point at them.
+// The server starts before the vault is seeded, so the seeded credentials point at it.
 beforeEach(() => {
   fake = new FakeKite();
-  other = new FakeKite();
 });
 
 /**
@@ -35,52 +37,39 @@ beforeEach(() => {
  * describe. Registered there so it runs after the servers exist.
  */
 function withProfiles(profiles: () => Record<string, { readOnly?: boolean; server: FakeKite }>): void {
-  const vault = withTempVault('agentio-kite-cli-', () => {
+  const own = withTempVault('agentio-kite-cli-', () => {
     const entries = Object.entries(profiles());
     return {
       config: { profiles: { kite: entries.map(([name, p]) => ({ name, ...(p.readOnly ? { readOnly: true } : {}) })) } } as never,
       credentials: { kite: Object.fromEntries(entries.map(([name, p]) => [name, creds(p.server)])) } as never,
     };
   });
-  beforeEach(() => { home = vault.home(); });
+  beforeEach(() => { vault = own; });
 }
 
 afterEach(() => {
   fake.stop();
-  other.stop();
+  other?.stop();
+  other = undefined;
 });
 
-/** Never run or write anything without a temp home: an empty one would mean the repo folder. */
-function requireHome(): string {
-  if (!home.startsWith(tmpdir())) throw new Error(`no temp home for this test: "${home}"`);
-  return home;
-}
-
 async function cli(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  const home = requireHome();
   const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: {
-      PATH: process.env.PATH,
-      HOME: home,
-      AGENTIO_HOME: join(home, '.config', 'agentio'),
-      AGENTIO_TOKEN: '',
-      AGENTIO_PASSPHRASE: process.env.AGENTIO_PASSPHRASE,
-      NO_COLOR: '1',
-    },
+    env: { ...vault.env(), NO_COLOR: '1' },
   });
   const code = await proc.exited;
   return { code, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };
 }
 
-/** Stdout must be exactly one JSON document. */
+/** Stdout parsed as one JSON document; a second document or any stray text makes it throw. */
 function onlyJson(stdout: string): any {
   return JSON.parse(stdout);
 }
 
 function file(name: string, content: string): string {
-  const path = join(requireHome(), name);
+  const path = join(home(), name);
   writeFileSync(path, content);
   return path;
 }
@@ -100,17 +89,22 @@ describe('one profile', () => {
     const updated = onlyJson((await cli('kite', 'publish', path, '--id', doc.id, '--json')).stdout);
     expect(updated.version).toBe(2);
 
-    const got = onlyJson((await cli('kite', 'get', doc.url, '--json')).stdout);
+    const out = join(home(), 'out.md');
+    const [gotRun, savedRun, listRun] = await Promise.all([
+      cli('kite', 'get', doc.url, '--json'),
+      cli('kite', 'get', doc.id, '--out', out, '--json'),
+      cli('kite', 'list', '--json'),
+    ]);
+    const got = onlyJson(gotRun.stdout);
     expect(got.content).toBe('# Two');
     expect(got.id).toBe(doc.id);
 
-    const out = join(home, 'out.md');
-    const saved = onlyJson((await cli('kite', 'get', doc.id, '--out', out, '--json')).stdout);
+    const saved = onlyJson(savedRun.stdout);
     expect(saved.file).toBe(out);
     expect(saved).not.toHaveProperty('content');
     expect(readFileSync(out, 'utf8')).toBe('# Two');
 
-    const list = onlyJson((await cli('kite', 'list', '--json')).stdout);
+    const list = onlyJson(listRun.stdout);
     expect(list).toEqual({ documents: [expect.objectContaining({ id: doc.id })] });
     expect(list.documents[0]).not.toHaveProperty('content');
 
@@ -124,26 +118,33 @@ describe('one profile', () => {
     const shown = await cli('kite', 'share', 'show', doc.id, '--json');
     expect(onlyJson(shown.stdout)).toEqual({ id: doc.id, isPublic: false, people: [], domains: [], expiresAt: null });
 
-    const added = onlyJson((await cli('kite', 'share', 'add', doc.id, 'p@x.com', '--json')).stdout);
-    expect(added.notified).toBe(true);
-    expect(added.people).toEqual([{ email: 'p@x.com', pending: true }]);
-    expect(onlyJson((await cli('kite', 'share', 'add', doc.id, 'example.com', '--json')).stdout).domains).toEqual(['example.com']);
-    expect(onlyJson((await cli('kite', 'share', 'remove', doc.id, 'p@x.com', '--json')).stdout).people).toEqual([]);
-    expect(onlyJson((await cli('kite', 'share', 'public', doc.id, '--json')).stdout).isPublic).toBe(true);
-    expect(onlyJson((await cli('kite', 'share', 'private', doc.id, '--json')).stdout).isPublic).toBe(false);
-    expect(onlyJson((await cli('kite', 'share', 'expiry', doc.id, '30d', '--json')).stdout).expiresAt).toBeString();
+    // Sharing and comments touch different state, so the two sequences run side by side.
+    const sharing = async () => {
+      const added = onlyJson((await cli('kite', 'share', 'add', doc.id, 'p@x.com', '--json')).stdout);
+      expect(added.notified).toBe(true);
+      expect(added.people).toEqual([{ email: 'p@x.com', pending: true }]);
+      expect(onlyJson((await cli('kite', 'share', 'add', doc.id, 'example.com', '--json')).stdout).domains).toEqual(['example.com']);
+      expect(onlyJson((await cli('kite', 'share', 'remove', doc.id, 'p@x.com', '--json')).stdout).people).toEqual([]);
+      expect(onlyJson((await cli('kite', 'share', 'public', doc.id, '--json')).stdout).isPublic).toBe(true);
+      expect(onlyJson((await cli('kite', 'share', 'private', doc.id, '--json')).stdout).isPublic).toBe(false);
+      expect(onlyJson((await cli('kite', 'share', 'expiry', doc.id, '30d', '--json')).stdout).expiresAt).toBeString();
+    };
 
-    const thread = onlyJson((await cli('kite', 'comments', 'add', doc.id, '--body', 'Why?', '--snippet', 'exact rendered text', '--json')).stdout);
-    expect(thread.mentions).toEqual({ notified: [], shared: [], awaitingAccess: [] });
-    expect(thread.anchor).toEqual({ snippet: 'exact rendered text' });
-    const reply = onlyJson((await cli('kite', 'comments', 'reply', thread.id, '--body', 'Because', '--json')).stdout);
-    expect(reply.body).toBe('Because');
-    expect(onlyJson((await cli('kite', 'comments', 'resolve', thread.id, '--json')).stdout).status).toBe('resolved');
-    expect(onlyJson((await cli('kite', 'comments', 'reopen', thread.id, '--json')).stdout).status).toBe('open');
-    const listed = onlyJson((await cli('kite', 'comments', 'list', doc.id, '--status', 'open', '--json')).stdout);
-    expect(listed.threads).toHaveLength(1);
-    expect(Object.keys(listed.threads[0]).sort()).toEqual(['anchor', 'anchorDrifted', 'anchorLost', 'comments', 'id', 'status']);
-    expect(listed.threads[0].comments.map((c: { body: string }) => c.body)).toEqual(['Why?', 'Because']);
+    const comments = async () => {
+      const thread = onlyJson((await cli('kite', 'comments', 'add', doc.id, '--body', 'Why?', '--snippet', 'exact rendered text', '--json')).stdout);
+      expect(thread.mentions).toEqual({ notified: [], shared: [], awaitingAccess: [] });
+      expect(thread.anchor).toEqual({ snippet: 'exact rendered text' });
+      const reply = onlyJson((await cli('kite', 'comments', 'reply', thread.id, '--body', 'Because', '--json')).stdout);
+      expect(reply.body).toBe('Because');
+      expect(onlyJson((await cli('kite', 'comments', 'resolve', thread.id, '--json')).stdout).status).toBe('resolved');
+      expect(onlyJson((await cli('kite', 'comments', 'reopen', thread.id, '--json')).stdout).status).toBe('open');
+      const listed = onlyJson((await cli('kite', 'comments', 'list', doc.id, '--status', 'open', '--json')).stdout);
+      expect(listed.threads).toHaveLength(1);
+      expect(Object.keys(listed.threads[0]).sort()).toEqual(['anchor', 'anchorDrifted', 'anchorLost', 'comments', 'id', 'status']);
+      expect(listed.threads[0].comments.map((c: { body: string }) => c.body)).toEqual(['Why?', 'Because']);
+    };
+
+    await Promise.all([sharing(), comments()]);
   }, 30_000);
 
   test('human output goes to stdout and never says artifact', async () => {
@@ -180,7 +181,7 @@ describe('one profile', () => {
     const runs = await Promise.all([
       cli('kite', 'delete', 'art_1', '--json'),
       cli('kite', 'publish', txt, '--json'),
-      cli('kite', 'publish', join(home, 'missing.md'), '--json'),
+      cli('kite', 'publish', join(home(), 'missing.md'), '--json'),
       cli('kite', 'share', 'expiry', 'art_1', '30', '--json'),
       cli('kite', 'comments', 'list', 'art_1', '--since', 'soon', '--json'),
       cli('kite', 'comments', 'list', 'art_1', '--status', 'closed', '--json'),
@@ -188,8 +189,8 @@ describe('one profile', () => {
       cli('kite', 'comments', 'add', 'art_1', '--body', 'b', '--heading', 'h', '--json'),
       cli('kite', 'share', 'show', 'https://kite.example/a/slug', '--json'),
       cli('kite', 'publish', file('d.md', 'x'), '--id', 'https://kite.example/a/slug', '--json'),
-      cli('kite', 'get', 'art_1', '--out', home, '--json'),
-      cli('kite', 'get', 'art_1', '--out', join(home, 'no', 'such', 'dir', 'x.md'), '--json'),
+      cli('kite', 'get', 'art_1', '--out', home(), '--json'),
+      cli('kite', 'get', 'art_1', '--out', join(home(), 'no', 'such', 'dir', 'x.md'), '--json'),
     ]);
     for (const r of runs) {
       expect(r.code).not.toBe(0);
@@ -258,7 +259,8 @@ describe('read-only profile', () => {
 });
 
 describe('two profiles on two servers', () => {
-  withProfiles(() => ({ a: { server: fake }, b: { server: other } }));
+  beforeEach(() => { other = new FakeKite(); });
+  withProfiles(() => ({ a: { server: fake }, b: { server: other! } }));
 
   test('omitting --profile is a clear error, with no request', async () => {
     const r = await cli('kite', 'list', '--json');
@@ -266,23 +268,21 @@ describe('two profiles on two servers', () => {
     expect(event.event).toBe('error');
     expect(event.message).toContain('Multiple kite profiles');
     expect(event.suggestion).toContain('--profile');
-    expect(fake.log.length + other.log.length).toBe(0);
+    expect(fake.log.length + other!.log.length).toBe(0);
   }, 30_000);
 
   test('each profile talks only to its own server', async () => {
-    await cli('kite', 'list', '--profile', 'a', '--json');
-    expect(fake.log.length).toBe(1);
-    expect(other.log.length).toBe(0);
-    await cli('kite', 'list', '--profile', 'b', '--json');
-    expect(fake.log.length).toBe(1);
-    expect(other.log.length).toBe(1);
+    const [a, b] = await Promise.all([getCredentials<KiteCredentials>('kite', 'a'), getCredentials<KiteCredentials>('kite', 'b')]);
+    await Promise.all([cli('kite', 'list', '--profile', 'a', '--json'), cli('kite', 'list', '--profile', 'b', '--json')]);
+    expect(fake.log.map((r) => r.headers.authorization)).toEqual([`Bearer ${a!.token}`]);
+    expect(other!.log.map((r) => r.headers.authorization)).toEqual([`Bearer ${b!.token}`]);
   }, 30_000);
 
   test('no command but profile add takes --url', async () => {
-    const r = await cli('kite', 'list', '--profile', 'a', '--url', other.url);
+    const r = await cli('kite', 'list', '--profile', 'a', '--url', other!.url);
     expect(r.code).not.toBe(0);
     expect(r.stderr).toContain("unknown option '--url'");
-    expect(fake.log.length + other.log.length).toBe(0);
+    expect(fake.log.length + other!.log.length).toBe(0);
   }, 30_000);
 });
 

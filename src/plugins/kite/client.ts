@@ -8,10 +8,12 @@ import type {
   KiteDocument,
   KiteDocumentType,
   KiteMe,
+  KiteRawComment,
   KiteRawDocument,
   KiteRawSharingState,
   KiteRawThread,
   KiteSharing,
+  KiteReply,
   KiteThread,
 } from './types';
 
@@ -88,7 +90,7 @@ export async function readDocumentFile(path: string): Promise<{ type: KiteDocume
   }
 }
 
-export type KiteReference = { kind: 'id'; id: string } | { kind: 'slug'; slug: string };
+type KiteReference = { kind: 'id'; id: string } | { kind: 'slug'; slug: string };
 
 /** `art_…` is an id; otherwise the text after the last `/a/`, cut at `?` or `#`, or a bare slug. */
 export function resolveReference(input: string): KiteReference {
@@ -149,12 +151,12 @@ export function shareTarget(input: string): { kind: 'email'; value: string } | {
   return { kind: 'domain', value: domain };
 }
 
-export function parseStatus(input: string): 'open' | 'resolved' {
+function parseStatus(input: string): 'open' | 'resolved' {
   if (input === 'open' || input === 'resolved') return input;
   throw new CliError('INVALID_PARAMS', `--status must be open or resolved, not "${input}"`);
 }
 
-export function parseSince(input: string): string {
+function parseSince(input: string): string {
   if (!input.trim() || isNaN(Date.parse(input))) {
     throw new CliError('INVALID_PARAMS', `--since is not a timestamp: "${input}"`, 'Use ISO 8601, like 2026-01-31T09:00:00Z');
   }
@@ -166,15 +168,15 @@ function requireBody(body: string | undefined): string {
   return body;
 }
 
-export function toDocument(raw: KiteRawDocument): KiteDocument {
+function toDocument(raw: KiteRawDocument): KiteDocument {
   return { id: raw.id, url: raw.url, title: raw.title, type: raw.type, version: raw.version, updated: raw.updatedAt };
 }
 
 function toSharing(raw: KiteRawSharingState): KiteSharing {
   return {
     id: raw.artifactId,
-    isPublic: !!raw.isPublic,
-    people: raw.people.map((p) => ({ email: p.email, pending: !!p.pending })),
+    isPublic: raw.isPublic,
+    people: raw.people.map((p) => ({ email: p.email, pending: p.pending })),
     domains: raw.domains.map((d) => d.domain),
     expiresAt: raw.expiresAt,
   };
@@ -185,8 +187,8 @@ function toThread(raw: KiteRawThread): KiteThread {
     id: raw.id,
     status: raw.status,
     anchor: raw.anchor,
-    anchorLost: !!raw.anchorLost,
-    anchorDrifted: !!raw.anchorDrifted,
+    anchorLost: raw.anchorLost,
+    anchorDrifted: raw.anchorDrifted,
     comments: raw.comments.map((c) => ({ author: c.author?.email ?? null, body: c.body, createdAt: c.createdAt })),
   };
 }
@@ -259,7 +261,7 @@ export class KiteClient implements ServiceClient {
       try {
         data = JSON.parse(text);
       } catch {
-        data = null;
+        // Not JSON, such as a proxy's HTML page: the status alone decides.
       }
     }
     return { status: response.status, headers: response.headers, data };
@@ -331,19 +333,16 @@ export class KiteClient implements ServiceClient {
     return this.request<KiteMe>('GET', '/api/auth/me');
   }
 
-  async publish(input: { type: KiteDocumentType; content: string; title?: string }): Promise<KiteDocument> {
-    const body: Record<string, unknown> = { type: input.type, content: input.content };
-    if (input.title !== undefined) body.title = requireTitle(input.title);
-    return toDocument(await this.request<KiteRawDocument>('POST', '/api/artifacts', { body }));
+  async publish(input: DocumentInput): Promise<KiteDocument> {
+    return toDocument(await this.request<KiteRawDocument>('POST', '/api/artifacts', { body: documentBody(input) }));
   }
 
   /** Read the current version, then write against it; a change in between is a conflict, never retried. */
-  async update(id: string, input: { type: KiteDocumentType; content: string; title?: string }): Promise<KiteDocument> {
+  async update(id: string, input: DocumentInput): Promise<KiteDocument> {
     const docId = requireDocumentId(id);
-    const title = input.title !== undefined ? requireTitle(input.title) : undefined;
+    const body = documentBody(input);
     const current = await this.request<KiteRawDocument>('GET', `/api/artifacts/${enc(docId)}`);
-    const body: Record<string, unknown> = { type: input.type, content: input.content, baseVersion: current.version };
-    if (title !== undefined) body.title = title;
+    body.baseVersion = current.version;
     return toDocument(await this.request<KiteRawDocument>('PUT', `/api/artifacts/${enc(docId)}`, { body }));
   }
 
@@ -373,8 +372,7 @@ export class KiteClient implements ServiceClient {
 
   async share(id: string, target: string): Promise<KiteSharing & { notified: boolean }> {
     const t = shareTarget(target);
-    const path = this.sharingPath(id, t.kind === 'email' ? '/people' : '/domains');
-    const res = await this.raw('POST', path, { body: t.kind === 'email' ? { email: t.value } : { domain: t.value } });
+    const res = await this.raw('POST', this.sharingPath(id, `/${shareList(t)}`), { body: { [t.kind]: t.value } });
     if (res.status !== 200 && res.status !== 201) throw this.errorFor(res);
     // A new share with a person emails them; a domain share emails nobody.
     return { ...toSharing(res.data as KiteRawSharingState), notified: t.kind === 'email' && res.status === 201 };
@@ -382,7 +380,7 @@ export class KiteClient implements ServiceClient {
 
   async unshare(id: string, target: string): Promise<KiteSharing> {
     const t = shareTarget(target);
-    const path = this.sharingPath(id, `/${t.kind === 'email' ? 'people' : 'domains'}/${enc(t.value)}`);
+    const path = this.sharingPath(id, `/${shareList(t)}/${enc(t.value)}`);
     return toSharing(await this.request<KiteRawSharingState>('DELETE', path));
   }
 
@@ -413,10 +411,10 @@ export class KiteClient implements ServiceClient {
     return { ...toThread(data), mentions: data.mentions };
   }
 
-  async reply(threadId: string, text: string): Promise<{ id: string; author: string | null; body: string; createdAt: string; mentions: unknown }> {
+  async reply(threadId: string, text: string): Promise<KiteReply> {
     const tid = requireThreadId(threadId);
     const body = requireBody(text);
-    const data = await this.request<{ id: string; author: { email: string } | null; body: string; createdAt: string; mentions: unknown }>(
+    const data = await this.request<KiteRawComment & { mentions: unknown }>(
       'POST', `/api/comments/threads/${enc(tid)}/replies`, { body: { body } });
     return { id: data.id, author: data.author?.email ?? null, body: data.body, createdAt: data.createdAt, mentions: data.mentions };
   }
@@ -431,9 +429,21 @@ function enc(segment: string): string {
   return encodeURIComponent(segment);
 }
 
-function requireTitle(title: string): string {
-  if (!title.trim()) throw new CliError('INVALID_PARAMS', 'The title is empty', 'Leave out --title to keep the current one');
-  return title;
+type DocumentInput = { type: KiteDocumentType; content: string; title?: string };
+
+/** What publish and update both send; a blank title is refused before any request. */
+function documentBody(input: DocumentInput): Record<string, unknown> {
+  const body: Record<string, unknown> = { type: input.type, content: input.content };
+  if (input.title !== undefined) {
+    if (!input.title.trim()) throw new CliError('INVALID_PARAMS', 'The title is empty', 'Leave out --title to keep the current one');
+    body.title = input.title;
+  }
+  return body;
+}
+
+/** The sharing list a target belongs to, as the server names it in paths. */
+function shareList(target: ReturnType<typeof shareTarget>): 'people' | 'domains' {
+  return target.kind === 'email' ? 'people' : 'domains';
 }
 
 /**

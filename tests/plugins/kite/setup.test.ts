@@ -10,7 +10,7 @@ import { loadVault } from '../../../src/vault/vault';
 import { configDir } from '../../../src/vault/pointer';
 import { CliError } from '../../../src/utils/errors';
 import type { KiteCredentials } from '../../../src/plugins/kite/types';
-import { FakeKite } from './fake-kite';
+import { FakeKite, caught } from './fake-kite';
 
 // The installed agentio's folder, as it is before any test runs.
 const REAL_CONFIG = join(process.env.HOME || homedir(), '.config', 'agentio');
@@ -74,16 +74,6 @@ afterEach(() => {
 afterAll(() => {
   expect(snapshot(REAL_CONFIG)).toBe(REAL_BEFORE);
 });
-
-async function caught(p: Promise<unknown>): Promise<CliError> {
-  try {
-    await p;
-  } catch (e) {
-    expect(e).toBeInstanceOf(CliError);
-    return e as CliError;
-  }
-  throw new Error('expected a CliError, got success');
-}
 
 test('setup returns normalised credentials, named after the email', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };

@@ -1,5 +1,5 @@
 import { writeJson } from '../../utils/output';
-import type { KiteDocument, KiteSharing, KiteThread } from './types';
+import type { KiteDocument, KiteReply, KiteSharing, KiteThread } from './types';
 
 /** `--json` writes `data`; otherwise `text` prints for people. */
 function emit(json: boolean | undefined, data: unknown, text: () => void): void {
@@ -100,6 +100,6 @@ export function printThread(thread: KiteThread & { mentions?: unknown }, json?: 
   emit(json, thread, () => threadLines(thread));
 }
 
-export function printReply(reply: { id: string; author: string | null; body: string; createdAt: string; mentions: unknown }, json?: boolean): void {
+export function printReply(reply: KiteReply, json?: boolean): void {
   emit(json, reply, () => console.log(`Replied (${reply.id}) at ${reply.createdAt}`));
 }

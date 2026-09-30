@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { KiteClient } from '../../../src/plugins/kite/client';
 import { kiteDeviceLogin } from '../../../src/plugins/kite/device-auth';
 import { CliError } from '../../../src/utils/errors';
+import { caught } from './fake-kite';
 
 /**
  * Opt-in: the fake Kite (fake-kite.ts) checked against a real one. Runs only
@@ -80,16 +81,6 @@ async function deviceToken(email: string): Promise<string> {
   });
   await approval;
   return token;
-}
-
-async function caught(p: Promise<unknown>): Promise<CliError> {
-  try {
-    await p;
-  } catch (e) {
-    expect(e).toBeInstanceOf(CliError);
-    return e as CliError;
-  }
-  throw new Error('expected a CliError, got success');
 }
 
 run('contract with a real Kite', () => {
