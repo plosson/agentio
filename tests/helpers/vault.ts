@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { writePointer } from '../../src/vault/pointer';
+import { resetRemoteCache } from '../../src/auth/remote';
 import { saveVault, clearVaultCache, CURRENT_VAULT_VERSION } from '../../src/vault/vault';
 import { setPassphraseProvider, memoryOnlyProvider, clearPassphraseCache, resetPassphraseProvider } from '../../src/vault/passphrase';
 import type { Config } from '../../src/types/config';
@@ -54,25 +55,45 @@ export async function seedVault(options: {
 
 type SeedOptions = Parameters<typeof seedVault>[0];
 
+/** Put an environment variable back as it was, deleting it when it was unset. */
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 /**
  * Registers a beforeEach/afterEach pair: a fresh temp HOME with a seeded vault
  * for every test, and full teardown (HOME restored, passphrase env and caches
  * cleared, directory removed). Call at module level; register any extra hooks
  * after it so they run once the vault exists.
+ *
+ * AGENTIO_HOME is pointed into the temp HOME and AGENTIO_TOKEN is cleared, so
+ * neither a shell's AGENTIO_HOME nor a real login (remote mode) can reach past
+ * the temp folder. Both are restored exactly afterwards.
  */
 export function withTempVault(prefix: string, seed: () => SeedOptions): { home: () => string } {
   let tempHome = '';
-  let savedHome = '';
+  let savedHome: string | undefined;
+  let savedAgentioHome: string | undefined;
+  let savedAgentioToken: string | undefined;
 
   beforeEach(async () => {
-    savedHome = process.env.HOME || '';
+    savedHome = process.env.HOME;
+    savedAgentioHome = process.env.AGENTIO_HOME;
+    savedAgentioToken = process.env.AGENTIO_TOKEN;
     tempHome = await mkdtemp(join(tmpdir(), prefix));
     process.env.HOME = tempHome;
+    process.env.AGENTIO_HOME = join(tempHome, '.config', 'agentio');
+    delete process.env.AGENTIO_TOKEN;
+    resetRemoteCache();
     await seedVault(seed());
   });
 
   afterEach(async () => {
-    process.env.HOME = savedHome;
+    restoreEnv('HOME', savedHome);
+    restoreEnv('AGENTIO_HOME', savedAgentioHome);
+    restoreEnv('AGENTIO_TOKEN', savedAgentioToken);
+    resetRemoteCache();
     delete process.env.AGENTIO_PASSPHRASE;
     resetPassphraseProvider();
     clearPassphraseCache();
