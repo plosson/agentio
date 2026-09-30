@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { writePointer } from '../../src/vault/pointer';
+import { resetRemoteCache } from '../../src/auth/remote';
 import { saveVault, clearVaultCache, CURRENT_VAULT_VERSION } from '../../src/vault/vault';
 import { setPassphraseProvider, memoryOnlyProvider, clearPassphraseCache, resetPassphraseProvider } from '../../src/vault/passphrase';
 import type { Config } from '../../src/types/config';
@@ -54,31 +55,64 @@ export async function seedVault(options: {
 
 type SeedOptions = Parameters<typeof seedVault>[0];
 
+/** Variables a test's environment must not inherit; saved before each test and restored exactly after. */
+const ISOLATED_ENV = ['HOME', 'AGENTIO_HOME', 'AGENTIO_TOKEN'] as const;
+
 /**
  * Registers a beforeEach/afterEach pair: a fresh temp HOME with a seeded vault
  * for every test, and full teardown (HOME restored, passphrase env and caches
  * cleared, directory removed). Call at module level; register any extra hooks
  * after it so they run once the vault exists.
+ *
+ * AGENTIO_HOME is pointed into the temp HOME and AGENTIO_TOKEN is cleared, so
+ * neither a shell's AGENTIO_HOME nor a real login (remote mode) can reach past
+ * the temp folder. Both are restored exactly afterwards; an unset one stays unset.
+ *
+ * `home()` and `env()` throw outside a test, so nothing can fall back to an
+ * empty path, which would mean the current folder. `env()` is the environment
+ * for a CLI spawned from the test: the same isolation, plus the passphrase.
  */
-export function withTempVault(prefix: string, seed: () => SeedOptions): { home: () => string } {
+export function withTempVault(
+  prefix: string,
+  seed: () => SeedOptions,
+): { home: () => string; env: () => Record<string, string> } {
   let tempHome = '';
-  let savedHome = '';
+  const saved: Partial<Record<(typeof ISOLATED_ENV)[number], string>> = {};
 
   beforeEach(async () => {
-    savedHome = process.env.HOME || '';
+    for (const name of ISOLATED_ENV) saved[name] = process.env[name];
     tempHome = await mkdtemp(join(tmpdir(), prefix));
     process.env.HOME = tempHome;
+    process.env.AGENTIO_HOME = join(tempHome, '.config', 'agentio');
+    delete process.env.AGENTIO_TOKEN;
+    resetRemoteCache();
     await seedVault(seed());
   });
 
   afterEach(async () => {
-    process.env.HOME = savedHome;
+    for (const name of ISOLATED_ENV) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
+    resetRemoteCache();
     delete process.env.AGENTIO_PASSPHRASE;
     resetPassphraseProvider();
     clearPassphraseCache();
     clearVaultCache();
     await rm(tempHome, { recursive: true, force: true }).catch(() => {});
+    tempHome = '';
   });
 
-  return { home: () => tempHome };
+  const home = () => {
+    if (!tempHome) throw new Error('withTempVault: no temp home outside a test');
+    return tempHome;
+  };
+  const env = () => ({
+    PATH: process.env.PATH ?? '',
+    HOME: home(),
+    AGENTIO_HOME: join(home(), '.config', 'agentio'),
+    AGENTIO_TOKEN: '',
+    AGENTIO_PASSPHRASE: process.env.AGENTIO_PASSPHRASE ?? '',
+  });
+  return { home, env };
 }

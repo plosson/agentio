@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-09-28. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-09-30. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -17,6 +17,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | slack | Incoming webhook URL (send only) | **The user's own Slack app** | No | None |
 | whatsapp | A linked device (QR code or 8-character code), through the unofficial Baileys library; the daemon holds the connection | **The user's own WhatsApp account**, no app | No | **Meta may ban the number.** Use a dedicated one. |
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
+| kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
 | rss | None (public feed URL) | — | No | None |
@@ -411,6 +412,29 @@ Notes:
 Source: [create and configure an API key](https://meta.discourse.org/t/create-and-configure-an-api-key/230124).
 
 **What's needed:** nothing.
+
+---
+
+## Kite
+
+**Code:** `src/plugins/kite/device-auth.ts`, `src/plugins/kite/commands.ts`
+
+Kite is a fork of Open Artifact. The plugin talks to its REST API, never to its MCP endpoint.
+
+**Sign-in**
+- `agentio kite profile add --url <server>` asks the server for a code (`POST /api/auth/device`), prints the code and the approval link, then opens the browser. `--no-browser` only prints them, for SSH.
+- The approval page signs the person in first if needed (Google sign-in on kite.chuut.com), then asks them to approve the code.
+- agentio polls `POST /api/auth/device/token` until the code is approved, refused or expired. The token is handed out once.
+- The approval link must be on the same site as the server URL, or agentio refuses to open it.
+- `agentio profile reauth kite` repeats the sign-in against the stored URL and keeps the profile name.
+
+**What the vault stores:** server URL, CLI token, account email, the expiry given at sign-in.
+
+**Expiry:** the server gives tokens 90 days and pushes the expiry forward on every request, so there is no refresh. A token unused for 90 days, or revoked on the web ("Where you are signed in"), stops working; the fix is `agentio profile reauth kite`. On a hub, reauth runs on the hub machine.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, token included, as with the other static-token plugins.
+
+**What's needed:** an account on the Kite server. There is no app to create and no key to copy.
 
 ---
 

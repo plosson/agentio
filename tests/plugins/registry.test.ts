@@ -29,6 +29,7 @@ const SERVICE_ORDER = [
   'gscript',
   'gtasks',
   'jira',
+  'kite',
   'revolut',
   'rss',
   'slack',
