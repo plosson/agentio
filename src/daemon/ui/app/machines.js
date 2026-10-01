@@ -84,7 +84,8 @@ function revokedView(revoked) {
     ${revoked.refs.length
       ? html`<div class="box">${revoked.refs.map((ref) => {
           const i = ref.indexOf('/');
-          const command = reauthCommand(ref.slice(0, i), ref.slice(i + 1));
+          const service = ref.slice(0, i);
+          const command = fixCommand(service, ref.slice(i + 1), Boolean(PLUGIN_METADATA[service]?.reauth));
           return html`<div class="codebox"><code>${command}</code>${copyButton(command)}</div>`;
         })}</div>`
       : html`<p class="muted">It could not read any profile.</p>`}

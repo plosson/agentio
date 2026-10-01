@@ -6,6 +6,7 @@ import {
   clockTime,
   effectiveStatus,
   escapeHtml,
+  fixCommand,
   groupProfiles,
   html,
   hubSummary,
@@ -157,6 +158,12 @@ describe('commands', () => {
     expect(reauthCommand('gmail', 'my work')).toBe("agentio profile reauth gmail 'my work'");
     expect(addCommand('jira')).toBe('agentio jira profile add');
     expect(loginCommand('https://agentio.chuut.com')).toBe('agentio login https://agentio.chuut.com');
+  });
+
+  test('fixCommand reauths where the plugin supports it, else adds the profile again by name', () => {
+    expect(fixCommand('gmail', 'work', true)).toBe('agentio profile reauth gmail work');
+    expect(fixCommand('discourse', 'bot', false)).toBe('agentio discourse profile add --profile bot');
+    expect(fixCommand('notes', 'my work', false)).toBe("agentio notes profile add --profile 'my work'");
   });
 
   test('plural', () => {

@@ -61,7 +61,10 @@ function copyButton(text) {
 /**
  * One call to the owner API. A 401 or 503 means the session or the vault is
  * gone: the page goes back to the locked screen by itself and the call comes
- * back with `lost`, so a caller that forgets to check still lands right.
+ * back with `lost`, so a caller that forgets to check still lands right. The
+ * one exception is the unlock request itself: its own 401 is a wrong
+ * passphrase, not a lost session, so it never counts as `lost` and the
+ * caller shows it inline instead.
  */
 async function api(path, options = {}) {
   let res;
@@ -76,7 +79,16 @@ async function api(path, options = {}) {
   }
   // A 401 from the unlock attempt itself is a wrong passphrase, not a lost session: the caller shows it inline.
   const lost = path !== '/ui/api/unlock' && (res.status === 401 || res.status === 503);
-  if (lost) showUnlock();
+  if (lost) {
+    if (res.status === 503) {
+      showUnlock(true);
+    } else {
+      // A 401 elsewhere means this browser has no session; that can happen with the vault
+      // either unlocked or locked, so ask rather than assume the alarming case.
+      const probe = await fetch('/ui/api/session').then((r) => r.json()).catch(() => null);
+      showUnlock(probe ? probe.locked : false);
+    }
+  }
   return { ok: res.ok, status: res.status, body, lost, error: (body && body.error) || `The hub answered ${res.status}.` };
 }
 
@@ -102,25 +114,46 @@ async function loadPending() {
 }
 
 /**
+ * True while the owner is filling a form that a redraw would clobber: step 2
+ * of a sign-in, a machine's "Connect a machine" panel, or its scope editor.
+ */
+function formOpen() {
+  const route = currentRoute();
+  if (route.view === 'authorize') return true;
+  if (route.view === 'machines' && state.ui.connectOpen) return true;
+  if (route.view === 'machine' && state.ui.editScope) return true;
+  return false;
+}
+
+/**
  * Tests the given profiles, three at a time, so each one reports as soon as
- * it is done. Only ever called when the owner asks.
+ * it is done. Only ever called when the owner asks. Results are stored as
+ * they arrive, but the page is redrawn only once at the end, and not at all
+ * over a form the owner is filling in (the next redraw picks up the results).
  */
 async function testProfiles(refs) {
   for (const ref of refs) state.results.set(ref, { status: 'testing', detail: '', at: Date.now() });
   render();
   const queue = refs.slice();
+  let lost = false;
   const worker = async () => {
     for (let ref = queue.shift(); ref; ref = queue.shift()) {
       const res = await api(`/ui/api/profiles/${refPath(ref)}/status`);
-      if (res.lost) return;
+      if (res.lost) { lost = true; return; }
       const result = res.ok
         ? { status: res.body.status, detail: res.body.error || res.body.info || '', at: Date.now() }
         : { status: 'invalid', detail: res.error, at: Date.now() };
       state.results.set(ref, result);
-      render();
     }
   };
   await Promise.all([worker(), worker(), worker()]);
+  if (lost) {
+    // The session or vault went away mid-run: drop results still stuck on 'testing' so
+    // they do not claim to be testing forever once the owner is back.
+    for (const ref of refs) if (state.results.get(ref)?.status === 'testing') state.results.delete(ref);
+    return;
+  }
+  if (!formOpen()) render();
 }
 
 // ---------- Rendering ----------
@@ -231,7 +264,7 @@ function profileChooser(prefix, selected) {
     <label class="radio"><input type="radio" name="${prefix}-scope" value="all" ${all ? raw('checked') : ''} data-change="scope-mode">
       <div><b>All profiles</b><div class="muted">Including profiles added later</div></div></label>
     <label class="radio"><input type="radio" name="${prefix}-scope" value="some" ${all ? '' : raw('checked')} data-change="scope-mode">
-      <div class="grow"><b>Choose profiles…</b>${profileChecks(prefix, all ? [] : selected)}</div></label>`;
+      <div class="grow"><b>Choose profiles…</b>${profileChecks(prefix, selected)}</div></label>`;
 }
 
 function readProfileChoice(form, prefix) {

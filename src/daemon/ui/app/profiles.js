@@ -40,15 +40,16 @@ VIEWS.profile = (route) => {
   const users = machinesUsing(state.keys, r);
   const testedText = st.at ? `tested ${relativeTime(st.at, now)}` : '';
   const ref = refOf(r);
+  const fix = fixCommand(r.service, r.profile, Boolean(PLUGIN_METADATA[r.service]?.reauth));
 
   const statusBox = st.status === 'invalid'
     ? html`<div class="box alert"><b>The last test failed</b><div class="mono mt-4">${st.detail || 'No details were given.'}</div></div>
         <div class="box hl"><b>To fix it, run this on the hub</b>
-          <div class="codebox"><code>${reauthCommand(r.service, r.profile)}</code>${copyButton(reauthCommand(r.service, r.profile))}</div>
+          <div class="codebox"><code>${fix}</code>${copyButton(fix)}</div>
           <button class="btn pri" data-action="test-one" data-ref="${ref}">Test again</button></div>`
     : st.status === 'no-creds'
       ? html`<div class="box hl"><b>This profile has no credentials yet</b>
-          <div class="codebox"><code>${reauthCommand(r.service, r.profile)}</code>${copyButton(reauthCommand(r.service, r.profile))}</div>
+          <div class="codebox"><code>${fix}</code>${copyButton(fix)}</div>
           <button class="btn" data-action="test-one" data-ref="${ref}">Test</button></div>`
       : html`<div class="box row"><span class="grow">${st.status === 'skipped' ? 'Not tested in this session.' : st.status === 'testing' ? 'Testing…' : html`Working${st.detail ? html` · ${st.detail}` : ''}${testedText ? html` · ${testedText}` : ''}`}</span>
           <button class="btn" data-action="test-one" data-ref="${ref}" ${st.status === 'testing' ? raw('disabled') : ''}>Test</button></div>`;

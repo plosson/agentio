@@ -406,7 +406,16 @@ describe('daemon HTTP surface', () => {
   });
 
   test('fonts: unknown names and path tricks are 404', async () => {
-    for (const path of ['/ui/fonts/nope.woff2', '/ui/fonts/', '/ui/fonts/..%2Fassets.ts', '/ui/fonts/balsamiq-sans-400.woff2/x']) {
+    for (const path of [
+      '/ui/fonts/nope.woff2',
+      '/ui/fonts/',
+      '/ui/fonts/..%2Fassets.ts',
+      '/ui/fonts/balsamiq-sans-400.woff2/x',
+      '/ui/fonts/constructor',
+      '/ui/fonts/__proto__',
+      '/ui/fonts/toString',
+      '/ui/fonts/hasOwnProperty',
+    ]) {
       expect((await call(path)).status).toBe(404);
     }
   });
@@ -423,8 +432,9 @@ describe('daemon HTTP surface', () => {
 
   test('page metadata says which services can be added and which hold a session', async () => {
     const html = await (await call('/ui')).text();
-    expect(html).toMatch(/"gmail":\{"displayName":"Gmail"[^}]*"addable":true[^}]*"session":false/);
+    expect(html).toMatch(/"gmail":\{"displayName":"Gmail"[^}]*"addable":true[^}]*"session":false[^}]*"reauth":true/);
     expect(html).toMatch(/"whatsapp":\{[^}]*"addable":true[^}]*"session":true/);
     expect(html).toMatch(/"rss":\{[^}]*"addable":false/);
+    expect(html).toMatch(/"notes":\{[^}]*"reauth":false/);
   });
 });

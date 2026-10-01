@@ -26,10 +26,10 @@ body { font: 15px/1.5 'Balsamiq Sans', 'Comic Sans MS', cursive; }
 a { color: var(--accent); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
-h1 { font-size: 26px; margin: 0 0 4px; line-height: 1.2; }
+h1 { font-size: 26px; margin: 0 0 4px; line-height: 1.2; overflow-wrap: anywhere; }
 h2 { font-size: 19px; margin: 18px 0 8px; }
 p { margin: 0 0 10px; }
-code, .mono { font-family: 'Courier New', ui-monospace, monospace; font-size: 13px; }
+code, .mono { font-family: 'Courier New', ui-monospace, monospace; font-size: 13px; overflow-wrap: anywhere; }
 .muted { color: var(--pencil); }
 
 /* Shell */
@@ -141,6 +141,7 @@ dialog::backdrop { background: rgba(20, 20, 18, .45); }
   .tabbar a { flex: 1; text-align: center; padding: 10px 0 14px; color: var(--pencil); text-decoration: none; }
   .tabbar a.on { color: var(--accent); font-weight: 700; }
   .body { padding: 16px 16px 90px; }
+  .field input, .field select { font-size: 16px; } /* 16px keeps iOS Safari from zooming in on focus */
   .grid2, .grid3 { grid-template-columns: 1fr; }
   table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
   table.stack tr:first-child:has(th) { display: none; }

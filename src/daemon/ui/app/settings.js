@@ -15,7 +15,7 @@ VIEWS.settings = () => html`
 
 ACTIONS['sign-out'] = async () => {
   await api('/ui/api/logout', { method: 'POST' });
-  showUnlock();
+  showUnlock(false);
 };
 
 ACTIONS.lock = async () => {
@@ -27,5 +27,5 @@ ACTIONS.lock = async () => {
   if (!ok) return;
   await api('/ui/api/lock', { method: 'POST' });
   toast('Vault locked');
-  showUnlock();
+  showUnlock(true);
 };

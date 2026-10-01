@@ -156,6 +156,15 @@ export function addCommand(service: string): string {
   return `agentio ${shellQuote(service)} profile add`;
 }
 
+/**
+ * The command that actually fixes a broken or credential-less profile. `agentio
+ * profile reauth` only exists for plugins whose `profile.reauthenticate` is
+ * defined; every other plugin is fixed by adding the profile again, by name.
+ */
+export function fixCommand(service: string, profile: string, canReauth: boolean): string {
+  return canReauth ? reauthCommand(service, profile) : `agentio ${shellQuote(service)} profile add --profile ${shellQuote(profile)}`;
+}
+
 export function loginCommand(origin: string): string {
   return `agentio login ${shellQuote(origin)}`;
 }

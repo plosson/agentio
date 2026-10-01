@@ -59,6 +59,8 @@ function page(): Response {
     // `agentio <id> profile add` exists for every plugin with profiles or a session.
     addable: Boolean(plugin.profile) || (isLegacyServicePlugin(plugin) && Boolean(plugin.session)),
     session: isLegacyServicePlugin(plugin) && Boolean(plugin.session),
+    // `agentio profile reauth` only works where the plugin defines it; otherwise the fix is `profile add --profile <name>`.
+    reauth: Boolean(plugin.profile?.reauthenticate),
   }]));
   const serialized = JSON.stringify(metadata).replace(/[<>&]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const html = INDEX_HTML
@@ -189,8 +191,10 @@ async function handleStatus(request: Request, ctx: UiContext): Promise<Response>
 /** `/ui/fonts/<file>`: the page's own fonts, public so the locked screen can use them. */
 function font(pathname: string): Response | null {
   if (!pathname.startsWith('/ui/fonts/')) return null;
-  const bytes = FONTS[pathname.slice('/ui/fonts/'.length)];
-  if (!bytes) return errorResponse(new CliError('NOT_FOUND', 'Not found'));
+  const name = pathname.slice('/ui/fonts/'.length);
+  // A plain-object lookup also matches inherited names like `constructor` or `toString`; require an own property.
+  if (!Object.hasOwn(FONTS, name)) return errorResponse(new CliError('NOT_FOUND', 'Not found'));
+  const bytes = FONTS[name];
   // TS's BodyInit wants a Uint8Array<ArrayBuffer>; our decoded bytes are typed ArrayBufferLike, same data.
   return new Response(bytes as Uint8Array<ArrayBuffer>, {
     headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' },
