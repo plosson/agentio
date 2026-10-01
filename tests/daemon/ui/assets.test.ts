@@ -69,4 +69,10 @@ describe('the assembled admin page', () => {
     expect(script).toContain('This sign-in request has ended or was already answered. Run agentio login again on the machine.');
     expect(script).toMatch(/name="\$\{prefix\}-preset" value="read-all" checked/);
   });
+
+  test('access: cells toggle through toggleScope, never by hand', () => {
+    expect(script).toContain("ACTIONS['toggle-cell']");
+    expect(script).toContain('toggleScope(');
+    expect(script).toContain('accessCell(');
+  });
 });
