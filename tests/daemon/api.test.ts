@@ -79,7 +79,7 @@ describe('daemon HTTP surface', () => {
     const page = await call('/ui');
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
-    expect(await page.text()).toContain('agentio vault');
+    expect(await page.text()).toContain('<title>agentio hub</title>');
 
     const probe = await call('/ui/api/session');
     expect(await probe.json()).toEqual({ authenticated: false, locked: true });
