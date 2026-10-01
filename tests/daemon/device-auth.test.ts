@@ -5,6 +5,7 @@ import {
   approveDeviceAuth,
   denyDeviceAuth,
   describeDeviceAuth,
+  listDeviceAuth,
   normalizeUserCode,
   pollDeviceAuth,
   resetDeviceAuth,
@@ -56,5 +57,35 @@ describe('device auth', () => {
     expect(() => startDeviceAuth('x'.repeat(65))).toThrow('name');
     for (let i = 0; i < 100; i++) startDeviceAuth('n');
     expect(() => startDeviceAuth('one more')).toThrow('Too many');
+  });
+
+  test('the owner sees pending requests only, oldest first, without device codes', async () => {
+    const t0 = 2_000_000;
+    const first = startDeviceAuth('first', t0);
+    const second = startDeviceAuth('<img src=x onerror=alert(1)>', t0 + 1000);
+    const denied = startDeviceAuth('denied', t0 + 2000);
+    const approved = startDeviceAuth('approved', t0 + 3000);
+    denyDeviceAuth(denied.userCode, t0 + 4000);
+    await approveDeviceAuth(approved.userCode, { name: 'approved', allowedProfiles: '*', readOnly: true }, 'https://hub.example.com', t0 + 4000);
+
+    const list = listDeviceAuth(t0 + 5000);
+    expect(list.map((r) => r.userCode)).toEqual([first.userCode, second.userCode]);
+    // The name is passed through as given; escaping is the page's job.
+    expect(list[1].name).toBe('<img src=x onerror=alert(1)>');
+    for (const r of list) {
+      expect(Object.keys(r).sort()).toEqual(['createdAt', 'expiresAt', 'name', 'userCode']);
+      expect(JSON.stringify(r)).not.toContain(first.deviceCode);
+    }
+  });
+
+  test('expired requests leave the list at the TTL, not before', () => {
+    const t0 = 3_000_000;
+    const a = startDeviceAuth('a', t0);
+    expect(listDeviceAuth(t0 + DEVICE_AUTH_TTL_MS).map((r) => r.userCode)).toEqual([a.userCode]);
+    expect(listDeviceAuth(t0 + DEVICE_AUTH_TTL_MS + 1)).toEqual([]);
+  });
+
+  test('an empty hub lists nothing', () => {
+    expect(listDeviceAuth()).toEqual([]);
   });
 });

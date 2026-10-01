@@ -79,7 +79,7 @@ describe('daemon HTTP surface', () => {
     const page = await call('/ui');
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
-    expect(await page.text()).toContain('agentio vault');
+    expect(await page.text()).toContain('<title>agentio hub</title>');
 
     const probe = await call('/ui/api/session');
     expect(await probe.json()).toEqual({ authenticated: false, locked: true });
@@ -363,5 +363,78 @@ describe('daemon HTTP surface', () => {
     expect((await call('/nope')).status).toBe(404);
     const cookie = await cookieFrom(await unlock());
     expect((await call('/ui/api/nope', { headers: { cookie } })).status).toBe(404);
+  });
+
+  test('pending sign-ins: listed for the owner only, without device codes', async () => {
+    const start = await (await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'build-box' }), ip: '203.0.113.30' })).json();
+
+    // No session: 401. Session on a vault locked another way: 503.
+    expect((await call('/ui/api/authorize')).status).toBe(401);
+    const cookie = await cookieFrom(await unlock());
+    const res = await call('/ui/api/authorize', { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.requests).toHaveLength(1);
+    expect(body.requests[0]).toMatchObject({ userCode: start.userCode, name: 'build-box' });
+    expect(JSON.stringify(body)).not.toContain(start.deviceCode);
+
+    lockVault();
+    expect((await call('/ui/api/authorize', { headers: { cookie } })).status).toBe(503);
+  });
+
+  test('pending sign-ins: an answered request leaves the list, and answering it again is 404', async () => {
+    const start = await (await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'ci' }), ip: '203.0.113.31' })).json();
+    const cookie = await cookieFrom(await unlock());
+    await call(`/ui/api/authorize/${start.userCode}`, { method: 'POST', headers: { cookie }, body: JSON.stringify({ approve: false }) });
+    expect((await (await call('/ui/api/authorize', { headers: { cookie } })).json()).requests).toEqual([]);
+    const again = await call(`/ui/api/authorize/${start.userCode}`, {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ approve: true, name: 'ci', allowedProfiles: '*', readOnly: true, url: 'https://hub.example.com' }),
+    });
+    expect(again.status).toBe(404);
+  });
+
+  test('fonts: served publicly from the hub itself as WOFF2', async () => {
+    for (const file of ['balsamiq-sans-400.woff2', 'balsamiq-sans-700.woff2']) {
+      const res = await call(`/ui/fonts/${file}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('font/woff2');
+      expect(res.headers.get('cache-control')).toContain('immutable');
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe('wOF2');
+    }
+  });
+
+  test('fonts: unknown names and path tricks are 404', async () => {
+    for (const path of [
+      '/ui/fonts/nope.woff2',
+      '/ui/fonts/',
+      '/ui/fonts/..%2Fassets.ts',
+      '/ui/fonts/balsamiq-sans-400.woff2/x',
+      '/ui/fonts/constructor',
+      '/ui/fonts/__proto__',
+      '/ui/fonts/toString',
+      '/ui/fonts/hasOwnProperty',
+    ]) {
+      expect((await call(path)).status).toBe(404);
+    }
+  });
+
+  test('the CSP lets the page load fonts from the hub and nothing else from outside', async () => {
+    const page = await call('/ui');
+    const csp = page.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).toContain("default-src 'none'");
+    const html = await page.text();
+    expect(html).not.toMatch(/(src|href)=["']https?:/);
+    expect(html).not.toMatch(/url\(\s*["']?https?:/);
+  });
+
+  test('page metadata says which services can be added and which hold a session', async () => {
+    const html = await (await call('/ui')).text();
+    expect(html).toMatch(/"gmail":\{"displayName":"Gmail"[^}]*"addable":true[^}]*"session":false[^}]*"reauth":true/);
+    expect(html).toMatch(/"whatsapp":\{[^}]*"addable":true[^}]*"session":true/);
+    expect(html).toMatch(/"rss":\{[^}]*"addable":false/);
+    expect(html).toMatch(/"notes":\{[^}]*"reauth":false/);
   });
 });

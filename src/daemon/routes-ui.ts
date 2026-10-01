@@ -19,9 +19,11 @@ import {
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
-import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth } from './device-auth';
+import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth, listDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
 import { getPluginRegistry } from '../plugins/registry';
+import { FONTS } from './ui/fonts';
+import { isLegacyServicePlugin } from '../plugins/types';
 
 export interface UiContext {
   version: string;
@@ -34,13 +36,13 @@ export const unlockLimiter = new RateLimiter(5, 60_000);
  * Response headers that lock the admin UI down. The vault-unlock panel is a
  * prime clickjacking target, so framing is denied outright; a strict CSP with a
  * per-response nonce lets the single inline script and style run while blocking
- * anything injected, and HSTS keeps the browser on TLS. The page pulls in no
- * external resource, so everything but 'self' and the nonce is denied.
+ * anything injected, and HSTS keeps the browser on TLS. The page pulls in nothing
+ * from another origin; only its own fonts come from 'self'.
  */
 function securityHeaders(nonce: string): Record<string, string> {
   return {
     'Content-Security-Policy':
-      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; ` +
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; font-src 'self'; ` +
       `connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
@@ -54,6 +56,11 @@ function page(): Response {
   const metadata = Object.fromEntries(getPluginRegistry().plugins.map((plugin) => [plugin.id, {
     displayName: plugin.displayName,
     color: plugin.brand?.color && /^#[0-9a-f]{6}$/i.test(plugin.brand.color) ? plugin.brand.color : undefined,
+    // `agentio <id> profile add` exists for every plugin with profiles or a session.
+    addable: Boolean(plugin.profile) || (isLegacyServicePlugin(plugin) && Boolean(plugin.session)),
+    session: isLegacyServicePlugin(plugin) && Boolean(plugin.session),
+    // `agentio profile reauth` only works where the plugin defines it; otherwise the fix is `profile add --profile <name>`.
+    reauth: Boolean(plugin.profile?.reauthenticate),
   }]));
   const serialized = JSON.stringify(metadata).replace(/[<>&]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const html = INDEX_HTML
@@ -181,6 +188,19 @@ async function handleStatus(request: Request, ctx: UiContext): Promise<Response>
   return json({ version: ctx.version, services });
 }
 
+/** `/ui/fonts/<file>`: the page's own fonts, public so the locked screen can use them. */
+function font(pathname: string): Response | null {
+  if (!pathname.startsWith('/ui/fonts/')) return null;
+  const name = pathname.slice('/ui/fonts/'.length);
+  // A plain-object lookup also matches inherited names like `constructor` or `toString`; require an own property.
+  if (!Object.hasOwn(FONTS, name)) return errorResponse(new CliError('NOT_FOUND', 'Not found'));
+  const bytes = FONTS[name];
+  // TS's BodyInit wants a Uint8Array<ArrayBuffer>; our decoded bytes are typed ArrayBufferLike, same data.
+  return new Response(bytes as Uint8Array<ArrayBuffer>, {
+    headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' },
+  });
+}
+
 /**
  * Routes under /ui. Returns null for anything else so the caller can keep
  * matching. The page and the session probe are public; the rest needs a
@@ -194,6 +214,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
   try {
     if (method === 'GET' && (pathname === '/ui' || pathname === '/ui/')) return page();
+    if (method === 'GET') { const res = font(pathname); if (res) return res; }
 
     if (method === 'GET' && pathname === '/ui/api/session') {
       return json({ authenticated: hasSession(request), locked: !isVaultUnlocked() });
@@ -218,6 +239,8 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
+
+    if (method === 'GET' && pathname === '/ui/api/authorize') return json({ requests: listDeviceAuth() });
 
     const code = authorizeCode(pathname);
     if (code && method === 'GET') return json(describeDeviceAuth(code));

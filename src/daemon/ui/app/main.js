@@ -1,0 +1,65 @@
+// Boot: delegated listeners, routing, and the first session probe.
+
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-action]');
+  if (!el || !ACTIONS[el.dataset.action]) return;
+  ev.preventDefault();
+  ACTIONS[el.dataset.action](el, ev);
+});
+
+document.addEventListener('change', (ev) => {
+  // A profile checkbox, the "Read-only" box, or the "Same as…" <select> lives inside its
+  // own option's <label class="radio">, alongside the actual radio input. Changing one of
+  // those should select that option too, not just the radio the owner happened to click.
+  const radio = ev.target.closest('.radio');
+  if (radio) {
+    const own = radio.querySelector(':scope > input[type=radio]');
+    if (own) own.checked = true;
+  }
+  const el = ev.target.closest('[data-change]');
+  if (el && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el, ev);
+});
+
+document.addEventListener('input', (ev) => {
+  const el = ev.target.closest('[data-input]');
+  if (el && INPUTS[el.dataset.input]) INPUTS[el.dataset.input](el, ev);
+});
+
+// "/" jumps to the filter box, unless the owner is already typing somewhere.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== '/' || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const target = ev.target;
+  if (target.closest('input, textarea, select, [contenteditable]')) return;
+  const box = $('profile-filter');
+  if (!box) return;
+  ev.preventDefault();
+  box.focus();
+  box.select();
+});
+
+document.addEventListener('submit', (ev) => {
+  const form = ev.target.closest('form[data-submit]');
+  if (!form || !SUBMITS[form.dataset.submit]) return;
+  ev.preventDefault();
+  SUBMITS[form.dataset.submit](form, ev);
+});
+
+window.addEventListener('hashchange', () => {
+  clearToasts();
+  render();
+  main.focus();
+  // Tests stay on demand, but a sign-in started elsewhere should show up
+  // in the banner without a reload: refresh the waiting list on every move.
+  if (state.loaded) loadPending().then(render);
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.loaded) return;
+  loadPending().then(render);
+});
+
+(async () => {
+  const res = await api('/ui/api/session');
+  if (res.ok && res.body.authenticated && !res.body.locked) await openHub();
+  else if (!res.lost) showUnlock(res.ok ? res.body.locked : true);
+})();
