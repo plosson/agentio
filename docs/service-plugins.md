@@ -58,6 +58,7 @@ src/plugins/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
 ├── kite/             # device sign-in, owned by the service folder
+├── notes/            # Apple Notes through an apple-notes-api server; API key
 ├── revolut/
 ├── spotify/
 ├── sql/

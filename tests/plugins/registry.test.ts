@@ -30,6 +30,7 @@ const SERVICE_ORDER = [
   'gtasks',
   'jira',
   'kite',
+  'notes',
   'revolut',
   'rss',
   'slack',

@@ -1,6 +1,7 @@
 import { readFile, stat } from 'fs/promises';
 import { extname } from 'path';
 import type { ServiceClient, ValidationResult } from '../../types/service';
+import { normaliseServerUrl } from '../../utils/base-url';
 import { CliError } from '../../utils/errors';
 import type {
   KiteCommentPosition,
@@ -38,24 +39,9 @@ export function sanitise(message: string): string {
   });
 }
 
-/** Scheme required (https added when absent), http(s) only, no path, no trailing slash. */
+/** Scheme required (https added when absent), http(s) only, no trailing slash. */
 export function normaliseBaseUrl(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) throw new CliError('INVALID_PARAMS', 'The Kite URL is required', 'Example: --url https://kite.example.com');
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  let url: URL;
-  try {
-    url = new URL(withScheme);
-  } catch {
-    throw new CliError('INVALID_PARAMS', `Not a valid Kite URL: ${input}`, 'Example: --url https://kite.example.com');
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new CliError('INVALID_PARAMS', `A Kite URL must use https or http, not ${url.protocol.slice(0, -1)}`);
-  }
-  if (!url.hostname || url.username || url.password) {
-    throw new CliError('INVALID_PARAMS', `Not a valid Kite URL: ${input}`, 'Example: --url https://kite.example.com');
-  }
-  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+  return normaliseServerUrl(input, 'Kite', 'https://kite.example.com');
 }
 
 /** The document format from a file's extension, or INVALID_PARAMS. */
