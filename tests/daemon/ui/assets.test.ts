@@ -54,4 +54,13 @@ describe('the assembled admin page', () => {
     expect(script).toContain('reauthCommand(');
     expect(script).toContain('addCommand(');
   });
+
+  test('machines: its actions are registered', () => {
+    for (const name of ["ACTIONS['toggle-connect']", "ACTIONS['rename-machine']", "ACTIONS['replace-key']", "ACTIONS['revoke-machine']",
+      "SUBMITS['create-key']", "SUBMITS['save-scope']", "CHANGES['machine-ro']", "CHANGES['machine-manage']"]) {
+      expect(script).toContain(name);
+    }
+    expect(script).toContain('loginCommand(');
+    expect(script).toContain('reachableRefs(');
+  });
 });
