@@ -27,7 +27,7 @@ agentio asks for the API key the server printed when it was installed.
 ## Good to know
 
 - Note ids look like `x-coredata://…`. Quote them in the shell.
-- `update --body` replaces the whole body. Read the note first if you want to keep any of it.
+- `update --body` replaces the whole body. Read the note first if you want to keep any of it. A new body turns checklists into plain lists, losing which items are ticked; moving a note with `--folder` alone leaves its body untouched.
 - `delete` moves the note to Recently Deleted, where Notes keeps it for 30 days.
 - A folder is found by its name, so two accounts with a folder of the same name are ambiguous.
 - Locked notes cannot be read or changed.
