@@ -393,4 +393,38 @@ describe('daemon HTTP surface', () => {
     });
     expect(again.status).toBe(404);
   });
+
+  test('fonts: served publicly from the hub itself as WOFF2', async () => {
+    for (const file of ['balsamiq-sans-400.woff2', 'balsamiq-sans-700.woff2']) {
+      const res = await call(`/ui/fonts/${file}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('font/woff2');
+      expect(res.headers.get('cache-control')).toContain('immutable');
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe('wOF2');
+    }
+  });
+
+  test('fonts: unknown names and path tricks are 404', async () => {
+    for (const path of ['/ui/fonts/nope.woff2', '/ui/fonts/', '/ui/fonts/..%2Fassets.ts', '/ui/fonts/balsamiq-sans-400.woff2/x']) {
+      expect((await call(path)).status).toBe(404);
+    }
+  });
+
+  test('the CSP lets the page load fonts from the hub and nothing else from outside', async () => {
+    const page = await call('/ui');
+    const csp = page.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).toContain("default-src 'none'");
+    const html = await page.text();
+    expect(html).not.toMatch(/(src|href)=["']https?:/);
+    expect(html).not.toMatch(/url\(\s*["']?https?:/);
+  });
+
+  test('page metadata says which services can be added and which hold a session', async () => {
+    const html = await (await call('/ui')).text();
+    expect(html).toMatch(/"gmail":\{"displayName":"Gmail"[^}]*"addable":true[^}]*"session":false/);
+    expect(html).toMatch(/"whatsapp":\{[^}]*"addable":true[^}]*"session":true/);
+    expect(html).toMatch(/"rss":\{[^}]*"addable":false/);
+  });
 });
