@@ -31,3 +31,4 @@ agentio asks for the API key the server printed when it was installed.
 - `delete` moves the note to Recently Deleted, where Notes keeps it for 30 days.
 - A folder is found by its name, so two accounts with a folder of the same name are ambiguous.
 - Locked notes cannot be read or changed.
+- `get` shows which checklist items are ticked (`- [x]`) when the server has Full Disk Access on the Mac. Ticking items is not possible.

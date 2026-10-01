@@ -23,8 +23,19 @@ export interface Note extends NoteSummary {
   /** Plain text, HTML stripped by the server. */
   body: string;
   bodyHtml: string;
-  /** The server's best-effort conversion of the HTML. */
+  /** The server's best-effort conversion of the HTML; checklist lines marked - [x] / - [ ]. */
   bodyMarkdown: string;
+  /**
+   * Checklist items and whether each is ticked. [] when the note has none;
+   * null when the server cannot read it (no Full Disk Access on the Mac) or
+   * is older than this field.
+   */
+  checklist?: NoteChecklistItem[] | null;
+}
+
+export interface NoteChecklistItem {
+  text: string;
+  done: boolean;
 }
 
 export interface NotesListOptions {

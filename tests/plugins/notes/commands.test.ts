@@ -91,6 +91,23 @@ describe('one profile', () => {
     expect(bad.code).toBe(INVALID);
   });
 
+  test('get shows which checklist items are ticked, in Markdown and in --json', async () => {
+    const note = fake.seed('Groceries', '<ul><li>milk</li><li>eggs</li></ul>', 'Notes', {
+      checklist: [{ text: 'milk', done: true }, { text: 'eggs', done: false }],
+    });
+    const text = (await cli(['notes', 'get', note.id])).stdout;
+    expect(text).toContain('- [x] milk');
+    expect(text).toContain('- [ ] eggs');
+    const json = JSON.parse((await cli(['notes', 'get', note.id, '--json'])).stdout);
+    expect(json.checklist).toEqual([{ text: 'milk', done: true }, { text: 'eggs', done: false }]);
+  });
+
+  test('a server that cannot read checklist state gives null, not an empty list', async () => {
+    const note = fake.seed('Groceries', '<ul><li>milk</li></ul>');
+    const json = JSON.parse((await cli(['notes', 'get', note.id, '--json'])).stdout);
+    expect(json.checklist).toBeNull();
+  });
+
   test('the body is read from stdin only with --file -', async () => {
     const piped = await cli(['notes', 'create', '--title', 'Piped', '--file', '-', '--format', 'text'], '<b>not bold</b>');
     expect(piped.code).toBe(0);

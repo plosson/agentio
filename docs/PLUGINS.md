@@ -462,7 +462,7 @@ agentio does not talk to Notes.app itself. It talks to [apple-notes-api](https:/
 3. The server listens on `127.0.0.1:8787`. To reach it from another machine, use Tailscale Serve or an SSH tunnel. Don't expose it to the internet.
 4. Run `agentio notes profile add --url <server URL>` and paste the key.
 
-**What's needed:** a Mac with Notes signed in, and a network path from the agent to the server.
+**What's needed:** a Mac with Notes signed in, and a network path from the agent to the server. Optional: Full Disk Access for the server's `node` binary, so `notes get` shows which checklist items are ticked; the server reads them from Notes' database, read-only.
 
 ---
 
