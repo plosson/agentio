@@ -19,6 +19,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
+| pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
 | rss | None (public feed URL) | — | No | None |
@@ -463,6 +464,25 @@ agentio does not talk to Notes.app itself. It talks to [apple-notes-api](https:/
 4. Run `agentio notes profile add --url <server URL>` and paste the key.
 
 **What's needed:** a Mac with Notes signed in, and a network path from the agent to the server. Optional: Full Disk Access for the server's `node` binary, so `notes get` shows which checklist items are ticked; the server reads them from Notes' database, read-only.
+
+---
+
+## Pocket Alert
+
+**Code:** `src/plugins/pocketalert/`
+
+Sends push notifications to the user's devices through the [Pocket Alert](https://pocketalert.app) REST API (`https://api.pocketalert.app/v1`). Only `send` is implemented.
+
+**Sign-in:** the account's API key, from Settings in the Pocket Alert app, sent as `Token: <key>`.
+- `agentio pocketalert profile add` asks for the key when `--api-key` is absent, so the key can stay out of shell history.
+- Setup checks the key with `GET /v1/applications`, which sends nothing. A refused key stops setup.
+- There is no expiry and no refresh. A regenerated key breaks the profile; run `agentio pocketalert profile add` again.
+
+**What the vault stores:** API key.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, API key included, as with the other static-token plugins.
+
+**What's needed:** a Pocket Alert account, and the app on at least one device.
 
 ---
 
