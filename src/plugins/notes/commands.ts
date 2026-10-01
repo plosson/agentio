@@ -259,7 +259,7 @@ export function registerNotesCommands(program: Command): void {
     leaf(notes, 'update', 'Change a note\'s title, replace its body, or move it to another folder')
       .argument('<id>', 'Note id (x-coredata://…)')
       .option('--title <title>', 'New title')
-      .option('--body <text>', 'New body; replaces the whole body')
+      .option('--body <text>', 'New body; replaces the whole body, and erases checklists')
       .option('--file <path>', 'Read the new body from a file, or from stdin with -')
       .option('--format <format>', 'Body format: markdown, html or text (default: markdown, or from the file extension)')
       .option('--folder <name>', 'Move the note to this folder; it must exist')
@@ -276,7 +276,11 @@ export function registerNotesCommands(program: Command): void {
   agentio notes update "x-coredata://…/ICNote/p123" --folder Archive
 
   # replace the body; read the note first, since the old body is lost
-  agentio notes update "x-coredata://…/ICNote/p123" --file note.md`,
+  agentio notes update "x-coredata://…/ICNote/p123" --file note.md
+
+Warning: a new body (--body or --file) turns Notes checklists into plain
+lists and loses which items are ticked. Moving a note with --folder alone
+leaves its body untouched.`,
   );
 
   addExamples(

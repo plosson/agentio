@@ -36,6 +36,8 @@ interface StoredNote {
   created: string;
   modified: string;
   locked?: boolean;
+  /** What the real server reads from Notes' database; null without Full Disk Access. */
+  checklist?: Array<{ text: string; done: boolean }> | null;
 }
 
 /** A failure the next /v1 request answers with instead of its normal answer. */
@@ -88,7 +90,9 @@ export class FakeNotes {
 
   private detail(n: StoredNote) {
     const body = n.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    return { id: n.id, name: n.name, folder: n.folder, created: n.created, modified: n.modified, body, bodyHtml: n.bodyHtml, bodyMarkdown: body };
+    const items = n.checklist ?? [];
+    const bodyMarkdown = items.length ? items.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n') : body;
+    return { id: n.id, name: n.name, folder: n.folder, created: n.created, modified: n.modified, body, bodyHtml: n.bodyHtml, bodyMarkdown, checklist: n.checklist ?? null };
   }
 
   private async handle(req: Request): Promise<Response> {
