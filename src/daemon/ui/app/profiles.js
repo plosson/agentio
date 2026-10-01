@@ -90,6 +90,7 @@ VIEWS.add = () => {
       <div class="row"><span class="muted grow">Then come back and press Refresh.</span><button class="btn" data-action="refresh">Refresh</button></div></div>` : ''}`;
 };
 
+ACTIONS['test-all'] = () => testProfiles(allRefs());
 ACTIONS['pick-service'] = (el) => { state.ui.addService = el.dataset.service; render(); };
 ACTIONS.refresh = async () => { if (await loadAll()) { render(); toast('Refreshed'); } };
 ACTIONS['test-one'] = (el) => testProfiles([el.dataset.ref]);

@@ -179,7 +179,7 @@ function setTabs(route) {
 function render() {
   if (!state.loaded) return;
   const route = currentRoute();
-  const view = VIEWS[route.view] || VIEWS.overview;
+  const view = VIEWS[route.view] || VIEWS.profiles;
   setTabs(route);
   $('bar').hidden = false;
   $('tabbar').hidden = route.view === 'authorize';
@@ -188,12 +188,34 @@ function render() {
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
-  main.innerHTML = view(route).__html;
+  main.innerHTML = (route.view === 'authorize' ? '' : signInBanner().__html) + view(route).__html;
   const again = focused && $(focused);
   if (!again) return;
   again.focus();
   if (caret && typeof again.setSelectionRange === 'function') again.setSelectionRange(caret[0], caret[1]);
 }
+
+// ---------- Waiting sign-ins ----------
+
+/**
+ * A machine waiting for approval is the one thing that cannot wait, so it shows
+ * on every page (not on the approval page itself). Oldest first, as the daemon lists them.
+ */
+function signInBanner() {
+  const now = Date.now();
+  return html`${state.pending.map((req) => html`<div class="box hl row mb-12"><span class="grow"><b>${req.name} wants access</b> · code ${req.userCode} · asked ${relativeTime(req.createdAt, now)}</span>
+    <button class="btn" data-action="deny-sign-in" data-code="${req.userCode}">Deny</button>
+    <a class="btn pri" href="${routeHash({ view: 'authorize', code: req.userCode })}">Review</a></div>`)}`;
+}
+
+ACTIONS['deny-sign-in'] = async (el) => {
+  const res = await api(`/ui/api/authorize/${encodeURIComponent(el.dataset.code)}`, { method: 'POST', body: JSON.stringify({ approve: false }) });
+  if (res.lost) return;
+  if (res.ok || res.status === 404) toast(res.ok ? 'Denied. The terminal is told no.' : 'That request had already ended.');
+  else toast(res.error, 'error');
+  await loadPending();
+  render();
+};
 
 // ---------- Filtering profiles (Profiles, Who can use what) ----------
 

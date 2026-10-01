@@ -48,14 +48,14 @@ window.addEventListener('hashchange', () => {
   clearToasts();
   render();
   main.focus();
-  // The overview never tests profiles itself, but a sign-in started elsewhere
-  // while the owner was on another tab should still show up without a reload.
-  if (currentRoute().view === 'overview') loadPending().then(render);
+  // Tests stay on demand, but a sign-in started elsewhere should show up
+  // in the banner without a reload: refresh the waiting list on every move.
+  if (state.loaded) loadPending().then(render);
 });
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.loaded) return;
-  if (currentRoute().view === 'overview') loadPending().then(render);
+  loadPending().then(render);
 });
 
 (async () => {

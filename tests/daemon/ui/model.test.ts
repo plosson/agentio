@@ -15,7 +15,6 @@ import {
   loginCommand,
   machineCanUse,
   machinesUsing,
-  needsYou,
   parseRoute,
   plural,
   presetInput,
@@ -34,7 +33,6 @@ import {
   timeLeft,
   toggleScope,
   type Key,
-  type PendingSignIn,
   type ProfileRow,
   type TestResult,
 } from '../../../src/daemon/ui/model';
@@ -70,18 +68,20 @@ describe('escaping', () => {
 
 describe('routes', () => {
   test('known tabs and the default', () => {
-    for (const view of ['overview', 'machines', 'profiles', 'access', 'settings', 'add'] as const) {
+    for (const view of ['machines', 'profiles', 'access', 'settings', 'add'] as const) {
       expect(parseRoute(`#${view}`)).toEqual({ view });
     }
-    expect(parseRoute('')).toEqual({ view: 'overview' });
-    expect(parseRoute('#')).toEqual({ view: 'overview' });
-    expect(parseRoute('#nonsense')).toEqual({ view: 'overview' });
-    expect(parseRoute('#machines=1')).toEqual({ view: 'overview' });
+    // Profiles is the home page; old #overview bookmarks land there too.
+    expect(parseRoute('#overview')).toEqual({ view: 'profiles' });
+    expect(parseRoute('')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#nonsense')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#machines=1')).toEqual({ view: 'profiles' });
   });
 
   test('the approval link the CLI prints keeps working', () => {
     expect(parseRoute('#authorize=KQ7M-2XWD')).toEqual({ view: 'authorize', code: 'KQ7M-2XWD' });
-    expect(parseRoute('#authorize=')).toEqual({ view: 'overview' });
+    expect(parseRoute('#authorize=')).toEqual({ view: 'profiles' });
   });
 
   test('ids and refs survive a round trip, whatever they contain', () => {
@@ -95,12 +95,12 @@ describe('routes', () => {
   });
 
   test('a profile route needs service/name', () => {
-    expect(parseRoute('#profile=gmail')).toEqual({ view: 'overview' });
-    expect(parseRoute('#profile=/work')).toEqual({ view: 'overview' });
+    expect(parseRoute('#profile=gmail')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#profile=/work')).toEqual({ view: 'profiles' });
   });
 
-  test('a mangled percent-encoding falls back to the overview instead of throwing', () => {
-    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'overview' });
+  test('a mangled percent-encoding falls back to Profiles instead of throwing', () => {
+    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'profiles' });
   });
 
   test('tabOf highlights the parent tab', () => {
@@ -301,29 +301,7 @@ describe('statuses', () => {
   });
 });
 
-describe('what needs the owner', () => {
-  const pending = (name: string, minutesAgo: number): PendingSignIn => ({
-    userCode: `CODE-${name}`, name,
-    createdAt: new Date(NOW - minutesAgo * MIN).toISOString(),
-    expiresAt: new Date(NOW + (10 - minutesAgo) * MIN).toISOString(),
-  });
-
-  test('sign-ins first, oldest first, then profiles that are not working, with their users', () => {
-    const rows = [row('gmail', 'work'), row('jira', 'hex-rays'), row('whatsapp', 'work', { status: 'invalid', error: 'session closed' })];
-    const results = new Map<string, TestResult>([
-      ['gmail/work', { status: 'invalid', detail: 'invalid_grant', at: NOW }],
-      ['jira/hex-rays', { status: 'ok', detail: '', at: NOW }],
-    ]);
-    const keys = [key('macbook'), key('ci', { allowedProfiles: ['jira/hex-rays'] })];
-    const items = needsYou([pending('new', 1), pending('old', 5)], rows, results, keys);
-    expect(items.map((i) => (i.kind === 'sign-in' ? i.request.name : `${refOf(i.row)}:${i.usedBy}`)))
-      .toEqual(['old', 'new', 'gmail/work:1', 'whatsapp/work:1']);
-  });
-
-  test('untested profiles never count as needing the owner (tests are on demand)', () => {
-    expect(needsYou([], [row('gmail', 'work'), row('slack', 'team', { status: 'no-creds' })], new Map(), [])).toEqual([]);
-  });
-
+describe('hub summary', () => {
   test('hub summary', () => {
     const rows = [row('gmail', 'work'), row('gmail', 'perso'), row('jira', 'hex-rays')];
     const results = new Map<string, TestResult>([

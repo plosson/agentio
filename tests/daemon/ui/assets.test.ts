@@ -31,8 +31,8 @@ describe('the assembled admin page', () => {
   });
 
   test('the model and every screen are in the script', () => {
-    for (const name of ['function escapeHtml', 'function parseRoute', 'function needsYou', 'function toggleScope']) expect(script).toContain(name);
-    for (const view of ['overview', 'machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize']) {
+    for (const name of ['function escapeHtml', 'function parseRoute', 'function toggleScope']) expect(script).toContain(name);
+    for (const view of ['machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize']) {
       expect(script).toMatch(new RegExp(`VIEWS\\.${view} = `));
     }
   });
@@ -74,6 +74,13 @@ describe('the assembled admin page', () => {
     expect(script).toContain("ACTIONS['toggle-cell']");
     expect(script).toContain('toggleScope(');
     expect(script).toContain('accessCell(');
+  });
+
+  test('no Overview: waiting sign-ins show as a banner on every page instead', () => {
+    expect(script).not.toMatch(/VIEWS\.overview = /);
+    expect(INDEX_HTML).not.toContain('data-tab="overview"');
+    expect(script).toContain('function signInBanner(');
+    expect(script).toContain("ACTIONS['deny-sign-in']");
   });
 
   test('profiles and access share a filter that types without losing the caret', () => {

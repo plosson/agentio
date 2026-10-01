@@ -1,5 +1,5 @@
 // Sign-in approval: is this you, what can it use, connected. Reached from the link
-// `agentio login` prints, or from Review on the Overview.
+// `agentio login` prints, or from Review on the waiting sign-in banner.
 
 const ENDED = 'This sign-in request has ended or was already answered. Run agentio login again on the machine.';
 
@@ -28,8 +28,8 @@ VIEWS.authorize = (route) => {
   const steps = (n) => html`<span class="steps">${n} / 3</span>`;
 
   if (auth.step === 'loading') return html`<div class="narrow"><h1>Sign-in request</h1><p class="muted">Loading…</p></div>`;
-  if (auth.step === 'error') return html`<div class="narrow"><h1>Sign-in request</h1><div class="box alert">${auth.error}</div><p class="mt-12"><a class="btn" href="#overview">Back to the overview</a></p></div>`;
-  if (auth.step === 'denied') return html`<div class="narrow"><h1>Denied</h1><p>The terminal is told no. Nothing was created.</p><a class="btn" href="#overview">Back to the overview</a></div>`;
+  if (auth.step === 'error') return html`<div class="narrow"><h1>Sign-in request</h1><div class="box alert">${auth.error}</div><p class="mt-12"><a class="btn" href="#profiles">Back to profiles</a></p></div>`;
+  if (auth.step === 'denied') return html`<div class="narrow"><h1>Denied</h1><p>The terminal is told no. Nothing was created.</p><a class="btn" href="#profiles">Back to profiles</a></div>`;
 
   const req = auth.request;
   if (auth.step === 1) {

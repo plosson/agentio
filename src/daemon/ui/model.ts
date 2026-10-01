@@ -45,31 +45,31 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
 
 // ---------- Routes ----------
 
-export type TabView = 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | 'add';
+export type TabView = 'machines' | 'profiles' | 'access' | 'settings' | 'add';
 export type Route =
   | { view: TabView }
   | { view: 'machine'; id: string }
   | { view: 'profile'; ref: string }
   | { view: 'authorize'; code: string };
 
-const TAB_VIEWS: readonly string[] = ['overview', 'machines', 'profiles', 'access', 'settings', 'add'];
+const TAB_VIEWS: readonly string[] = ['machines', 'profiles', 'access', 'settings', 'add'];
 
-/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else is the overview. */
+/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else, old `#overview` links included, is Profiles. */
 export function parseRoute(hash: string): Route {
   let text = hash.startsWith('#') ? hash.slice(1) : hash;
   try {
     text = decodeURIComponent(text);
   } catch {
-    return { view: 'overview' };
+    return { view: 'profiles' };
   }
   const eq = text.indexOf('=');
-  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'overview' };
+  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'profiles' };
   const name = text.slice(0, eq);
   const value = text.slice(eq + 1);
   if (name === 'machine' && value) return { view: 'machine', id: value };
   if (name === 'profile' && /^[^/]+\/.+$/.test(value)) return { view: 'profile', ref: value };
   if (name === 'authorize' && value) return { view: 'authorize', code: value };
-  return { view: 'overview' };
+  return { view: 'profiles' };
 }
 
 export function routeHash(route: Route): string {
@@ -86,7 +86,7 @@ export function routeHash(route: Route): string {
 }
 
 /** The navigation tab to highlight; the sign-in page has none. */
-export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | null {
+export function tabOf(route: Route): 'machines' | 'profiles' | 'access' | 'settings' | null {
   switch (route.view) {
     case 'machine':
       return 'machines';
@@ -356,24 +356,7 @@ export function matchesFilter(row: ProfileRow, query: string, displayName: (serv
   return words.every((word) => haystack.includes(word));
 }
 
-// ---------- What needs the owner ----------
-
-export type NeedItem =
-  | { kind: 'sign-in'; request: PendingSignIn }
-  | { kind: 'profile'; row: ProfileRow; detail: string; at?: number; usedBy: number };
-
-/** Sign-ins waiting, oldest first, then profiles known not to work. Nothing is tested here. */
-export function needsYou(pending: PendingSignIn[], rows: ProfileRow[], results: ReadonlyMap<string, TestResult>, keys: Key[]): NeedItem[] {
-  const signIns: NeedItem[] = [...pending]
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-    .map((request) => ({ kind: 'sign-in', request }));
-  const broken: NeedItem[] = rows
-    .map((row) => ({ row, s: effectiveStatus(row, results) }))
-    .filter(({ s }) => s.status === 'invalid')
-    .sort((a, b) => refOf(a.row).localeCompare(refOf(b.row)))
-    .map(({ row, s }) => ({ kind: 'profile', row, detail: s.detail, at: s.at, usedBy: keys.filter((k) => scopeIncludes(k, refOf(row))).length }));
-  return [...signIns, ...broken];
-}
+// ---------- Summary ----------
 
 export interface HubSummary {
   profiles: number;
