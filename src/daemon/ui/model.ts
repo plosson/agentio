@@ -159,3 +159,130 @@ export function addCommand(service: string): string {
 export function loginCommand(origin: string): string {
   return `agentio login ${shellQuote(origin)}`;
 }
+
+// ---------- Data the page receives ----------
+
+export type Status = 'ok' | 'invalid' | 'no-creds' | 'skipped' | 'testing';
+
+/** One profile, flattened from `GET /ui/api/status?test=false`. */
+export interface ProfileRow {
+  service: string;
+  profile: string;
+  readOnly: boolean;
+  status: Status;
+  info?: string;
+  error?: string;
+}
+
+/** A key as `GET /ui/api/keys` returns it: one machine. */
+export interface Key {
+  id: string;
+  name: string;
+  hint?: string;
+  allowedProfiles: '*' | string[];
+  readOnly: boolean;
+  canManageProfiles: boolean;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+/** The body the key and approval routes accept. */
+export interface KeyInput {
+  name: string;
+  allowedProfiles: '*' | string[];
+  readOnly: boolean;
+  canManageProfiles: boolean;
+}
+
+// ---------- Who can use what ----------
+
+export const SILENT_DAYS = 30;
+
+export const refOf = (p: { service: string; profile: string }): string => `${p.service}/${p.profile}`;
+
+export function scopeIncludes(key: Pick<Key, 'allowedProfiles'>, ref: string): boolean {
+  return key.allowedProfiles === '*' || key.allowedProfiles.includes(ref);
+}
+
+/** A machine writes only when neither it nor the profile is read-only. */
+export function canWrite(key: Pick<Key, 'readOnly'>, profile: Pick<ProfileRow, 'readOnly'>): boolean {
+  return !key.readOnly && !profile.readOnly;
+}
+
+export type Cell = 'W' | 'R' | '·';
+
+export function accessCell(key: Key, profile: ProfileRow): Cell {
+  if (!scopeIncludes(key, refOf(profile))) return '·';
+  return canWrite(key, profile) ? 'W' : 'R';
+}
+
+/**
+ * The key's profile list with `ref` added or removed. `*` becomes the list of
+ * all existing profiles; references to deleted profiles are dropped, because
+ * the daemon rejects them, and so is an empty list.
+ */
+export function toggleScope(key: Pick<Key, 'allowedProfiles'>, ref: string, allRefs: string[]): { allowedProfiles: string[] } | { error: string } {
+  const current = (key.allowedProfiles === '*' ? allRefs : key.allowedProfiles).filter((r) => allRefs.includes(r));
+  const next = current.includes(ref) ? current.filter((r) => r !== ref) : [...current, ref];
+  const unique = [...new Set(next)].sort();
+  if (unique.length === 0) return { error: 'A machine needs at least one profile. To cut it off, revoke it from its page.' };
+  return { allowedProfiles: unique };
+}
+
+export function machinesUsing(keys: Key[], profile: ProfileRow): Array<{ key: Key; canWrite: boolean }> {
+  return keys
+    .filter((k) => scopeIncludes(k, refOf(profile)))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((k) => ({ key: k, canWrite: canWrite(k, profile) }));
+}
+
+/** The existing profiles a machine could read: after a revoke, the ones to reauthorise. */
+export function reachableRefs(key: Pick<Key, 'allowedProfiles'>, allRefs: string[]): string[] {
+  const refs = key.allowedProfiles === '*' ? allRefs : key.allowedProfiles.filter((r) => allRefs.includes(r));
+  return [...refs].sort();
+}
+
+const lastActivity = (key: Key): number => Date.parse(key.lastUsedAt ?? key.createdAt);
+
+export function isSilent(key: Key, now: number): boolean {
+  const t = lastActivity(key);
+  return !Number.isNaN(t) && now - t > SILENT_DAYS * DAY_MS;
+}
+
+export function seenToday(key: Key, now: number): boolean {
+  if (!key.lastUsedAt) return false;
+  const t = Date.parse(key.lastUsedAt);
+  return !Number.isNaN(t) && now - t < DAY_MS;
+}
+
+export function machineCanUse(key: Key, allRefs: string[]): string {
+  if (key.allowedProfiles === '*') return `all ${plural(allRefs.length, 'profile')}`;
+  const refs = reachableRefs(key, allRefs);
+  if (refs.length === 0) return 'no profiles';
+  if (refs.length === 1) return refs[0].replace('/', ' / ');
+  return plural(refs.length, 'profile');
+}
+
+// ---------- Access presets (sign-in step 2, connect a machine) ----------
+
+export type Preset =
+  | { kind: 'read-all' }
+  | { kind: 'same-as'; key: Key }
+  | { kind: 'choose'; refs: string[]; readOnly: boolean };
+
+export function presetInput(preset: Preset, name: string): KeyInput {
+  switch (preset.kind) {
+    case 'read-all':
+      return { name, allowedProfiles: '*', readOnly: true, canManageProfiles: false };
+    case 'same-as':
+      return {
+        name,
+        allowedProfiles: preset.key.allowedProfiles === '*' ? '*' : [...preset.key.allowedProfiles],
+        readOnly: preset.key.readOnly,
+        canManageProfiles: preset.key.canManageProfiles,
+      };
+    case 'choose':
+      if (preset.refs.length === 0) throw new Error('Choose at least one profile');
+      return { name, allowedProfiles: [...new Set(preset.refs)].sort(), readOnly: preset.readOnly, canManageProfiles: false };
+  }
+}

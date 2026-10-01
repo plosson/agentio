@@ -1,20 +1,33 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  accessCell,
   addCommand,
+  canWrite,
   clockTime,
   escapeHtml,
   html,
+  isSilent,
   loginCommand,
+  machineCanUse,
+  machinesUsing,
   parseRoute,
   plural,
+  presetInput,
   raw,
+  reachableRefs,
   reauthCommand,
+  refOf,
   relativeTime,
   routeHash,
+  scopeIncludes,
+  seenToday,
   shellQuote,
   shortDate,
   tabOf,
   timeLeft,
+  toggleScope,
+  type Key,
+  type ProfileRow,
 } from '../../../src/daemon/ui/model';
 
 const NOW = new Date(2026, 9, 1, 14, 5, 0).getTime(); // Oct 1 2026, 14:05 local time
@@ -143,5 +156,98 @@ describe('commands', () => {
     expect(plural(0, 'profile')).toBe('0 profiles');
     expect(plural(1, 'profile')).toBe('1 profile');
     expect(plural(11, 'machine')).toBe('11 machines');
+  });
+});
+
+const row = (service: string, profile: string, extra: Partial<ProfileRow> = {}): ProfileRow =>
+  ({ service, profile, readOnly: false, status: 'skipped', ...extra });
+const key = (name: string, extra: Partial<Key> = {}): Key =>
+  ({ id: `id-${name}`, name, allowedProfiles: '*', readOnly: false, canManageProfiles: false, createdAt: new Date(NOW - 10 * DAY).toISOString(), ...extra });
+
+const ALL = ['gmail/perso', 'gmail/work', 'jira/hex-rays'];
+
+describe('who can use what', () => {
+  test('a cell is W only when neither the machine nor the profile is read-only', () => {
+    const p = row('gmail', 'work');
+    expect(accessCell(key('mac'), p)).toBe('W');
+    expect(accessCell(key('mac', { readOnly: true }), p)).toBe('R');
+    expect(accessCell(key('mac'), row('gmail', 'work', { readOnly: true }))).toBe('R');
+    expect(accessCell(key('ci', { allowedProfiles: ['jira/hex-rays'] }), p)).toBe('·');
+    expect(canWrite({ readOnly: false }, { readOnly: false })).toBe(true);
+  });
+
+  test('refs are service/name, and * includes everything', () => {
+    expect(refOf({ service: 'gmail', profile: 'my work' })).toBe('gmail/my work');
+    expect(scopeIncludes({ allowedProfiles: '*' }, 'anything/x')).toBe(true);
+    expect(scopeIncludes({ allowedProfiles: ['gmail/work'] }, 'gmail/perso')).toBe(false);
+  });
+
+  test('toggleScope adds and removes, sorted, without duplicates', () => {
+    expect(toggleScope({ allowedProfiles: ['jira/hex-rays'] }, 'gmail/work', ALL)).toEqual({ allowedProfiles: ['gmail/work', 'jira/hex-rays'] });
+    expect(toggleScope({ allowedProfiles: ['gmail/work', 'jira/hex-rays'] }, 'gmail/work', ALL)).toEqual({ allowedProfiles: ['jira/hex-rays'] });
+  });
+
+  test('a machine on every profile loses one: the explicit list of all the others', () => {
+    expect(toggleScope({ allowedProfiles: '*' }, 'gmail/work', ALL)).toEqual({ allowedProfiles: ['gmail/perso', 'jira/hex-rays'] });
+  });
+
+  test('references to deleted profiles are dropped, since the daemon rejects them', () => {
+    expect(toggleScope({ allowedProfiles: ['gone/old', 'gmail/work'] }, 'jira/hex-rays', ALL)).toEqual({ allowedProfiles: ['gmail/work', 'jira/hex-rays'] });
+  });
+
+  test('removing the last profile is refused: revoke the machine instead', () => {
+    const result = toggleScope({ allowedProfiles: ['gmail/work'] }, 'gmail/work', ALL);
+    expect(result).toEqual({ error: 'A machine needs at least one profile. To cut it off, revoke it from its page.' });
+    const stale = toggleScope({ allowedProfiles: ['gone/old', 'gmail/work'] }, 'gmail/work', ALL);
+    expect('error' in stale).toBe(true);
+  });
+
+  test('machinesUsing lists who can reach a profile and whether they can write, by name', () => {
+    const keys = [key('old-vps', { readOnly: true }), key('ci', { allowedProfiles: ['jira/hex-rays'] }), key('macbook')];
+    expect(machinesUsing(keys, row('gmail', 'work')).map((m) => [m.key.name, m.canWrite])).toEqual([['macbook', true], ['old-vps', false]]);
+    expect(machinesUsing([], row('gmail', 'work'))).toEqual([]);
+  });
+
+  test('reachableRefs is what a revoked machine could read', () => {
+    expect(reachableRefs({ allowedProfiles: '*' }, ALL)).toEqual(ALL);
+    expect(reachableRefs({ allowedProfiles: ['jira/hex-rays', 'gone/old'] }, ALL)).toEqual(['jira/hex-rays']);
+  });
+
+  test('machineCanUse wording', () => {
+    expect(machineCanUse(key('a'), ALL)).toBe('all 3 profiles');
+    expect(machineCanUse(key('a'), ['gmail/work'])).toBe('all 1 profile');
+    expect(machineCanUse(key('a', { allowedProfiles: ['jira/hex-rays'] }), ALL)).toBe('jira / hex-rays');
+    expect(machineCanUse(key('a', { allowedProfiles: ['gmail/work', 'jira/hex-rays'] }), ALL)).toBe('2 profiles');
+    expect(machineCanUse(key('a', { allowedProfiles: ['gone/old'] }), ALL)).toBe('no profiles');
+  });
+
+  test('silent after 30 days without use; never used counts from creation', () => {
+    expect(isSilent(key('a', { lastUsedAt: new Date(NOW - 31 * DAY).toISOString() }), NOW)).toBe(true);
+    expect(isSilent(key('a', { lastUsedAt: new Date(NOW - 29 * DAY).toISOString() }), NOW)).toBe(false);
+    expect(isSilent(key('a', { createdAt: new Date(NOW - 40 * DAY).toISOString() }), NOW)).toBe(true);
+    expect(isSilent(key('a', { createdAt: new Date(NOW - 2 * DAY).toISOString() }), NOW)).toBe(false);
+    expect(isSilent(key('a', { createdAt: 'garbage' }), NOW)).toBe(false);
+    expect(seenToday(key('a', { lastUsedAt: new Date(NOW - 3_600_000).toISOString() }), NOW)).toBe(true);
+    expect(seenToday(key('a'), NOW)).toBe(false);
+  });
+});
+
+describe('access presets', () => {
+  test('read everything is the read-only default', () => {
+    expect(presetInput({ kind: 'read-all' }, 'build-box')).toEqual({ name: 'build-box', allowedProfiles: '*', readOnly: true, canManageProfiles: false });
+  });
+
+  test('same as copies the other machine, without sharing its array', () => {
+    const other = key('macbook', { allowedProfiles: ['gmail/work'], canManageProfiles: true });
+    const input = presetInput({ kind: 'same-as', key: other }, 'build-box');
+    expect(input).toEqual({ name: 'build-box', allowedProfiles: ['gmail/work'], readOnly: false, canManageProfiles: true });
+    (input.allowedProfiles as string[]).push('x/y');
+    expect(other.allowedProfiles).toEqual(['gmail/work']);
+  });
+
+  test('choose needs at least one profile and never grants profile management', () => {
+    expect(presetInput({ kind: 'choose', refs: ['jira/hex-rays', 'gmail/work', 'gmail/work'], readOnly: true }, 'ci'))
+      .toEqual({ name: 'ci', allowedProfiles: ['gmail/work', 'jira/hex-rays'], readOnly: true, canManageProfiles: false });
+    expect(() => presetInput({ kind: 'choose', refs: [], readOnly: true }, 'ci')).toThrow('Choose at least one profile');
   });
 });
