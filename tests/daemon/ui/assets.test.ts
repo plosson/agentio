@@ -63,4 +63,10 @@ describe('the assembled admin page', () => {
     expect(script).toContain('loginCommand(');
     expect(script).toContain('reachableRefs(');
   });
+
+  test('sign-in: three steps, read-only by default, and an ended request is explained', () => {
+    for (const name of ["ACTIONS['auth-yes']", "ACTIONS['auth-deny']", "SUBMITS['auth-approve']"]) expect(script).toContain(name);
+    expect(script).toContain('This sign-in request has ended or was already answered. Run agentio login again on the machine.');
+    expect(script).toMatch(/name="\$\{prefix\}-preset" value="read-all" checked/);
+  });
 });
