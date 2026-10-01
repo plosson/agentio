@@ -202,6 +202,11 @@ describe('who can use what', () => {
     expect('error' in stale).toBe(true);
   });
 
+  test('toggling a ref that is not in allRefs never returns it', () => {
+    expect(toggleScope({ allowedProfiles: ['gmail/work'] }, 'gone/old', ALL)).toEqual({ allowedProfiles: ['gmail/work'] });
+    expect(toggleScope({ allowedProfiles: ['gone/old'] }, 'gone/new', ALL)).toEqual({ error: 'A machine needs at least one profile. To cut it off, revoke it from its page.' });
+  });
+
   test('machinesUsing lists who can reach a profile and whether they can write, by name', () => {
     const keys = [key('old-vps', { readOnly: true }), key('ci', { allowedProfiles: ['jira/hex-rays'] }), key('macbook')];
     expect(machinesUsing(keys, row('gmail', 'work')).map((m) => [m.key.name, m.canWrite])).toEqual([['macbook', true], ['old-vps', false]]);

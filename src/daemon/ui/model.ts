@@ -224,7 +224,7 @@ export function accessCell(key: Key, profile: ProfileRow): Cell {
 export function toggleScope(key: Pick<Key, 'allowedProfiles'>, ref: string, allRefs: string[]): { allowedProfiles: string[] } | { error: string } {
   const current = (key.allowedProfiles === '*' ? allRefs : key.allowedProfiles).filter((r) => allRefs.includes(r));
   const next = current.includes(ref) ? current.filter((r) => r !== ref) : [...current, ref];
-  const unique = [...new Set(next)].sort();
+  const unique = [...new Set(next)].filter((r) => allRefs.includes(r)).sort();
   if (unique.length === 0) return { error: 'A machine needs at least one profile. To cut it off, revoke it from its page.' };
   return { allowedProfiles: unique };
 }
