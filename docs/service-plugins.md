@@ -58,6 +58,7 @@ src/plugins/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
 ├── kite/             # device sign-in, owned by the service folder
+├── todo/             # device sign-in against plosson/todo, mirror of kite
 ├── revolut/
 ├── spotify/
 ├── sql/

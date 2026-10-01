@@ -179,6 +179,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
 | **Discourse** | API Key | `list`, `get`, `categories` |
 | **Kite** | Browser sign-in | `publish`, `get`, `list`, `delete`, `share show/add/remove/public/private/expiry`, `comments list/add/reply/resolve/reopen` |
+| **Todo** | Browser device sign-in | `add`, `list`, `get`, `check`, `uncheck`, `rm`, `tag list` |
 | **Falco** | Password + 2FA | `peppol list`, `peppol get`, `peppol sync`, `peppol mark-paid`, `invoices sync` |
 | **RSS** | None | `articles`, `get`, `info` |
 
