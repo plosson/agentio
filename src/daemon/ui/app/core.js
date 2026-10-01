@@ -22,6 +22,8 @@ const ACTIONS = {};
 const CHANGES = {};
 /** data-submit -> handler(form, event), for forms. */
 const SUBMITS = {};
+/** data-input -> handler(input, event), for text typed into a field. */
+const INPUTS = {};
 
 const displayName = (service) => PLUGIN_METADATA[service]?.displayName || ICONS[service]?.[0] || service;
 const isSession = (service) => Boolean(PLUGIN_METADATA[service]?.session);
@@ -182,10 +184,37 @@ function render() {
   $('bar').hidden = false;
   $('tabbar').hidden = route.view === 'authorize';
   $('hub-host').textContent = location.host;
-  const focused = document.activeElement && document.activeElement.id;
+  // Redrawing replaces every element: put focus, and the caret of a text field, back where they were.
+  const active = document.activeElement;
+  const focused = active && active.id;
+  const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   main.innerHTML = view(route).__html;
-  if (focused && $(focused)) $(focused).focus();
+  const again = focused && $(focused);
+  if (!again) return;
+  again.focus();
+  if (caret && typeof again.setSelectionRange === 'function') again.setSelectionRange(caret[0], caret[1]);
 }
+
+// ---------- Filtering profiles (Profiles, Who can use what) ----------
+
+/** The rows that match the filter box; the filter is kept across screens for the session. */
+const filteredRows = (rows) => rows.filter((r) => matchesFilter(r, state.ui.filter || '', displayName));
+
+/** The filter box, and how many of the profiles it shows when it hides some. */
+function filterBox(shown, total) {
+  const query = state.ui.filter || '';
+  return html`<div class="row mt-12">
+    <input type="search" id="profile-filter" class="filter grow" data-input="filter" value="${query}"
+      placeholder="Filter profiles (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
+    ${query.trim() ? html`<span class="muted">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
+  </div>`;
+}
+
+/** What a filtered screen shows when nothing matches. */
+const noMatch = () => html`<div class="box empty mt-12"><p>No profile matches “${state.ui.filter}”.</p><button class="btn" data-action="clear-filter">Clear filter</button></div>`;
+
+INPUTS.filter = (input) => { state.ui.filter = input.value; render(); };
+ACTIONS['clear-filter'] = () => { state.ui.filter = ''; render(); };
 
 // ---------- Feedback ----------
 

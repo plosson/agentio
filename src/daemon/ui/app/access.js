@@ -2,14 +2,15 @@
 
 VIEWS.access = () => {
   const keys = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
-  const rows = groupProfiles(state.rows, displayName).flatMap((g) => g.rows);
+  const rows = groupProfiles(filteredRows(state.rows), displayName).flatMap((g) => g.rows);
   if (keys.length === 0) return html`<h1>Who can use what</h1><div class="box empty mt-12"><h2>No machines yet.</h2><p class="muted">Connect one from Machines.</p><a class="btn pri" href="#machines">Machines</a></div>`;
-  if (rows.length === 0) return html`<h1>Who can use what</h1><div class="box empty mt-12"><h2>No profiles yet.</h2><a class="btn pri" href="#add">Add a profile</a></div>`;
+  if (state.rows.length === 0) return html`<h1>Who can use what</h1><div class="box empty mt-12"><h2>No profiles yet.</h2><a class="btn pri" href="#add">Add a profile</a></div>`;
 
   return html`
     <h1>Who can use what</h1>
     <span class="muted">Click a cell to give or remove access. W = can write, R = read-only, · = no access. A machine writes only if neither it nor the profile is read-only.</span>
-    <div class="box mt-12 scroll-x"><table>
+    ${filterBox(rows.length, state.rows.length)}
+    ${rows.length === 0 ? noMatch() : html`<div class="box mt-12 scroll-x"><table>
       <tr><th></th>${keys.map((k) => html`<th class="cell"><a href="${routeHash({ view: 'machine', id: k.id })}">${k.name}</a>${k.readOnly ? html`<br><span class="pill ro">read-only</span>` : ''}</th>`)}</tr>
       ${rows.map((r) => {
         const st = effectiveStatus(r, state.results).status;
@@ -24,7 +25,7 @@ VIEWS.access = () => {
           })}
         </tr>`;
       })}
-    </table></div>`;
+    </table></div>`}`;
 };
 
 ACTIONS['toggle-cell'] = async (el) => {

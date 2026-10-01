@@ -75,4 +75,11 @@ describe('the assembled admin page', () => {
     expect(script).toContain('toggleScope(');
     expect(script).toContain('accessCell(');
   });
+
+  test('profiles and access share a filter that types without losing the caret', () => {
+    expect(script).toContain("INPUTS.filter");
+    expect(script).toContain("ACTIONS['clear-filter']");
+    expect(script).toContain('matchesFilter(');
+    expect(script).toContain('setSelectionRange(');
+  });
 });

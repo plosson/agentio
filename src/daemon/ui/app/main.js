@@ -20,6 +20,23 @@ document.addEventListener('change', (ev) => {
   if (el && CHANGES[el.dataset.change]) CHANGES[el.dataset.change](el, ev);
 });
 
+document.addEventListener('input', (ev) => {
+  const el = ev.target.closest('[data-input]');
+  if (el && INPUTS[el.dataset.input]) INPUTS[el.dataset.input](el, ev);
+});
+
+// "/" jumps to the filter box, unless the owner is already typing somewhere.
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== '/' || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const target = ev.target;
+  if (target.closest('input, textarea, select, [contenteditable]')) return;
+  const box = $('profile-filter');
+  if (!box) return;
+  ev.preventDefault();
+  box.focus();
+  box.select();
+});
+
 document.addEventListener('submit', (ev) => {
   const form = ev.target.closest('form[data-submit]');
   if (!form || !SUBMITS[form.dataset.submit]) return;

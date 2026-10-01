@@ -344,6 +344,18 @@ export function groupProfiles(rows: ProfileRow[], displayName: (service: string)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Whether a profile matches what the owner typed in the filter box: every
+ * word, ignoring case, somewhere in its service id, the service's display
+ * name, its name or its account. Words are plain text, never patterns.
+ */
+export function matchesFilter(row: ProfileRow, query: string, displayName: (service: string) => string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = `${row.service} ${displayName(row.service)} ${row.profile} ${row.info ?? ''}`.toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
 // ---------- What needs the owner ----------
 
 export type NeedItem =

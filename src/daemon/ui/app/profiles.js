@@ -4,7 +4,8 @@ VIEWS.profiles = () => {
   const now = Date.now();
   const s = hubSummary(state.rows, state.keys, state.results, now);
   const broken = state.rows.filter((r) => effectiveStatus(r, state.results).status === 'invalid');
-  const groups = groupProfiles(state.rows, displayName);
+  const visible = filteredRows(state.rows);
+  const groups = groupProfiles(visible, displayName);
   const subtitle = [plural(s.profiles, 'profile'), s.testedAt ? `tested at ${clockTime(s.testedAt)}` : 'not tested in this session', s.failing ? `${s.failing} not working` : ''].filter(Boolean).join(' · ');
 
   return html`
@@ -13,8 +14,10 @@ VIEWS.profiles = () => {
       <a class="btn pri" href="#add">Add a profile</a></div>
     ${broken.map((r) => html`<div class="box alert row mt-12"><span class="grow">${profileLabel(r)} · ${effectiveStatus(r, state.results).detail || 'not working'}</span>
       <a class="btn pri" href="${routeHash({ view: 'profile', ref: refOf(r) })}">Fix</a></div>`)}
+    ${state.rows.length ? filterBox(visible.length, state.rows.length) : ''}
     ${state.rows.length === 0
       ? html`<div class="box empty mt-12"><h2>No profiles yet.</h2><p class="muted">Profiles are added from a terminal on the hub.</p><a class="btn pri" href="#add">Add a profile</a></div>`
+      : visible.length === 0 ? noMatch()
       : html`<div class="box mt-12"><table class="stack">
           <tr><th>Profile</th><th>Status</th><th>Used by</th><th>Read-only</th></tr>
           ${groups.map((g) => html`

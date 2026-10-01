@@ -10,6 +10,7 @@ import {
   groupProfiles,
   html,
   hubSummary,
+  matchesFilter,
   isSilent,
   loginCommand,
   machineCanUse,
@@ -338,5 +339,40 @@ describe('what needs the owner', () => {
       profiles: 3, working: 1, failing: 1, notTested: 1, testedAt: NOW - 2 * MIN, machines: 2, seenToday: 1, silent: 1,
     });
     expect(hubSummary([], [], new Map(), NOW)).toEqual({ profiles: 0, working: 0, failing: 0, notTested: 0, machines: 0, seenToday: 0, silent: 0 });
+  });
+});
+
+describe('filtering profiles', () => {
+  const names: Record<string, string> = { gmail: 'Gmail', gcal: 'Google Calendar', notes: 'Apple Notes' };
+  const name = (s: string) => names[s] ?? s;
+  const work = row('gmail', 'work', { info: 'palosson@hex-rays.com' });
+
+  test('an empty or blank filter keeps everything', () => {
+    expect(matchesFilter(work, '', name)).toBe(true);
+    expect(matchesFilter(work, '   ', name)).toBe(true);
+  });
+
+  test('matches the profile name, the service id, its display name or the account, ignoring case', () => {
+    expect(matchesFilter(work, 'WORK', name)).toBe(true);
+    expect(matchesFilter(work, 'gmail', name)).toBe(true);
+    expect(matchesFilter(row('gcal', 'perso'), 'google', name)).toBe(true);
+    expect(matchesFilter(work, 'hex-rays', name)).toBe(true);
+    expect(matchesFilter(work, 'perso', name)).toBe(false);
+  });
+
+  test('every word must match, in any order', () => {
+    expect(matchesFilter(work, 'work gmail', name)).toBe(true);
+    expect(matchesFilter(work, 'gmail  work ', name)).toBe(true);
+    expect(matchesFilter(work, 'gmail perso', name)).toBe(false);
+  });
+
+  test('text is matched literally, not as a pattern', () => {
+    expect(matchesFilter(row('sql', 'a.b'), 'a.b', name)).toBe(true);
+    expect(matchesFilter(row('sql', 'axb'), 'a.b', name)).toBe(false);
+    expect(matchesFilter(row('sql', 'x'), '(', name)).toBe(false);
+  });
+
+  test('a row with no account still filters by its other fields', () => {
+    expect(matchesFilter(row('notes', 'macmini'), 'apple mac', name)).toBe(true);
   });
 });
