@@ -74,7 +74,8 @@ async function api(path, options = {}) {
   if (res.status !== 204) {
     try { body = await res.json(); } catch { /* no body */ }
   }
-  const lost = res.status === 401 || res.status === 503;
+  // A 401 from the unlock attempt itself is a wrong passphrase, not a lost session: the caller shows it inline.
+  const lost = path !== '/ui/api/unlock' && (res.status === 401 || res.status === 503);
   if (lost) showUnlock();
   return { ok: res.ok, status: res.status, body, lost, error: (body && body.error) || `The hub answered ${res.status}.` };
 }
