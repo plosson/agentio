@@ -19,17 +19,16 @@ VIEWS.profiles = () => {
       ? html`<div class="box empty mt-12"><h2>No profiles yet.</h2><p class="muted">Profiles are added from a terminal on the hub.</p><a class="btn pri" href="#add">Add a profile</a></div>`
       : visible.length === 0 ? noMatch()
       : html`<div class="box mt-12"><table class="stack">
-          <tr><th>Profile</th><th>Status</th><th>Used by</th><th>Read-only</th></tr>
+          <tr><th>Profile</th><th>Status</th><th>Used by</th></tr>
           ${groups.map((g) => html`
-            <tr class="group"><td colspan="4"><span class="svc">${icon(g.service)}${g.name}</span></td></tr>
+            <tr class="group"><td colspan="3"><span class="svc">${icon(g.service)}${g.name}</span></td></tr>
             ${g.rows.map((r) => {
               const st = effectiveStatus(r, state.results);
               const users = machinesUsing(state.keys, r).length;
               return html`<tr class="indent">
-                <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a></td>
+                <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a>${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}</td>
                 <td>${pill(st.status, r.service)}</td>
-                <td>${plural(users, 'machine')}</td>
-                <td><label class="tog" title="Read-only for every machine"><input type="checkbox" data-change="profile-ro" data-ref="${refOf(r)}" ${r.readOnly ? raw('checked') : ''} aria-label="Read-only: ${refOf(r)}"><span></span></label></td>
+                <td><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
               </tr>`;
             })}`)}
         </table></div>`}`;
@@ -66,8 +65,11 @@ VIEWS.profile = (route) => {
         <div class="box"><b>Used by</b>${users.length
           ? users.map((u) => html`<div><a href="${routeHash({ view: 'machine', id: u.key.id })}">${u.key.name}</a> · ${u.canWrite ? 'can write' : 'read-only'}</div>`)
           : html`<div class="muted">No machine can use it.</div>`}</div>
-        <div class="box row"><span class="grow">Read-only for every machine</span>
-          <label class="tog"><input type="checkbox" data-change="profile-ro" data-ref="${ref}" ${r.readOnly ? raw('checked') : ''} aria-label="Read-only for every machine"><span></span></label></div>
+        ${r.readOnly
+          ? html`<div class="box"><b>Read-only</b><div class="muted">Machines can read through it but never change anything. To allow writes, run this on the hub:</div>
+              <div class="codebox"><code>${allowWritesCommand(r.service, r.profile)}</code>${copyButton(allowWritesCommand(r.service, r.profile))}</div>
+              <div class="muted">If it was signed in with read-only permissions, sign in again instead.</div></div>`
+          : html`<div class="box"><b>Can write</b><div class="muted">Machines that are not read-only can change things through it.</div></div>`}
         <div class="box row"><button class="btn" data-action="rename-profile" data-ref="${ref}">Rename</button><button class="btn red" data-action="delete-profile" data-ref="${ref}">Delete…</button></div>
       </div>
     </div>`;
@@ -94,23 +96,6 @@ ACTIONS['test-all'] = () => testProfiles(allRefs());
 ACTIONS['pick-service'] = (el) => { state.ui.addService = el.dataset.service; render(); };
 ACTIONS.refresh = async () => { if (await loadAll()) { render(); toast('Refreshed'); } };
 ACTIONS['test-one'] = (el) => testProfiles([el.dataset.ref]);
-
-CHANGES['profile-ro'] = async (input) => {
-  const ref = input.dataset.ref;
-  input.disabled = true;
-  const res = await api(`/ui/api/profiles/${refPath(ref)}`, { method: 'PATCH', body: JSON.stringify({ readOnly: input.checked }) });
-  if (res.lost) return;
-  if (res.ok) {
-    const r = rowByRef(ref);
-    if (r) r.readOnly = input.checked;
-    toast(input.checked ? `${ref} is now read-only for every machine` : `${ref} can be written again`);
-    render();
-  } else {
-    input.checked = !input.checked;
-    input.disabled = false;
-    toast(res.error, 'error');
-  }
-};
 
 ACTIONS['rename-profile'] = async (el) => {
   const ref = el.dataset.ref;

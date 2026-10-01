@@ -48,7 +48,7 @@ describe('the assembled admin page', () => {
   });
 
   test('profiles: its actions are registered and its commands come from the model', () => {
-    for (const action of ["ACTIONS['test-one']", "ACTIONS['rename-profile']", "ACTIONS['delete-profile']", "ACTIONS['pick-service']", "CHANGES['profile-ro']"]) {
+    for (const action of ["ACTIONS['test-one']", "ACTIONS['rename-profile']", "ACTIONS['delete-profile']", "ACTIONS['pick-service']"]) {
       expect(script).toContain(action);
     }
     expect(script).toContain('reauthCommand(');
@@ -81,6 +81,13 @@ describe('the assembled admin page', () => {
     expect(INDEX_HTML).not.toContain('data-tab="overview"');
     expect(script).toContain('function signInBanner(');
     expect(script).toContain("ACTIONS['deny-sign-in']");
+  });
+
+  test('read-only is shown on a profile, never switched from the page', () => {
+    expect(script).not.toContain("CHANGES['profile-ro']");
+    expect(script).not.toContain('data-change="profile-ro"');
+    expect(script).toContain('<span class="pill ro">read-only</span>');
+    expect(script).toContain('profile update --profile');
   });
 
   test('profiles and access share a filter that types without losing the caret', () => {

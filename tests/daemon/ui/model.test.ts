@@ -11,6 +11,7 @@ import {
   html,
   hubSummary,
   matchesFilter,
+  allowWritesCommand,
   isSilent,
   loginCommand,
   machineCanUse,
@@ -352,5 +353,12 @@ describe('filtering profiles', () => {
 
   test('a row with no account still filters by its other fields', () => {
     expect(matchesFilter(row('notes', 'macmini'), 'apple mac', name)).toBe(true);
+  });
+});
+
+describe('read-only', () => {
+  test('the command that lifts it names the profile, quoted when needed', () => {
+    expect(allowWritesCommand('gmail', 'work')).toBe('agentio gmail profile update --profile work --no-read-only');
+    expect(allowWritesCommand('gmail', 'my work')).toBe("agentio gmail profile update --profile 'my work' --no-read-only");
   });
 });
