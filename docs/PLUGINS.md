@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-09-30. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-01. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -18,6 +18,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | whatsapp | A linked device (QR code or 8-character code), through the unofficial Baileys library; the daemon holds the connection | **The user's own WhatsApp account**, no app | No | **Meta may ban the number.** Use a dedicated one. |
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
+| notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
 | rss | None (public feed URL) | — | No | None |
@@ -435,6 +436,33 @@ Kite is a fork of Open Artifact. The plugin talks to its REST API, never to its 
 **Remote mode:** agents with a key that covers the profile receive the whole credential, token included, as with the other static-token plugins.
 
 **What's needed:** an account on the Kite server. There is no app to create and no key to copy.
+
+---
+
+## Apple Notes
+
+**Code:** `src/plugins/notes/`
+
+agentio does not talk to Notes.app itself. It talks to [apple-notes-api](https://github.com/plosson/apple-notes-api), a REST server the user runs on the Mac that has Notes. The server drives Notes.app through AppleScript.
+
+**Sign-in:** the server's API key (`NOTES_API_KEY`), sent as `Authorization: Bearer <key>`.
+- `agentio notes profile add --url <server>` asks for the key when `--api-key` is absent, so the key can stay out of shell history.
+- Setup calls `GET /health` without the key first, to check that the URL is an apple-notes-api server on macOS. Then it calls `GET /v1/folders` with the key.
+- A refused key stops setup. If Notes.app does not answer (Automation permission not granted yet, or Notes.app busy), the key still works, so the profile is saved with a warning.
+- There is no expiry and no refresh. Changing `NOTES_API_KEY` on the Mac breaks every profile at once; run `agentio notes profile add` again.
+
+**What the vault stores:** server URL, API key.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, API key included, as with the other static-token plugins.
+
+### Set up the server (required)
+
+1. On the Mac that has Notes, clone apple-notes-api and run `./scripts/install.sh`. It writes a random key to `.env`, prints it, and starts the server at login.
+2. The first request asks macOS for permission to control Notes. Allow it in **System Settings > Privacy & Security > Automation**.
+3. The server listens on `127.0.0.1:8787`. To reach it from another machine, use Tailscale Serve or an SSH tunnel. Don't expose it to the internet.
+4. Run `agentio notes profile add --url <server URL>` and paste the key.
+
+**What's needed:** a Mac with Notes signed in, and a network path from the agent to the server.
 
 ---
 

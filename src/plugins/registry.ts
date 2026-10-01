@@ -15,6 +15,7 @@ import gscript from './google/gscript';
 import gtasks from './google/gtasks';
 import jira from './jira';
 import kite from './kite';
+import notes from './notes';
 import revolut from './revolut';
 import rss from './rss';
 import slack from './slack';
@@ -43,6 +44,7 @@ export const SERVICE_PLUGINS = [
   gtasks,
   jira,
   kite,
+  notes,
   revolut,
   rss,
   slack,
