@@ -165,6 +165,11 @@ export function fixCommand(service: string, profile: string, canReauth: boolean)
   return canReauth ? reauthCommand(service, profile) : `agentio ${shellQuote(service)} profile add --profile ${shellQuote(profile)}`;
 }
 
+/** Lifts agentio's read-only block on a profile; run on the hub. */
+export function allowWritesCommand(service: string, profile: string): string {
+  return `agentio ${shellQuote(service)} profile update --profile ${shellQuote(profile)} --no-read-only`;
+}
+
 export function loginCommand(origin: string): string {
   return `agentio login ${shellQuote(origin)}`;
 }
