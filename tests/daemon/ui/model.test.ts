@@ -4,12 +4,16 @@ import {
   addCommand,
   canWrite,
   clockTime,
+  effectiveStatus,
   escapeHtml,
+  groupProfiles,
   html,
+  hubSummary,
   isSilent,
   loginCommand,
   machineCanUse,
   machinesUsing,
+  needsYou,
   parseRoute,
   plural,
   presetInput,
@@ -23,11 +27,14 @@ import {
   seenToday,
   shellQuote,
   shortDate,
+  statusPill,
   tabOf,
   timeLeft,
   toggleScope,
   type Key,
+  type PendingSignIn,
   type ProfileRow,
+  type TestResult,
 } from '../../../src/daemon/ui/model';
 
 const NOW = new Date(2026, 9, 1, 14, 5, 0).getTime(); // Oct 1 2026, 14:05 local time
@@ -254,5 +261,75 @@ describe('access presets', () => {
     expect(presetInput({ kind: 'choose', refs: ['jira/hex-rays', 'gmail/work', 'gmail/work'], readOnly: true }, 'ci'))
       .toEqual({ name: 'ci', allowedProfiles: ['gmail/work', 'jira/hex-rays'], readOnly: true, canManageProfiles: false });
     expect(() => presetInput({ kind: 'choose', refs: [], readOnly: true }, 'ci')).toThrow('Choose at least one profile');
+  });
+});
+
+describe('statuses', () => {
+  test('a test result taken in this session wins over the page load', () => {
+    const p = row('gmail', 'work', { status: 'skipped' });
+    const results = new Map<string, TestResult>([['gmail/work', { status: 'invalid', detail: 'invalid_grant', at: NOW }]]);
+    expect(effectiveStatus(p, results)).toEqual({ status: 'invalid', detail: 'invalid_grant', at: NOW });
+    expect(effectiveStatus(p, new Map())).toEqual({ status: 'skipped', detail: '' });
+    expect(effectiveStatus(row('whatsapp', 'work', { status: 'ok', info: '+32 4…' }), new Map())).toEqual({ status: 'ok', detail: '+32 4…' });
+    expect(effectiveStatus(row('x', 'y', { status: 'invalid', error: 'boom', info: 'acct' }), new Map()).detail).toBe('boom');
+  });
+
+  test('pills', () => {
+    expect(statusPill('ok', false)).toEqual({ label: 'working', tone: 'ok' });
+    expect(statusPill('ok', true)).toEqual({ label: 'connected', tone: 'ok' });
+    expect(statusPill('invalid', false)).toEqual({ label: 'not working', tone: 'red' });
+    expect(statusPill('no-creds', false)).toEqual({ label: 'no credentials', tone: 'warn' });
+    expect(statusPill('skipped', false)).toEqual({ label: 'not tested', tone: 'neutral' });
+    expect(statusPill('testing', false)).toEqual({ label: 'testing…', tone: 'neutral' });
+  });
+
+  test('groups by display name, profiles by name', () => {
+    const names: Record<string, string> = { gmail: 'Gmail', jira: 'Jira', notes: 'Apple Notes' };
+    const groups = groupProfiles([row('jira', 'hex-rays'), row('gmail', 'work'), row('notes', 'macmini'), row('gmail', 'perso')], (s) => names[s] ?? s);
+    expect(groups.map((g) => [g.name, g.rows.map((r) => r.profile)])).toEqual([
+      ['Apple Notes', ['macmini']], ['Gmail', ['perso', 'work']], ['Jira', ['hex-rays']],
+    ]);
+    expect(groupProfiles([], (s) => s)).toEqual([]);
+  });
+});
+
+describe('what needs the owner', () => {
+  const pending = (name: string, minutesAgo: number): PendingSignIn => ({
+    userCode: `CODE-${name}`, name,
+    createdAt: new Date(NOW - minutesAgo * MIN).toISOString(),
+    expiresAt: new Date(NOW + (10 - minutesAgo) * MIN).toISOString(),
+  });
+
+  test('sign-ins first, oldest first, then profiles that are not working, with their users', () => {
+    const rows = [row('gmail', 'work'), row('jira', 'hex-rays'), row('whatsapp', 'work', { status: 'invalid', error: 'session closed' })];
+    const results = new Map<string, TestResult>([
+      ['gmail/work', { status: 'invalid', detail: 'invalid_grant', at: NOW }],
+      ['jira/hex-rays', { status: 'ok', detail: '', at: NOW }],
+    ]);
+    const keys = [key('macbook'), key('ci', { allowedProfiles: ['jira/hex-rays'] })];
+    const items = needsYou([pending('new', 1), pending('old', 5)], rows, results, keys);
+    expect(items.map((i) => (i.kind === 'sign-in' ? i.request.name : `${refOf(i.row)}:${i.usedBy}`)))
+      .toEqual(['old', 'new', 'gmail/work:1', 'whatsapp/work:1']);
+  });
+
+  test('untested profiles never count as needing the owner (tests are on demand)', () => {
+    expect(needsYou([], [row('gmail', 'work'), row('slack', 'team', { status: 'no-creds' })], new Map(), [])).toEqual([]);
+  });
+
+  test('hub summary', () => {
+    const rows = [row('gmail', 'work'), row('gmail', 'perso'), row('jira', 'hex-rays')];
+    const results = new Map<string, TestResult>([
+      ['gmail/work', { status: 'invalid', detail: 'x', at: NOW - 5 * MIN }],
+      ['gmail/perso', { status: 'ok', detail: '', at: NOW - 2 * MIN }],
+      ['deleted/one', { status: 'ok', detail: '', at: NOW }],
+    ]);
+    const keys = [
+      key('macbook', { lastUsedAt: new Date(NOW - MIN).toISOString() }),
+      key('old-vps', { lastUsedAt: new Date(NOW - 41 * DAY).toISOString() }),
+    ];
+    expect(hubSummary(rows, keys, results, NOW)).toEqual({
+      profiles: 3, working: 1, failing: 1, notTested: 1, testedAt: NOW - 2 * MIN, machines: 2, seenToday: 1, silent: 1,
+    });
+    expect(hubSummary([], [], new Map(), NOW)).toEqual({ profiles: 0, working: 0, failing: 0, notTested: 0, machines: 0, seenToday: 0, silent: 0 });
   });
 });

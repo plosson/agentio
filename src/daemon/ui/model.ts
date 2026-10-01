@@ -286,3 +286,97 @@ export function presetInput(preset: Preset, name: string): KeyInput {
       return { name, allowedProfiles: [...new Set(preset.refs)].sort(), readOnly: preset.readOnly, canManageProfiles: false };
   }
 }
+
+// ---------- Statuses ----------
+
+/** A test the owner ran in this browser session. */
+export interface TestResult {
+  status: Status;
+  detail: string;
+  at: number;
+}
+
+/** A sign-in request waiting for the owner, as `GET /ui/api/authorize` lists it. */
+export interface PendingSignIn {
+  userCode: string;
+  name: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export type Tone = 'ok' | 'red' | 'warn' | 'neutral';
+
+export function effectiveStatus(row: ProfileRow, results: ReadonlyMap<string, TestResult>): { status: Status; detail: string; at?: number } {
+  const result = results.get(refOf(row));
+  if (result) return { status: result.status, detail: result.detail, at: result.at };
+  return { status: row.status, detail: row.error ?? row.info ?? '' };
+}
+
+export function statusPill(status: Status, session: boolean): { label: string; tone: Tone } {
+  switch (status) {
+    case 'ok':
+      return { label: session ? 'connected' : 'working', tone: 'ok' };
+    case 'invalid':
+      return { label: 'not working', tone: 'red' };
+    case 'no-creds':
+      return { label: 'no credentials', tone: 'warn' };
+    case 'testing':
+      return { label: 'testing…', tone: 'neutral' };
+    default:
+      return { label: 'not tested', tone: 'neutral' };
+  }
+}
+
+export function groupProfiles(rows: ProfileRow[], displayName: (service: string) => string): Array<{ service: string; name: string; rows: ProfileRow[] }> {
+  const groups = new Map<string, ProfileRow[]>();
+  for (const r of rows) groups.set(r.service, [...(groups.get(r.service) ?? []), r]);
+  return [...groups.entries()]
+    .map(([service, list]) => ({ service, name: displayName(service), rows: [...list].sort((a, b) => a.profile.localeCompare(b.profile)) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---------- What needs the owner ----------
+
+export type NeedItem =
+  | { kind: 'sign-in'; request: PendingSignIn }
+  | { kind: 'profile'; row: ProfileRow; detail: string; at?: number; usedBy: number };
+
+/** Sign-ins waiting, oldest first, then profiles known not to work. Nothing is tested here. */
+export function needsYou(pending: PendingSignIn[], rows: ProfileRow[], results: ReadonlyMap<string, TestResult>, keys: Key[]): NeedItem[] {
+  const signIns: NeedItem[] = [...pending]
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .map((request) => ({ kind: 'sign-in', request }));
+  const broken: NeedItem[] = rows
+    .map((row) => ({ row, s: effectiveStatus(row, results) }))
+    .filter(({ s }) => s.status === 'invalid')
+    .sort((a, b) => refOf(a.row).localeCompare(refOf(b.row)))
+    .map(({ row, s }) => ({ kind: 'profile', row, detail: s.detail, at: s.at, usedBy: keys.filter((k) => scopeIncludes(k, refOf(row))).length }));
+  return [...signIns, ...broken];
+}
+
+export interface HubSummary {
+  profiles: number;
+  working: number;
+  failing: number;
+  notTested: number;
+  testedAt?: number;
+  machines: number;
+  seenToday: number;
+  silent: number;
+}
+
+export function hubSummary(rows: ProfileRow[], keys: Key[], results: ReadonlyMap<string, TestResult>, now: number): HubSummary {
+  const statuses = rows.map((r) => effectiveStatus(r, results));
+  const times = rows.map((r) => results.get(refOf(r))?.at).filter((t): t is number => typeof t === 'number');
+  const summary: HubSummary = {
+    profiles: rows.length,
+    working: statuses.filter((s) => s.status === 'ok').length,
+    failing: statuses.filter((s) => s.status === 'invalid').length,
+    notTested: statuses.filter((s) => s.status === 'skipped' || s.status === 'testing').length,
+    machines: keys.length,
+    seenToday: keys.filter((k) => seenToday(k, now)).length,
+    silent: keys.filter((k) => isSilent(k, now)).length,
+  };
+  if (times.length) summary.testedAt = Math.max(...times);
+  return summary;
+}
