@@ -94,14 +94,25 @@ export function pollDeviceAuth(deviceCode: unknown, now = Date.now()): DevicePol
   return req.outcome;
 }
 
-export function describeDeviceAuth(userCode: string, now = Date.now()): DeviceRequestView {
-  const req = liveRequest(userCode, now);
+function viewOf(req: PendingRequest): DeviceRequestView {
   return {
     userCode: req.userCode,
     name: req.name,
     createdAt: new Date(req.createdAt).toISOString(),
     expiresAt: new Date(req.createdAt + DEVICE_AUTH_TTL_MS).toISOString(),
   };
+}
+
+export function describeDeviceAuth(userCode: string, now = Date.now()): DeviceRequestView {
+  return viewOf(liveRequest(userCode, now));
+}
+
+/** What the owner may still answer, oldest first. Device codes never leave this module. */
+export function listDeviceAuth(now = Date.now()): DeviceRequestView[] {
+  return [...requests.values()]
+    .filter((req) => req.outcome.status === 'pending' && !expired(req, now))
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map(viewOf);
 }
 
 /** Creates the key now; the token waits in memory for the CLI's next poll. */

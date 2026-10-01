@@ -364,4 +364,33 @@ describe('daemon HTTP surface', () => {
     const cookie = await cookieFrom(await unlock());
     expect((await call('/ui/api/nope', { headers: { cookie } })).status).toBe(404);
   });
+
+  test('pending sign-ins: listed for the owner only, without device codes', async () => {
+    const start = await (await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'build-box' }), ip: '203.0.113.30' })).json();
+
+    // No session: 401. Session on a vault locked another way: 503.
+    expect((await call('/ui/api/authorize')).status).toBe(401);
+    const cookie = await cookieFrom(await unlock());
+    const res = await call('/ui/api/authorize', { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.requests).toHaveLength(1);
+    expect(body.requests[0]).toMatchObject({ userCode: start.userCode, name: 'build-box' });
+    expect(JSON.stringify(body)).not.toContain(start.deviceCode);
+
+    lockVault();
+    expect((await call('/ui/api/authorize', { headers: { cookie } })).status).toBe(503);
+  });
+
+  test('pending sign-ins: an answered request leaves the list, and answering it again is 404', async () => {
+    const start = await (await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'ci' }), ip: '203.0.113.31' })).json();
+    const cookie = await cookieFrom(await unlock());
+    await call(`/ui/api/authorize/${start.userCode}`, { method: 'POST', headers: { cookie }, body: JSON.stringify({ approve: false }) });
+    expect((await (await call('/ui/api/authorize', { headers: { cookie } })).json()).requests).toEqual([]);
+    const again = await call(`/ui/api/authorize/${start.userCode}`, {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ approve: true, name: 'ci', allowedProfiles: '*', readOnly: true, url: 'https://hub.example.com' }),
+    });
+    expect(again.status).toBe(404);
+  });
 });

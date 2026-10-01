@@ -19,7 +19,7 @@ import {
   sessionCookie,
 } from './session';
 import { INDEX_HTML } from './ui/assets';
-import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth } from './device-auth';
+import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth, listDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
 import { getPluginRegistry } from '../plugins/registry';
 
@@ -218,6 +218,8 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
     if (ref?.action) throw new CliError('NOT_FOUND', 'Not found');
     if (ref && method === 'DELETE') return await handleDeleteProfile(ref);
     if (ref && method === 'PATCH') return await handlePatchProfile(request, ref);
+
+    if (method === 'GET' && pathname === '/ui/api/authorize') return json({ requests: listDeviceAuth() });
 
     const code = authorizeCode(pathname);
     if (code && method === 'GET') return json(describeDeviceAuth(code));
