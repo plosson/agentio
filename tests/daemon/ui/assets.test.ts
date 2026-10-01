@@ -46,4 +46,12 @@ describe('the assembled admin page', () => {
     expect(style).toContain("url('/ui/fonts/balsamiq-sans-700.woff2')");
     for (const colour of ['#2b2b2b', '#fdfdfb', '#3b6fd8', '#fff4b8', '#d0453a']) expect(style).toContain(colour);
   });
+
+  test('profiles: its actions are registered and its commands come from the model', () => {
+    for (const action of ["ACTIONS['test-one']", "ACTIONS['rename-profile']", "ACTIONS['delete-profile']", "ACTIONS['pick-service']", "CHANGES['profile-ro']"]) {
+      expect(script).toContain(action);
+    }
+    expect(script).toContain('reauthCommand(');
+    expect(script).toContain('addCommand(');
+  });
 });

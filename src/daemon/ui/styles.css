@@ -130,6 +130,9 @@ dialog::backdrop { background: rgba(20, 20, 18, .45); }
 .toast { background: var(--ink); color: var(--paper); border-radius: var(--sketch-btn); padding: 9px 14px; max-width: 360px; }
 .toast.error { background: var(--red); color: #fff; }
 
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 14px; }
+.tile { font: inherit; color: inherit; text-align: center; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; }
+
 /* Phone: bottom tab bar, stacked tables, one column. */
 @media (max-width: 720px) {
   .bar .nav, .bar #hub-host { display: none; }
