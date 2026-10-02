@@ -1,5 +1,5 @@
 import { writeJson } from '../../utils/output';
-import type { KiteDocument, KiteReply, KiteSharing, KiteThread } from './types';
+import type { KiteDocument, KiteLibrary, KiteReply, KiteSharing, KiteThread, KiteWorkspace } from './types';
 
 /** `--json` writes `data`; otherwise `text` prints for people. */
 function emit(json: boolean | undefined, data: unknown, text: () => void): void {
@@ -9,6 +9,7 @@ function emit(json: boolean | undefined, data: unknown, text: () => void): void 
 
 function documentLines(doc: KiteDocument): void {
   console.log(`${doc.title} (${doc.type}, version ${doc.version})`);
+  if (doc.description) console.log(`  ${doc.description}`);
   console.log(`  ID: ${doc.id}`);
   console.log(`  URL: ${doc.url}`);
   console.log(`  Updated: ${doc.updated}`);
@@ -42,6 +43,59 @@ export function printDocumentList(docs: KiteDocument[], json?: boolean): void {
       documentLines(doc);
       console.log('');
     }
+  });
+}
+
+/** How current a summary is, said the way a reader needs it. */
+function summaryState(doc: KiteDocument): string {
+  if (doc.summary === null || doc.summaryVersion === null) return 'missing';
+  const behind = doc.version - doc.summaryVersion;
+  if (behind <= 0) return 'current';
+  return `written for version ${doc.summaryVersion}, ${behind} version${behind === 1 ? '' : 's'} behind`;
+}
+
+function workspaceLines(workspace: KiteWorkspace): void {
+  console.log(`${workspace.name} (${workspace.count} document${workspace.count === 1 ? '' : 's'})`);
+  console.log(`  ID: ${workspace.id}`);
+  console.log(`  ${workspace.description}`);
+}
+
+export function printWorkspaces(workspaces: KiteWorkspace[], json?: boolean): void {
+  emit(json, { workspaces }, () => {
+    for (const workspace of workspaces) {
+      workspaceLines(workspace);
+      console.log('');
+    }
+  });
+}
+
+export function printWorkspace(workspace: KiteWorkspace, json?: boolean): void {
+  emit(json, workspace, () => workspaceLines(workspace));
+}
+
+export function printMoved(moved: { id: string; workspace: KiteWorkspace }, json?: boolean): void {
+  emit(json, { id: moved.id, workspace: moved.workspace.id }, () => console.log(`Moved ${moved.id} to ${moved.workspace.name}`));
+}
+
+export function printLibrary(library: KiteLibrary, json?: boolean): void {
+  emit(json, library, () => {
+    console.log('Workspaces\n');
+    for (const workspace of library.workspaces) {
+      workspaceLines(workspace);
+      console.log('');
+    }
+    const names = new Map(library.workspaces.map((w) => [w.id, w.name]));
+    console.log(`Documents (${library.documents.length})\n`);
+    for (const doc of library.documents) {
+      console.log(`${doc.title} (${doc.type}, version ${doc.version})`);
+      console.log(`  ID: ${doc.id}`);
+      console.log(`  Workspace: ${names.get(doc.workspace) ?? doc.workspace}`);
+      console.log(`  Description: ${doc.description ?? '(missing)'}`);
+      console.log(`  Summary (${summaryState(doc)}):`);
+      for (const line of (doc.summary ?? '(missing)').split('\n')) console.log(`    ${line}`);
+      console.log('');
+    }
+    console.log(library.instructions);
   });
 }
 

@@ -79,10 +79,12 @@ describe('one profile', () => {
 
   test('publish, update, get, list, delete in --json mode', async () => {
     const path = file('doc.md', '# One');
-    const published = await cli('kite', 'publish', path, '--title', 'First', '--json');
+    const published = await cli('kite', 'publish', path, '--title', 'First', '--description', 'D.', '--summary', 'S.', '--json');
     expect(published.code).toBe(0);
     const doc = onlyJson(published.stdout);
-    expect(Object.keys(doc).sort()).toEqual(['id', 'title', 'type', 'updated', 'url', 'version']);
+    expect(Object.keys(doc).sort()).toEqual(
+      ['description', 'id', 'summary', 'summaryVersion', 'title', 'type', 'updated', 'url', 'version'],
+    );
     expect(doc).toMatchObject({ title: 'First', type: 'markdown', version: 1 });
 
     writeFileSync(path, '# Two');
@@ -238,6 +240,9 @@ describe('read-only profile', () => {
       cli('kite', 'comments', 'reply', 'thr_1', '--body', 'x', '--json'),
       cli('kite', 'comments', 'resolve', 'thr_1', '--json'),
       cli('kite', 'comments', 'reopen', 'thr_1', '--json'),
+      cli('kite', 'describe', 'art_1', '--title', 'T', '--json'),
+      cli('kite', 'move', 'art_1', 'inbox', '--json'),
+      cli('kite', 'workspaces', 'create', 'Research', '--description', 'Papers.', '--json'),
     ]);
     for (const r of writes) {
       const event = onlyJson(r.stdout);
@@ -253,6 +258,8 @@ describe('read-only profile', () => {
       cli('kite', 'get', doc.id, '--json'),
       cli('kite', 'share', 'show', doc.id, '--json'),
       cli('kite', 'comments', 'list', doc.id, '--json'),
+      cli('kite', 'workspaces', 'list', '--json'),
+      cli('kite', 'organize', '--json'),
     ]);
     for (const r of reads) expect(r.code).toBe(0);
   }, 60_000);
@@ -305,4 +312,75 @@ describe('name hygiene', () => {
       }
     }
   });
+});
+
+describe('describing and organizing from the command line', () => {
+  withProfiles(() => ({ main: { server: fake } }));
+
+  test('a new document without --description sends nothing and says what is missing', async () => {
+    const r = await cli('kite', 'publish', file('doc.md', '# x'), '--summary', 'S.', '--json');
+    const event = onlyJson(r.stdout);
+    expect(event).toMatchObject({ event: 'error', code: 'INVALID_PARAMS' });
+    expect(JSON.stringify(event)).toContain('--description');
+    expect(fake.requests('POST')).toEqual([]);
+  }, 30_000);
+
+  test('--summary and --summary-file together are refused with no request', async () => {
+    const summary = file('summary.txt', 'From a file.');
+    const r = await cli('kite', 'publish', file('doc.md', '# x'), '--description', 'D.', '--summary', 'S.', '--summary-file', summary, '--json');
+    expect(onlyJson(r.stdout)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS' });
+    expect(fake.log).toEqual([]);
+  }, 30_000);
+
+  test('a --summary-file that does not exist is refused with no request', async () => {
+    const r = await cli('kite', 'describe', 'art_1', '--summary-file', join(home(), 'nope.txt'), '--json');
+    expect(onlyJson(r.stdout)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS' });
+    expect(fake.log).toEqual([]);
+  }, 30_000);
+
+  test('the summary file is sent as written, line breaks and all', async () => {
+    const doc = fake.seedDoc(ME);
+    const summary = 'Line one.\nLine two.\n';
+    const r = await cli('kite', 'describe', doc.id, '--summary-file', file('summary.txt', summary), '--json');
+    expect(r.code).toBe(0);
+    expect(fake.requests('PATCH')[0].body).toEqual({ summary });
+    expect(fake.docs.get(doc.id)!.summary).toBe('Line one.\nLine two.');
+  }, 30_000);
+
+  test('an update without the flags keeps what the document said', async () => {
+    const doc = fake.seedDoc(ME, { description: 'Kept.', summary: 'Kept.' });
+    const r = await cli('kite', 'publish', file('doc.md', '# New'), '--id', doc.id, '--json');
+    expect(onlyJson(r.stdout)).toMatchObject({ description: 'Kept.', summary: 'Kept.', summaryVersion: 1, version: 2 });
+  }, 30_000);
+
+  test('organize --json is one document an agent can read whole', async () => {
+    fake.seedWorkspace(ME, 'Research');
+    fake.seedDoc(ME, { title: 'A note' });
+    const library = onlyJson((await cli('kite', 'organize', '--json')).stdout);
+    expect(Object.keys(library).sort()).toEqual(['documents', 'instructions', 'workspaces']);
+    expect(library.documents[0]).toMatchObject({ title: 'A note', workspace: 'inbox' });
+  }, 30_000);
+
+  test('organize without --json says how stale each summary is', async () => {
+    fake.seedDoc(ME, { title: 'Drifted', version: 4, summaryVersion: 1 });
+    fake.seedDoc(ME, { title: 'Never described', description: null, summary: null, summaryVersion: null });
+    const r = await cli('kite', 'organize');
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('written for version 1, 3 versions behind');
+    expect(r.stdout).toContain('Summary (missing)');
+    expect(r.stdout).toContain('Propose before you change anything');
+  }, 30_000);
+
+  test('move by name, then back to the inbox', async () => {
+    const research = fake.seedWorkspace(ME, 'Research');
+    const doc = fake.seedDoc(ME);
+    expect(onlyJson((await cli('kite', 'move', doc.id, 'research', '--json')).stdout)).toEqual({ id: doc.id, workspace: research.id });
+    expect(onlyJson((await cli('kite', 'move', doc.id, 'inbox', '--json')).stdout)).toEqual({ id: doc.id, workspace: 'inbox' });
+  }, 30_000);
+
+  test('workspaces create needs a description', async () => {
+    const r = await cli('kite', 'workspaces', 'create', 'Research', '--json');
+    expect(r.code).not.toBe(0);
+    expect(fake.log).toEqual([]);
+  }, 30_000);
 });

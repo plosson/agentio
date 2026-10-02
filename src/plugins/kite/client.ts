@@ -8,14 +8,17 @@ import type {
   KiteCredentials,
   KiteDocument,
   KiteDocumentType,
+  KiteLibrary,
   KiteMe,
   KiteRawComment,
   KiteRawDocument,
   KiteRawSharingState,
   KiteRawThread,
+  KiteRawWorkspace,
   KiteSharing,
   KiteReply,
   KiteThread,
+  KiteWorkspace,
 } from './types';
 
 /**
@@ -155,8 +158,38 @@ function requireBody(body: string | undefined): string {
 }
 
 function toDocument(raw: KiteRawDocument): KiteDocument {
-  return { id: raw.id, url: raw.url, title: raw.title, type: raw.type, version: raw.version, updated: raw.updatedAt };
+  return {
+    id: raw.id,
+    url: raw.url,
+    title: raw.title,
+    description: raw.description ?? null,
+    summary: raw.summary ?? null,
+    summaryVersion: raw.summaryVersion ?? null,
+    type: raw.type,
+    version: raw.version,
+    updated: raw.updatedAt,
+  };
 }
+
+function toWorkspace(raw: KiteRawWorkspace): KiteWorkspace {
+  return { id: raw.id, name: raw.name, description: raw.description, count: raw.count };
+}
+
+/**
+ * What an agent is told to do with `organize`. Propose first, because a
+ * library is the user's and renaming it behind their back loses their bearings.
+ */
+export const ORGANIZE_INSTRUCTIONS = [
+  'Propose before you change anything: list the new titles, descriptions and moves you suggest,',
+  'with a reason for each, and apply only what the user agrees to.',
+  'Prefer fewer changes: leave a title alone unless it is misleading, vague, or inconsistent with its neighbours.',
+  'Title, description and summary change less often than the content, in that order.',
+  'Suggest a new workspace only when several documents share a subject no workspace covers.',
+  'Where a summary is missing or behind its version, read the document with `agentio kite get <id>`',
+  'and write one with `agentio kite describe <id> --summary-file <file>`.',
+  'Apply changes with `agentio kite describe` and `agentio kite move`;',
+  'create a workspace with `agentio kite workspaces create` only after the user agreed to its name and description.',
+].join(' ');
 
 function toSharing(raw: KiteRawSharingState): KiteSharing {
   return {
@@ -283,6 +316,9 @@ export class KiteClient implements ServiceClient {
     if (res.status === 404 || code === 'not_found') {
       return new CliError('NOT_FOUND', withDetail('Not found on Kite'), 'Check the id; the document may not be yours');
     }
+    if (code === 'name_taken') {
+      return new CliError('INVALID_PARAMS', withDetail('That name is taken'), 'Run: agentio kite workspaces list');
+    }
     if (res.status === 409 || code === 'version_conflict') {
       const now = details.currentVersion ?? '?';
       const had = details.baseVersion ?? '?';
@@ -320,6 +356,10 @@ export class KiteClient implements ServiceClient {
   }
 
   async publish(input: DocumentInput): Promise<KiteDocument> {
+    if (input.description === undefined || input.summary === undefined) {
+      throw new CliError('INVALID_PARAMS', 'A new document needs a description and a summary',
+        'Pass --description "<one line>" and --summary "<up to 10 lines>" (or --summary-file <file>)');
+    }
     return toDocument(await this.request<KiteRawDocument>('POST', '/api/artifacts', { body: documentBody(input) }));
   }
 
@@ -342,6 +382,45 @@ export class KiteClient implements ServiceClient {
   async list(): Promise<KiteDocument[]> {
     const data = await this.request<{ artifacts: KiteRawDocument[] }>('GET', '/api/artifacts');
     return (data?.artifacts ?? []).map(toDocument);
+  }
+
+  /** Title, description and summary only: the content is untouched and no version is written. */
+  async describe(id: string, input: DescriptionInput): Promise<KiteDocument> {
+    const docId = requireDocumentId(id);
+    const body = descriptionBody(input);
+    if (Object.keys(body).length === 0) {
+      throw new CliError('INVALID_PARAMS', 'Nothing to change', 'Pass --title, --description, --summary or --summary-file');
+    }
+    return toDocument(await this.request<KiteRawDocument>('PATCH', `/api/artifacts/${enc(docId)}`, { body }));
+  }
+
+  async workspaces(): Promise<KiteWorkspace[]> {
+    const data = await this.request<{ workspaces: KiteRawWorkspace[] }>('GET', '/api/workspaces');
+    return (data?.workspaces ?? []).map(toWorkspace);
+  }
+
+  async createWorkspace(name: string, description: string): Promise<KiteWorkspace> {
+    const raw = await this.request<Omit<KiteRawWorkspace, 'count'> & { count?: number }>(
+      'POST', '/api/workspaces', { body: { name, description } });
+    return toWorkspace({ ...raw, count: raw.count ?? 0 });
+  }
+
+  /** Into a workspace named by id or name (any case), or "inbox". Where you sort a document is private to you. */
+  async move(id: string, workspace: string): Promise<{ id: string; workspace: KiteWorkspace }> {
+    const docId = requireDocumentId(id);
+    const target = resolveWorkspace(await this.workspaces(), workspace);
+    await this.request('PUT', `/api/artifacts/${enc(docId)}/workspace`, { body: { workspaceId: target.id } });
+    return { id: docId, workspace: target };
+  }
+
+  /** Everything needed to propose new titles and moves, in two requests. */
+  async organize(): Promise<KiteLibrary> {
+    const [listing, workspaces] = await Promise.all([
+      this.request<{ artifacts: KiteRawDocument[] }>('GET', '/api/artifacts'),
+      this.workspaces(),
+    ]);
+    const documents = (listing?.artifacts ?? []).map((raw) => ({ ...toDocument(raw), workspace: raw.workspaceId ?? 'inbox' }));
+    return { workspaces, documents, instructions: ORGANIZE_INSTRUCTIONS };
   }
 
   async delete(id: string): Promise<void> {
@@ -415,16 +494,38 @@ function enc(segment: string): string {
   return encodeURIComponent(segment);
 }
 
-type DocumentInput = { type: KiteDocumentType; content: string; title?: string };
+type DescriptionInput = { title?: string; description?: string; summary?: string };
+type DocumentInput = DescriptionInput & { type: KiteDocumentType; content: string };
 
 /** What publish and update both send; a blank title is refused before any request. */
 function documentBody(input: DocumentInput): Record<string, unknown> {
-  const body: Record<string, unknown> = { type: input.type, content: input.content };
+  return { type: input.type, content: input.content, ...descriptionBody(input) };
+}
+
+/**
+ * Only the fields given. A blank title is refused here, before any request;
+ * the limits on description and summary are the server's to enforce.
+ */
+function descriptionBody(input: DescriptionInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
   if (input.title !== undefined) {
     if (!input.title.trim()) throw new CliError('INVALID_PARAMS', 'The title is empty', 'Leave out --title to keep the current one');
     body.title = input.title;
   }
+  if (input.description !== undefined) body.description = input.description;
+  if (input.summary !== undefined) body.summary = input.summary;
   return body;
+}
+
+/** A workspace by exact id, by name ignoring case and surrounding spaces, or "inbox". */
+export function resolveWorkspace(workspaces: KiteWorkspace[], wanted: string): KiteWorkspace {
+  const key = wanted.trim().toLowerCase();
+  if (!key) throw new CliError('INVALID_PARAMS', 'A workspace is required', 'Pass a workspace name or id, or inbox');
+  const match = workspaces.find((w) => w.id === wanted.trim()) ?? workspaces.find((w) => w.name.trim().toLowerCase() === key);
+  if (match) return match;
+  const names = workspaces.map((w) => w.name).join(', ');
+  throw new CliError('NOT_FOUND', `No workspace called "${wanted}"`,
+    names ? `Choose one of: ${names}` : 'Run: agentio kite workspaces list');
 }
 
 /** The sharing list a target belongs to, as the server names it in paths. */
