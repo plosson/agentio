@@ -146,6 +146,8 @@ async function testProfiles(refs) {
         ? { status: res.body.status, detail: res.body.error || res.body.info || '', at: Date.now() }
         : { status: 'invalid', detail: res.error, at: Date.now() };
       state.results.set(ref, result);
+      // Each result shows as soon as it arrives, not when the slowest profile is done.
+      if (!formOpen()) render();
     }
   };
   await Promise.all([worker(), worker(), worker()]);
@@ -153,9 +155,7 @@ async function testProfiles(refs) {
     // The session or vault went away mid-run: drop results still stuck on 'testing' so
     // they do not claim to be testing forever once the owner is back.
     for (const ref of refs) if (state.results.get(ref)?.status === 'testing') state.results.delete(ref);
-    return;
   }
-  if (!formOpen()) render();
 }
 
 // ---------- Rendering ----------
