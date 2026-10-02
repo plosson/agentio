@@ -20,11 +20,11 @@ interface GitHubRelease {
   }>;
 }
 
-function getCurrentVersion(): string {
+export function getCurrentVersion(): string {
   return pkg.version;
 }
 
-function getPlatform(): string {
+export function getPlatform(): string {
   const platform = os.platform();
   const arch = os.arch();
 
@@ -39,14 +39,14 @@ function getPlatform(): string {
   throw new CliError('API_ERROR', `Unsupported platform: ${platform}-${arch}`);
 }
 
-function getAssetName(platform: string): string {
+export function getAssetName(platform: string): string {
   if (platform === 'windows-x64') {
     return `agentio-${platform}.exe`;
   }
   return `agentio-${platform}`;
 }
 
-function isCompiledBinary(): boolean {
+export function isCompiledBinary(): boolean {
   // In compiled bun binaries, argv[0] is just "bun" (no path)
   // In dev mode, argv[0] is a full path like "/Users/.../bun"
   return process.argv[0] === 'bun' && !process.execPath.endsWith('/bun');
@@ -143,7 +143,7 @@ async function resolveLatestRelease(): Promise<LatestRelease> {
   return { tag: release.tag_name, assets: release.assets };
 }
 
-async function resolveDownloadUrl(release: LatestRelease, assetName: string, platform: string): Promise<string> {
+export async function resolveDownloadUrl(release: LatestRelease, assetName: string, platform: string): Promise<string> {
   if (release.assets) {
     const asset = release.assets.find(a => a.name === assetName);
     if (!asset) {
@@ -272,7 +272,7 @@ function moveFile(src: string, dest: string): void {
   }
 }
 
-async function updateBinary(downloadUrl: string, targetPath: string): Promise<void> {
+export async function updateBinary(downloadUrl: string, targetPath: string): Promise<void> {
   const platform = os.platform();
   const isWindows = platform === 'win32';
 
