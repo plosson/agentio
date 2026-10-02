@@ -43,6 +43,9 @@ interface Doc {
   owner: string;
   type: string;
   title: string;
+  description: string | null;
+  summary: string | null;
+  summaryVersion: number | null;
   content: string;
   version: number;
   createdAt: string;
@@ -51,6 +54,15 @@ interface Doc {
   expiresAt: string | null;
   people: Array<{ id: string; email: string; pending: boolean; createdAt: string }>;
   domains: Array<{ id: string; domain: string; createdAt: string }>;
+  /** Where each reader sorted it: email to workspace id. Absent means inbox. */
+  placements: Map<string, string>;
+}
+
+interface Workspace {
+  id: string;
+  owner: string;
+  name: string;
+  description: string;
 }
 
 interface Thread {
@@ -75,6 +87,7 @@ export class FakeKite {
   readonly devices = new Map<string, Device>();
   readonly docs = new Map<string, Doc>();
   readonly threads = new Map<string, Thread>();
+  readonly workspaces = new Map<string, Workspace>();
   maxBytes = 5 * 1024 * 1024;
   intervalSeconds = 2;
   expiresInSeconds = 600;
@@ -164,6 +177,13 @@ export class FakeKite {
     return doc;
   }
 
+  /** Create a workspace directly, owned by `email`. */
+  seedWorkspace(email: string, name: string, description = `About ${name}.`): Workspace {
+    const workspace = { id: this.id('wsp'), owner: email, name, description };
+    this.workspaces.set(workspace.id, workspace);
+    return workspace;
+  }
+
   requests(method?: string, pathPrefix?: string): LoggedRequest[] {
     return this.log.filter((r) => (!method || r.method === method) && (!pathPrefix || r.path.startsWith(pathPrefix)));
   }
@@ -183,7 +203,8 @@ export class FakeKite {
     const at = this.now();
     return {
       id: this.id('art'), slug: this.id('s').replace('_', ''), owner, type, title, content, version: 1,
-      createdAt: at, updatedAt: at, isPublic: false, expiresAt: null, people: [], domains: [],
+      description: 'Seeded.', summary: 'Seeded.', summaryVersion: 1,
+      createdAt: at, updatedAt: at, isPublic: false, expiresAt: null, people: [], domains: [], placements: new Map(),
     };
   }
 
@@ -232,9 +253,13 @@ export class FakeKite {
     if (path === '/api/artifacts') {
       if (method === 'GET') {
         const mine = [...this.docs.values()].filter((d) => d.owner === me).reverse();
-        return json(200, { artifacts: mine.map((d) => this.view(d, false)) });
+        return json(200, { artifacts: mine.map((d) => ({ ...this.view(d, false), workspaceId: d.placements.get(me) ?? 'inbox' })) });
       }
       if (method === 'POST') return this.publish(me, b);
+    }
+    if (path === '/api/workspaces') {
+      if (method === 'GET') return json(200, { workspaces: this.workspaceList(me) });
+      if (method === 'POST') return this.createWorkspace(me, b);
     }
     let m = /^\/api\/artifacts\/by-slug\/([^/]+)$/.exec(path);
     if (m && method === 'GET') {
@@ -248,6 +273,7 @@ export class FakeKite {
       const doc = this.docs.get(decodeURIComponent(m[1]));
       const rest = m[2] ?? '';
       if (rest === '/comments') return this.comments(doc, me, r, b);
+      if (rest === '/workspace' && method === 'PUT') return this.place(doc, me, b);
       if (!doc || doc.owner !== me) return err(404, 'not_found', 'No such artifact.');
       if (rest === '') return this.document(doc, method, r, b);
       if (rest.startsWith('/sharing')) return this.sharing(doc, method, rest.slice('/sharing'.length), b);
@@ -317,12 +343,67 @@ export class FakeKite {
     return undefined;
   }
 
+  /** Kite's rules for what a publisher says about a document; undefined when they hold. */
+  private invalidDescription(b: Record<string, any>, required: boolean): Response | undefined {
+    for (const field of ['description', 'summary'] as const) {
+      if (b[field] === undefined) {
+        if (required) return err(400, 'validation_failed', `${field} is required and must be text.`);
+        continue;
+      }
+      if (typeof b[field] !== 'string' || !b[field].trim()) return err(400, 'validation_failed', `${field} cannot be blank.`);
+    }
+    if (typeof b.description === 'string' && (/[\r\n]/.test(b.description.trim()) || b.description.trim().length > 160)) {
+      return err(400, 'validation_failed', 'description must be a single line of at most 160 characters.');
+    }
+    if (typeof b.summary === 'string' && (b.summary.trim().split('\n').length > 10 || b.summary.trim().length > 1200)) {
+      return err(400, 'validation_failed', 'summary is at most 10 lines and 1200 characters.');
+    }
+    return undefined;
+  }
+
   private publish(me: string, b: Record<string, any>): Response {
-    const invalid = this.invalidDocument(b);
+    const invalid = this.invalidDocument(b) ?? this.invalidDescription(b, true);
     if (invalid) return invalid;
     const doc = this.newDoc(me, b.type, b.content, typeof b.title === 'string' ? b.title : 'Untitled');
+    Object.assign(doc, { description: b.description.trim(), summary: b.summary.trim(), summaryVersion: 1 });
     this.docs.set(doc.id, doc);
     return json(201, this.view(doc, true));
+  }
+
+  private workspaceList(me: string) {
+    const mine = [...this.workspaces.values()].filter((w) => w.owner === me).sort((a, b) => a.name.localeCompare(b.name));
+    const count = (id: string) => [...this.docs.values()].filter((d) => this.canRead(d, me) && (d.placements.get(me) ?? 'inbox') === id).length;
+    return [
+      { id: 'inbox', name: 'Inbox', description: 'Kites that are not sorted into a workspace yet.', count: count('inbox') },
+      ...mine.map((w) => ({ id: w.id, name: w.name, description: w.description, count: count(w.id) })),
+    ];
+  }
+
+  private createWorkspace(me: string, b: Record<string, any>): Response {
+    if (typeof b.name !== 'string' || !b.name.trim() || b.name.length > 60) return err(400, 'validation_failed', 'name is required, at most 60 characters.');
+    if (typeof b.description !== 'string' || !b.description.trim() || b.description.length > 500) {
+      return err(400, 'validation_failed', 'description is required, at most 500 characters.');
+    }
+    const taken = (n: string) => n.trim().toLowerCase();
+    if (taken(b.name) === 'inbox' || [...this.workspaces.values()].some((w) => w.owner === me && taken(w.name) === taken(b.name))) {
+      return err(409, 'name_taken', `You already have a workspace called ${b.name}.`);
+    }
+    const w = this.seedWorkspace(me, b.name.trim(), b.description.trim());
+    return json(201, { id: w.id, name: w.name, description: w.description, count: 0 });
+  }
+
+  /** Placement needs only that you can see the document, as in Kite. */
+  private place(doc: Doc | undefined, me: string, b: Record<string, any>): Response {
+    if (!doc || !this.canRead(doc, me)) return err(404, 'not_found', 'No such artifact.');
+    if (typeof b.workspaceId !== 'string' || !b.workspaceId) return err(400, 'validation_failed', 'workspaceId is required.');
+    if (b.workspaceId === 'inbox') {
+      doc.placements.delete(me);
+      return json(200, { workspaceId: 'inbox' });
+    }
+    const w = this.workspaces.get(b.workspaceId);
+    if (!w || w.owner !== me) return err(404, 'not_found', 'No such workspace.');
+    doc.placements.set(me, w.id);
+    return json(200, { workspaceId: w.id });
   }
 
   private document(doc: Doc, method: string, r: LoggedRequest, b: Record<string, any>): Response {
@@ -331,13 +412,27 @@ export class FakeKite {
       return json(200, this.view(doc, true));
     }
     if (method === 'PUT') {
-      const invalid = this.invalidDocument(b);
+      const invalid = this.invalidDocument(b) ?? this.invalidDescription(b, false);
       if (invalid) return invalid;
       if (b.baseVersion !== doc.version) {
         return err(409, 'version_conflict', 'The artifact changed.', { currentVersion: doc.version, baseVersion: b.baseVersion });
       }
       Object.assign(doc, { type: b.type, content: b.content, version: doc.version + 1, updatedAt: this.now() });
       if (typeof b.title === 'string') doc.title = b.title;
+      if (typeof b.description === 'string') doc.description = b.description.trim();
+      if (typeof b.summary === 'string') Object.assign(doc, { summary: b.summary.trim(), summaryVersion: doc.version });
+      return json(200, this.view(doc, true));
+    }
+    if (method === 'PATCH') {
+      if (b.title === undefined && b.description === undefined && b.summary === undefined) {
+        return err(400, 'validation_failed', 'Send at least one of title, description or summary.');
+      }
+      if (b.title !== undefined && (typeof b.title !== 'string' || !b.title.trim())) return err(400, 'validation_failed', 'title cannot be blank.');
+      const invalid = this.invalidDescription(b, false);
+      if (invalid) return invalid;
+      if (typeof b.title === 'string') doc.title = b.title.trim();
+      if (typeof b.description === 'string') doc.description = b.description.trim();
+      if (typeof b.summary === 'string') Object.assign(doc, { summary: b.summary.trim(), summaryVersion: doc.version });
       return json(200, this.view(doc, true));
     }
     if (method === 'DELETE') {
@@ -435,7 +530,7 @@ export class FakeKite {
   }
 
   private view(doc: Doc, withContent: boolean) {
-    const { content, owner, people, domains, ...rest } = doc;
+    const { content, owner, people, domains, placements, ...rest } = doc;
     return {
       ...rest, ownerId: `usr_${owner}`, isPublic: doc.isPublic ? 1 : 0, url: `${this.url}/a/${doc.slug}`,
       ...(withContent ? { content } : {}),

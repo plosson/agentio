@@ -95,19 +95,39 @@ run('contract with a real Kite', () => {
     expect(await client.validate()).toEqual({ valid: true, info: ME });
 
     // Publish, read, update, conflict.
-    const doc = await client.publish({ type: 'markdown', content: '# Contract\n\nexact rendered text here', title: 'Contract' });
-    expect(Object.keys(doc).sort()).toEqual(['id', 'title', 'type', 'updated', 'url', 'version']);
+    const described = { description: 'A contract check.', summary: 'Checks the fake against a real Kite.' };
+    // A publish that says nothing about the document is refused by Kite itself, not only by this client.
+    expect((await client.raw('POST', '/api/artifacts', { body: { type: 'markdown', content: '# x' } })).status).toBe(400);
+    const doc = await client.publish({ type: 'markdown', content: '# Contract\n\nexact rendered text here', title: 'Contract', ...described });
+    expect(Object.keys(doc).sort()).toEqual(
+      ['description', 'id', 'summary', 'summaryVersion', 'title', 'type', 'updated', 'url', 'version'],
+    );
+    expect(doc).toMatchObject({ ...described, summaryVersion: 1 });
     expect(doc.id).toStartWith('art_');
     expect(doc.version).toBe(1);
     expect((await client.get(doc.id)).content).toBe('# Contract\n\nexact rendered text here');
     expect((await client.get(doc.url)).id).toBe(doc.id);
     const v2 = await client.update(doc.id, { type: 'markdown', content: '# Contract\n\nexact rendered text here, v2' });
-    expect(v2.version).toBe(2);
+    expect(v2).toMatchObject({ version: 2, ...described, summaryVersion: 1 });
     const stale = await client.raw('PUT', `/api/artifacts/${doc.id}`, { body: { type: 'markdown', content: 'x', baseVersion: 1 } });
     expect(stale.status).toBe(409);
     expect(client.errorFor(stale).message).toContain('now version 2, you had 1');
-    expect((await caught(client.publish({ type: 'markdown', content: '' }))).code).toBe('INVALID_PARAMS');
+    expect((await caught(client.publish({ type: 'markdown', content: '', ...described }))).code).toBe('INVALID_PARAMS');
     expect((await client.list()).map((d) => d.id)).toContain(doc.id);
+
+    // Describing, workspaces, moving and organizing.
+    const renamed = await client.describe(doc.id, { title: 'Contract, renamed', summary: 'Caught up.' });
+    expect(renamed).toMatchObject({ title: 'Contract, renamed', version: 2, summary: 'Caught up.', summaryVersion: 2 });
+    expect((await caught(client.describe(doc.id, { description: 'one\ntwo' }))).code).toBe('INVALID_PARAMS');
+    expect((await caught(other.describe(doc.id, { title: 'Theirs now' }))).code).toBe('NOT_FOUND');
+    const research = await client.createWorkspace('Contract research', 'Where the contract test sorts things.');
+    expect(research).toMatchObject({ name: 'Contract research', count: 0 });
+    expect((await caught(client.createWorkspace('contract RESEARCH', 'Again.'))).code).toBe('INVALID_PARAMS');
+    expect((await client.move(doc.id, 'contract research')).workspace.id).toBe(research.id);
+    const library = await client.organize();
+    expect(library.workspaces.map((w) => w.id)).toEqual(['inbox', research.id]);
+    expect(library.documents.find((d) => d.id === doc.id)).toMatchObject({ workspace: research.id, title: 'Contract, renamed' });
+    expect((await client.move(doc.id, 'inbox')).workspace.id).toBe('inbox');
 
     // Someone else's document is not found, never forbidden.
     expect((await caught(other.get(doc.id))).code).toBe('NOT_FOUND');

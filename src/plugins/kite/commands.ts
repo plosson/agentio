@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { stat, writeFile } from 'fs/promises';
+import { readFile, stat, writeFile } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import { launchBrowser } from '../../auth/oauth-server';
 import { createClientGetter } from '../../utils/client-factory';
@@ -19,10 +19,14 @@ import {
   printDocument,
   printDocumentList,
   printFetchedDocument,
+  printLibrary,
+  printMoved,
   printReply,
   printSharing,
   printThread,
   printThreads,
+  printWorkspace,
+  printWorkspaces,
 } from './output';
 import type { KiteCredentials } from './types';
 
@@ -69,6 +73,35 @@ async function checkOutPath(path: string): Promise<string> {
     if (!parent?.isDirectory()) throw new CliError('INVALID_PARAMS', `Cannot write ${path}: its folder does not exist`);
   }
   return target;
+}
+
+/** What `publish` and `describe` say about the steadiness of title, description and summary. */
+const STABILITY = `Title, description and summary change less often than the content, in that order:
+the title least often, then the description, then the summary. When you update,
+leave them out to keep them. Change the title only when the subject changed, the
+description only when the purpose or scope changed, and the summary only when the
+main points changed. A wording fix or a small edit changes none of them.`;
+
+/** The summary from --summary or --summary-file; both at once is refused. */
+async function summaryFrom(options: { summary?: string; summaryFile?: string }): Promise<string | undefined> {
+  if (options.summary !== undefined && options.summaryFile !== undefined) {
+    throw new CliError('INVALID_PARAMS', 'Pass --summary or --summary-file, not both');
+  }
+  if (options.summaryFile === undefined) return options.summary;
+  try {
+    return await readFile(options.summaryFile, 'utf8');
+  } catch {
+    throw new CliError('INVALID_PARAMS', `Cannot read ${options.summaryFile}`);
+  }
+}
+
+/** The options that say what a document is, shared by `publish` and `describe`. */
+function withDescriptionOptions(command: Command): Command {
+  return command
+    .option('--title <title>', 'Document title')
+    .option('--description <text>', 'One line, at most 160 characters, on what the document is and what it is for')
+    .option('--summary <text>', 'At most 10 lines and 1200 characters on what the document says')
+    .option('--summary-file <file>', 'Read the summary from this file instead');
 }
 
 export interface KiteProfileAddOptions extends ProfileAddOptions {
@@ -142,24 +175,30 @@ export function registerKiteCommands(program: Command): void {
   const kite = program.command('kite').description('Publish Markdown and HTML documents as private web pages on Kite, share them, and work with their comments');
 
   addExamples(
-    leaf(kite, 'publish', 'Publish a Markdown or HTML file as a new document, or update one with --id')
-      .argument('<file>', 'A .md, .markdown, .html or .htm file')
-      .option('--id <id>', 'Update this document (art_…) instead of publishing a new one')
-      .option('--title <title>', 'Document title')
-      .action(run(async (file: string, options) => {
-        const id: string | undefined = options.id;
-        const document = await readDocumentFile(file);
-        const client = await getWritableClient(options.profile, id ? 'update a document' : 'publish a document');
-        const input = { ...document, title: options.title };
-        printDocument(id ? await client.update(id, input) : await client.publish(input), options.json);
-      })),
+    withDescriptionOptions(
+      leaf(kite, 'publish', 'Publish a Markdown or HTML file as a new document, or update one with --id')
+        .argument('<file>', 'A .md, .markdown, .html or .htm file')
+        .option('--id <id>', 'Update this document (art_…) instead of publishing a new one'),
+    ).action(run(async (file: string, options) => {
+      const id: string | undefined = options.id;
+      const summary = await summaryFrom(options);
+      const document = await readDocumentFile(file);
+      const client = await getWritableClient(options.profile, id ? 'update a document' : 'publish a document');
+      const input = { ...document, title: options.title, description: options.description, summary };
+      printDocument(id ? await client.update(id, input) : await client.publish(input), options.json);
+    })),
     `Examples:
 
   # publish a Markdown file; prints its id and private link
-  agentio kite publish notes.md --title "Weekly notes" --json
+  agentio kite publish notes.md --title "Weekly notes" \\
+    --description "What the team shipped this week" --summary-file summary.txt --json
 
-  # publish a new version of an existing document
+  # publish a new version of an existing document, keeping its description and summary
   agentio kite publish notes.md --id art_abc123
+
+A new document needs --description and --summary (or --summary-file).
+
+${STABILITY}
 
 Updating fails if someone changed the document since you last read it;
 read it again with \`agentio kite get\` and re-apply your change.`,
@@ -224,6 +263,57 @@ read it again with \`agentio kite get\` and re-apply your change.`,
   agentio kite delete art_abc123 --confirm`,
   );
 
+  addExamples(
+    withDescriptionOptions(
+      leaf(kite, 'describe', 'Change a document\'s title, description or summary without touching its content')
+        .argument('<id>', 'Document id (art_…)'),
+    ).action(run(async (id: string, options) => {
+      const summary = await summaryFrom(options);
+      const client = await getWritableClient(options.profile, 'describe a document');
+      printDocument(await client.describe(id, { title: options.title, description: options.description, summary }), options.json);
+    })),
+    `Examples:
+
+  # retitle a document; no new version is written
+  agentio kite describe art_abc123 --title "Q3 launch plan"
+
+  # write a summary that is missing or out of date
+  agentio kite describe art_abc123 --summary-file summary.txt
+
+${STABILITY}`,
+  );
+
+  addExamples(
+    leaf(kite, 'move', 'Move a document into one of your workspaces, or back to the inbox')
+      .argument('<id>', 'Document id (art_…)')
+      .argument('<workspace>', 'A workspace name or id, or inbox')
+      .action(run(async (id: string, workspace: string, options) => {
+        const client = await getWritableClient(options.profile, 'move a document');
+        printMoved(await client.move(id, workspace), options.json);
+      })),
+    `Examples:
+
+  agentio kite move art_abc123 Research
+  agentio kite move art_abc123 inbox
+
+Where you sort a document is private to you.`,
+  );
+
+  addExamples(
+    leaf(kite, 'organize', 'Every workspace and every document, with descriptions and summaries, to propose a tidier library')
+      .action(run(async (options) => {
+        const { client } = await getKiteClient(options.profile);
+        printLibrary(await client.organize(), options.json);
+      })),
+    `Examples:
+
+  agentio kite organize --json
+
+Propose new titles, descriptions and moves to the user before applying any of
+them with \`agentio kite describe\` and \`agentio kite move\`.`,
+  );
+
+  registerWorkspaceCommands(kite);
   registerShareCommands(kite);
   registerCommentCommands(kite);
 
@@ -255,6 +345,37 @@ read it again with \`agentio kite get\` and re-apply your change.`,
 
   # a second, read-only account under a chosen name
   agentio kite profile add --url https://kite.example.com --profile team --read-only`,
+  );
+}
+
+function registerWorkspaceCommands(kite: Command): void {
+  const workspaces = kite.command('workspaces').description('The workspaces you sort documents into');
+
+  addExamples(
+    leaf(workspaces, 'list', 'List your workspaces, with what belongs in each')
+      .action(run(async (options) => {
+        const { client } = await getKiteClient(options.profile);
+        printWorkspaces(await client.workspaces(), options.json);
+      })),
+    `Examples:
+
+  agentio kite workspaces list --json`,
+  );
+
+  addExamples(
+    leaf(workspaces, 'create', 'Create a workspace')
+      .argument('<name>', 'At most 60 characters; "Inbox" is reserved')
+      .requiredOption('--description <text>', 'What belongs in it, at most 500 characters')
+      .action(run(async (name: string, options) => {
+        const client = await getWritableClient(options.profile, 'create a workspace');
+        printWorkspace(await client.createWorkspace(name, options.description), options.json);
+      })),
+    `Examples:
+
+  agentio kite workspaces create Research --description "Papers, notes and reading lists"
+
+Write what belongs in it, not what it is called: assistants read the
+description to decide where a document goes.`,
   );
 }
 

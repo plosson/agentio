@@ -18,6 +18,8 @@ import { CliError, exitCodeForError, type ErrorCode } from '../../../src/utils/e
 import { FakeKite, caught } from './fake-kite';
 
 const ME = 'me@example.com';
+/** What a new document has to say about itself; most tests are not about it. */
+const DESCRIBED = { description: 'D.', summary: 'S.' };
 let fake: FakeKite;
 let token: string;
 let client: KiteClient;
@@ -51,7 +53,7 @@ describe('transport and auth', () => {
 
   test('Content-Type is sent only with a body', async () => {
     await client.list();
-    await client.publish({ type: 'markdown', content: '# x' });
+    await client.publish({ type: 'markdown', content: '# x', ...DESCRIBED });
     const [get, post] = fake.log;
     expect(get.headers['content-type']).toBeUndefined();
     expect(get.rawBody).toBe('');
@@ -124,7 +126,7 @@ describe('error mapping', () => {
 
   test('413 includes maxBytes', async () => {
     fake.maxBytes = 10;
-    const e = await caught(client.publish({ type: 'markdown', content: 'x'.repeat(11) }));
+    const e = await caught(client.publish({ type: 'markdown', content: 'x'.repeat(11), ...DESCRIBED }));
     expectCode(e, 'INVALID_PARAMS', 1);
     expect(e.message).toContain('10');
   });
@@ -192,7 +194,7 @@ describe('publish and update', () => {
   test('an empty file reaches the server and its 400 is mapped', async () => {
     await writeFile(join(dir, 'empty.md'), '');
     const doc = await readDocumentFile(join(dir, 'empty.md'));
-    const e = await caught(client.publish(doc));
+    const e = await caught(client.publish({ ...doc, ...DESCRIBED }));
     expect(e.code).toBe('INVALID_PARAMS');
     expect(fake.requests('POST').length).toBe(1);
     mustNotLeak(e);
@@ -201,16 +203,16 @@ describe('publish and update', () => {
   test('UTF-8 content round-trips byte for byte', async () => {
     const content = '# Émoji 🪁\r\nline two\r\n\u0001ÿ  end';
     await writeFile(join(dir, 'u.md'), content);
-    const published = await client.publish(await readDocumentFile(join(dir, 'u.md')));
+    const published = await client.publish({ ...(await readDocumentFile(join(dir, 'u.md'))), ...DESCRIBED });
     expect((await client.get(published.id)).content).toBe(content);
   });
 
   test('title is sent only when given; a blank title is refused locally', async () => {
-    await client.publish({ type: 'markdown', content: 'x' });
+    await client.publish({ type: 'markdown', content: 'x', ...DESCRIBED });
     expect(fake.log[0].body).not.toHaveProperty('title');
-    await client.publish({ type: 'markdown', content: 'x', title: 'T' });
+    await client.publish({ type: 'markdown', content: 'x', title: 'T', ...DESCRIBED });
     expect((fake.log[1].body as any).title).toBe('T');
-    expect((await caught(client.publish({ type: 'markdown', content: 'x', title: '  ' }))).code).toBe('INVALID_PARAMS');
+    expect((await caught(client.publish({ type: 'markdown', content: 'x', title: '  ', ...DESCRIBED }))).code).toBe('INVALID_PARAMS');
     expect(fake.log.length).toBe(2);
   });
 
@@ -290,7 +292,9 @@ describe('get, list, delete', () => {
     expect(docs.map((d) => d.id)).toEqual([b.id, a.id]);
     for (const d of docs) {
       expect(d).not.toHaveProperty('content');
-      expect(Object.keys(d).sort()).toEqual(['id', 'title', 'type', 'updated', 'url', 'version']);
+      expect(Object.keys(d).sort()).toEqual(
+        ['description', 'id', 'summary', 'summaryVersion', 'title', 'type', 'updated', 'url', 'version'],
+      );
     }
   });
 
@@ -517,3 +521,179 @@ describe('normaliseBaseUrl', () => {
   });
 });
 
+
+describe('what a document says about itself', () => {
+  test('a new document without a description is refused with no request', async () => {
+    const e = await caught(client.publish({ type: 'markdown', content: 'x', summary: 'S.' }));
+    expectCode(e, 'INVALID_PARAMS', 1);
+    expect(e.suggestion).toContain('--description');
+    expect(fake.log).toEqual([]);
+  });
+
+  test('a new document without a summary is refused with no request', async () => {
+    expect((await caught(client.publish({ type: 'markdown', content: 'x', description: 'D.' }))).code).toBe('INVALID_PARAMS');
+    expect(fake.log).toEqual([]);
+  });
+
+  test("the server's limits reach the user as INVALID_PARAMS, sanitised", async () => {
+    const e = await caught(client.publish({ type: 'markdown', content: 'x', description: 'D.', summary: Array(11).fill('l').join('\n') }));
+    expectCode(e, 'INVALID_PARAMS', 1);
+    expect(e.message).toContain('10 lines');
+    mustNotLeak(e);
+    expect(fake.docs.size).toBe(0);
+  });
+
+  test('an update leaves description and summary out unless given, so the server keeps them', async () => {
+    const doc = fake.seedDoc(ME, { description: 'Kept.', summary: 'Kept too.', summaryVersion: 1 });
+    const updated = await client.update(doc.id, { type: 'markdown', content: 'new' });
+    const put = fake.requests('PUT')[0].body as Record<string, unknown>;
+    expect(put).not.toHaveProperty('description');
+    expect(put).not.toHaveProperty('summary');
+    expect(updated).toMatchObject({ description: 'Kept.', summary: 'Kept too.', summaryVersion: 1, version: 2 });
+  });
+
+  test('a document from before descriptions lists with nulls, not undefined or a crash', async () => {
+    fake.seedDoc(ME, { description: null, summary: null, summaryVersion: null });
+    const [doc] = await client.list();
+    expect(doc).toMatchObject({ description: null, summary: null, summaryVersion: null });
+  });
+
+  test('a server that predates descriptions still lists, with nulls', async () => {
+    fake.failNext(200, { artifacts: [{ id: 'art_old', url: 'u', title: 'Old', type: 'markdown', version: 3, updatedAt: 'x' }] });
+    const [doc] = await client.list();
+    expect(doc).toMatchObject({ description: null, summary: null, summaryVersion: null });
+  });
+});
+
+describe('describe', () => {
+  test('sends one PATCH with only the fields given, and no read first', async () => {
+    const doc = fake.seedDoc(ME, { version: 3 });
+    const described = await client.describe(doc.id, { title: 'Q3 plan' });
+    expect(fake.log.map((r) => r.method)).toEqual(['PATCH']);
+    expect(fake.log[0].body).toEqual({ title: 'Q3 plan' });
+    expect(described).toMatchObject({ title: 'Q3 plan', version: 3 });
+    expect(fake.docs.get(doc.id)!.content).toBe('# Hello');
+  });
+
+  test('a summary written here catches up with the version', async () => {
+    const doc = fake.seedDoc(ME, { version: 5, summaryVersion: 2 });
+    expect((await client.describe(doc.id, { summary: 'New.' })).summaryVersion).toBe(5);
+  });
+
+  test('nothing to change is refused with no request', async () => {
+    const doc = fake.seedDoc(ME);
+    expect((await caught(client.describe(doc.id, {}))).code).toBe('INVALID_PARAMS');
+    expect(fake.log).toEqual([]);
+  });
+
+  test('a blank title is refused locally, even alongside a good summary', async () => {
+    const doc = fake.seedDoc(ME);
+    expect((await caught(client.describe(doc.id, { title: ' ', summary: 'Fine.' }))).code).toBe('INVALID_PARAMS');
+    expect(fake.log).toEqual([]);
+  });
+
+  test('a link instead of an id is refused with no request', async () => {
+    expect((await caught(client.describe('https://kite.example/a/slug', { title: 'T' }))).code).toBe('INVALID_PARAMS');
+    expect(fake.log).toEqual([]);
+  });
+
+  test("someone else's document is NOT_FOUND and unchanged", async () => {
+    const theirs = fake.seedDoc('other@example.com', { title: 'Theirs' });
+    expect((await caught(client.describe(theirs.id, { title: 'Mine now' }))).code).toBe('NOT_FOUND');
+    expect(fake.docs.get(theirs.id)!.title).toBe('Theirs');
+  });
+
+  test('a description over one line is refused by the server, changing nothing', async () => {
+    const doc = fake.seedDoc(ME, { title: 'Before' });
+    const e = await caught(client.describe(doc.id, { title: 'After', description: 'one\ntwo' }));
+    expect(e.code).toBe('INVALID_PARAMS');
+    expect(fake.docs.get(doc.id)!.title).toBe('Before');
+  });
+});
+
+describe('workspaces and move', () => {
+  test('a name is matched ignoring case and spaces, and sent as the id', async () => {
+    const research = fake.seedWorkspace(ME, 'Research');
+    const doc = fake.seedDoc(ME);
+    const moved = await client.move(doc.id, '  rESEARCH ');
+    expect(moved.workspace.id).toBe(research.id);
+    expect(fake.requests('PUT')[0].body).toEqual({ workspaceId: research.id });
+  });
+
+  test('inbox, in any case, moves it back', async () => {
+    const research = fake.seedWorkspace(ME, 'Research');
+    const doc = fake.seedDoc(ME);
+    await client.move(doc.id, research.id);
+    await client.move(doc.id, 'INBOX');
+    expect(fake.requests('PUT').at(-1)!.body).toEqual({ workspaceId: 'inbox' });
+    expect(fake.docs.get(doc.id)!.placements.has(ME)).toBe(false);
+  });
+
+  test('an exact id wins over a workspace whose name looks like it', async () => {
+    const real = fake.seedWorkspace(ME, 'Real');
+    const decoy = fake.seedWorkspace(ME, real.id);
+    const doc = fake.seedDoc(ME);
+    expect((await client.move(doc.id, real.id)).workspace.id).toBe(real.id);
+    expect(decoy.id).not.toBe(real.id);
+  });
+
+  test('an unknown workspace is NOT_FOUND, names the choices, and moves nothing', async () => {
+    fake.seedWorkspace(ME, 'Research');
+    const doc = fake.seedDoc(ME);
+    const e = await caught(client.move(doc.id, 'Reserch'));
+    expectCode(e, 'NOT_FOUND', 5);
+    expect(e.suggestion).toContain('Research');
+    expect(fake.requests('PUT')).toEqual([]);
+  });
+
+  test("another person's workspace id is unknown here, and moves nothing", async () => {
+    const theirs = fake.seedWorkspace('other@example.com', 'Theirs');
+    const doc = fake.seedDoc(ME);
+    expect((await caught(client.move(doc.id, theirs.id))).code).toBe('NOT_FOUND');
+    expect(fake.requests('PUT')).toEqual([]);
+  });
+
+  test('a blank workspace is refused and moves nothing', async () => {
+    const doc = fake.seedDoc(ME);
+    expect((await caught(client.move(doc.id, '   '))).code).toBe('INVALID_PARAMS');
+    expect(fake.requests('PUT')).toEqual([]);
+  });
+
+  test('a link instead of an id is refused with no request', async () => {
+    expect((await caught(client.move('https://kite.example/a/slug', 'inbox'))).code).toBe('INVALID_PARAMS');
+    expect(fake.log).toEqual([]);
+  });
+
+  test('a workspace name already taken is INVALID_PARAMS, not a version conflict', async () => {
+    fake.seedWorkspace(ME, 'Research');
+    const e = await caught(client.createWorkspace('research', 'Again.'));
+    expectCode(e, 'INVALID_PARAMS', 1);
+    expect(e.message).not.toContain('changed this document');
+    expect(e.message).toContain('Research'.toLowerCase());
+  });
+});
+
+describe('organize', () => {
+  test('every document with its workspace, every workspace, and the instructions, in two requests', async () => {
+    const research = fake.seedWorkspace(ME, 'Research');
+    const sorted = fake.seedDoc(ME, { title: 'Sorted' });
+    sorted.placements.set(ME, research.id);
+    const loose = fake.seedDoc(ME, { title: 'Loose', description: null, summary: null, summaryVersion: null });
+    fake.seedDoc('other@example.com', { title: 'Not mine' });
+
+    const library = await client.organize();
+    expect(fake.log.length).toBe(2);
+    expect(library.workspaces.map((w) => w.name)).toEqual(['Inbox', 'Research']);
+    expect(library.documents.map((d) => [d.title, d.workspace])).toEqual([['Loose', 'inbox'], ['Sorted', research.id]]);
+    expect(library.documents.find((d) => d.id === loose.id)).toMatchObject({ description: null, summary: null });
+    expect(library.instructions).toContain('Propose before you change anything');
+  });
+
+  test('a failing half fails the whole, rather than printing a library missing its workspaces', async () => {
+    fake.seedDoc(ME);
+    // Whichever of the two requests arrives first gets the failure.
+    fake.failNext(500, { error: { code: 'internal_error', message: 'boom' } });
+    const e = await caught(client.organize());
+    expect(e.code).toBe('API_ERROR');
+  });
+});

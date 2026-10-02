@@ -20,11 +20,25 @@ export interface KiteRawDocument {
   expiresAt: string | null;
   type: KiteDocumentType;
   title: string;
+  /** Absent from servers that predate descriptions; null on documents published before they were required. */
+  description?: string | null;
+  summary?: string | null;
+  /** The version the summary was written for. */
+  summaryVersion?: number | null;
   version: number;
   createdAt: string;
   updatedAt: string;
   url: string;
   content?: string;
+  /** On the listing only: a workspace id, or "inbox". */
+  workspaceId?: string;
+}
+
+export interface KiteRawWorkspace {
+  id: string;
+  name: string;
+  description: string;
+  count: number;
 }
 
 export interface KiteRawSharingState {
@@ -74,9 +88,31 @@ export interface KiteDocument {
   id: string;
   url: string;
   title: string;
+  /** One line on what it is; null when nobody has written one yet. */
+  description: string | null;
+  /** Up to ten lines on what it says; null when nobody has written one yet. */
+  summary: string | null;
+  /** The version the summary was written for; behind `version` when the content moved on without it. */
+  summaryVersion: number | null;
   type: KiteDocumentType;
   version: number;
   updated: string;
+}
+
+export interface KiteWorkspace {
+  id: string;
+  name: string;
+  /** What belongs in it. */
+  description: string;
+  /** How many documents in it you can see. */
+  count: number;
+}
+
+/** What `organize` prints: every workspace, every document and where it sits, and what to do next. */
+export interface KiteLibrary {
+  workspaces: KiteWorkspace[];
+  documents: Array<KiteDocument & { workspace: string }>;
+  instructions: string;
 }
 
 export interface KiteSharing {
