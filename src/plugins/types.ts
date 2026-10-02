@@ -14,6 +14,19 @@ export interface ProfilePlugin<TCredentials extends object> {
   createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
   reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;
+  /**
+   * What the admin may show about a profile without calling the service: the
+   * account it signs in as and a link to it. Pick public fields only (an
+   * email, a username, a server the owner chose); never a token, key or a URL
+   * that is itself a secret. The host keeps only http(s) links.
+   */
+  describe?(credentials: TCredentials): ProfileDetails;
+}
+
+/** Public facts about a profile, for people to read. */
+export interface ProfileDetails {
+  account?: string;
+  url?: string;
 }
 
 export interface CredentialLifecycle<TCredentials extends object> {
@@ -105,7 +118,8 @@ export interface SessionPlugin {
  */
 export interface ServiceRegistration {
   readonly id: string;
-  readonly brand?: { color?: string; iconPath?: string };
+  /** `url`: the service's own web app (mail.google.com…), the link for profiles that have none of their own. */
+  readonly brand?: { color?: string; iconPath?: string; url?: string };
   readonly registerCommands: (program: Command) => void;
 }
 

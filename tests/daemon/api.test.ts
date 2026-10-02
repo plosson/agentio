@@ -198,6 +198,20 @@ describe('daemon HTTP surface', () => {
     expect(await res.json()).toMatchObject({ code: 'VAULT_LOCKED' });
   });
 
+  test('the profile list carries public accounts and links, never secrets', async () => {
+    const cookie = await cookieFrom(await unlock());
+    await saveProfile('notes', 'macmini', { baseUrl: 'https://mac.example.ts.net', apiKey: 'notes-secret-key' });
+    await saveProfile('notes', 'sneaky', { baseUrl: 'javascript:alert(1)', apiKey: 'other-secret' });
+    const res = await call('/ui/api/status?test=false', { headers: { cookie } });
+    const text = await res.text();
+    expect(text).not.toContain('notes-secret-key');
+    expect(text).not.toContain('other-secret');
+    expect(text).not.toContain('javascript:');
+    const notes = JSON.parse(text).services.notes as Array<{ profile: string; url?: string }>;
+    expect(notes.find((p) => p.profile === 'macmini')?.url).toBe('https://mac.example.ts.net');
+    expect(notes.find((p) => p.profile === 'sneaky')?.url).toBeUndefined();
+  });
+
   test('read-only can be toggled from the UI', async () => {
     const cookie = await cookieFrom(await unlock());
     const off = await call('/ui/api/profiles/discourse/bot', {
