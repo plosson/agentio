@@ -10,10 +10,12 @@ export default defineServicePlugin<GSheetsCredentials, GoogleCamelTokens>()({
   id: 'gsheets',
   displayName: 'Google Sheets',
   description: 'Use when interacting with Google Sheets via the agentio CLI.',
+  brand: { url: 'https://sheets.google.com' },
   registerCommands: registerGSheetsCommands,
   profile: {
     setup: gsheetsProfileAdd,
     createClient: (credentials) => new GSheetsClient(credentials),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GSheetsCredentials>('gsheets'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,

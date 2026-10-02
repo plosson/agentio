@@ -12,5 +12,6 @@ export default defineServicePlugin<DiscourseCredentials>()({
   profile: {
     setup: discourseProfileAdd,
     createClient: (credentials) => new DiscourseClient(credentials),
+    describe: (credentials) => ({ account: credentials.username, url: credentials.baseUrl }),
   },
 });

@@ -1,5 +1,11 @@
 // Profiles: the list grouped by service, one profile with its fix, and adding one.
 
+// Account and link, shown in full until space runs out, then cut with an ellipsis; the title holds the rest.
+const accountText = (r) => (r.account ? html`<span class="clip" title="${r.account}">${r.account}</span>` : '');
+const linkOut = (r) => (r.url && /^https?:\/\//i.test(r.url)
+  ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer" title="${r.url}"><span class="clip">${linkLabel(r.url)}</span><span aria-hidden="true">↗</span></a>`
+  : '');
+
 VIEWS.profiles = () => {
   const now = Date.now();
   const s = hubSummary(state.rows, state.keys, state.results, now);
@@ -19,7 +25,7 @@ VIEWS.profiles = () => {
       ? html`<div class="box empty mt-12"><h2>No profiles yet.</h2><p class="muted">Profiles are added from a terminal on the hub.</p><a class="btn pri" href="#add">Add a profile</a></div>`
       : visible.length === 0 ? noMatch()
       : html`<div class="box mt-12"><table class="stack compact">
-          <tr><th>Service</th><th>Profile</th><th>Status</th><th>Used by</th></tr>
+          <tr><th>Service</th><th>Profile</th><th>Account</th><th>Link</th><th>Status</th><th>Used by</th></tr>
           ${groups.map((g) => g.rows.map((r, i) => {
             const st = effectiveStatus(r, state.results);
             const users = machinesUsing(state.keys, r).length;
@@ -27,8 +33,10 @@ VIEWS.profiles = () => {
             return html`<tr class="${i === 0 ? 'starts' : 'same'}">
               <td class="service">${i === 0 ? html`<span class="svc">${icon(g.service)}${g.name}</span>` : ''}</td>
               <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a>${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}</td>
-              <td>${pill(st.status, r.service)}</td>
-              <td><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
+              <td class="detail">${accountText(r)}</td>
+              <td class="detail">${linkOut(r)}</td>
+              <td class="inl">${pill(st.status, r.service)}</td>
+              <td class="inl"><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
             </tr>`;
           }))}
         </table></div>`}`;
@@ -58,7 +66,7 @@ VIEWS.profile = (route) => {
 
   return html`
     <a class="muted" href="#profiles">Profiles ›</a>
-    <div class="row"><span class="svc grow">${icon(r.service, 'lg')}<span><h1 class="m-0">${r.service} / ${r.profile}</h1>${r.info ? html`<span class="muted">${r.info}</span>` : ''}</span></span>${pill(st.status, r.service)}</div>
+    <div class="row"><span class="svc grow">${icon(r.service, 'lg')}<span><h1 class="m-0">${r.service} / ${r.profile}</h1>${r.info ? html`<span class="muted">${r.info}</span>` : ''}${r.account || r.url ? html`<span class="details">${accountText(r)}${linkOut(r)}</span>` : ''}</span></span>${pill(st.status, r.service)}</div>
     <div class="grid2 mt-14">
       <div class="col">${statusBox}</div>
       <div class="col">

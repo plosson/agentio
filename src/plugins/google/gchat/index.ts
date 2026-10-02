@@ -12,10 +12,12 @@ export default defineServicePlugin<GChatCredentials, GoogleCamelTokens>()({
   id: 'gchat',
   displayName: 'Google Chat',
   description: 'Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.',
+  brand: { url: 'https://chat.google.com' },
   registerCommands: registerGChatCommands,
   profile: {
     setup: gchatProfileAdd,
     createClient: (credentials) => new GChatClient(credentials),
+    describe: (credentials) => ({ account: 'email' in credentials ? credentials.email : undefined }),
     async reauthenticate(credentials, profileName) {
       const existing = credentials;
       if (existing?.type === 'webhook') {

@@ -13,6 +13,7 @@ export default defineServicePlugin<KiteCredentials>()({
   profile: {
     setup: kiteProfileAdd,
     createClient: (credentials) => new KiteClient(credentials),
+    describe: (credentials) => ({ account: credentials.email, url: credentials.baseUrl }),
     reauthenticate: (credentials, profileName) => reauthenticateKite(credentials, profileName),
   },
 });

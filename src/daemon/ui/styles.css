@@ -91,7 +91,14 @@ table.compact td { padding: 5px 8px; border-bottom: 0; }
 table.compact th { padding: 5px 8px; }
 table.compact tr.starts td { border-top: 1.5px dashed var(--line); }
 table.compact tr:nth-child(2) td { border-top: 0; }
-table.compact td.service { width: 30%; white-space: nowrap; font-weight: 700; }
+table.compact td.service { width: 20%; white-space: nowrap; font-weight: 700; }
+/* max-width: 0 lets the width share decide, so long text is cut instead of widening the table. */
+table.compact td.detail { width: 22%; max-width: 0; }
+.clip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.ext { display: inline-flex; gap: 4px; max-width: 100%; }
+.details { display: flex; flex-wrap: wrap; gap: 2px 14px; max-width: 100%; min-width: 0; }
+.details > * { max-width: 100%; }
+.svc.grow, .svc.grow > span { min-width: 0; }
 tr:last-child td { border-bottom: 0; }
 .cell { text-align: center; font-weight: 700; font-size: 17px; }
 .cell button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; padding: 4px 10px; border-radius: 8px; }
@@ -202,6 +209,8 @@ dialog::backdrop { background: rgba(20, 20, 18, .45); }
   table.stack.compact tr:nth-child(2) { border-top: 0; }
   table.stack.compact td, table.stack.compact tr.starts td { border: 0; padding: 1px 0; }
   table.stack.compact tr.same td.service { display: none; }
-  table.stack.compact td:nth-child(3), table.stack.compact td:nth-child(4) { display: inline-block; width: auto; margin-right: 10px; }
+  table.stack.compact td.detail { width: 100%; max-width: 100%; }
+  table.stack.compact td.detail:empty { display: none; }
+  table.stack.compact td.inl { display: inline-block; width: auto; margin-right: 10px; }
   #toasts { bottom: 76px; }
 }

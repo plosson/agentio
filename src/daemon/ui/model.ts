@@ -186,6 +186,9 @@ export interface ProfileRow {
   status: Status;
   info?: string;
   error?: string;
+  /** Who the profile signs in as, and where it lives; both public, from the plugin. */
+  account?: string;
+  url?: string;
 }
 
 /** A key as `GET /ui/api/keys` returns it: one machine. */
@@ -352,12 +355,18 @@ export function groupProfiles(rows: ProfileRow[], displayName: (service: string)
 /**
  * Whether a profile matches what the owner typed in the filter box: every
  * word, ignoring case, somewhere in its service id, the service's display
- * name, its name or its account. Words are plain text, never patterns.
+ * name, its name, its account or its link. Words are plain text, never patterns.
  */
+/** A link as shown: https:// and a lone trailing slash dropped; http:// kept, so it reads as unencrypted. */
+export function linkLabel(url: string): string {
+  const bare = url.replace(/^https:\/\//i, '');
+  return bare === url ? url : bare.replace(/^([^/?#]+)\/$/, '$1');
+}
+
 export function matchesFilter(row: ProfileRow, query: string, displayName: (service: string) => string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
-  const haystack = `${row.service} ${displayName(row.service)} ${row.profile} ${row.info ?? ''}`.toLowerCase();
+  const haystack = `${row.service} ${displayName(row.service)} ${row.profile} ${row.info ?? ''} ${row.account ?? ''} ${row.url ?? ''}`.toLowerCase();
   return words.every((word) => haystack.includes(word));
 }
 

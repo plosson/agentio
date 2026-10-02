@@ -21,10 +21,12 @@ export default defineServicePlugin<GitHubCredentials>()({
   id: 'github',
   displayName: 'GitHub',
   description: 'Use when interacting with GitHub via the agentio CLI.',
+  brand: { url: 'https://github.com' },
   registerCommands: registerGitHubCommands,
   profile: {
     setup: githubProfileAdd,
     createClient: (credentials) => new GitHubClient(credentials),
+    describe: (credentials) => ({ account: credentials.username, url: credentials.username ? `https://github.com/${encodeURIComponent(credentials.username)}` : undefined }),
     reauthenticate: reauthenticateGitHub,
   },
 });

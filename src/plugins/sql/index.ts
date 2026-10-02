@@ -12,5 +12,6 @@ export default defineServicePlugin<SqlCredentials>()({
   profile: {
     setup: sqlProfileAdd,
     createClient: (credentials) => new SqlClient(credentials),
+    describe: (credentials) => ({ account: credentials.displayName }),
   },
 });

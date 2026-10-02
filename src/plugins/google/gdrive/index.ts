@@ -12,10 +12,12 @@ export default defineServicePlugin<GDriveCredentials, GoogleCamelTokens>()({
   id: 'gdrive',
   displayName: 'Google Drive',
   description: 'Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.',
+  brand: { url: 'https://drive.google.com' },
   registerCommands: registerGDriveCommands,
   profile: {
     setup: gdriveProfileAdd,
     createClient: (credentials) => new GDriveClient(credentials),
+    describe: (credentials) => ({ account: credentials.email }),
     async reauthenticate(credentials, profileName) {
       const existing = credentials;
       const accessLevel = existing?.accessLevel || 'readonly';

@@ -10,10 +10,12 @@ export default defineServicePlugin<GSlidesCredentials, GoogleCamelTokens>()({
   id: 'gslides',
   displayName: 'Google Slides',
   description: 'Use when interacting with Google Slides via the agentio CLI.',
+  brand: { url: 'https://slides.google.com' },
   registerCommands: registerGSlidesCommands,
   profile: {
     setup: gslidesProfileAdd,
     createClient: (credentials) => new GSlidesClient(credentials),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GSlidesCredentials>('gslides'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,

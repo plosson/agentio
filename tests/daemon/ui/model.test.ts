@@ -10,6 +10,7 @@ import {
   groupProfiles,
   html,
   hubSummary,
+  linkLabel,
   matchesFilter,
   allowWritesCommand,
   isSilent,
@@ -351,6 +352,13 @@ describe('filtering profiles', () => {
     expect(matchesFilter(row('sql', 'x'), '(', name)).toBe(false);
   });
 
+  test('matches the account and the link the hub shows for the profile', () => {
+    const notes = row('notes', 'mac', { account: 'me@icloud.com', url: 'https://mac.tail1.ts.net' });
+    expect(matchesFilter(notes, 'icloud', name)).toBe(true);
+    expect(matchesFilter(notes, 'tail1', name)).toBe(true);
+    expect(matchesFilter(row('notes', 'mac'), 'undefined', name)).toBe(false);
+  });
+
   test('a row with no account still filters by its other fields', () => {
     expect(matchesFilter(row('notes', 'macmini'), 'apple mac', name)).toBe(true);
   });
@@ -360,5 +368,24 @@ describe('read-only', () => {
   test('the command that lifts it names the profile, quoted when needed', () => {
     expect(allowWritesCommand('gmail', 'work')).toBe('agentio gmail profile update --profile work --no-read-only');
     expect(allowWritesCommand('gmail', 'my work')).toBe("agentio gmail profile update --profile 'my work' --no-read-only");
+  });
+});
+
+describe('link labels', () => {
+  test('drop the scheme and a bare trailing slash, keep the rest', () => {
+    expect(linkLabel('https://mail.google.com')).toBe('mail.google.com');
+    expect(linkLabel('https://mail.google.com/')).toBe('mail.google.com');
+    expect(linkLabel('https://github.com/plosson')).toBe('github.com/plosson');
+    expect(linkLabel('https://x.example/a/?q=1#f')).toBe('x.example/a/?q=1#f');
+  });
+
+  test('plain http stays visible, so an unencrypted link is not mistaken for a safe one', () => {
+    expect(linkLabel('http://mac.local:8080')).toBe('http://mac.local:8080');
+  });
+
+  test('anything that is not an http(s) URL is shown as is, never altered', () => {
+    expect(linkLabel('javascript:alert(1)')).toBe('javascript:alert(1)');
+    expect(linkLabel('')).toBe('');
+    expect(linkLabel('HTTPS://Upper.example')).toBe('Upper.example');
   });
 });

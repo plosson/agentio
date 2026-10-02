@@ -126,6 +126,14 @@ checks. A plugin without `profile.reauthenticate` receives the generic profile
 setup instruction; reauthentication policy is not maintained in a central
 service-name list.
 
+A plugin may also give `profile.describe(credentials)`, returning
+`{ account?, url? }`: what the admin shows next to a profile without calling
+the service, such as the email it signs in as or the server the owner chose.
+Pick public fields only, never a token, key or a URL that is itself a secret
+(a webhook, a connection string). The host keeps only http(s) links without
+embedded credentials. `brand.url` names the service's own web app
+(`https://mail.google.com`), the link for profiles that have none of their own.
+
 `profile` is omitted for services such as RSS that need no stored credentials.
 All hooks are optional, so static-token services can adopt the folder layout
 without implementing OAuth behavior.

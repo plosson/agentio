@@ -13,6 +13,7 @@ const jira = defineServicePlugin<JiraCredentials>()({
   profile: {
     setup: jiraProfileAdd,
     createClient: (credentials) => new JiraClient(credentials),
+    describe: (credentials) => ({ url: credentials.siteUrl }),
     reauthenticate: reauthenticateJira,
   },
   credentialLifecycle: jiraCredentialLifecycle,

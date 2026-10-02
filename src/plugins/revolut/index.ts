@@ -9,6 +9,7 @@ export default defineServicePlugin<RevolutCredentials>()({
   id: 'revolut',
   displayName: 'Revolut',
   description: 'Use when interacting with Revolut Business via the agentio CLI.',
+  brand: { url: 'https://business.revolut.com' },
   registerCommands: registerRevolutCommands,
   profile: {
     setup: revolutProfileAdd,

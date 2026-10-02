@@ -21,7 +21,9 @@ import {
 import { INDEX_HTML } from './ui/assets';
 import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth, listDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
-import { getPluginRegistry } from '../plugins/registry';
+import { findServicePlugin, getPluginRegistry } from '../plugins/registry';
+import { profileDetails } from '../plugins/profile-details';
+import { getCredentials } from '../auth/token-store';
 import { FONTS } from './ui/fonts';
 import { isLegacyServicePlugin } from '../plugins/types';
 
@@ -181,9 +183,11 @@ const inDaemon = async (service: ServiceName, name: string) => sessionStatus(ser
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
   const statuses = await getProfileStatuses({ test, sessionStatus: inDaemon });
-  const services: Record<string, Array<Omit<ProfileStatus, 'service'>>> = {};
+  const services: Record<string, Array<Omit<ProfileStatus, 'service'> & { account?: string; url?: string }>> = {};
   for (const { service, ...rest } of statuses) {
-    (services[service] ??= []).push(rest);
+    // Public facts only, read from the vault: no call to the service, no secret.
+    const details = profileDetails(findServicePlugin(service), await getCredentials(service, rest.profile));
+    (services[service] ??= []).push({ ...rest, ...details });
   }
   return json({ version: ctx.version, services });
 }

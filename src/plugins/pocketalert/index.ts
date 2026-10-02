@@ -8,6 +8,7 @@ export default defineServicePlugin<PocketAlertCredentials>()({
   id: 'pocketalert',
   displayName: 'Pocket Alert',
   description: 'Use when sending push notifications to phones via Pocket Alert with the agentio CLI.',
+  brand: { url: 'https://pocketalert.app' },
   registerCommands: registerPocketAlertCommands,
   profile: {
     setup: pocketAlertProfileAdd,

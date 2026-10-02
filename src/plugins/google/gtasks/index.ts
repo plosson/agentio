@@ -10,10 +10,12 @@ export default defineServicePlugin<GTasksCredentials, OAuthTokens>()({
   id: 'gtasks',
   displayName: 'Google Tasks',
   description: 'Use when interacting with Google Tasks via the agentio CLI.',
+  brand: { url: 'https://tasks.google.com' },
   registerCommands: registerGTasksCommands,
   profile: {
     setup: gtasksProfileAdd,
     createClient: (credentials) => new GTasksClient(googleAuthFromSnakeCredentials(credentials)),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gtasks'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,

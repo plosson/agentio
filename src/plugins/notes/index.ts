@@ -13,5 +13,6 @@ export default defineServicePlugin<NotesCredentials>()({
   profile: {
     setup: notesProfileAdd,
     createClient: (credentials) => new NotesClient(credentials),
+    describe: (credentials) => ({ url: credentials.baseUrl }),
   },
 });

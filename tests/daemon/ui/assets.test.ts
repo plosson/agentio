@@ -93,7 +93,15 @@ describe('the assembled admin page', () => {
   test('profiles: one row per profile, the service named once per group', () => {
     expect(script).not.toContain('<tr class="group">');
     expect(script).toContain('<table class="stack compact">');
-    expect(script).toContain('<th>Service</th><th>Profile</th><th>Status</th><th>Used by</th>');
+    expect(script).toContain('<th>Service</th><th>Profile</th><th>Account</th><th>Link</th><th>Status</th><th>Used by</th>');
+  });
+
+  test('a profile link opens apart from the admin, and long details are cut, not wrapped', () => {
+    // Every outbound link must deny the target page a handle on the admin's window.
+    const blanks = script.match(/target="_blank"[^>]*>/g) ?? [];
+    expect(blanks.length).toBeGreaterThan(0);
+    for (const tag of blanks) expect(tag).toContain('rel="noopener noreferrer"');
+    expect(style).toMatch(/\.clip \{[^}]*text-overflow: ellipsis/);
   });
 
   test('the locked screen: a drawn padlock that reacts, and stays still for reduced motion', () => {
