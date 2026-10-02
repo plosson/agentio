@@ -86,6 +86,12 @@ td, th { border-bottom: 1.5px dashed var(--line); padding: 7px 6px; text-align: 
 th { border-bottom: 2px solid var(--ink); font-size: 14px; }
 tr.group td { border-bottom: 0; padding-top: 12px; font-weight: 700; }
 tr.indent td:first-child { padding-left: 26px; }
+/* Compact list: one row per profile, a line between services only. */
+table.compact td { padding: 5px 8px; border-bottom: 0; }
+table.compact th { padding: 5px 8px; }
+table.compact tr.starts td { border-top: 1.5px dashed var(--line); }
+table.compact tr:nth-child(2) td { border-top: 0; }
+table.compact td.service { width: 30%; white-space: nowrap; font-weight: 700; }
 tr:last-child td { border-bottom: 0; }
 .cell { text-align: center; font-weight: 700; font-size: 17px; }
 .cell button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; padding: 4px 10px; border-radius: 8px; }
@@ -190,5 +196,12 @@ dialog::backdrop { background: rgba(20, 20, 18, .45); }
   table.stack tr { border-bottom: 1.5px dashed var(--line); padding: 8px 0; }
   table.stack td { border: 0; padding: 2px 0; }
   table.stack tr.indent td:first-child { padding-left: 0; }
+  /* Compact cards: service on its own line only when it starts a group, status and machines side by side. */
+  table.stack.compact tr { border-bottom: 0; padding: 6px 0; }
+  table.stack.compact tr.starts { border-top: 1.5px dashed var(--line); padding-top: 10px; }
+  table.stack.compact tr:nth-child(2) { border-top: 0; }
+  table.stack.compact td, table.stack.compact tr.starts td { border: 0; padding: 1px 0; }
+  table.stack.compact tr.same td.service { display: none; }
+  table.stack.compact td:nth-child(3), table.stack.compact td:nth-child(4) { display: inline-block; width: auto; margin-right: 10px; }
   #toasts { bottom: 76px; }
 }

@@ -90,6 +90,12 @@ describe('the assembled admin page', () => {
     expect(script).toContain('profile update --profile');
   });
 
+  test('profiles: one row per profile, the service named once per group', () => {
+    expect(script).not.toContain('<tr class="group">');
+    expect(script).toContain('<table class="stack compact">');
+    expect(script).toContain('<th>Service</th><th>Profile</th><th>Status</th><th>Used by</th>');
+  });
+
   test('the locked screen: a drawn padlock that reacts, and stays still for reduced motion', () => {
     expect(script).toContain('function lockArt(');
     for (const state of ['busy', 'nope', 'open', 'peek']) expect(style).toContain(`.lock.${state}`);
