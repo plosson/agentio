@@ -15,6 +15,7 @@ import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
+import { maybeAutoUpdate } from './commands/auto-update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
 import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
@@ -87,6 +88,9 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
+    const commandPath: string[] = [];
+    for (let cmd: Command | null = actionCommand; cmd?.parent; cmd = cmd.parent) commandPath.unshift(cmd.name());
+    await maybeAutoUpdate(commandPath);
     enterJsonMode(actionCommand);
     const name = actionCommand.name();
     const parent = actionCommand.parent?.name();
