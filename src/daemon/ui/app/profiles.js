@@ -18,19 +18,19 @@ VIEWS.profiles = () => {
     ${state.rows.length === 0
       ? html`<div class="box empty mt-12"><h2>No profiles yet.</h2><p class="muted">Profiles are added from a terminal on the hub.</p><a class="btn pri" href="#add">Add a profile</a></div>`
       : visible.length === 0 ? noMatch()
-      : html`<div class="box mt-12"><table class="stack">
-          <tr><th>Profile</th><th>Status</th><th>Used by</th></tr>
-          ${groups.map((g) => html`
-            <tr class="group"><td colspan="3"><span class="svc">${icon(g.service)}${g.name}</span></td></tr>
-            ${g.rows.map((r) => {
-              const st = effectiveStatus(r, state.results);
-              const users = machinesUsing(state.keys, r).length;
-              return html`<tr class="indent">
-                <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a>${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}</td>
-                <td>${pill(st.status, r.service)}</td>
-                <td><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
-              </tr>`;
-            })}`)}
+      : html`<div class="box mt-12"><table class="stack compact">
+          <tr><th>Service</th><th>Profile</th><th>Status</th><th>Used by</th></tr>
+          ${groups.map((g) => g.rows.map((r, i) => {
+            const st = effectiveStatus(r, state.results);
+            const users = machinesUsing(state.keys, r).length;
+            // The service is named on its first profile only; a line separates services.
+            return html`<tr class="${i === 0 ? 'starts' : 'same'}">
+              <td class="service">${i === 0 ? html`<span class="svc">${icon(g.service)}${g.name}</span>` : ''}</td>
+              <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a>${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}</td>
+              <td>${pill(st.status, r.service)}</td>
+              <td><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
+            </tr>`;
+          }))}
         </table></div>`}`;
 };
 

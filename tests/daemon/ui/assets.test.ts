@@ -90,6 +90,12 @@ describe('the assembled admin page', () => {
     expect(script).toContain('profile update --profile');
   });
 
+  test('profiles: one row per profile, the service named once per group', () => {
+    expect(script).not.toContain('<tr class="group">');
+    expect(script).toContain('<table class="stack compact">');
+    expect(script).toContain('<th>Service</th><th>Profile</th><th>Status</th><th>Used by</th>');
+  });
+
   test('profiles and access share a filter that types without losing the caret', () => {
     expect(script).toContain("INPUTS.filter");
     expect(script).toContain("ACTIONS['clear-filter']");
