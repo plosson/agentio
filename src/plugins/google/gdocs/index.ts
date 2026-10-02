@@ -10,10 +10,12 @@ export default defineServicePlugin<GDocsCredentials, GoogleCamelTokens>()({
   id: 'gdocs',
   displayName: 'Google Docs',
   description: 'Use when interacting with Google Docs via the agentio CLI - list, read, create, update from Markdown.',
+  brand: { url: 'https://docs.google.com' },
   registerCommands: registerGDocsCommands,
   profile: {
     setup: gdocsProfileAdd,
     createClient: (credentials) => new GDocsClient(credentials),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GDocsCredentials>('gdocs'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,

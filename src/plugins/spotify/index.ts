@@ -10,10 +10,12 @@ export default defineServicePlugin<SpotifyCredentials>()({
   displayName: 'Spotify',
   description:
     'Use when interacting with Spotify via the agentio CLI — search, playlists, library, history, and playback control.',
+  brand: { url: 'https://open.spotify.com' },
   registerCommands: registerSpotifyCommands,
   profile: {
     setup: spotifyProfileAdd,
     createClient: (credentials) => new SpotifyClient(credentials),
+    describe: (credentials) => ({ account: credentials.displayName ?? credentials.userId }),
     reauthenticate: reauthenticateSpotify,
   },
   credentialLifecycle: spotifyCredentialLifecycle,

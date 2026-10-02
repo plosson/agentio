@@ -9,10 +9,12 @@ export default defineServicePlugin<GoogleSnakeCredentials, OAuthTokens>()({
   id: 'gmail',
   displayName: 'Gmail',
   description: 'Use when interacting with Gmail via the agentio CLI - list, read, search, send, draft, reply, archive, mark, attachments, export.',
+  brand: { url: 'https://mail.google.com' },
   registerCommands: registerGmailCommands,
   profile: {
     setup: gmailProfileAdd,
     createClient: (credentials) => new GmailClient(googleAuthFromSnakeCredentials(credentials)),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gmail'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,

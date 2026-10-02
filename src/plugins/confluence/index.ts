@@ -13,6 +13,7 @@ export default defineServicePlugin<ConfluenceCredentials>()({
   profile: {
     setup: confluenceProfileAdd,
     createClient: (credentials) => new ConfluenceClient(credentials),
+    describe: (credentials) => ({ url: credentials.siteUrl }),
     reauthenticate: reauthenticateConfluence,
   },
   credentialLifecycle: confluenceCredentialLifecycle,

@@ -13,6 +13,7 @@ export default defineServicePlugin<FalcoCredentials>()({
   profile: {
     setup: falcoProfileAdd,
     createClient: (credentials) => new FalcoClient(credentials),
+    describe: (credentials) => ({ account: credentials.organizationName ? `${credentials.userEmail} · ${credentials.organizationName}` : credentials.userEmail }),
     reauthenticate: reauthenticateFalco,
   },
   credentialLifecycle: falcoCredentialLifecycle,

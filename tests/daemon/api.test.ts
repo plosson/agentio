@@ -153,7 +153,7 @@ describe('daemon HTTP surface', () => {
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({
       version: 'test',
-      services: { slack: [{ profile: 'empty', status: 'no-creds' }], discourse: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
+      services: { slack: [{ profile: 'empty', status: 'no-creds', url: 'https://app.slack.com' }], discourse: [{ profile: 'bot', readOnly: true, status: 'skipped' }] },
     });
   });
 

@@ -10,10 +10,12 @@ export default defineServicePlugin<GCalCredentials, OAuthTokens>()({
   id: 'gcal',
   displayName: 'Google Calendar',
   description: 'Use when interacting with Google Calendar via the agentio CLI.',
+  brand: { url: 'https://calendar.google.com' },
   registerCommands: registerGCalCommands,
   profile: {
     setup: gcalProfileAdd,
     createClient: (credentials) => new GCalClient(googleAuthFromSnakeCredentials(credentials)),
+    describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gcal'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,
