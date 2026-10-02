@@ -90,6 +90,13 @@ describe('the assembled admin page', () => {
     expect(script).toContain('profile update --profile');
   });
 
+  test('the locked screen: a drawn padlock that reacts, and stays still for reduced motion', () => {
+    expect(script).toContain('function lockArt(');
+    for (const state of ['busy', 'nope', 'open', 'peek']) expect(style).toContain(`.lock.${state}`);
+    expect(style).toMatch(/@media \(prefers-reduced-motion: reduce\)[^}]*\.lock/);
+    expect(script).toContain("prefers-reduced-motion: reduce");
+  });
+
   test('profiles and access share a filter that types without losing the caret', () => {
     expect(script).toContain("INPUTS.filter");
     expect(script).toContain("ACTIONS['clear-filter']");
