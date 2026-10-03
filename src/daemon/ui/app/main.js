@@ -1,5 +1,8 @@
 // Boot: delegated listeners, routing, and the first session probe.
 
+// The gate dialog is the only way back in: Esc must not close it over a dead session.
+$('gate-dialog').addEventListener('cancel', (ev) => ev.preventDefault());
+
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
   if (!el || !ACTIONS[el.dataset.action]) return;
@@ -54,8 +57,15 @@ function closeMenu() {
   $('menu-button').setAttribute('aria-expanded', 'false');
 }
 
+// A same-tab tap on a menu link does not fire hashchange: close the menu on the tap.
+document.addEventListener('click', (ev) => {
+  if (ev.target.closest('#tabs a')) closeMenu();
+});
+
 window.addEventListener('hashchange', () => {
   closeMenu();
+  state.ui.renaming = null;
+  state.ui.renameError = '';
   clearToasts();
   render();
   main.focus();

@@ -155,11 +155,33 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/\.clip \{[^}]*text-overflow: ellipsis/);
   });
 
-  test('the locked screen: a drawn padlock that reacts, and stays still for reduced motion', () => {
-    expect(script).toContain('function lockArt(');
-    for (const state of ['busy', 'nope', 'open', 'peek']) expect(style).toContain(`.lock.${state}`);
-    expect(style).toMatch(/@media \(prefers-reduced-motion: reduce\)[^}]*\.lock/);
-    expect(script).toContain("prefers-reduced-motion: reduce");
+  test('the gate: the vault icon, two states, the strong button and the help line', () => {
+    expect(script).not.toContain('function lockArt(');
+    expect(script).toContain(`const VAULT_ICON = ${JSON.stringify(ICON_SVG)};`);
+    expect(script).toContain('Unlock the vault');
+    expect(script).toContain('Sign in to continue');
+    expect(script).toContain("Your agents can't get their keys until you unlock it.");
+    expect(script).toContain('The vault is unlocked and your agents keep working.');
+    expect(script).toContain("Forgot the passphrase? It can't be recovered.");
+    expect(script).toContain('class="button strong wide" id="unlock-btn"');
+  });
+
+  test('the gate: motion only on state changes; only the dial turning while checking may loop', () => {
+    for (const mood of ['checking', 'nope', 'open']) expect(style).toContain(`.vault.${mood}`);
+    expect(style).not.toMatch(/\.lock(?![\w-])/);
+    const looping = style.match(/[^{}]+\{[^{}]*infinite[^{}]*\}/g) ?? [];
+    expect(looping.length).toBeGreaterThan(0);
+    for (const rule of looping) expect(rule.trim().startsWith('.vault.checking')).toBe(true);
+  });
+
+  test('the gate: when a session ends mid-task it opens over the screen and cannot be dismissed', () => {
+    expect(INDEX_HTML).toContain('<dialog id="gate-dialog" class="dialog gate-dialog" aria-labelledby="gate-title"></dialog>');
+    expect(script).toMatch(/function showUnlock\(locked\) \{[\s\S]*?if \(state\.loaded\) \{[\s\S]*?showModal\(\)/);
+    expect(script).toContain("$('gate-dialog').addEventListener('cancel', (ev) => ev.preventDefault());");
+    // Signing out or locking on purpose leaves the hub: the full-page gate, not the dialog.
+    expect(script).toContain('function leaveHub(locked)');
+    expect(script).toMatch(/ACTIONS\['sign-out'\] = async \(\) => \{[\s\S]*?leaveHub\(false\)/);
+    expect(script).toMatch(/ACTIONS\.lock = async \(\) => \{[\s\S]*?leaveHub\(true\)/);
   });
 
   test('profiles and access share a filter that types without losing the caret', () => {

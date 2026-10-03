@@ -35,8 +35,8 @@ const model = new Bun.Transpiler({ loader: 'ts' })
   .transformSync(text(modelSource))
   .replace(/^export (?=(async )?function |const |let |class )/gm, '');
 
-/** Order matters: the screens use the model, the icons and core; main boots last. */
-const script = [model, icons, core, unlock, profiles, machines, authorize, access, settings, main].map(text).join('\n');
+/** Order matters: the screens use the model, the icons and core; main boots last. The gate draws the vault icon inline. */
+const script = [`const VAULT_ICON = ${JSON.stringify(ICON_SVG)};`, ...[model, icons, core, unlock, profiles, machines, authorize, access, settings, main].map(text)].join('\n');
 
 /**
  * The admin page with its style and script inlined. Function replacers keep
