@@ -158,7 +158,12 @@ export async function reauthGoogleGroups<T extends { service: string; profile: s
   for (const status of selected) {
     const entry = suite.find((e) => e.service === status.service);
     if (!entry) continue;
-    const existing = await getCredentials<StoredGoogleCredentials>(status.service, status.profile);
+    let existing: StoredGoogleCredentials | null | undefined;
+    try {
+      existing = await getCredentials<StoredGoogleCredentials>(status.service, status.profile);
+    } catch {
+      continue; // left for the one-by-one path, which reports its own error
+    }
     if (!existing || typeof existing.email !== 'string' || !existing.email) continue;
     const account = existing.email.toLowerCase();
     groups.set(account, [...(groups.get(account) ?? []), { status, entry, existing }]);

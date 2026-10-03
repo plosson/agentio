@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { redactForRemote } from '../../../src/auth/refresh';
 import {
   assertSameAccount,
@@ -35,6 +35,14 @@ describe('shared Google plugin lifecycle', () => {
 });
 
 describe('reauthenticateGoogle', () => {
+  let errorSpy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
   const emailIs = (email: string) => mock(async () => email);
 
   test('keeps fields the plugin stored, in both credential shapes', async () => {

@@ -4,6 +4,7 @@ import { loadVault } from '../../../src/vault/vault';
 import { scopesFor, type OAuthService } from '../../../src/plugins/google/oauth';
 import { GOOGLE_SUITE } from '../../../src/plugins/google/suite';
 import { addGoogleProfiles, reauthGoogleGroups, type GoogleGrantDeps } from '../../../src/plugins/google/group';
+import * as tokenStore from '../../../src/auth/token-store';
 import { CliError } from '../../../src/utils/errors';
 
 const OLD_GMAIL = { access_token: 'old', refresh_token: 'rt-old', token_type: 'Bearer', email: 'me@x.com' };
@@ -226,5 +227,25 @@ describe('reauthGoogleGroups', () => {
     expect(credentials.gmail?.me).toMatchObject({ refresh_token: 'rt-new' });
     expect(credentials.gcal?.me).toMatchObject({ refresh_token: 'rt-old' });
     expect(stderr.join('\n')).toContain('Failed to reauth gcal / me: Google did not grant https://www.googleapis.com/auth/calendar');
+  });
+
+  test('an unreadable profile is returned for the one-by-one path, and the rest still form a group', async () => {
+    const real = tokenStore.getCredentials;
+    const readSpy = spyOn(tokenStore, 'getCredentials').mockImplementation((async (service: string, profile: string) => {
+      if (service === 'gmail' && profile === 'me') throw new Error('vault unreadable');
+      return real(service, profile);
+    }) as typeof tokenStore.getCredentials);
+    try {
+      const performOAuth = grantAll();
+      const remaining = await reauthGoogleGroups(pick('gmail/me', 'gcal/me', 'gdrive/me'), deps({ performOAuth, fetchEmail: mock(async () => ME) }));
+      expect(remaining).toEqual(pick('gmail/me'));
+      expect(performOAuth.mock.calls.map((c) => c[0])).toEqual([['gcal', 'gdrive-full']]);
+    } finally {
+      readSpy.mockRestore();
+    }
+    const { credentials } = await loadVault();
+    expect(credentials.gcal?.me).toMatchObject({ refresh_token: 'rt-new' });
+    expect(credentials.gdrive?.me).toMatchObject({ refreshToken: 'rt-new' });
+    expect(credentials.gmail?.me).toMatchObject({ refresh_token: 'rt-old' });
   });
 });

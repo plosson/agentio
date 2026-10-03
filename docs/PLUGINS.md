@@ -41,7 +41,8 @@ The **"Create your own app"** steps below were checked against each provider's o
 - The code is exchanged for tokens with the client secret.
 - The daemon refreshes access tokens.
 - One consent can cover several services: `agentio google profile add [--services gmail,gcal,…]` (hidden from help). It requests the joined scopes and saves one profile per service whose scopes Google granted; services left unticked on the consent screen are skipped and listed.
-- All profiles from one consent store the same refresh token. Revoking agentio in the Google account invalidates them together; `agentio reauth` then renews the profiles of one account with one consent.
+- All profiles from one consent store the same refresh token. Revoking agentio in the Google account invalidates them together; `agentio reauth` then renews them with one consent when two or more selected Google profiles belong to the same account; a lone profile is renewed on its own, as before.
+- Every profile created or renewed by one consent holds a token for **all** the scopes of that consent, not only its own service's. A hub key limited to one of these profiles therefore receives an access token that also works for the other services, and a read-only Drive profile renewed together with Docs or Script gets a full `drive` token. Use separate per-service consents (`agentio <service> profile add`) when that matters.
 - A renewal must use the account the profile holds. Signing in with another Google account is refused and nothing is saved.
 
 **agentio's Google app**
