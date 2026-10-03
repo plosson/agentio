@@ -3,6 +3,7 @@ import { activatePluginRegistry, DEFAULT_PLUGIN_REGISTRY, registerServiceCommand
 import type { PluginRegistry } from './plugins/plugin-registry';
 
 // Agentio utilities
+import { registerGoogleCommands } from './plugins/google/commands';
 import { registerDocsCommand } from './commands/docs';
 import { registerDaemonCommands } from './commands/daemon';
 import { registerDoctorCommand } from './commands/doctor';
@@ -47,6 +48,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
     .version(getVersion());
 
   registerServiceCommands(program, registry);
+  registerGoogleCommands(program);
   registerGitHubVaultSecretCommands(program);
 
   // Agentio utilities
