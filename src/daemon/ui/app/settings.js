@@ -24,7 +24,7 @@ ACTIONS['sign-out'] = async () => {
 ACTIONS.lock = async () => {
   const ok = await confirmDialog({
     title: 'Lock the vault?',
-    body: `Every agent using this hub stops getting credentials until someone unlocks it here. That is ${plural(state.keys.length, 'machine')}. Scheduled jobs on them fail meanwhile.`,
+    body: `Every agent using this hub stops getting credentials until someone unlocks it here. That’s ${plural(state.keys.length, 'machine')}. Scheduled jobs on them fail meanwhile.`,
     action: 'Lock the vault',
   });
   if (!ok) return;

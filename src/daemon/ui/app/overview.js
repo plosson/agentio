@@ -27,7 +27,7 @@ VIEWS.overview = () => {
         ${recent.length === 0
           ? emptyState('No machines yet. Connect one so an agent can use the vault.')
           : html`<ul class="list">${recent.map((k) => machineItem(k, now))}
-              ${machines > RECENT ? html`<li class="more"><span>${plural(machines, 'machine')}</span><a href="#machines">Show all ${plural(machines, 'machine')}</a></li>` : ''}</ul>`}
+              ${machines > RECENT ? html`<li class="more"><a href="#machines">Show all ${plural(machines, 'machine')}</a></li>` : ''}</ul>`}
       </section>
     </div>`;
 };

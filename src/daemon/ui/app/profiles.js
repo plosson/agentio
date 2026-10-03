@@ -80,7 +80,7 @@ VIEWS.profile = (route) => {
           ? html`<p><b>Read-only.</b> Machines can read through it but never change anything. To allow writes, run this on the hub:</p>
               ${command(allowWritesCommand(r.service, r.profile))}
               <p class="muted small">If it was signed in with read-only permissions, sign in again instead.</p>`
-          : html`<p><b>Can write.</b> Machines that are not read-only can change things through it.</p>`}
+          : html`<p><b>Can write.</b> Machines that aren’t read-only can change things through it.</p>`}
         <h2>Danger zone</h2>
         <div class="actions"><button class="button danger" data-action="delete-profile" data-ref="${ref}">Delete profile…</button></div>
       </section>

@@ -105,7 +105,7 @@ SUBMITS.unlock = async () => {
     const probe = await api('/ui/api/session');
     if (!probe.ok || !probe.body.authenticated) {
       vaultMood('nope');
-      showGateError('Unlocked, but the browser did not keep the session cookie. Open the admin at http://127.0.0.1:7890/ui or over HTTPS.');
+      showGateError('Unlocked, but the browser didn’t keep the session cookie. Open the admin at http://127.0.0.1:7890/ui or over HTTPS.');
       return;
     }
     opened = true;

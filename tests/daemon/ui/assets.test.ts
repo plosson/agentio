@@ -9,6 +9,7 @@ const adminCss = readFileSync(join(UI, 'admin.css'), 'utf8');
 
 const script = INDEX_HTML.slice(INDEX_HTML.indexOf('<script nonce="__CSP_NONCE__">') + '<script nonce="__CSP_NONCE__">'.length, INDEX_HTML.lastIndexOf('</script>'));
 const style = INDEX_HTML.slice(INDEX_HTML.indexOf('<style nonce="__CSP_NONCE__">'), INDEX_HTML.indexOf('</style>'));
+const markupAll = () => script + INDEX_HTML;
 
 describe('the assembled admin page', () => {
   test('every build-time placeholder is filled; only the per-request ones remain', () => {
@@ -37,7 +38,7 @@ describe('the assembled admin page', () => {
     expect(script).toContain('${');
   });
 
-    test('the header: lockup, text tabs, where you are, Sign out; no bottom tab bar, no gear', () => {
+  test('the header: lockup, text tabs, where you are, Sign out; no bottom tab bar, no gear', () => {
     expect(INDEX_HTML).toContain('<a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>');
     expect(INDEX_HTML).toContain('<nav class="tabs" id="tabs" aria-label="Main">');
     expect(INDEX_HTML).not.toContain('id="tabbar"');
@@ -308,6 +309,22 @@ describe('the assembled admin page', () => {
     expect(script).toContain('function signInBanner(');
     expect(script).toContain('data-countdown="${req.expiresAt}"');
     expect(script).toContain("ACTIONS['deny-sign-in']");
+  });
+
+  test('no class of the old wireframe look is left, in the markup or the style', () => {
+    const legacy = ['box', 'btn', 'pill', 'sketch', 'tiles', 'tile', 'codebox', 'welcome', 'lock', 'tabbar', 'bar', 'section-title', 'grid2', 'grid3', 'hl', 'tog', 'radio', 'filter', 'field', 'compact'];
+    const markup = script + INDEX_HTML;
+    for (const cls of legacy) {
+      expect(markup).not.toMatch(new RegExp(`class="[^"]*(?<![\\w-])${cls}(?![\\w-])`));
+      expect(style).not.toMatch(new RegExp(`\\.${cls}(?![\\w-])`));
+    }
+    expect(style).not.toContain('Legacy');
+    expect(style).not.toMatch(/--(ink|pencil|paper|accent|hl|red|green|amber|sketch)\b/);
+  });
+
+  test('on-screen words: no "agentio hub", no exclamation mark in a message', () => {
+    expect(markupAll()).not.toContain('agentio hub');
+    expect(script).not.toMatch(/toast\('[^']*!'/);
   });
 });
 

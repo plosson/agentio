@@ -147,7 +147,7 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--link); fle
 
 .table-box { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 table.grid { width: 100%; border-collapse: collapse; }
-table.grid th, table.grid td { height: 44px; padding: 0 12px; border: 0; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+table.grid th, table.grid td { height: 44px; padding: 0 12px; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
 table.grid thead th { color: var(--muted); font-size: var(--size-small); font-weight: 600; }
 table.grid tbody tr:last-child th, table.grid tbody tr:last-child td { border-bottom: 0; }
 table.grid td.cell { padding: 0 4px; text-align: center; }
@@ -169,6 +169,8 @@ a.ext { display: inline-flex; gap: 4px; max-width: 100%; }
 .grow { flex: 1; min-width: 0; }
 .m-0 { margin: 0; } .mt-8 { margin-top: var(--s1); } .mt-16 { margin-top: var(--s2); } .mt-24 { margin-top: var(--s3); } .mb-24 { margin-bottom: var(--s3); }
 .center { text-align: center; }
+ol.steps { margin: 0; padding-left: 1.25rem; }
+ol.steps > li { margin-bottom: var(--s3); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 dialog.dialog { width: min(520px, calc(100vw - 32px)); padding: var(--s3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); }
@@ -185,7 +187,6 @@ dialog::backdrop { background: color-mix(in srgb, var(--display-bg) 55%, transpa
 /* ---------- Machines: the Access grid needs room; narrow screens edit per machine ---------- */
 .phone-only-view { display: none; }
 @media (max-width: 959px) { .phone-only-view { display: block; } .wide-only-view { display: none; } }
-table.grid th, table.grid td { vertical-align: middle; }
 table.grid th .small { font-weight: 400; vertical-align: middle; }
 table.grid .svc { vertical-align: middle; }
 table.grid th.center { text-align: center; }
@@ -209,119 +210,3 @@ details[open] > summary::before { content: '▾'; }
 @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
 dialog.gate-dialog { width: min(440px, calc(100vw - 32px)); }
 dialog.gate-dialog .gate { margin: 0 auto; }
-
-/* ---------- Legacy: classes of screens not rebuilt yet. Removed once no screen uses them. ---------- */
-:root {
-  --ink: var(--fg); --pencil: var(--muted); --paper: var(--bg);
-  --accent: var(--link); --accent-soft: var(--code-bg); --on-accent: var(--primary-fg);
-  --hl: var(--warn-bg); --red: var(--bad); --red-soft: var(--warn-bg); --green: var(--ok); --green-soft: var(--card);
-  --amber: var(--fg); --amber-soft: var(--warn-bg);
-  --sketch: var(--radius-small); --sketch-btn: var(--radius-small); --sketch-card: var(--radius);
-}
-
-
-
-/* Building blocks */
-.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.row.end { justify-content: flex-end; }
-.grow { flex: 1; min-width: 0; }
-.col { display: flex; flex-direction: column; gap: 10px; }
-.grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; align-items: start; }
-.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.box { border: 1px solid var(--ink); border-radius: var(--sketch); padding: 10px 12px; background: var(--card); color: var(--ink); }
-.box.dashed { border-style: dashed; }
-.box.alert { border-color: var(--red); background: var(--red-soft); }
-.box.hl { background: var(--hl); }
-.box.sel { border-color: var(--accent); background: var(--accent-soft); }
-.sketch { border: 1px solid var(--ink); border-radius: var(--sketch-card); padding: 12px 14px; background: var(--card); }
-.section-title { display: flex; align-items: center; gap: 6px; font-size: 19px; font-weight: 700; margin: 18px 0 8px; }
-.n { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 700; align-items: center; justify-content: center; }
-
-.btn { display: inline-block; font: inherit; font-weight: 700; border: 1px solid var(--ink); border-radius: var(--sketch-btn); padding: 5px 14px; background: var(--card); color: var(--ink); white-space: nowrap; cursor: pointer; text-decoration: none; }
-.btn.pri { background: var(--primary-bg); border-color: var(--primary-bg); color: var(--primary-fg); }
-.btn.red { border-color: var(--red); color: var(--red); }
-.btn.redfill { background: var(--red); border-color: var(--red); color: var(--card); }
-.btn.link { border: 0; background: none; text-decoration: underline; padding: 5px 4px; color: var(--accent); }
-.btn.block { display: block; width: 100%; text-align: center; }
-.btn:disabled { opacity: .5; cursor: default; }
-
-.pill { display: inline-block; border: 1px solid var(--ink); border-radius: 12px; padding: 0 9px; font-size: 13px; background: var(--card); white-space: nowrap; }
-.pill.red { border-color: var(--red); color: var(--red); background: var(--red-soft); }
-.pill.ok { border-color: var(--green); color: var(--green); background: var(--green-soft); }
-.pill.warn { border-color: var(--amber); color: var(--amber); background: var(--amber-soft); }
-.pill.ro { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.pill.neutral { color: var(--pencil); border-color: var(--line); }
-
-.icons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-
-table { width: 100%; border-collapse: collapse; }
-td, th { border-bottom: 1px dashed var(--line); padding: 7px 6px; text-align: left; vertical-align: middle; }
-th { border-bottom: 1px solid var(--ink); font-size: 14px; }
-tr.group td { border-bottom: 0; padding-top: 12px; font-weight: 700; }
-tr.indent td:first-child { padding-left: 26px; }
-/* Compact list: one row per profile, a line between services only. */
-table.compact td { padding: 5px 8px; border-bottom: 0; }
-table.compact th { padding: 5px 8px; }
-table.compact tr.starts td { border-top: 1px dashed var(--line); }
-table.compact tr:nth-child(2) td { border-top: 0; }
-table.compact td.service { width: 20%; white-space: nowrap; font-weight: 700; }
-/* max-width: 0 lets the width share decide, so long text is cut instead of widening the table. */
-table.compact td.detail { width: 22%; max-width: 0; }
-.svc.grow, .svc.grow > span { min-width: 0; }
-tr:last-child td { border-bottom: 0; }
-.cell { text-align: center; font-weight: 700; font-size: 17px; }
-.cell button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; padding: 4px 10px; border-radius: 8px; }
-.cell button:hover { background: var(--accent-soft); }
-.cell.w { color: var(--ink); } .cell.r { color: var(--accent); } .cell.no { color: var(--line); }
-
-/* Forms */
-.field { display: block; margin: 10px 0; font-weight: 700; }
-.field input, .field select { display: block; width: 100%; margin-top: 6px; font: inherit; font-weight: 400; color: var(--ink); background: var(--card); border: 1px solid var(--ink); border-radius: var(--sketch); padding: 8px 10px; }
-.tog { position: relative; display: inline-block; width: 34px; height: 18px; flex: none; }
-.tog input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-.tog span { position: absolute; inset: 0; border: 1px solid var(--ink); border-radius: 12px; background: var(--card); pointer-events: none; }
-.tog span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
-.tog input:checked + span { background: var(--accent); border-color: var(--accent); }
-.tog input:checked + span::after { left: 18px; background: var(--on-accent); }
-.tog input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
-
-.codebox { display: flex; gap: 8px; align-items: center; border: 1px solid var(--ink); border-radius: var(--sketch); padding: 8px 10px; background: var(--card); margin: 6px 0 10px; }
-.codebox code { flex: 1; min-width: 0; overflow-wrap: break-word; word-break: normal; }
-.code { font-size: 34px; letter-spacing: 6px; font-weight: 700; text-align: center; }
-
-/* Spacing and colour helpers: the CSP blocks inline style attributes, so markup uses these classes. */
-.m-0 { margin: 0; } .phone-only { display: none; }
-.mt-0 { margin-top: 0; } .mb-12 { margin-bottom: 12px; } .mt-4 { margin-top: 4px; } .mt-6 { margin-top: 6px; } .mt-8 { margin-top: 8px; }
-.mt-10 { margin-top: 10px; } .mt-12 { margin-top: 12px; } .mt-14 { margin-top: 14px; } .mt-16 { margin-top: 16px; }
-.mt-18 { margin-top: 18px; } .mt-22 { margin-top: 22px; } .my-12 { margin: 12px 0; } .my-16 { margin: 16px 0; }
-.center { text-align: center; } .plain { color: inherit; text-decoration: none; } .scroll-x { overflow-x: auto; }
-.text-red { color: var(--red); } .text-amber { color: var(--amber); }
-ol.steps { margin: 0; padding-left: 1.25rem; }
-ol.steps > li { margin-bottom: var(--s3); }
-
-/* Dialogs and toasts */
-
-.filter { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--ink); border-radius: var(--sketch); padding: 7px 10px; min-width: 0; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 14px; }
-.tile { font: inherit; color: inherit; text-align: center; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; }
-
-/* Phone: stacked tables, one column. */
-@media (max-width: 720px) {
-  .field input, .field select, .filter { font-size: 16px; }
-  .phone-only { display: inline; } /* 16px keeps iOS Safari from zooming in on focus */
-  .grid2, .grid3 { grid-template-columns: 1fr; }
-  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
-  table.stack tr:first-child:has(th) { display: none; }
-  table.stack tr { border-bottom: 1px dashed var(--line); padding: 8px 0; }
-  table.stack td { border: 0; padding: 2px 0; }
-  table.stack tr.indent td:first-child { padding-left: 0; }
-  /* Compact cards: service on its own line only when it starts a group, status and machines side by side. */
-  table.stack.compact tr { border-bottom: 0; padding: 6px 0; }
-  table.stack.compact tr.starts { border-top: 1px dashed var(--line); padding-top: 10px; }
-  table.stack.compact tr:nth-child(2) { border-top: 0; }
-  table.stack.compact td, table.stack.compact tr.starts td { border: 0; padding: 1px 0; }
-  table.stack.compact tr.same td.service { display: none; }
-  table.stack.compact td.detail { width: 100%; max-width: 100%; }
-  table.stack.compact td.detail:empty { display: none; }
-  table.stack.compact td.inl { display: inline-block; width: auto; margin-right: 10px; }
-}
