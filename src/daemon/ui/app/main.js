@@ -30,6 +30,7 @@ document.addEventListener('input', (ev) => {
 
 // "/" jumps to the filter box, unless the owner is already typing somewhere.
 document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && ev.target.id === 'rename-input') { ev.preventDefault(); ACTIONS['cancel-rename'](); return; }
   if (ev.key !== '/' || ev.metaKey || ev.ctrlKey || ev.altKey) return;
   const target = ev.target;
   if (target.closest('input, textarea, select, [contenteditable]')) return;

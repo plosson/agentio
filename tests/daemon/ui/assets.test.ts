@@ -99,7 +99,7 @@ describe('the assembled admin page', () => {
   });
 
   test('profiles: its actions are registered and its commands come from the model', () => {
-    for (const action of ["ACTIONS['test-one']", "ACTIONS['rename-profile']", "ACTIONS['delete-profile']", "ACTIONS['pick-service']"]) {
+    for (const action of ["ACTIONS['test-one']", "SUBMITS['rename-profile']", "ACTIONS['check-again']", "ACTIONS['delete-profile']", "ACTIONS['pick-service']"]) {
       expect(script).toContain(action);
     }
     expect(script).toContain('reauthCommand(');
@@ -137,14 +137,27 @@ describe('the assembled admin page', () => {
   test('read-only is shown on a profile, never switched from the page', () => {
     expect(script).not.toContain("CHANGES['profile-ro']");
     expect(script).not.toContain('data-change="profile-ro"');
-    expect(script).toContain('<span class="pill ro">read-only</span>');
+    expect(script).toContain('<span>Read-only</span>');
     expect(script).toContain('profile update --profile');
   });
 
-  test('profiles: one row per profile, the service named once per group', () => {
-    expect(script).not.toContain('<tr class="group">');
-    expect(script).toContain('<table class="stack compact">');
-    expect(script).toContain('<th>Service</th><th>Profile</th><th>Account</th><th>Link</th><th>Status</th><th>Used by</th>');
+  test('profiles: a grouped list, problems first in each group, no table', () => {
+    expect(script).not.toContain('<table class="stack compact">');
+    expect(script).toContain('<li class="group-heading">');
+    expect(script).toContain('problemsFirst(');
+  });
+
+  test('a profile: Signed in as in the display panel, renamed in place, the reason it is read only', () => {
+    expect(script).toContain("displayPanel('Signed in as'");
+    expect(script).toContain("submit: 'rename-profile'");
+    expect(script).toContain('accessLevel(');
+    expect(script).toContain('This profile was removed or renamed.');
+  });
+
+  test('add a profile: a filterable list of services and Check again, no tiles', () => {
+    expect(script).not.toContain('class="tiles"');
+    expect(script).toContain('matchesService(');
+    expect(script).toContain('data-input="service-filter"');
   });
 
   test('a profile link opens apart from the admin, and long details are cut, not wrapped', () => {

@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   accessCell,
+  accessLevel,
+  problemsFirst,
+  matchesService,
   addCommand,
   canWrite,
   clockTime,
@@ -418,5 +421,59 @@ describe('countdown', () => {
     expect(countdown(at(-30), NOW)).toBe('ended');
     expect(countdown('not a date', NOW)).toBe('ended');
     expect(countdown('', NOW)).toBe('ended');
+  });
+});
+
+describe('access level', () => {
+  test('write only when neither side is read-only; otherwise read only, with the reason', () => {
+    expect(accessLevel({ readOnly: false }, { readOnly: false })).toEqual({ level: 'Write', reason: '' });
+    expect(accessLevel({ readOnly: false }, { readOnly: true })).toEqual({ level: 'Read only', reason: 'because the profile is read-only' });
+    expect(accessLevel({ readOnly: true }, { readOnly: false })).toEqual({ level: 'Read only', reason: 'because the machine is read-only' });
+    expect(accessLevel({ readOnly: true }, { readOnly: true })).toEqual({ level: 'Read only', reason: 'because both the machine and the profile are read-only' });
+  });
+
+  test('agrees with canWrite for every combination', () => {
+    for (const k of [true, false]) for (const p of [true, false]) {
+      expect(accessLevel({ readOnly: k }, { readOnly: p }).level === 'Write').toBe(canWrite({ readOnly: k }, { readOnly: p }));
+    }
+  });
+});
+
+describe('problems first', () => {
+  test('failed, then no credentials, then the rest, each in the order given', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'no-creds' }), row('gmail', 'c'), row('gmail', 'd')];
+    const results = new Map<string, TestResult>([['gmail/d', { status: 'invalid', detail: 'x', at: NOW }]]);
+    expect(problemsFirst(rows, results).map((r) => r.profile)).toEqual(['d', 'b', 'a', 'c']);
+  });
+
+  test('does not touch its input, and copes with nothing', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'invalid' })];
+    problemsFirst(rows, new Map());
+    expect(rows.map((r) => r.profile)).toEqual(['a', 'b']);
+    expect(problemsFirst([], new Map())).toEqual([]);
+  });
+
+  test('a test that passed in this session lifts a profile the page loaded as failed', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'invalid' })];
+    const results = new Map<string, TestResult>([['gmail/b', { status: 'ok', detail: '', at: NOW }]]);
+    expect(problemsFirst(rows, results).map((r) => r.profile)).toEqual(['a', 'b']);
+  });
+});
+
+describe('matching services', () => {
+  const names: Record<string, string> = { gcal: 'Google Calendar', gmail: 'Gmail' };
+  const name = (s: string) => names[s] ?? s;
+
+  test('every word, ignoring case, in the id or the display name', () => {
+    expect(matchesService('gcal', 'google cal', name)).toBe(true);
+    expect(matchesService('gcal', 'GCAL', name)).toBe(true);
+    expect(matchesService('gmail', 'google', name)).toBe(false);
+    expect(matchesService('gmail', '', name)).toBe(true);
+    expect(matchesService('gmail', '   ', name)).toBe(true);
+  });
+
+  test('typed text is never a pattern', () => {
+    expect(matchesService('gmail', '.*', name)).toBe(false);
+    expect(matchesService('gmail', '(', name)).toBe(false);
   });
 });

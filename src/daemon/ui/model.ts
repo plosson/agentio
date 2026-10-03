@@ -263,6 +263,14 @@ export function machinesUsing(keys: Key[], profile: ProfileRow): Array<{ key: Ke
     .map((k) => ({ key: k, canWrite: canWrite(k, profile) }));
 }
 
+/** What a machine can do through a profile, and why when it can only read. */
+export function accessLevel(key: Pick<Key, 'readOnly'>, profile: Pick<ProfileRow, 'readOnly'>): { level: 'Write' | 'Read only'; reason: string } {
+  if (key.readOnly && profile.readOnly) return { level: 'Read only', reason: 'because both the machine and the profile are read-only' };
+  if (profile.readOnly) return { level: 'Read only', reason: 'because the profile is read-only' };
+  if (key.readOnly) return { level: 'Read only', reason: 'because the machine is read-only' };
+  return { level: 'Write', reason: '' };
+}
+
 /** The existing profiles a machine could read: after a revoke, the ones to reauthorise. */
 export function reachableRefs(key: Pick<Key, 'allowedProfiles'>, allRefs: string[]): string[] {
   const refs = key.allowedProfiles === '*' ? allRefs : key.allowedProfiles.filter((r) => allRefs.includes(r));
@@ -369,6 +377,14 @@ export function groupProfiles(rows: ProfileRow[], displayName: (service: string)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const PROBLEM_RANK: Partial<Record<Status, number>> = { invalid: 0, 'no-creds': 1 };
+
+/** Failed profiles first, then those with no credentials, then the rest; each keeps its order. */
+export function problemsFirst(rows: ProfileRow[], results: ReadonlyMap<string, TestResult>): ProfileRow[] {
+  const rank = (r: ProfileRow): number => PROBLEM_RANK[effectiveStatus(r, results).status] ?? 2;
+  return [...rows].sort((a, b) => rank(a) - rank(b));
+}
+
 /**
  * Whether a profile matches what the owner typed in the filter box: every
  * word, ignoring case, somewhere in its service id, the service's display
@@ -384,6 +400,13 @@ export function matchesFilter(row: ProfileRow, query: string, displayName: (serv
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
   const haystack = `${row.service} ${displayName(row.service)} ${row.profile} ${row.info ?? ''} ${row.account ?? ''} ${row.url ?? ''}`.toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+/** Whether a service matches the Add a profile filter: every word, ignoring case, in its id or display name. */
+export function matchesService(service: string, query: string, displayName: (service: string) => string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = `${service} ${displayName(service)}`.toLowerCase();
   return words.every((word) => haystack.includes(word));
 }
 
