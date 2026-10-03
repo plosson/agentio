@@ -142,7 +142,7 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--link); fle
 .setting .text { flex: 1; min-width: 0; }
 
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--card); }
-.segmented a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 var(--s2); border-radius: 8px; color: var(--muted); font-weight: 600; text-decoration: none; }
+.segmented a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 var(--s2); border-radius: 8px; color: var(--muted); font-weight: 600; text-decoration: none; }
 .segmented a[aria-current="page"] { background: var(--strong-bg); color: var(--strong-fg); }
 
 .table-box { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -181,6 +181,17 @@ dialog::backdrop { background: color-mix(in srgb, var(--display-bg) 55%, transpa
 @media (max-width: 599px) { #toasts { left: var(--s2); } .toast { max-width: none; } }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- Machines: the Access grid needs room; narrow screens edit per machine ---------- */
+.phone-only-view { display: none; }
+@media (max-width: 959px) { .phone-only-view { display: block; } .wide-only-view { display: none; } }
+table.grid th, table.grid td { vertical-align: middle; }
+table.grid th .small { font-weight: 400; vertical-align: middle; }
+table.grid .svc { vertical-align: middle; }
+table.grid th.center { text-align: center; }
+details > summary { list-style: none; display: inline-flex; align-items: center; min-height: var(--tap); cursor: pointer; }
+details > summary::before { content: '▸'; margin-right: 6px; }
+details[open] > summary::before { content: '▾'; }
 
 /* ---------- Gate ---------- */
 .gate { max-width: 400px; margin: 10vh auto var(--s4); }

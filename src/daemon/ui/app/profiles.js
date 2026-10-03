@@ -137,6 +137,7 @@ SUBMITS['rename-profile'] = async (form) => {
   const r = rowByRef(ref);
   const name = form.elements.name.value.trim();
   if (!r || name === r.profile) { ACTIONS['cancel-rename'](); return; }
+  state.ui.renameDraft = name;
   if (!name) { state.ui.renameError = 'Give the profile a name.'; render(); return; }
   const res = await api(`/ui/api/profiles/${refPath(ref)}`, { method: 'PATCH', body: JSON.stringify({ name }) });
   if (res.lost) return;
@@ -146,6 +147,7 @@ SUBMITS['rename-profile'] = async (form) => {
   if (result) state.results.set(`${r.service}/${name}`, result);
   state.ui.renaming = null;
   state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
   await loadAll();
   toast(`Renamed to ${name}`);
   go({ view: 'profile', ref: `${r.service}/${name}` });

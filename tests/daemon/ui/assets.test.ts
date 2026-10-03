@@ -63,7 +63,7 @@ describe('the assembled admin page', () => {
 
   test('the model and every screen are in the script', () => {
     for (const name of ['function escapeHtml', 'function parseRoute', 'function toggleScope']) expect(script).toContain(name);
-    for (const view of ['machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize']) {
+    for (const view of ['machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize', 'connect', 'key']) {
       expect(script).toMatch(new RegExp(`VIEWS\\.${view} = `));
     }
   });
@@ -107,12 +107,37 @@ describe('the assembled admin page', () => {
   });
 
   test('machines: its actions are registered', () => {
-    for (const name of ["ACTIONS['toggle-connect']", "ACTIONS['rename-machine']", "ACTIONS['replace-key']", "ACTIONS['revoke-machine']",
-      "SUBMITS['create-key']", "SUBMITS['save-scope']", "CHANGES['machine-ro']", "CHANGES['machine-manage']"]) {
+    for (const name of ["ACTIONS['replace-key']", "ACTIONS['revoke-machine']", "ACTIONS['key-done']", "SUBMITS['create-key']", "SUBMITS['save-scope']",
+      "SUBMITS['rename-machine']", "CHANGES['machine-ro']", "CHANGES['machine-manage']"]) {
       expect(script).toContain(name);
     }
+    expect(script).not.toContain("ACTIONS['toggle-connect']");
+    expect(script).not.toContain("ACTIONS['rename-machine']");
     expect(script).toContain('loginCommand(');
     expect(script).toContain('reachableRefs(');
+  });
+
+  test('machines: List and Access are two views of one section; Access is no longer a tab', () => {
+    expect(INDEX_HTML).not.toContain('data-tab="access"');
+    expect(script).toContain("{ id: 'access', href: '#access', label: 'Access' }");
+    expect(script).toContain('Change access from each machine’s page.');
+  });
+
+  test('key created: shown once, never in the address, and leaving before copying asks first', () => {
+    expect(INDEX_HTML).not.toContain('token-dialog');
+    expect(INDEX_HTML).not.toContain('rename-dialog');
+    expect(script).not.toContain('function showToken(');
+    expect(script).not.toMatch(/routeHash\(\{ view: 'key',/);
+    expect(script).toContain('This key is shown once.');
+    expect(script).toContain('Leave without copying the key?');
+    expect(script).toContain("window.addEventListener('beforeunload'");
+  });
+
+  test('renaming: what the owner typed survives an error, and is dropped when the rename ends', () => {
+    expect(script).toContain('state.ui.renameDraft ?? title');
+    expect(script).toMatch(/SUBMITS\['rename-profile'\][\s\S]*?state\.ui\.renameDraft = name;/);
+    expect(script).toMatch(/SUBMITS\['rename-machine'\][\s\S]*?state\.ui\.renameDraft = name;/);
+    expect(script.match(/state\.ui\.renameDraft = undefined;/g)!.length).toBeGreaterThanOrEqual(5);
   });
 
   test('sign-in: three steps, read-only by default, and an ended request is explained', () => {
@@ -125,6 +150,7 @@ describe('the assembled admin page', () => {
     expect(script).toContain("ACTIONS['toggle-cell']");
     expect(script).toContain('toggleScope(');
     expect(script).toContain('accessCell(');
+    expect(script).toContain('Revoke instead');
   });
 
   test('no Overview: waiting sign-ins show as a banner on every page instead', () => {

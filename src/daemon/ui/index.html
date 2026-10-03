@@ -16,7 +16,6 @@
   <nav class="tabs" id="tabs" aria-label="Main">
     <a href="#profiles" data-tab="profiles">Profiles</a>
     <a href="#machines" data-tab="machines">Machines</a>
-    <a href="#access" data-tab="access">Access</a>
     <a href="#settings" data-tab="settings">Settings</a>
     <a href="#settings" class="menu-only" data-action="sign-out">Sign out</a>
   </nav>
@@ -34,27 +33,6 @@
     <button value="cancel" class="button" autofocus>Cancel</button>
     <button value="ok" class="button danger" id="confirm-ok"></button>
   </form>
-</dialog>
-
-<dialog id="rename-dialog" class="dialog">
-  <form method="dialog">
-    <h2 id="rename-title">Rename</h2>
-    <label class="form-field"><span class="label">New name</span><input class="input" type="text" id="rename-input" required autocomplete="off"></label>
-    <div class="actions">
-      <button value="cancel" class="button" formnovalidate>Cancel</button>
-      <button value="ok" class="button primary">Rename</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="token-dialog" class="dialog">
-  <h2>Copy the key now</h2>
-  <p class="muted">On the machine, after installing agentio, run one of these. The key is not shown again; if it is lost, replace it.</p>
-  <p><b>Save it for this user</b></p>
-  <div class="command"><code id="token-save-cmd"></code><button class="button" type="button" data-copy-from="token-save-cmd">Copy</button></div>
-  <p><b>Or for one shell or a CI job</b></p>
-  <div class="command"><code id="token-env-cmd"></code><button class="button" type="button" data-copy-from="token-env-cmd">Copy</button></div>
-  <form method="dialog" class="actions"><button class="button primary" value="ok">Done</button></form>
 </dialog>
 
 <dialog id="gate-dialog" class="dialog gate-dialog" aria-labelledby="gate-title"></dialog>

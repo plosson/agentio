@@ -45,14 +45,14 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
 
 // ---------- Routes ----------
 
-export type TabView = 'machines' | 'profiles' | 'access' | 'settings' | 'add';
+export type TabView = 'machines' | 'profiles' | 'access' | 'settings' | 'add' | 'connect' | 'key';
 export type Route =
   | { view: TabView }
   | { view: 'machine'; id: string }
   | { view: 'profile'; ref: string }
   | { view: 'authorize'; code: string };
 
-const TAB_VIEWS: readonly string[] = ['machines', 'profiles', 'access', 'settings', 'add'];
+const TAB_VIEWS: readonly string[] = ['machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'];
 
 /** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else, old `#overview` links included, is Profiles. */
 export function parseRoute(hash: string): Route {
@@ -86,9 +86,12 @@ export function routeHash(route: Route): string {
 }
 
 /** The navigation tab to highlight; the sign-in page has none. */
-export function tabOf(route: Route): 'machines' | 'profiles' | 'access' | 'settings' | null {
+export function tabOf(route: Route): 'machines' | 'profiles' | 'settings' | null {
   switch (route.view) {
     case 'machine':
+    case 'access':
+    case 'connect':
+    case 'key':
       return 'machines';
     case 'profile':
     case 'add':
@@ -151,6 +154,17 @@ export function countdown(expiresAt: string, now: number): string {
 
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** Up to `max` names, then "N more"; when only one would be left over, it is shown instead of "1 more". */
+export function listSummary(names: string[], max = 3): string {
+  if (names.length <= max + 1) return names.join(' · ');
+  return `${names.slice(0, max).join(' · ')} · ${names.length - max} more`;
+}
+
+/** The services of these profiles by display name, once each, sorted. Falls back to the id. */
+export function serviceNames(rows: Array<Pick<ProfileRow, 'service'>>, displayName: (service: string) => string): string[] {
+  return [...new Set(rows.map((r) => displayName(r.service) || r.service))].sort((a, b) => a.localeCompare(b));
 }
 
 /** A word a POSIX shell reads back unchanged. */
@@ -236,11 +250,11 @@ export function canWrite(key: Pick<Key, 'readOnly'>, profile: Pick<ProfileRow, '
   return !key.readOnly && !profile.readOnly;
 }
 
-export type Cell = 'W' | 'R' | '·';
+export type Cell = 'Write' | 'Read' | 'None';
 
 export function accessCell(key: Key, profile: ProfileRow): Cell {
-  if (!scopeIncludes(key, refOf(profile))) return '·';
-  return canWrite(key, profile) ? 'W' : 'R';
+  if (!scopeIncludes(key, refOf(profile))) return 'None';
+  return canWrite(key, profile) ? 'Write' : 'Read';
 }
 
 /**
@@ -288,6 +302,17 @@ export function seenToday(key: Key, now: number): boolean {
   if (!key.lastUsedAt) return false;
   const t = Date.parse(key.lastUsedAt);
   return !Number.isNaN(t) && now - t < DAY_MS;
+}
+
+/** When a machine was last seen, as a status. Never-used machines count from their creation. */
+export function machineSeen(key: Key, now: number): StatusWord {
+  const seen = key.lastUsedAt ? Date.parse(key.lastUsedAt) : NaN;
+  if (isSilent(key, now)) {
+    const days = Math.floor((now - lastActivity(key)) / DAY_MS);
+    return { symbol: '!', word: Number.isNaN(seen) ? `Never used, created ${days} days ago` : `Silent for ${days} days`, tone: 'warn' };
+  }
+  if (Number.isNaN(seen)) return { symbol: '○', word: 'Never used', tone: 'neutral' };
+  return { symbol: '✓', word: `Seen ${relativeTime(seen, now)}`, tone: 'ok' };
 }
 
 export function machineCanUse(key: Key, allRefs: string[]): string {

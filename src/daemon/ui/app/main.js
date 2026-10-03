@@ -63,10 +63,32 @@ document.addEventListener('click', (ev) => {
   if (ev.target.closest('#tabs a')) closeMenu();
 });
 
-window.addEventListener('hashchange', () => {
+let lastHash = location.hash;
+
+window.addEventListener('hashchange', async () => {
+  // Leaving the shown-once key before copying it asks first; once left, the key is forgotten.
+  const leavingKey = parseRoute(lastHash).view === 'key' && currentRoute().view !== 'key';
+  if (leavingKey && state.ui.shownKey) {
+    if (!state.ui.shownKey.copied) {
+      const target = location.hash;
+      history.replaceState(null, '', lastHash);
+      const leave = await confirmDialog({
+        title: 'Leave without copying the key?',
+        body: "It isn't shown again. If you leave now, you'll have to replace the key.",
+        action: 'Leave',
+      });
+      if (!leave) return;
+      state.ui.shownKey = null;
+      location.hash = target;
+      return;
+    }
+    state.ui.shownKey = null;
+  }
+  lastHash = location.hash;
   closeMenu();
   state.ui.renaming = null;
   state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
   clearToasts();
   render();
   main.focus();
@@ -74,6 +96,15 @@ window.addEventListener('hashchange', () => {
   // in the banner without a reload: refresh the waiting list on every move.
   if (state.loaded) loadPending().then(render);
 });
+
+window.addEventListener('beforeunload', (ev) => {
+  if (state.ui.shownKey && !state.ui.shownKey.copied) { ev.preventDefault(); ev.returnValue = ''; }
+});
+
+// <details> does not bubble its toggle: remember "create a key by hand" being open across redraws.
+document.addEventListener('toggle', (ev) => {
+  if (ev.target.id === 'by-hand') state.ui.byHand = ev.target.open;
+}, true);
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.loaded) return;

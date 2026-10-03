@@ -18,6 +18,9 @@ import {
   matchesFilter,
   allowWritesCommand,
   isSilent,
+  listSummary,
+  machineSeen,
+  serviceNames,
   loginCommand,
   machineCanUse,
   machinesUsing,
@@ -74,7 +77,7 @@ describe('escaping', () => {
 
 describe('routes', () => {
   test('known tabs and the default', () => {
-    for (const view of ['machines', 'profiles', 'access', 'settings', 'add'] as const) {
+    for (const view of ['machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'] as const) {
       expect(parseRoute(`#${view}`)).toEqual({ view });
     }
     // Profiles is the home page; old #overview bookmarks land there too.
@@ -111,6 +114,9 @@ describe('routes', () => {
 
   test('tabOf highlights the parent tab', () => {
     expect(tabOf({ view: 'machine', id: 'x' })).toBe('machines');
+    expect(tabOf({ view: 'access' })).toBe('machines');
+    expect(tabOf({ view: 'connect' })).toBe('machines');
+    expect(tabOf({ view: 'key' })).toBe('machines');
     expect(tabOf({ view: 'profile', ref: 'a/b' })).toBe('profiles');
     expect(tabOf({ view: 'add' })).toBe('profiles');
     expect(tabOf({ view: 'authorize', code: 'X' })).toBeNull();
@@ -188,12 +194,12 @@ const key = (name: string, extra: Partial<Key> = {}): Key =>
 const ALL = ['gmail/perso', 'gmail/work', 'jira/hex-rays'];
 
 describe('who can use what', () => {
-  test('a cell is W only when neither the machine nor the profile is read-only', () => {
+  test('a cell says Write only when neither the machine nor the profile is read-only', () => {
     const p = row('gmail', 'work');
-    expect(accessCell(key('mac'), p)).toBe('W');
-    expect(accessCell(key('mac', { readOnly: true }), p)).toBe('R');
-    expect(accessCell(key('mac'), row('gmail', 'work', { readOnly: true }))).toBe('R');
-    expect(accessCell(key('ci', { allowedProfiles: ['jira/hex-rays'] }), p)).toBe('·');
+    expect(accessCell(key('mac'), p)).toBe('Write');
+    expect(accessCell(key('mac', { readOnly: true }), p)).toBe('Read');
+    expect(accessCell(key('mac'), row('gmail', 'work', { readOnly: true }))).toBe('Read');
+    expect(accessCell(key('ci', { allowedProfiles: ['jira/hex-rays'] }), p)).toBe('None');
     expect(canWrite({ readOnly: false }, { readOnly: false })).toBe(true);
   });
 
@@ -475,5 +481,51 @@ describe('matching services', () => {
   test('typed text is never a pattern', () => {
     expect(matchesService('gmail', '.*', name)).toBe(false);
     expect(matchesService('gmail', '(', name)).toBe(false);
+  });
+});
+
+describe('summaries', () => {
+  test('listSummary: up to three, then "N more"; never "1 more"', () => {
+    expect(listSummary([])).toBe('');
+    expect(listSummary(['Gmail'])).toBe('Gmail');
+    expect(listSummary(['A', 'B', 'C'])).toBe('A · B · C');
+    expect(listSummary(['A', 'B', 'C', 'D'])).toBe('A · B · C · D');
+    expect(listSummary(['A', 'B', 'C', 'D', 'E'])).toBe('A · B · C · 2 more');
+    expect(listSummary(Array.from({ length: 40 }, (_, i) => `S${i}`))).toBe('S0 · S1 · S2 · 37 more');
+    expect(listSummary(['A', 'B', 'C'], 1)).toBe('A · 2 more');
+  });
+
+  test('serviceNames: display names, once each, sorted; unknown services fall back to their id', () => {
+    const names: Record<string, string> = { gmail: 'Gmail', jira: 'Jira' };
+    const name = (s: string) => names[s] ?? s;
+    expect(serviceNames([{ service: 'jira' }, { service: 'gmail' }, { service: 'gmail' }, { service: 'zzz-new' }], name)).toEqual(['Gmail', 'Jira', 'zzz-new']);
+    expect(serviceNames([], name)).toEqual([]);
+  });
+
+  test('serviceNames never shows "undefined" for a service the page has no name for', () => {
+    expect(serviceNames([{ service: 'mystery' }], () => undefined as unknown as string)).toEqual(['mystery']);
+  });
+});
+
+describe('when a machine was last seen', () => {
+  test('seen recently: ✓ with the relative time', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW - 2 * MIN).toISOString() }), NOW)).toEqual({ symbol: '✓', word: 'Seen 2 min ago', tone: 'ok' });
+  });
+
+  test('a clock ahead of ours reads as just now, not as the future', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW + 10 * MIN).toISOString() }), NOW).word).toBe('Seen just now');
+  });
+
+  test('silent for 30+ days: ! with the number of days', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW - 34 * DAY).toISOString() }), NOW)).toEqual({ symbol: '!', word: 'Silent for 34 days', tone: 'warn' });
+  });
+
+  test('never used: ○ while new, ! once it is 30+ days old', () => {
+    expect(machineSeen(key('a', { createdAt: new Date(NOW - 2 * DAY).toISOString() }), NOW)).toEqual({ symbol: '○', word: 'Never used', tone: 'neutral' });
+    expect(machineSeen(key('a', { createdAt: new Date(NOW - 40 * DAY).toISOString() }), NOW)).toEqual({ symbol: '!', word: 'Never used, created 40 days ago', tone: 'warn' });
+  });
+
+  test('a last-seen date that cannot be read counts as never used', () => {
+    expect(machineSeen(key('a', { lastUsedAt: 'garbage', createdAt: new Date(NOW - DAY).toISOString() }), NOW)).toEqual({ symbol: '○', word: 'Never used', tone: 'neutral' });
   });
 });

@@ -86,7 +86,7 @@ function pageHead({ path = [], title, count, actions = '', rename = null }) {
   const heading = editing
     ? html`<form class="inline-edit" data-submit="${rename.submit}" data-key="${rename.key}" novalidate>
         <label class="sr-only" for="rename-input">New name</label>
-        <input class="input" id="rename-input" name="name" value="${title}" maxlength="64" autocomplete="off" spellcheck="false"
+        <input class="input" id="rename-input" name="name" value="${state.ui.renameError ? (state.ui.renameDraft ?? title) : title}" maxlength="64" autocomplete="off" spellcheck="false"
           ${state.ui.renameError ? raw('aria-invalid="true" aria-describedby="rename-error"') : ''}>
         <button class="button">Save</button>
         <button type="button" class="button link" data-action="cancel-rename">Cancel</button>
@@ -100,6 +100,7 @@ function pageHead({ path = [], title, count, actions = '', rename = null }) {
 ACTIONS['start-rename'] = (el) => {
   state.ui.renaming = el.dataset.key;
   state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
   render();
   const input = $('rename-input');
   if (input) { input.focus(); input.select(); }
@@ -108,6 +109,7 @@ ACTIONS['start-rename'] = (el) => {
 ACTIONS['cancel-rename'] = () => {
   state.ui.renaming = null;
   state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
   render();
 };
 
@@ -205,7 +207,7 @@ function formOpen() {
   if (state.ui.renaming) return true;
   const route = currentRoute();
   if (route.view === 'authorize') return true;
-  if (route.view === 'machines' && state.ui.connectOpen) return true;
+  if (route.view === 'connect' && state.ui.byHand) return true;
   if (route.view === 'machine' && state.ui.editScope) return true;
   return false;
 }
@@ -380,38 +382,17 @@ async function confirmDialog({ title, body, action }) {
   return (await modal('confirm-dialog')) === 'ok';
 }
 
-async function renameDialog(current, label) {
-  $('rename-title').textContent = `Rename ${label}`;
-  $('rename-input').value = current;
-  const result = await modal('rename-dialog');
-  const value = $('rename-input').value.trim();
-  return result === 'ok' && value && value !== current ? value : null;
-}
-
-/** The key is shown once, as the two ways to use it. */
-function showToken(token) {
-  const quoted = shellQuote(token);
-  $('token-save-cmd').textContent = `(umask 077 && mkdir -p ~/.config/agentio && printf '%s\\n' ${quoted} > ~/.config/agentio/token)`;
-  $('token-env-cmd').textContent = `export AGENTIO_TOKEN=${quoted}`;
-  const dialog = $('token-dialog');
-  dialog.addEventListener('close', () => { $('token-save-cmd').textContent = ''; $('token-env-cmd').textContent = ''; }, { once: true });
-  dialog.showModal();
-}
-
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
     toast('Copied');
+    if (state.ui.shownKey) state.ui.shownKey.copied = true;
   } catch {
     toast('Copy failed: select the text and copy it by hand.', 'error');
   }
 }
 
 ACTIONS.copy = (el) => copyText(el.dataset.text);
-document.addEventListener('click', (ev) => {
-  const from = ev.target.closest('[data-copy-from]');
-  if (from) copyText($(from.dataset.copyFrom).textContent);
-});
 
 // ---------- Access choices (sign-in step 2, connect a machine, change a machine) ----------
 
