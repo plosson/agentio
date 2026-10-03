@@ -4,60 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>agentio hub</title>
+<title>agentio</title>
+<link rel="icon" href="/ui/icon.svg?v=__VERSION__" type="image/svg+xml">
 <style nonce="__CSP_NONCE__">
 /*__STYLES__*/
 </style>
 </head>
 <body>
-<header class="bar" id="bar" hidden>
-  <a class="logo" href="#profiles">agentio hub</a>
-  <nav class="nav" aria-label="Main">
+<header class="top" id="bar" hidden>
+  <a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>
+  <nav class="tabs" id="tabs" aria-label="Main">
+    <a href="#overview" data-tab="overview">Overview</a>
     <a href="#profiles" data-tab="profiles">Profiles</a>
     <a href="#machines" data-tab="machines">Machines</a>
-    <a href="#access" data-tab="access">Access</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+    <a href="#settings" class="menu-only" data-action="sign-out">Sign out</a>
   </nav>
-  <span class="r"><span id="hub-host"></span><a href="#settings" class="gear" data-tab="settings" aria-label="Settings" title="Settings">⚙</a></span>
+  <span class="where"><span id="hub-host"></span><button type="button" class="button link sign-out" data-action="sign-out">Sign out</button></span>
+  <button type="button" class="button menu-button" id="menu-button" data-action="toggle-menu" aria-expanded="false" aria-controls="tabs" aria-label="Menu">☰</button>
 </header>
 
-<main id="main" class="body" tabindex="-1"></main>
+<main id="main" class="page" tabindex="-1"></main>
+<footer class="version" id="version" hidden></footer>
 
-<nav class="tabbar" id="tabbar" aria-label="Main" hidden>
-  <a href="#profiles" data-tab="profiles">Profiles</a>
-  <a href="#machines" data-tab="machines">Machines</a>
-  <a href="#access" data-tab="access">Access</a>
-</nav>
-
-<dialog id="confirm-dialog" class="box">
+<dialog id="confirm-dialog" class="dialog">
   <h2 id="confirm-title"></h2>
   <p id="confirm-body"></p>
-  <form method="dialog" class="row end">
-    <button value="cancel" class="btn" autofocus>Cancel</button>
-    <button value="ok" class="btn red" id="confirm-ok"></button>
+  <form method="dialog" class="actions">
+    <button value="cancel" class="button" autofocus>Cancel</button>
+    <button value="ok" class="button danger" id="confirm-ok"></button>
   </form>
 </dialog>
 
-<dialog id="rename-dialog" class="box">
-  <form method="dialog">
-    <h2 id="rename-title">Rename</h2>
-    <label class="field">New name<input type="text" id="rename-input" required autocomplete="off"></label>
-    <div class="row end">
-      <button value="cancel" class="btn" formnovalidate>Cancel</button>
-      <button value="ok" class="btn pri">Rename</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="token-dialog" class="box">
-  <h2>Copy the key now</h2>
-  <p class="muted">On the machine, after installing agentio, run one of these. The key is not shown again; if it is lost, replace it.</p>
-  <p><b>Save it for this user</b></p>
-  <div class="codebox"><code id="token-save-cmd"></code><button class="btn" type="button" data-copy-from="token-save-cmd">Copy</button></div>
-  <p><b>Or for one shell or a CI job</b></p>
-  <div class="codebox"><code id="token-env-cmd"></code><button class="btn" type="button" data-copy-from="token-env-cmd">Copy</button></div>
-  <form method="dialog" class="row end"><button class="btn pri" value="ok">Done</button></form>
-</dialog>
-
+<dialog id="gate-dialog" class="dialog gate-dialog" aria-labelledby="gate-title"></dialog>
 <div id="toasts" aria-live="polite"></div>
 
 <script nonce="__CSP_NONCE__">

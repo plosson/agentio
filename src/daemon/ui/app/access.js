@@ -1,38 +1,41 @@
-// Who can use what: machines across, profiles down. A cell gives or removes access.
+// Who can use what, as the Access view of Machines: machines across, profiles down.
+// A cell gives or removes access. On narrow screens access is changed from each machine's page.
 
 VIEWS.access = () => {
+  const now = Date.now();
   const keys = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
   const rows = groupProfiles(filteredRows(state.rows), displayName).flatMap((g) => g.rows);
-  if (keys.length === 0) return html`<h1>Who can use what</h1><div class="box empty mt-12"><h2>No machines yet.</h2><p class="muted">Connect one from Machines.</p><a class="btn pri" href="#machines">Machines</a></div>`;
-  if (state.rows.length === 0) return html`<h1>Who can use what</h1><div class="box empty mt-12"><h2>No profiles yet.</h2><a class="btn pri" href="#add">Add a profile</a></div>`;
+  const head = machinesHead('access');
+  if (keys.length === 0) return html`${head}${emptyState('No machines yet. Connect one first.', html`<a class="button" href="#connect">Connect a machine</a>`)}`;
+  if (state.rows.length === 0) return html`${head}${emptyState('No profiles yet. Profiles are added from a terminal on the hub.', html`<a class="button" href="#add">See how to add one</a>`)}`;
 
-  return html`
-    <h1>Who can use what</h1>
-    <span class="muted">Click a cell to give or remove access. W = can write, R = read-only, · = no access. A machine writes only if neither it nor the profile is read-only.</span>
-    ${filterBox(rows.length, state.rows.length)}
-    ${rows.length === 0 ? noMatch() : html`<div class="box mt-12 scroll-x"><table>
-      <tr><th></th>${keys.map((k) => html`<th class="cell"><a href="${routeHash({ view: 'machine', id: k.id })}">${k.name}</a>${k.readOnly ? html`<br><span class="pill ro">read-only</span>` : ''}</th>`)}</tr>
-      ${rows.map((r) => {
-        const st = effectiveStatus(r, state.results).status;
-        return html`<tr>
-          <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${profileLabel(r)}</a>
-            ${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}${st === 'invalid' ? html` ${pill(st, r.service)}` : ''}</td>
+  return html`${head}
+    <div class="phone-only-view"><p>Change access from each machine’s page.</p><ul class="list">${keys.map((k) => machineItem(k, now))}</ul></div>
+    <div class="wide-only-view">
+      <p class="muted">Click a cell to give or remove access. A machine can write only if neither it nor the profile is read-only.</p>
+      ${filterBox(rows.length, state.rows.length)}
+      ${rows.length === 0 ? noMatch() : html`<div class="table-box"><table class="grid">
+        <thead><tr><th scope="col">Profile</th>${keys.map((k) => html`<th scope="col" class="center"><a href="${routeHash({ view: 'machine', id: k.id })}">${k.name}</a>${k.readOnly ? html`<br><span class="small">read-only</span>` : ''}</th>`)}</tr></thead>
+        <tbody>${rows.map((r) => html`<tr>
+          <th scope="row"><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${profileLabel(r)}</a>${r.readOnly ? html` <span class="muted small">read-only</span>` : ''}</th>
           ${keys.map((k) => {
             const cell = accessCell(k, r);
-            const cls = cell === 'W' ? 'w' : cell === 'R' ? 'r' : 'no';
-            const label = `${cell === '·' ? 'Give' : 'Remove'} ${k.name} ${cell === '·' ? 'access to' : 'from'} ${refOf(r)}`;
-            return html`<td class="cell ${cls}"><button data-action="toggle-cell" data-id="${k.id}" data-ref="${refOf(r)}" aria-label="${label}" title="${label}">${cell}</button></td>`;
+            const label = `${cell === 'None' ? 'Give' : 'Remove'} ${k.name} ${cell === 'None' ? 'access to' : 'from'} ${refOf(r)}`;
+            return html`<td class="cell ${cell.toLowerCase()}"><button data-action="toggle-cell" data-id="${k.id}" data-ref="${refOf(r)}" aria-label="${label}" title="${label}">${cell}</button></td>`;
           })}
-        </tr>`;
-      })}
-    </table></div>`}`;
+        </tr>`)}</tbody>
+      </table></div>`}
+    </div>`;
 };
 
 ACTIONS['toggle-cell'] = async (el) => {
   const key = keyById(el.dataset.id);
   if (!key) return;
   const change = toggleScope(key, el.dataset.ref, allRefs());
-  if ('error' in change) { toast(change.error, 'error'); return; }
+  if ('error' in change) {
+    toast(change.error, 'error', { href: routeHash({ view: 'machine', id: key.id }), label: 'Revoke instead' });
+    return;
+  }
   el.disabled = true;
   const res = await api(`/ui/api/keys/${encodeURIComponent(key.id)}`, { method: 'PATCH', body: JSON.stringify({ allowedProfiles: change.allowedProfiles }) });
   if (res.lost) return;

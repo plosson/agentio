@@ -79,7 +79,7 @@ describe('daemon HTTP surface', () => {
     const page = await call('/ui');
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
-    expect(await page.text()).toContain('<title>agentio hub</title>');
+    expect(await page.text()).toContain('<title>agentio</title>');
 
     const probe = await call('/ui/api/session');
     expect(await probe.json()).toEqual({ authenticated: false, locked: true });
@@ -408,38 +408,35 @@ describe('daemon HTTP surface', () => {
     expect(again.status).toBe(404);
   });
 
-  test('fonts: served publicly from the hub itself as WOFF2', async () => {
-    for (const file of ['balsamiq-sans-400.woff2', 'balsamiq-sans-700.woff2']) {
-      const res = await call(`/ui/fonts/${file}`);
-      expect(res.status).toBe(200);
-      expect(res.headers.get('content-type')).toBe('font/woff2');
-      expect(res.headers.get('cache-control')).toContain('immutable');
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe('wOF2');
+  test('icon: the vault icon is served publicly as SVG, and locked down', async () => {
+    const res = await call('/ui/icon.svg?v=test');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/svg+xml');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'");
+    expect(res.headers.get('cache-control')).toContain('immutable');
+    const body = await res.text();
+    expect(body.startsWith('<svg')).toBe(true);
+    expect(body).not.toMatch(/<script|\son\w+=/i);
+  });
+
+  test('icon: nothing else is served next to it, and the fonts are gone', async () => {
+    for (const path of ['/ui/icon.svg/x', '/ui/icon.png', '/ui/ICON.SVG', '/ui/fonts/balsamiq-sans-400.woff2', '/ui/fonts/']) {
+      const res = await call(path);
+      expect(res.status).not.toBe(200);
+      expect(res.headers.get('content-type') ?? '').not.toMatch(/svg|font/);
     }
   });
 
-  test('fonts: unknown names and path tricks are 404', async () => {
-    for (const path of [
-      '/ui/fonts/nope.woff2',
-      '/ui/fonts/',
-      '/ui/fonts/..%2Fassets.ts',
-      '/ui/fonts/balsamiq-sans-400.woff2/x',
-      '/ui/fonts/constructor',
-      '/ui/fonts/__proto__',
-      '/ui/fonts/toString',
-      '/ui/fonts/hasOwnProperty',
-    ]) {
-      expect((await call(path)).status).toBe(404);
-    }
-  });
-
-  test('the CSP lets the page load fonts from the hub and nothing else from outside', async () => {
+  test('the CSP allows the hub its own icon and nothing from outside; no font source any more', async () => {
     const page = await call('/ui');
     const csp = page.headers.get('content-security-policy') ?? '';
-    expect(csp).toContain("font-src 'self'");
+    expect(csp).not.toContain('font-src');
+    expect(csp).toContain("img-src 'self' data:");
     expect(csp).toContain("default-src 'none'");
     const html = await page.text();
+    expect(html).toContain('<link rel="icon" href="/ui/icon.svg?v=test" type="image/svg+xml">');
+    expect(html).not.toContain('__VERSION__');
     expect(html).not.toMatch(/(src|href)=["']https?:/);
     expect(html).not.toMatch(/url\(\s*["']?https?:/);
   });

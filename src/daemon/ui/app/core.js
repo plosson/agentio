@@ -49,13 +49,99 @@ function icon(service, cls = '') {
 
 const profileLabel = (row) => html`<span class="svc">${icon(row.service)}${row.service} / ${row.profile}</span>`;
 
-function pill(status, service) {
-  const { label, tone } = statusPill(status, isSession(service));
-  return html`<span class="pill ${tone}">${label}</span>`;
+/** A status as symbol and word, coloured by tone. The symbol is decoration; the word carries the meaning. */
+function statusMarkup(sw) {
+  return html`<span class="status ${sw.tone}"><span aria-hidden="true">${sw.symbol}</span> ${sw.word}</span>`;
+}
+
+function statusText(status, service) {
+  return statusMarkup(statusWord(status, isSession(service)));
 }
 
 function copyButton(text) {
-  return html`<button class="btn" type="button" data-action="copy" data-text="${text}">Copy</button>`;
+  return html`<button class="button" type="button" data-action="copy" data-text="${text}">Copy</button>`;
+}
+
+/** A command people copy: monospace, wrapping, with its Copy button. */
+function command(text) {
+  return html`<div class="command"><code>${text}</code>${copyButton(text)}</div>`;
+}
+
+// ---------- Components (brand document, section 06): each exists once ----------
+
+/** The dark panel holding the one value the owner came for. At most one per screen. */
+function displayPanel(label, value, second) {
+  return html`<div class="display"><span class="label">${label}</span><span class="value">${value}</span>${second ? html`<span class="second">${second}</span>` : ''}</div>`;
+}
+
+/**
+ * The top of a screen: the path to it (detail pages only), the H1 with its count after it,
+ * and the screen's actions. With `rename`, the H1 can be edited in place: Enter saves, Esc cancels.
+ */
+function pageHead({ path = [], title, count, actions = '', rename = null }) {
+  const trail = path.length
+    ? html`<p class="path">${path.map((p, i) => html`${i ? ' / ' : ''}${p.href ? html`<a href="${p.href}">${p.label}</a>` : p.label}`)}</p>`
+    : '';
+  const editing = rename && state.ui.renaming === rename.key;
+  const heading = editing
+    ? html`<form class="inline-edit" data-submit="${rename.submit}" data-key="${rename.key}" novalidate>
+        <label class="sr-only" for="rename-input">New name</label>
+        <input class="input" id="rename-input" name="name" value="${state.ui.renameDraft ?? title}" data-input="rename" maxlength="64" autocomplete="off" spellcheck="false"
+          ${state.ui.renameError ? raw('aria-invalid="true" aria-describedby="rename-error"') : ''}>
+        <button class="button">Save</button>
+        <button type="button" class="button link" data-action="cancel-rename">Cancel</button>
+        ${state.ui.renameError ? html`<span class="field-error" id="rename-error" role="alert">✗ ${state.ui.renameError}</span>` : ''}
+      </form>`
+    : html`<div class="title"><h1>${title}</h1>${count === undefined ? '' : html`<span class="count">${count}</span>`}
+        ${rename ? html`<button type="button" class="button link" data-action="start-rename" data-key="${rename.key}">Rename</button>` : ''}</div>`;
+  return html`${trail}<div class="page-head">${heading}${actions}</div>`;
+}
+
+ACTIONS['start-rename'] = (el) => {
+  state.ui.renaming = el.dataset.key;
+  state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
+  render();
+  const input = $('rename-input');
+  if (input) { input.focus(); input.select(); }
+};
+
+/** Keep what was typed, so any redraw (a banner, a refresh) puts it back. */
+INPUTS.rename = (input) => { state.ui.renameDraft = input.value; };
+
+ACTIONS['cancel-rename'] = () => {
+  state.ui.renaming = null;
+  state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
+  render();
+};
+
+/** One list row: an optional dot (true = new or active), a bold title, a muted message, small meta. A link with `href`. */
+function listItem({ href, dot, title, message = '', meta = '' }) {
+  const cls = dot === undefined ? 'item no-dot' : 'item';
+  const body = html`${dot === undefined ? '' : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`}<span>
+    <span class="item-title">${title}</span>${message ? html`<span class="item-message">${message}</span>` : ''}${meta ? html`<span class="item-meta">${meta}</span>` : ''}</span>`;
+  return href ? html`<li><a class="${cls}" href="${href}">${body}</a></li>` : html`<li><div class="${cls}">${body}</div></li>`;
+}
+
+/** One sentence at the top of the page, then the next action. `problem` uses the warning background. */
+function banner(text, actions = '', problem = false) {
+  return html`<div class="banner ${problem ? 'problem' : ''}"><span class="text">${text}</span>${actions}</div>`;
+}
+
+/** What will appear here, and how to get it. */
+function emptyState(text, actions = '') {
+  return html`<div class="empty-state"><p>${text}</p>${actions ? html`<div class="actions">${actions}</div>` : ''}</div>`;
+}
+
+/** Two to four views of the same data. `items` are { id, href, label }. */
+function segmented(items, current) {
+  return html`<nav class="segmented" aria-label="View">${items.map((i) => html`<a href="${i.href}" ${i.id === current ? raw('aria-current="page"') : ''}>${i.label}</a>`)}</nav>`;
+}
+
+/** Not found, ended, unreachable: what happened, why in one sentence, the one way out. */
+function systemPage({ title, why, action, details = '' }) {
+  return html`<div class="narrow system"><h1>${title}</h1><p class="lede mt-8">${why}</p><div class="actions">${action}</div>${details}</div>`;
 }
 
 // ---------- Talking to the daemon ----------
@@ -98,6 +184,7 @@ async function api(path, options = {}) {
 async function loadAll() {
   const [status, keys, pending] = await Promise.all([api('/ui/api/status?test=false'), api('/ui/api/keys'), api('/ui/api/authorize')]);
   if (status.lost || keys.lost || pending.lost) return false;
+  if (!state.loaded && status.status === 0) { showUnreachable(); return false; }
   for (const res of [status, keys, pending]) if (!res.ok) toast(res.error, 'error');
   if (status.ok) {
     state.version = status.body.version || '';
@@ -107,6 +194,7 @@ async function loadAll() {
   if (keys.ok) state.keys = keys.body.keys;
   if (pending.ok) state.pending = pending.body.requests;
   state.loaded = true;
+  state.loadedAt = Date.now();
   return true;
 }
 
@@ -115,14 +203,30 @@ async function loadPending() {
   if (res.ok) state.pending = res.body.requests;
 }
 
+/** No answer from the hub before anything loaded: a system page, not a blank screen. */
+function showUnreachable() {
+  $('bar').hidden = true;
+  $('version').hidden = true;
+  main.innerHTML = systemPage({
+    title: 'The hub did not answer',
+    why: 'Check that it is running and that this computer can reach it.',
+    action: html`<button class="button primary" data-action="retry">Try again</button>`,
+    details: state.loadedAt ? html`<p class="muted small">Last loaded at ${clockTime(state.loadedAt)}.</p>` : '',
+  }).__html;
+  setTitle();
+}
+
+ACTIONS.retry = () => location.reload();
+
 /**
  * True while the owner is filling a form that a redraw would clobber: step 2
  * of a sign-in, a machine's "Connect a machine" panel, or its scope editor.
  */
 function formOpen() {
+  if (state.ui.renaming) return true;
   const route = currentRoute();
   if (route.view === 'authorize') return true;
-  if (route.view === 'machines' && state.ui.connectOpen) return true;
+  if (route.view === 'connect' && state.ui.byHand) return true;
   if (route.view === 'machine' && state.ui.editScope) return true;
   return false;
 }
@@ -175,20 +279,29 @@ function setTabs(route) {
   document.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
 }
 
+/** The browser title follows the H1, as "Profiles · agentio". */
+function setTitle() {
+  const h1 = main.querySelector('h1');
+  if (h1) document.title = `${h1.textContent.trim()} · agentio`;
+}
+
 /** Draws the current route into #main. Views read `state`; nothing else writes to the page. */
 function render() {
   if (!state.loaded) return;
   const route = currentRoute();
-  const view = VIEWS[route.view] || VIEWS.profiles;
+  const view = VIEWS[route.view] || VIEWS.overview;
   setTabs(route);
   $('bar').hidden = false;
-  $('tabbar').hidden = route.view === 'authorize';
+  $('version').hidden = !state.version;
+  $('version').textContent = state.version ? `v${state.version}` : '';
   $('hub-host').textContent = location.host;
   // Redrawing replaces every element: put focus, and the caret of a text field, back where they were.
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   main.innerHTML = (route.view === 'authorize' ? '' : signInBanner().__html) + view(route).__html;
+  setTitle();
+  syncCountdowns();
   const again = focused && $(focused);
   if (!again) return;
   again.focus();
@@ -203,18 +316,50 @@ function render() {
  */
 function signInBanner() {
   const now = Date.now();
-  return html`${state.pending.map((req) => html`<div class="box hl row mb-12"><span class="grow"><b>${req.name} wants access</b> · code ${req.userCode} · asked ${relativeTime(req.createdAt, now)}</span>
-    <button class="btn" data-action="deny-sign-in" data-code="${req.userCode}">Deny</button>
-    <a class="btn pri" href="${routeHash({ view: 'authorize', code: req.userCode })}">Review</a></div>`)}`;
+  return html`${state.pending.map((req) => banner(
+    html`<span aria-hidden="true">!</span> <b>${req.name}</b> wants access · code <span class="mono">${req.userCode}</span> · <span data-countdown="${req.expiresAt}">${countdown(req.expiresAt, now)}</span>`,
+    html`<button class="button" data-action="deny-sign-in" data-code="${req.userCode}">Deny</button>
+      <a class="button" href="${routeHash({ view: 'authorize', code: req.userCode })}">Review</a>`,
+    true))}`;
+}
+
+/** One timer while a countdown is on screen; it updates the text only, never redraws. */
+let ticker = null;
+
+function tick() {
+  const now = Date.now();
+  const live = document.querySelectorAll('[data-countdown]');
+  if (live.length === 0) { clearInterval(ticker); ticker = null; return; }
+  let ended = false;
+  live.forEach((el) => {
+    const text = countdown(el.dataset.countdown, now);
+    el.textContent = text;
+    if (text === 'ended') ended = true;
+  });
+  // The request ran out on the approval screen: say so instead of letting Approve fail.
+  if (ended && currentRoute().view === 'authorize' && state.ui.auth && state.ui.auth.step === 'ask' && !state.ui.auth.busy) {
+    Object.assign(state.ui.auth, { step: 'error', ended: true, error: ENDED });
+    render();
+  }
+}
+
+function syncCountdowns() {
+  const any = document.querySelector('[data-countdown]');
+  if (any && !ticker) ticker = setInterval(tick, 1000);
+  if (!any && ticker) { clearInterval(ticker); ticker = null; }
 }
 
 ACTIONS['deny-sign-in'] = async (el) => {
+  if (el.disabled) return;
+  el.disabled = true;
   const res = await api(`/ui/api/authorize/${encodeURIComponent(el.dataset.code)}`, { method: 'POST', body: JSON.stringify({ approve: false }) });
   if (res.lost) return;
   if (res.ok || res.status === 404) toast(res.ok ? 'Denied. The terminal is told no.' : 'That request had already ended.');
-  else toast(res.error, 'error');
+  else { toast(res.error, 'error'); el.disabled = false; }
   await loadPending();
-  render();
+  // Over a form the owner is filling, only this banner goes; a redraw would wipe what they typed.
+  if (formOpen()) el.closest('.banner')?.remove();
+  else render();
 };
 
 // ---------- Filtering profiles (Profiles, Who can use what) ----------
@@ -222,30 +367,34 @@ ACTIONS['deny-sign-in'] = async (el) => {
 /** The rows that match the filter box; the filter is kept across screens for the session. */
 const filteredRows = (rows) => rows.filter((r) => matchesFilter(r, state.ui.filter || '', displayName));
 
-/** The filter box, and how many of the profiles it shows when it hides some. */
 function filterBox(shown, total) {
   const query = state.ui.filter || '';
-  return html`<div class="row mt-12">
-    <input type="search" id="profile-filter" class="filter grow" data-input="filter" value="${query}"
+  return html`<div class="actions">
+    <input type="search" id="profile-filter" class="input grow" data-input="filter" value="${query}"
       placeholder="Filter profiles (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
     ${query.trim() ? html`<span class="muted">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
   </div>`;
 }
 
-/** What a filtered screen shows when nothing matches. */
-const noMatch = () => html`<div class="box empty mt-12"><p>No profile matches “${state.ui.filter}”.</p><button class="btn" data-action="clear-filter">Clear filter</button></div>`;
+const noMatch = () => emptyState(html`No profile matches “${state.ui.filter}”.`, html`<button class="button" data-action="clear-filter">Clear filter</button>`);
 
 INPUTS.filter = (input) => { state.ui.filter = input.value; render(); };
 ACTIONS['clear-filter'] = () => { state.ui.filter = ''; render(); };
 
 // ---------- Feedback ----------
 
-function toast(message, kind) {
+function toast(message, kind, link) {
   const el = document.createElement('div');
   el.className = 'toast' + (kind ? ' ' + kind : '');
   el.textContent = message;
+  if (link) {
+    const a = document.createElement('a');
+    a.href = link.href;
+    a.textContent = link.label;
+    el.appendChild(a);
+  }
   $('toasts').appendChild(el);
-  setTimeout(() => el.remove(), kind === 'error' ? 7000 : 3500);
+  setTimeout(() => el.remove(), kind === 'error' ? 7000 : 4000);
 }
 
 const clearToasts = () => { $('toasts').textContent = ''; };
@@ -266,38 +415,31 @@ async function confirmDialog({ title, body, action }) {
   return (await modal('confirm-dialog')) === 'ok';
 }
 
-async function renameDialog(current, label) {
-  $('rename-title').textContent = `Rename ${label}`;
-  $('rename-input').value = current;
-  const result = await modal('rename-dialog');
-  const value = $('rename-input').value.trim();
-  return result === 'ok' && value && value !== current ? value : null;
-}
+/** The question asked before leaving a key nobody has copied. One definition for every way out. */
+const LEAVE_KEY = {
+  title: 'Leave without copying the key?',
+  body: "It isn't shown again. If you leave now, you'll have to replace the key.",
+  action: 'Leave',
+};
 
-/** The key is shown once, as the two ways to use it. */
-function showToken(token) {
-  const quoted = shellQuote(token);
-  $('token-save-cmd').textContent = `(umask 077 && mkdir -p ~/.config/agentio && printf '%s\\n' ${quoted} > ~/.config/agentio/token)`;
-  $('token-env-cmd').textContent = `export AGENTIO_TOKEN=${quoted}`;
-  const dialog = $('token-dialog');
-  dialog.addEventListener('close', () => { $('token-save-cmd').textContent = ''; $('token-env-cmd').textContent = ''; }, { once: true });
-  dialog.showModal();
+/** True when leaving is fine: no key is on screen, it was copied, or the owner chose to leave. */
+async function confirmLeaveKey() {
+  const key = state.ui.shownKey;
+  if (!key || key.copied) return true;
+  return confirmDialog(LEAVE_KEY);
 }
 
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
     toast('Copied');
+    if (state.ui.shownKey) state.ui.shownKey.copied = true;
   } catch {
     toast('Copy failed: select the text and copy it by hand.', 'error');
   }
 }
 
 ACTIONS.copy = (el) => copyText(el.dataset.text);
-document.addEventListener('click', (ev) => {
-  const from = ev.target.closest('[data-copy-from]');
-  if (from) copyText($(from.dataset.copyFrom).textContent);
-});
 
 // ---------- Access choices (sign-in step 2, connect a machine, change a machine) ----------
 
@@ -312,10 +454,10 @@ function profileChecks(prefix, selected) {
 function profileChooser(prefix, selected) {
   const all = selected === '*';
   return html`
-    <label class="radio"><input type="radio" name="${prefix}-scope" value="all" ${all ? raw('checked') : ''} data-change="scope-mode">
-      <div><b>All profiles</b><div class="muted">Including profiles added later</div></div></label>
-    <label class="radio"><input type="radio" name="${prefix}-scope" value="some" ${all ? '' : raw('checked')} data-change="scope-mode">
-      <div class="grow"><b>Choose profiles…</b>${profileChecks(prefix, selected)}</div></label>`;
+    <label class="radio-card"><input type="radio" name="${prefix}-scope" value="all" ${all ? raw('checked') : ''}>
+      <span><span class="title">All profiles</span><span class="help">Including profiles added later</span></span></label>
+    <label class="radio-card"><input type="radio" name="${prefix}-scope" value="some" ${all ? '' : raw('checked')}>
+      <span class="grow"><span class="title">Choose profiles…</span>${profileChecks(prefix, selected)}</span></label>`;
 }
 
 function readProfileChoice(form, prefix) {
@@ -327,15 +469,15 @@ function readProfileChoice(form, prefix) {
 function accessChooser(prefix) {
   const others = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
   return html`
-    <label class="radio"><input type="radio" name="${prefix}-preset" value="read-all" checked>
-      <div><b>Read everything</b><div class="muted">All ${plural(state.rows.length, 'profile')}, read-only</div></div></label>
-    ${others.length ? html`<label class="radio"><input type="radio" name="${prefix}-preset" value="same-as">
-      <div class="grow"><b>Same as…</b><div class="muted">Copies another machine's profiles and settings</div>
-      <select name="${prefix}-same" aria-label="Machine to copy">${others.map((k) => html`<option value="${k.id}">${k.name}</option>`)}</select></div></label>` : ''}
-    <label class="radio"><input type="radio" name="${prefix}-preset" value="choose">
-      <div class="grow"><b>Choose profiles…</b><div class="muted">Tick each one</div>
+    <label class="radio-card"><input type="radio" name="${prefix}-preset" value="read-all" checked>
+      <span><span class="title">Read everything</span><span class="help">All ${plural(state.rows.length, 'profile')}, read-only</span></span></label>
+    ${others.length ? html`<label class="radio-card"><input type="radio" name="${prefix}-preset" value="same-as">
+      <span class="grow"><span class="title">Same as…</span><span class="help">Copies another machine's profiles and settings</span>
+      <select class="input mt-8" name="${prefix}-same" aria-label="Machine to copy">${others.map((k) => html`<option value="${k.id}">${k.name}</option>`)}</select></span></label>` : ''}
+    <label class="radio-card"><input type="radio" name="${prefix}-preset" value="choose">
+      <span class="grow"><span class="title">Choose profiles…</span><span class="help">Tick each one</span>
       ${profileChecks(prefix, [])}
-      <label class="row mt-6"><input type="checkbox" name="${prefix}-ro" checked> Read-only</label></div></label>`;
+      <label class="check"><input type="checkbox" name="${prefix}-ro" checked> Read-only</label></span></label>`;
 }
 
 /** The chosen preset, ready for `presetInput`. */
@@ -351,5 +493,3 @@ function readAccessChoice(form, prefix) {
   }
   return { kind: 'read-all' };
 }
-
-CHANGES['scope-mode'] = () => {};
