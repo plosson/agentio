@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-01. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-03. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -34,12 +34,15 @@ The **"Create your own app"** steps below were checked against each provider's o
 
 ## Google (gmail, gdrive, gdocs, gsheets, gslides, gcal, gtasks, gchat, gscript)
 
-**Code:** `src/plugins/google/oauth.ts`, `src/config/credentials.ts` (`GOOGLE_OAUTH_CONFIG`)
+**Code:** `src/plugins/google/oauth.ts`, `src/plugins/google/suite.ts`, `src/plugins/google/group.ts`, `src/config/credentials.ts` (`GOOGLE_OAUTH_CONFIG`)
 
 **Sign-in**
 - OAuth 2.0 in the system browser, with a `localhost` callback on a free port.
 - The code is exchanged for tokens with the client secret.
 - The daemon refreshes access tokens.
+- One consent can cover several services: `agentio google profile add [--services gmail,gcal,…]` (hidden from help). It requests the joined scopes and saves one profile per service whose scopes Google granted; services left unticked on the consent screen are skipped and listed.
+- All profiles from one consent store the same refresh token. Revoking agentio in the Google account invalidates them together; `agentio reauth` then renews the profiles of one account with one consent.
+- A renewal must use the account the profile holds. Signing in with another Google account is refused and nothing is saved.
 
 **agentio's Google app**
 - **Project number:** `931954287794`
