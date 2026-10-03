@@ -48,8 +48,10 @@ function showUnlock(locked) {
     // Mid-task: keep the screen and everything typed on it, and ask over it.
     const dialog = $('gate-dialog');
     if (dialog.open && dialog.dataset.locked === String(locked)) return; // already asking; keep what is typed
+    const typed = dialog.open && $('passphrase') ? $('passphrase').value : '';
     dialog.dataset.locked = String(locked);
     dialog.innerHTML = gateMarkup(locked).__html;
+    $('passphrase').value = typed; // the mode flipped while open: keep what was typed
     if (!dialog.open) dialog.showModal();
     $('passphrase').focus();
     return;
@@ -123,7 +125,9 @@ async function openHub() {
     dialog.close();
     dialog.textContent = '';
     // The screen and what was typed on it stay; only the data underneath refreshes.
-    if ((await loadAll()) && !formOpen()) render();
+    // An authorize screen that lost its request to the 401 must render to load it again.
+    const stalled = currentRoute().view === 'authorize' && (!state.ui.auth || state.ui.auth.step === 'loading');
+    if ((await loadAll()) && (!formOpen() || stalled)) render();
     return;
   }
   if (await loadAll()) render();

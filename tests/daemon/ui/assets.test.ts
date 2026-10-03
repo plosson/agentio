@@ -184,6 +184,11 @@ describe('the assembled admin page', () => {
     expect(script).toMatch(/ACTIONS\.lock = async \(\) => \{[\s\S]*?leaveHub\(true\)/);
   });
 
+  test('the gate: after signing back in, a stalled authorize screen renders again and a flipped gate keeps the typed passphrase', () => {
+    expect(script).toMatch(/async function openHub\(\) \{[\s\S]*?currentRoute\(\)\.view === 'authorize' && \(!state\.ui\.auth \|\| state\.ui\.auth\.step === 'loading'\)[\s\S]*?\(!formOpen\(\) \|\| stalled\)/);
+    expect(script).toContain("$('passphrase').value = typed;");
+  });
+
   test('profiles and access share a filter that types without losing the caret', () => {
     expect(script).toContain("INPUTS.filter");
     expect(script).toContain("ACTIONS['clear-filter']");
