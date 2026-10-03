@@ -2,7 +2,7 @@ import { gmailProfileAdd, registerGmailCommands } from './commands';
 import { GmailClient } from './client';
 import type { OAuthTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogleSnake, type GoogleSnakeCredentials } from '../shared';
+import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogle, type GoogleSnakeCredentials } from '../shared';
 
 export default defineServicePlugin<GoogleSnakeCredentials, OAuthTokens>()({
   apiVersion: 1,
@@ -15,7 +15,7 @@ export default defineServicePlugin<GoogleSnakeCredentials, OAuthTokens>()({
     setup: gmailProfileAdd,
     createClient: (credentials) => new GmailClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleSnake('gmail'),
+    reauthenticate: reauthenticateGoogle<GoogleSnakeCredentials>('gmail'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,
 });

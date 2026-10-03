@@ -3,7 +3,7 @@ import { GSlidesClient } from './client';
 import type { GSlidesCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleCamelCredentialLifecycle, reauthenticateGoogleCamel } from '../shared';
+import { googleCamelCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GSlidesCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GSlidesCredentials, GoogleCamelTokens>()({
     setup: gslidesProfileAdd,
     createClient: (credentials) => new GSlidesClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleCamel<GSlidesCredentials>('gslides'),
+    reauthenticate: reauthenticateGoogle<GSlidesCredentials>('gslides'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });

@@ -3,7 +3,7 @@ import { GDocsClient } from './client';
 import type { GDocsCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleCamelCredentialLifecycle, reauthenticateGoogleCamel } from '../shared';
+import { googleCamelCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GDocsCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GDocsCredentials, GoogleCamelTokens>()({
     setup: gdocsProfileAdd,
     createClient: (credentials) => new GDocsClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleCamel<GDocsCredentials>('gdocs'),
+    reauthenticate: reauthenticateGoogle<GDocsCredentials>('gdocs'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });
