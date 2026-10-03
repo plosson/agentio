@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { INDEX_HTML } from '../../../src/daemon/ui/assets';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { ICON_SVG, INDEX_HTML } from '../../../src/daemon/ui/assets';
+
+const UI = join(import.meta.dir, '../../../src/daemon/ui');
+const familyCss = readFileSync(join(UI, 'family.css'), 'utf8');
+const adminCss = readFileSync(join(UI, 'admin.css'), 'utf8');
 
 const script = INDEX_HTML.slice(INDEX_HTML.indexOf('<script nonce="__CSP_NONCE__">') + '<script nonce="__CSP_NONCE__">'.length, INDEX_HTML.lastIndexOf('</script>'));
 const style = INDEX_HTML.slice(INDEX_HTML.indexOf('<style nonce="__CSP_NONCE__">'), INDEX_HTML.indexOf('</style>'));
@@ -10,12 +16,13 @@ describe('the assembled admin page', () => {
     expect(INDEX_HTML).not.toContain('//__SCRIPT__');
     expect(INDEX_HTML).toContain('__PLUGIN_METADATA__');
     expect(INDEX_HTML.match(/__CSP_NONCE__/g)).toHaveLength(2);
+    expect(INDEX_HTML).toContain('__VERSION__');
   });
 
-  test('one inline script and one inline style, nothing external', () => {
+  test('one inline script and one inline style; the only link is the favicon, served by the hub', () => {
     expect(INDEX_HTML.match(/<script\b/g)).toHaveLength(1);
     expect(INDEX_HTML.match(/<style\b/g)).toHaveLength(1);
-    expect(INDEX_HTML).not.toMatch(/<link\b/);
+    expect(INDEX_HTML.match(/<link\b[^>]*>/g)).toEqual(['<link rel="icon" href="/ui/icon.svg?v=__VERSION__" type="image/svg+xml">']);
   });
 
   test('the script is valid JavaScript with no module syntax left', () => {
@@ -41,10 +48,30 @@ describe('the assembled admin page', () => {
     expect(INDEX_HTML).not.toMatch(/\sstyle\s*=/);
   });
 
-  test('the style uses the hub font and the wireframe palette', () => {
-    expect(style).toContain("url('/ui/fonts/balsamiq-sans-400.woff2')");
-    expect(style).toContain("url('/ui/fonts/balsamiq-sans-700.woff2')");
-    for (const colour of ['#2b2b2b', '#fdfdfb', '#3b6fd8', '#fff4b8', '#d0453a']) expect(style).toContain(colour);
+  test('the style is the family tokens, then the agentio brand, then the admin; no web font', () => {
+    expect(style).not.toMatch(/@font-face|url\(/);
+    expect(style).not.toContain('Balsamiq');
+    const family = style.indexOf('--bg: #F8F0E0;');
+    const brand = style.indexOf('--brand: #2F5FD8;');
+    expect(family).toBeGreaterThan(-1);
+    expect(brand).toBeGreaterThan(family);
+    expect(style).toContain('--primary-fg: #F8F0E0;');
+    expect(style).toContain('--display-fg: #F2C14E;');
+  });
+
+  test('admin.css uses roles, never a hex colour', () => {
+    expect(adminCss).not.toMatch(/:[^;{}]*#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  test("family.css is the brand document's family block, unchanged", () => {
+    expect(familyCss).toBe(FAMILY_CSS);
+  });
+
+  test('the vault icon: one SVG, no script, no outside reference', () => {
+    expect(ICON_SVG.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">')).toBe(true);
+    expect(ICON_SVG).not.toMatch(/<script|\son\w+=|href=|<foreignObject/i);
+    expect(ICON_SVG).toContain('<g class="dial">');
+    expect(ICON_SVG).toContain('class="knob"');
   });
 
   test('profiles: its actions are registered and its commands come from the model', () => {
@@ -118,3 +145,51 @@ describe('the assembled admin page', () => {
     expect(script).toContain('setSelectionRange(');
   });
 });
+
+const FAMILY_CSS = `/* family.css: the same file in every product. */
+:root {
+  color-scheme: light dark;
+  --bg: #F8F0E0;
+  --fg: #283030;
+  --muted: #6B6459;
+  --card: #FFFDF8;
+  --line: #E4DAC6;
+  --code-bg: #F1E9D8;
+  --badge-bg: #EFE6D4;
+  --strong-bg: #283030;
+  --strong-fg: #F8F0E0;
+  --display-bg: #283030;
+  --ok: #1E7A34;
+  --bad: #B42318;
+  --warn-bg: #F6DFB2;
+  --old-dot: #E4DAC6;
+  --link: var(--brand-deep);
+  --primary-bg: var(--brand);
+  --new-dot: var(--brand);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --size-title: 1.75rem; --size-section: 1.25rem; --size-body: 1rem;
+  --size-small: 0.875rem; --size-mono: 0.9375rem;
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
+  --radius: 14px; --radius-small: 10px; --tap: 44px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181820;
+    --fg: #F1EADB;
+    --muted: #A39E94;
+    --card: #22232B;
+    --line: #34363F;
+    --code-bg: #2C2D36;
+    --badge-bg: #34363F;
+    --strong-bg: #F1EADB;
+    --strong-fg: #181820;
+    --display-bg: #101615;
+    --ok: #5BD07A;
+    --bad: #FF6B5E;
+    --warn-bg: #4A3A1C;
+    --old-dot: #3A3C46;
+    --link: var(--link-dark);
+  }
+}
+`;

@@ -1,0 +1,10 @@
+/* brand.css: the agentio block of the io family brand, loaded after family.css. */
+:root {
+  --brand: #2F5FD8;
+  --brand-top: #4876EC;
+  --brand-deep: #1F3F9E;
+  --link-dark: #7EA2FF;
+  --display-fg: #F2C14E;
+  --display-label: #B39445;
+  --primary-fg: #F8F0E0;
+}

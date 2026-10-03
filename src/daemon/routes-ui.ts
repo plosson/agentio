@@ -18,13 +18,12 @@ import {
   isSecureRequest,
   sessionCookie,
 } from './session';
-import { INDEX_HTML } from './ui/assets';
+import { ICON_SVG, INDEX_HTML } from './ui/assets';
 import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth, listDeviceAuth } from './device-auth';
 import { errorResponse, json, profilePath, readJson } from './http';
 import { findServicePlugin, getPluginRegistry } from '../plugins/registry';
 import { profileDetails } from '../plugins/profile-details';
 import { getCredentials } from '../auth/token-store';
-import { FONTS } from './ui/fonts';
 import { isLegacyServicePlugin } from '../plugins/types';
 
 export interface UiContext {
@@ -39,12 +38,12 @@ export const unlockLimiter = new RateLimiter(5, 60_000);
  * prime clickjacking target, so framing is denied outright; a strict CSP with a
  * per-response nonce lets the single inline script and style run while blocking
  * anything injected, and HSTS keeps the browser on TLS. The page pulls in nothing
- * from another origin; only its own fonts come from 'self'.
+ * from another origin; its icon comes from 'self'.
  */
 function securityHeaders(nonce: string): Record<string, string> {
   return {
     'Content-Security-Policy':
-      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; font-src 'self'; ` +
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';` +
       `connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
@@ -53,7 +52,7 @@ function securityHeaders(nonce: string): Record<string, string> {
   };
 }
 
-function page(): Response {
+function page(ctx: UiContext): Response {
   const nonce = randomBytes(16).toString('base64');
   const metadata = Object.fromEntries(getPluginRegistry().plugins.map((plugin) => [plugin.id, {
     displayName: plugin.displayName,
@@ -67,6 +66,7 @@ function page(): Response {
   const serialized = JSON.stringify(metadata).replace(/[<>&]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const html = INDEX_HTML
     .replaceAll('__CSP_NONCE__', nonce)
+    .replaceAll('__VERSION__', encodeURIComponent(ctx.version))
     .replace('__PLUGIN_METADATA__', serialized);
   return new Response(html, {
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(nonce) },
@@ -192,16 +192,15 @@ async function handleStatus(request: Request, ctx: UiContext): Promise<Response>
   return json({ version: ctx.version, services });
 }
 
-/** `/ui/fonts/<file>`: the page's own fonts, public so the locked screen can use them. */
-function font(pathname: string): Response | null {
-  if (!pathname.startsWith('/ui/fonts/')) return null;
-  const name = pathname.slice('/ui/fonts/'.length);
-  // A plain-object lookup also matches inherited names like `constructor` or `toString`; require an own property.
-  if (!Object.hasOwn(FONTS, name)) return errorResponse(new CliError('NOT_FOUND', 'Not found'));
-  const bytes = FONTS[name];
-  // TS's BodyInit wants a Uint8Array<ArrayBuffer>; our decoded bytes are typed ArrayBufferLike, same data.
-  return new Response(bytes as Uint8Array<ArrayBuffer>, {
-    headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' },
+/** `/ui/icon.svg`: the vault icon, public so the gate and the favicon can use it. Its URL carries the version. */
+function icon(): Response {
+  return new Response(ICON_SVG, {
+    headers: {
+      'Content-Type': 'image/svg+xml',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'",
+    },
   });
 }
 
@@ -217,8 +216,8 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
   if (!pathname.startsWith('/ui')) return null;
 
   try {
-    if (method === 'GET' && (pathname === '/ui' || pathname === '/ui/')) return page();
-    if (method === 'GET') { const res = font(pathname); if (res) return res; }
+    if (method === 'GET' && (pathname === '/ui' || pathname === '/ui/')) return page(ctx);
+    if (method === 'GET' && pathname === '/ui/icon.svg') return icon();
 
     if (method === 'GET' && pathname === '/ui/api/session') {
       return json({ authenticated: hasSession(request), locked: !isVaultUnlocked() });
