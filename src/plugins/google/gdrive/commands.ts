@@ -4,6 +4,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
+import { driveCredentials } from '../suite';
 import { GDriveClient } from './client';
 import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions, printGDriveCopied } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -615,15 +616,7 @@ export async function gdriveProfileAdd(options: { profile?: string; readonly?: b
     );
   }
 
-  const credentials: GDriveCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-    accessLevel,
-  };
+  const credentials: GDriveCredentials = driveCredentials(tokens, userEmail, accessLevel);
 
   return {
     credentials,

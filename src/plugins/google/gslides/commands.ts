@@ -5,6 +5,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
+import { camelCredentials } from '../suite';
 import { GSlidesClient } from './client';
 import {
   printGSlidesList,
@@ -297,14 +298,7 @@ export async function gslidesProfileAdd(_options: { profile?: string; readOnly?:
     );
   }
 
-  const credentials: GSlidesCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
+  const credentials: GSlidesCredentials = camelCredentials(tokens, userEmail);
 
   return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gslides list` };
 }

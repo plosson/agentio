@@ -4,6 +4,7 @@ import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
+import { snakeCredentials } from '../suite';
 import { GTasksClient } from './client';
 import {
   printGTasksList,
@@ -451,5 +452,5 @@ export async function gtasksProfileAdd(_options: { profile?: string; readOnly?: 
     throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
   }
 
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
+  return { credentials: snakeCredentials(tokens, email), suggestedProfileName: email, info: `Email: ${email}` };
 }

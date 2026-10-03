@@ -5,6 +5,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
+import { camelCredentials } from '../suite';
 import { GSheetsClient } from './client';
 import {
   printGSheetsList,
@@ -609,14 +610,7 @@ export async function gsheetsProfileAdd(_options: { profile?: string; readOnly?:
     throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
   }
 
-  const credentials: GSheetsCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
+  const credentials: GSheetsCredentials = camelCredentials(tokens, userEmail);
 
   return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gsheets list` };
 }
