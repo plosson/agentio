@@ -47,6 +47,13 @@ export async function chooseProfileName(
   }
 }
 
+/** One profile of a batch save. */
+export interface ProfileWrite {
+  service: ServiceName;
+  name: string;
+  credentials: object;
+}
+
 /** Add or replace a profile and its credentials in one vault write, or one PUT to the hub. */
 export function saveProfile(
   service: ServiceName,
@@ -54,12 +61,44 @@ export function saveProfile(
   credentials: object,
   options: SetProfileOptions = {},
 ): Promise<void> {
-  if (isRemoteMode()) return remoteSaveProfile(service, profileName, credentials, options)
-    .then(() => { console.error(`Stored on the vault hub at ${hub().url}`); });
-  return updateVault((vault) => {
-    const index = findProfileIndex(vault.config, service, profileName);
-    putProfile(vault, service, profileName, credentials, keptOptions(vault, service, index, options));
+  return saveProfiles([{ service, name: profileName, credentials }], options);
+}
+
+/**
+ * Add or replace several profiles. Locally, one vault write: all of them or
+ * none. On the hub, one PUT each, in order; a failure stops there, and when
+ * some were already stored the error names what was and what was not.
+ */
+export async function saveProfiles(writes: readonly ProfileWrite[], options: SetProfileOptions = {}): Promise<void> {
+  for (const write of writes) validateProfileName(write.name);
+  if (isRemoteMode()) {
+    await remoteSaveProfiles(writes, options);
+    console.error(`Stored on the vault hub at ${hub().url}`);
+    return;
+  }
+  await updateVault((vault) => {
+    for (const write of writes) {
+      const index = findProfileIndex(vault.config, write.service, write.name);
+      putProfile(vault, write.service, write.name, write.credentials, keptOptions(vault, write.service, index, options));
+    }
   });
+}
+
+async function remoteSaveProfiles(writes: readonly ProfileWrite[], options: SetProfileOptions): Promise<void> {
+  for (const [done, write] of writes.entries()) {
+    try {
+      await remoteSaveProfile(write.service, write.name, write.credentials, options);
+    } catch (error) {
+      if (done === 0) throw error;
+      const refs = (from: number, to?: number) => writes.slice(from, to).map((w) => profileRef(w.service, w.name)).join(', ');
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError(
+        error instanceof CliError ? error.code : 'API_ERROR',
+        `${message}\nSaved: ${refs(0, done)}\nNot saved: ${refs(done)}`,
+        error instanceof CliError ? error.suggestion : undefined,
+      );
+    }
+  }
 }
 
 /**

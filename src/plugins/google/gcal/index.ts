@@ -3,7 +3,7 @@ import { GCalClient } from './client';
 import type { GCalCredentials } from './types';
 import type { OAuthTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogleSnake } from '../shared';
+import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GCalCredentials, OAuthTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GCalCredentials, OAuthTokens>()({
     setup: gcalProfileAdd,
     createClient: (credentials) => new GCalClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleSnake('gcal'),
+    reauthenticate: reauthenticateGoogle<GCalCredentials>('gcal'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,
 });

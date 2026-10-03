@@ -5,6 +5,7 @@ import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
+import { snakeCredentials } from '../suite';
 import { GCalClient } from './client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -504,5 +505,5 @@ export async function gcalProfileAdd(_options: { profile?: string; readOnly?: bo
     throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
   }
 
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
+  return { credentials: snakeCredentials(tokens, email), suggestedProfileName: email, info: `Email: ${email}` };
 }

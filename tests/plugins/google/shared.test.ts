@@ -1,13 +1,12 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { redactForRemote } from '../../../src/auth/refresh';
 import {
+  assertSameAccount,
   googleCamelCredentialLifecycle,
   googleSnakeCredentialLifecycle,
-  reauthenticateGoogleCamel,
-  reauthenticateGoogleSnake,
-  type GoogleCamelCredentials,
-  type GoogleSnakeCredentials,
+  reauthenticateGoogle,
 } from '../../../src/plugins/google/shared';
+import gchat from '../../../src/plugins/google/gchat';
 
 const tokens = {
   access_token: 'access-new',
@@ -33,22 +32,76 @@ describe('shared Google plugin lifecycle', () => {
     expect(redactForRemote('gmail', { access_token: 'a', refresh_token: 'r' })).toEqual({ access_token: 'a' });
     expect(redactForRemote('gdocs', { accessToken: 'a', refreshToken: 'r' })).toEqual({ accessToken: 'a' });
   });
+});
 
-  test('reauthenticates snake and camel credential shapes through shared code', async () => {
-    const performOAuth = mock(async () => tokens);
-    const fetchEmail = mock(async () => 'user@example.test');
+describe('reauthenticateGoogle', () => {
+  let errorSpy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
 
-    const snake = await reauthenticateGoogleSnake<GoogleSnakeCredentials & { custom: boolean }>('gslides', performOAuth, fetchEmail)(
+  const emailIs = (email: string) => mock(async () => email);
+
+  test('keeps fields the plugin stored, in both credential shapes', async () => {
+    const performOAuth = mock(async (..._keys: unknown[]) => tokens);
+    const snake = await reauthenticateGoogle<Record<string, unknown>>('gmail', performOAuth, emailIs('user@example.test'))(
       { access_token: 'old', refresh_token: 'old-refresh', token_type: 'Bearer', custom: true },
       'work',
     );
-    const camel = await reauthenticateGoogleCamel<GoogleCamelCredentials & { custom: boolean }>('gscript', performOAuth, fetchEmail)(
+    const camel = await reauthenticateGoogle<Record<string, unknown>>('gscript', performOAuth, emailIs('user@example.test'))(
       { accessToken: 'old', refreshToken: 'old-refresh', tokenType: 'Bearer', custom: true },
       'work',
     );
 
     expect(snake).toMatchObject({ access_token: 'access-new', refresh_token: 'refresh-new', email: 'user@example.test', custom: true });
     expect(camel).toMatchObject({ accessToken: 'access-new', refreshToken: 'refresh-new', email: 'user@example.test', custom: true });
-    expect(performOAuth).toHaveBeenCalledTimes(2);
+    expect(performOAuth.mock.calls.map((call) => call[0])).toEqual(['gmail', 'gscript']);
+  });
+
+  test('Drive renews with the level it had, and read-only when none was stored', async () => {
+    const performOAuth = mock(async (..._keys: unknown[]) => tokens);
+    const renew = reauthenticateGoogle<Record<string, unknown>>('gdrive', performOAuth, emailIs('user@example.test'));
+
+    expect(await renew({ accessToken: 'old', tokenType: 'Bearer', accessLevel: 'full' }, 'w')).toMatchObject({ accessLevel: 'full' });
+    expect(await renew(null, 'w')).toMatchObject({ accessLevel: 'readonly' });
+    expect(performOAuth.mock.calls.map((call) => call[0])).toEqual(['gdrive-full', 'gdrive-readonly']);
+  });
+
+  test('refuses a consent made with another account, names both, and returns nothing', async () => {
+    const renew = reauthenticateGoogle<Record<string, unknown>>('gmail', mock(async () => tokens), emailIs('home@example.test'));
+    const attempt = renew({ access_token: 'old', token_type: 'Bearer', email: 'work@example.test' }, 'work');
+
+    await expect(attempt).rejects.toMatchObject({ code: 'AUTH_FAILED' });
+    await expect(attempt).rejects.toThrow('Signed in as home@example.test, but this profile belongs to work@example.test');
+  });
+
+  test('the same account in other letter case is the same account', async () => {
+    const renew = reauthenticateGoogle<Record<string, unknown>>('gcal', mock(async () => tokens), emailIs('me@example.test'));
+    expect(await renew({ access_token: 'old', token_type: 'Bearer', email: 'Me@Example.TEST' }, 'w')).toMatchObject({ email: 'me@example.test' });
+  });
+
+  test('an older profile with no stored email takes the new one', async () => {
+    const renew = reauthenticateGoogle<Record<string, unknown>>('gdocs', mock(async () => tokens), emailIs('me@example.test'));
+    expect(await renew({ accessToken: 'old', tokenType: 'Bearer' }, 'w')).toMatchObject({ email: 'me@example.test' });
+  });
+
+  test('a service outside the Google suite fails when the plugin is defined', () => {
+    expect(() => reauthenticateGoogle('slack')).toThrow();
+  });
+
+  test('a Chat webhook profile is left as it is, with no browser', async () => {
+    const hook = { type: 'webhook' as const, webhookUrl: 'https://chat.example.test/hook' };
+    expect(await gchat.profile!.reauthenticate!(hook, 'hook')).toEqual(hook);
+  });
+});
+
+describe('assertSameAccount', () => {
+  test('passes when nothing was stored, or the stored value is not an email string', () => {
+    expect(() => assertSameAccount(undefined, 'a@x.com')).not.toThrow();
+    expect(() => assertSameAccount('', 'a@x.com')).not.toThrow();
+    expect(() => assertSameAccount(42, 'a@x.com')).not.toThrow();
   });
 });

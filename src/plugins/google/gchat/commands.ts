@@ -1,11 +1,11 @@
 import { Command } from 'commander';
-import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { chatCredentials, verifyChatAccess } from '../suite';
+import { fetchGoogleUserEmail } from '../token-manager';
 import { GChatClient } from './client';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin, prompt } from '../../../utils/stdin';
@@ -451,7 +451,6 @@ async function setupOAuthProfile(): Promise<SetupResult<GChatOAuthCredentials>> 
   console.error('Starting OAuth flow for Google Chat profile...\n');
 
   const tokens = await performOAuthFlow('gchat');
-  const auth = createGoogleAuth(tokens);
 
   // Fetch user email for profile naming
   let userEmail: string;
@@ -466,28 +465,9 @@ async function setupOAuthProfile(): Promise<SetupResult<GChatOAuthCredentials>> 
     );
   }
 
-  // Validate the token works with Chat API
-  try {
-    const chatApi = gchat({ version: 'v1', auth: auth as any });
-    await chatApi.spaces.list({ pageSize: 1 });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to validate Google Chat access: ${errorMessage}`,
-      'Google Chat API requires a Google Workspace account. Personal Gmail accounts cannot use the Chat API.'
-    );
-  }
+  await verifyChatAccess(tokens);
 
-  const credentials: GChatOAuthCredentials = {
-    type: 'oauth',
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
+  const credentials: GChatOAuthCredentials = chatCredentials(tokens, userEmail);
 
   return {
     credentials,

@@ -6,6 +6,7 @@ import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
+import { snakeCredentials } from '../suite';
 import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -1167,5 +1168,5 @@ export async function gmailProfileAdd(_options: { profile?: string; readOnly?: b
     throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
   }
 
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
+  return { credentials: snakeCredentials(tokens, email), suggestedProfileName: email, info: `Email: ${email}` };
 }

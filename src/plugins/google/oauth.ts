@@ -63,7 +63,24 @@ const SCOPES = {
 
 export type OAuthService = keyof typeof SCOPES;
 
-export async function performOAuthFlow(service: OAuthService): Promise<OAuthTokens> {
+/** A broader scope Google may grant that covers a narrower one we asked for. */
+const COVERED_BY: Record<string, string> = {
+  'https://www.googleapis.com/auth/drive.readonly': 'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file': 'https://www.googleapis.com/auth/drive',
+};
+
+/** Every scope the keys need, each once, in the order first seen. */
+export function scopesFor(keys: readonly OAuthService[]): string[] {
+  return [...new Set(keys.flatMap((key) => SCOPES[key]))];
+}
+
+/** The scopes the keys need that Google's space-separated answer does not grant. */
+export function missingScopes(keys: readonly OAuthService[], granted: string | undefined): string[] {
+  const have = new Set((granted ?? '').split(/\s+/).filter(Boolean));
+  return scopesFor(keys).filter((scope) => !have.has(scope) && !have.has(COVERED_BY[scope] ?? ''));
+}
+
+export async function performOAuthFlow(keys: OAuthService | readonly OAuthService[]): Promise<OAuthTokens> {
   const port = await findAvailablePort();
   const redirectUri = `http://localhost:${port}/callback`;
   const oauth2Client = new OAuth2Client(
@@ -74,7 +91,7 @@ export async function performOAuthFlow(service: OAuthService): Promise<OAuthToke
 
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: [...SCOPES[service]],
+    scope: scopesFor(typeof keys === 'string' ? [keys] : keys),
     prompt: 'consent',
   });
   const { code } = await awaitOAuthCode({

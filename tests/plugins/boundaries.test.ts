@@ -8,7 +8,7 @@ async function serviceSources(): Promise<Array<{ path: string; source: string }>
   const files: Array<{ path: string; source: string }> = [];
   const glob = new Bun.Glob('src/plugins/**/*.ts');
   for await (const path of glob.scan({ cwd: ROOT, absolute: true })) {
-    if (/\/src\/plugins\/(?:profile-host|declarative)\.ts$/.test(path)) continue;
+    if (/\/src\/plugins\/(?:profile-host|declarative|google\/group)\.ts$/.test(path)) continue;
     files.push({ path: relative(ROOT, path), source: await readFile(path, 'utf8') });
   }
   return files;

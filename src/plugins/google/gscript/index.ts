@@ -3,7 +3,7 @@ import { GScriptClient } from './client';
 import type { GScriptCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleCamelCredentialLifecycle, reauthenticateGoogleCamel } from '../shared';
+import { googleCamelCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GScriptCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GScriptCredentials, GoogleCamelTokens>()({
     setup: gscriptProfileAdd,
     createClient: (credentials) => new GScriptClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleCamel<GScriptCredentials>('gscript'),
+    reauthenticate: reauthenticateGoogle<GScriptCredentials>('gscript'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });

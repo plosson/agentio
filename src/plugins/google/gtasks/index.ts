@@ -3,7 +3,7 @@ import { GTasksClient } from './client';
 import type { GTasksCredentials } from './types';
 import type { OAuthTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogleSnake } from '../shared';
+import { googleAuthFromSnakeCredentials, googleSnakeCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GTasksCredentials, OAuthTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GTasksCredentials, OAuthTokens>()({
     setup: gtasksProfileAdd,
     createClient: (credentials) => new GTasksClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleSnake('gtasks'),
+    reauthenticate: reauthenticateGoogle<GTasksCredentials>('gtasks'),
   },
   credentialLifecycle: googleSnakeCredentialLifecycle,
 });

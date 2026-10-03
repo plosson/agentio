@@ -5,6 +5,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
+import { camelCredentials } from '../suite';
 import { GDocsClient } from './client';
 import { printGDocsList, printGDocCreated, printGDocUpdated, printGDocsBatchResult, printGDocsTabs, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -397,14 +398,7 @@ export async function gdocsProfileAdd(_options: { profile?: string; readOnly?: b
     );
   }
 
-  const credentials: GDocsCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
+  const credentials: GDocsCredentials = camelCredentials(tokens, userEmail);
 
   return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gdocs list` };
 }

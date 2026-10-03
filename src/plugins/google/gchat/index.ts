@@ -1,11 +1,11 @@
 import { gchatProfileAdd, registerGChatCommands } from './commands';
-import { performOAuthFlow } from '../oauth';
-import { fetchGoogleUserEmail } from '../token-manager';
 import { GChatClient } from './client';
 import type { GChatCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleCamelCredentialLifecycle } from '../shared';
+import { googleCamelCredentialLifecycle, reauthenticateGoogle } from '../shared';
+
+const renewOAuth = reauthenticateGoogle<GChatCredentials>('gchat');
 
 export default defineServicePlugin<GChatCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
@@ -19,26 +19,11 @@ export default defineServicePlugin<GChatCredentials, GoogleCamelTokens>()({
     createClient: (credentials) => new GChatClient(credentials),
     describe: (credentials) => ({ account: 'email' in credentials ? credentials.email : undefined }),
     async reauthenticate(credentials, profileName) {
-      const existing = credentials;
-      if (existing?.type === 'webhook') {
+      if (credentials?.type === 'webhook') {
         console.error(`\nSkipping gchat / ${profileName}: webhook profiles don't expire. Run 'agentio gchat profile add' to update.`);
-        return existing;
+        return credentials;
       }
-
-      console.error(`\nRe-authenticating gchat / ${profileName}...`);
-      const tokens = await performOAuthFlow('gchat');
-      const email = await fetchGoogleUserEmail(tokens.access_token);
-      console.error(`  Done (${email})`);
-      return {
-        ...existing,
-        type: 'oauth' as const,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiryDate: tokens.expiry_date,
-        tokenType: tokens.token_type,
-        scope: tokens.scope,
-        email,
-      };
+      return renewOAuth(credentials, profileName);
     },
   },
   credentialLifecycle: googleCamelCredentialLifecycle,

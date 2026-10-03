@@ -195,6 +195,29 @@ describe('remote mode end to end', () => {
     expect(query.stdout).toContain('one');
   });
 
+  test('a batch the hub refuses halfway says what was stored and what was not', async () => {
+    // The key may create free names, but gdrive/docs exists and is outside its list.
+    const adder = (await createApiKey({ name: 'batch', allowedProfiles: ['discourse/alerts'], canManageProfiles: true }, url)).token;
+    const writes = [
+      { service: 'gmail', name: 'new@x.com', credentials: { access_token: 'a' } },
+      { service: 'gdrive', name: 'docs', credentials: { accessToken: 'stolen' } },
+    ];
+    const script = `import { saveProfiles } from './src/config/profile-store';
+await saveProfiles(JSON.parse(process.env.WRITES!));`;
+    const env: Record<string, string> = { ...(process.env as Record<string, string>), HOME: clientHome, AGENTIO_TOKEN: adder, WRITES: JSON.stringify(writes) };
+    delete env.AGENTIO_PASSPHRASE;
+    const proc = Bun.spawn(['bun', '-e', script], { stdout: 'pipe', stderr: 'pipe', env });
+    const exitCode = await proc.exited;
+    const stderr = await new Response(proc.stderr).text();
+
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain('Saved: gmail/new@x.com');
+    expect(stderr).toContain('Not saved: gdrive/docs');
+    const vault = await loadVault();
+    expect(vault.config.profiles.gmail).toEqual([{ name: 'new@x.com' }]);
+    expect(vault.credentials.gdrive?.docs).toMatchObject({ accessToken: 'at' });
+  });
+
   test('a token outside the allow-list is refused by the hub, not the client', async () => {
     const res = await cli(['gdrive', 'list']);
     expect(res.exitCode).not.toBe(0);

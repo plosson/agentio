@@ -3,7 +3,7 @@ import { GSheetsClient } from './client';
 import type { GSheetsCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
-import { googleCamelCredentialLifecycle, reauthenticateGoogleCamel } from '../shared';
+import { googleCamelCredentialLifecycle, reauthenticateGoogle } from '../shared';
 
 export default defineServicePlugin<GSheetsCredentials, GoogleCamelTokens>()({
   apiVersion: 1,
@@ -16,7 +16,7 @@ export default defineServicePlugin<GSheetsCredentials, GoogleCamelTokens>()({
     setup: gsheetsProfileAdd,
     createClient: (credentials) => new GSheetsClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
-    reauthenticate: reauthenticateGoogleCamel<GSheetsCredentials>('gsheets'),
+    reauthenticate: reauthenticateGoogle<GSheetsCredentials>('gsheets'),
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });

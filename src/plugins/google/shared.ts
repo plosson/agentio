@@ -1,7 +1,9 @@
-import { performOAuthFlow, type OAuthService } from './oauth';
+import { performOAuthFlow } from './oauth';
+import { suiteEntry, type StoredGoogleCredentials } from './suite';
 import { createGoogleAuth, fetchGoogleUserEmail, refreshGoogleAccessToken } from './token-manager';
 import type { GoogleCamelTokens, OAuthTokens } from './tokens';
 import type { CredentialLifecycle, ProfilePlugin } from '../types';
+import { CliError } from '../../utils/errors';
 
 export type GoogleSnakeCredentials = OAuthTokens & { email?: string };
 export type GoogleCamelCredentials = GoogleCamelTokens & { email?: string };
@@ -55,38 +57,32 @@ export function googleAuthFromSnakeCredentials(tokens: OAuthTokens) {
   });
 }
 
-export function reauthenticateGoogleSnake<TCredentials extends GoogleSnakeCredentials = GoogleSnakeCredentials>(
-  service: OAuthService,
-  performOAuth: typeof performOAuthFlow = performOAuthFlow,
-  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
-): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
-  return async (credentials, profileName) => {
-    console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service);
-    const email = await fetchEmail(tokens.access_token);
-    console.error(`  Done (${email})`);
-    return { ...(credentials ?? {}), ...tokens, email } as TCredentials;
-  };
+/** A consent made with another Google account than the one the profile holds. */
+export function assertSameAccount(expected: unknown, actual: string): void {
+  if (typeof expected !== 'string' || !expected) return;
+  if (expected.toLowerCase() === actual.toLowerCase()) return;
+  throw new CliError(
+    'AUTH_FAILED',
+    `Signed in as ${actual}, but this profile belongs to ${expected}`,
+    `Run the command again and choose ${expected} in the browser`,
+  );
 }
 
-export function reauthenticateGoogleCamel<TCredentials extends GoogleCamelCredentials>(
-  service: OAuthService,
+/** Renew one Google profile: its own scopes, the same account, and the fields it already had. */
+export function reauthenticateGoogle<TCredentials extends object>(
+  service: string,
   performOAuth: typeof performOAuthFlow = performOAuthFlow,
   fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
 ): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
+  const entry = suiteEntry(service);
+  if (!entry) throw new Error(`${service} is not a Google suite service`);
   return async (credentials, profileName) => {
+    const existing = (credentials ?? {}) as StoredGoogleCredentials;
     console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service);
+    const tokens = await performOAuth(entry.scopeKey({ existing }));
     const email = await fetchEmail(tokens.access_token);
+    assertSameAccount(existing.email, email);
     console.error(`  Done (${email})`);
-    return {
-      ...(credentials ?? {}),
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date,
-      tokenType: tokens.token_type,
-      scope: tokens.scope,
-      email,
-    } as TCredentials;
+    return entry.toCredentials(tokens, email, { existing }) as unknown as TCredentials;
   };
 }
