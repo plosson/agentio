@@ -9,9 +9,9 @@ document.addEventListener('click', (ev) => {
 
 document.addEventListener('change', (ev) => {
   // A profile checkbox, the "Read-only" box, or the "Same as…" <select> lives inside its
-  // own option's <label class="radio">, alongside the actual radio input. Changing one of
+  // own option's <label class="radio-card">, alongside the actual radio input. Changing one of
   // those should select that option too, not just the radio the owner happened to click.
-  const radio = ev.target.closest('.radio');
+  const radio = ev.target.closest('.radio-card');
   if (radio) {
     const own = radio.querySelector(':scope > input[type=radio]');
     if (own) own.checked = true;

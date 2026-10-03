@@ -168,6 +168,38 @@ describe('the assembled admin page', () => {
     expect(script).toContain('matchesFilter(');
     expect(script).toContain('setSelectionRange(');
   });
+
+  test('components: each exists once, as a helper the screens share', () => {
+    for (const helper of ['function statusMarkup(', 'function statusText(', 'function displayPanel(', 'function pageHead(', 'function listItem(',
+      'function banner(', 'function emptyState(', 'function command(', 'function segmented(', 'function systemPage(', 'function syncCountdowns(']) {
+      expect(script.split(helper)).toHaveLength(2);
+    }
+    expect(script).not.toContain('function pill(');
+    expect(script).not.toContain('statusPill(');
+  });
+
+  test('components: long values wrap instead of pushing the page sideways', () => {
+    expect(style).toMatch(/\.display \.value \{[^}]*overflow-wrap: anywhere/);
+    expect(style).toMatch(/\.item-title \{[^}]*overflow-wrap: anywhere/);
+    expect(style).toMatch(/\.command code \{[^}]*overflow-wrap: anywhere/);
+    expect(style).toMatch(/\.page-head \.title \{[^}]*min-width: 0/);
+  });
+
+  test('components: every control is at least 44 px tall, and the focus ring is visible', () => {
+    expect(style).toMatch(/\.button \{[^}]*min-height: var\(--tap\)/);
+    expect(style).toMatch(/\.input \{[^}]*min-height: var\(--tap\)/);
+    expect(style).toMatch(/:focus-visible \{ outline: 3px solid var\(--link\); outline-offset: 2px; \}/);
+  });
+
+  test('motion: everything stops for reduced motion', () => {
+    expect(style).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \*, \*::before, \*::after \{ animation: none !important; transition: none !important; \} \}/);
+  });
+
+  test('a waiting sign-in shows on every screen with a live countdown', () => {
+    expect(script).toContain('function signInBanner(');
+    expect(script).toContain('data-countdown="${req.expiresAt}"');
+    expect(script).toContain("ACTIONS['deny-sign-in']");
+  });
 });
 
 const FAMILY_CSS = `/* family.css: the same file in every product. */

@@ -4,6 +4,7 @@ import {
   addCommand,
   canWrite,
   clockTime,
+  countdown,
   effectiveStatus,
   escapeHtml,
   fixCommand,
@@ -30,7 +31,7 @@ import {
   seenToday,
   shellQuote,
   shortDate,
-  statusPill,
+  statusWord,
   tabOf,
   timeLeft,
   toggleScope,
@@ -284,13 +285,18 @@ describe('statuses', () => {
     expect(effectiveStatus(row('x', 'y', { status: 'invalid', error: 'boom', info: 'acct' }), new Map()).detail).toBe('boom');
   });
 
-  test('pills', () => {
-    expect(statusPill('ok', false)).toEqual({ label: 'working', tone: 'ok' });
-    expect(statusPill('ok', true)).toEqual({ label: 'connected', tone: 'ok' });
-    expect(statusPill('invalid', false)).toEqual({ label: 'not working', tone: 'red' });
-    expect(statusPill('no-creds', false)).toEqual({ label: 'no credentials', tone: 'warn' });
-    expect(statusPill('skipped', false)).toEqual({ label: 'not tested', tone: 'neutral' });
-    expect(statusPill('testing', false)).toEqual({ label: 'testing…', tone: 'neutral' });
+  test('status words: a symbol and a word for every status, never colour alone', () => {
+    expect(statusWord('ok', false)).toEqual({ symbol: '✓', word: 'Working', tone: 'ok' });
+    expect(statusWord('ok', true)).toEqual({ symbol: '✓', word: 'Connected', tone: 'ok' });
+    expect(statusWord('invalid', false)).toEqual({ symbol: '✗', word: 'Failed', tone: 'bad' });
+    expect(statusWord('no-creds', false)).toEqual({ symbol: '!', word: 'No credentials', tone: 'warn' });
+    expect(statusWord('testing', false)).toEqual({ symbol: '⟳', word: 'Testing…', tone: 'neutral' });
+    expect(statusWord('skipped', false)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
+  });
+
+  test('a status the page does not know reads as not tested, not as working', () => {
+    expect(statusWord('exploded', false)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
+    expect(statusWord('', true)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
   });
 
   test('groups by display name, profiles by name', () => {
@@ -387,5 +393,30 @@ describe('link labels', () => {
     expect(linkLabel('javascript:alert(1)')).toBe('javascript:alert(1)');
     expect(linkLabel('')).toBe('');
     expect(linkLabel('HTTPS://Upper.example')).toBe('Upper.example');
+  });
+});
+
+describe('countdown', () => {
+  const at = (seconds: number) => new Date(NOW + seconds * 1000).toISOString();
+
+  test('minutes and seconds, padded', () => {
+    expect(countdown(at(252), NOW)).toBe('4:12 left');
+    expect(countdown(at(60), NOW)).toBe('1:00 left');
+    expect(countdown(at(9), NOW)).toBe('0:09 left');
+  });
+
+  test('hours when there are any', () => {
+    expect(countdown(at(3725), NOW)).toBe('1:02:05 left');
+  });
+
+  test('a fraction of a second left still shows as a second, not as ended', () => {
+    expect(countdown(new Date(NOW + 400).toISOString(), NOW)).toBe('0:01 left');
+  });
+
+  test('at or past the end, or for a date that cannot be read, it has ended', () => {
+    expect(countdown(at(0), NOW)).toBe('ended');
+    expect(countdown(at(-30), NOW)).toBe('ended');
+    expect(countdown('not a date', NOW)).toBe('ended');
+    expect(countdown('', NOW)).toBe('ended');
   });
 });

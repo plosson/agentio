@@ -57,7 +57,7 @@ VIEWS.machine = (route) => {
           : html`<div class="box">${refs.length
               ? html`<table>${refs.map((ref) => {
                   const r = rowByRef(ref);
-                  return html`<tr><td><a href="${routeHash({ view: 'profile', ref })}">${profileLabel(r)}</a></td><td>${pill(effectiveStatus(r, state.results).status, r.service)}</td></tr>`;
+                  return html`<tr><td><a href="${routeHash({ view: 'profile', ref })}">${profileLabel(r)}</a></td><td>${statusText(effectiveStatus(r, state.results).status, r.service)}</td></tr>`;
                 })}</table>`
               : html`<span class="muted">No profiles.</span>`}
               ${k.allowedProfiles === '*' ? html`<div class="muted mt-6">All profiles, including ones added later.</div>` : ''}</div>`}

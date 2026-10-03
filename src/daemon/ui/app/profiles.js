@@ -35,7 +35,7 @@ VIEWS.profiles = () => {
               <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${r.profile}</a>${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}</td>
               <td class="detail">${accountText(r)}</td>
               <td class="detail">${linkOut(r)}</td>
-              <td class="inl">${pill(st.status, r.service)}</td>
+              <td class="inl">${statusText(st.status, r.service)}</td>
               <td class="inl"><span class="phone-only">Used by </span>${plural(users, 'machine')}</td>
             </tr>`;
           }))}
@@ -66,7 +66,7 @@ VIEWS.profile = (route) => {
 
   return html`
     <a class="muted" href="#profiles">Profiles ›</a>
-    <div class="row"><span class="svc grow">${icon(r.service, 'lg')}<span><h1 class="m-0">${r.service} / ${r.profile}</h1>${r.info ? html`<span class="muted">${r.info}</span>` : ''}${r.account || r.url ? html`<span class="details">${accountText(r)}${linkOut(r)}</span>` : ''}</span></span>${pill(st.status, r.service)}</div>
+    <div class="row"><span class="svc grow">${icon(r.service, 'lg')}<span><h1 class="m-0">${r.service} / ${r.profile}</h1>${r.info ? html`<span class="muted">${r.info}</span>` : ''}${r.account || r.url ? html`<span class="details">${accountText(r)}${linkOut(r)}</span>` : ''}</span></span>${statusText(st.status, r.service)}</div>
     <div class="grid2 mt-14">
       <div class="col">${statusBox}</div>
       <div class="col">

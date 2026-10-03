@@ -16,7 +16,7 @@ VIEWS.access = () => {
         const st = effectiveStatus(r, state.results).status;
         return html`<tr>
           <td><a href="${routeHash({ view: 'profile', ref: refOf(r) })}">${profileLabel(r)}</a>
-            ${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}${st === 'invalid' ? html` ${pill(st, r.service)}` : ''}</td>
+            ${r.readOnly ? html` <span class="pill ro">read-only</span>` : ''}${st === 'invalid' ? html` ${statusText(st, r.service)}` : ''}</td>
           ${keys.map((k) => {
             const cell = accessCell(k, r);
             const cls = cell === 'W' ? 'w' : cell === 'R' ? 'r' : 'no';

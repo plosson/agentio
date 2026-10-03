@@ -137,6 +137,16 @@ export function timeLeft(expiresAt: string, now: number): string {
   return `ends in ${Math.ceil(ms / 60_000)} min`;
 }
 
+/** A live countdown: "4:12 left", "1:02:05 left"; "ended" at or past the end, or for a date that can't be read. */
+export function countdown(expiresAt: string, now: number): string {
+  const s = Math.ceil((Date.parse(expiresAt) - now) / 1000);
+  if (!(s > 0)) return 'ended';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h ? `${h}:${pad(m)}:${pad(sec)} left` : `${m}:${pad(sec)} left`;
+}
+
 // ---------- Words and commands ----------
 
 export function plural(n: number, word: string): string {
@@ -321,7 +331,14 @@ export interface PendingSignIn {
   expiresAt: string;
 }
 
-export type Tone = 'ok' | 'red' | 'warn' | 'neutral';
+export type Tone = 'ok' | 'bad' | 'warn' | 'neutral';
+
+/** A status as the page shows it: a symbol and words, coloured by tone, never by colour alone. */
+export interface StatusWord {
+  symbol: string;
+  word: string;
+  tone: Tone;
+}
 
 export function effectiveStatus(row: ProfileRow, results: ReadonlyMap<string, TestResult>): { status: Status; detail: string; at?: number } {
   const result = results.get(refOf(row));
@@ -329,18 +346,18 @@ export function effectiveStatus(row: ProfileRow, results: ReadonlyMap<string, Te
   return { status: row.status, detail: row.error ?? row.info ?? '' };
 }
 
-export function statusPill(status: Status, session: boolean): { label: string; tone: Tone } {
+export function statusWord(status: Status | string, session: boolean): StatusWord {
   switch (status) {
     case 'ok':
-      return { label: session ? 'connected' : 'working', tone: 'ok' };
+      return { symbol: '✓', word: session ? 'Connected' : 'Working', tone: 'ok' };
     case 'invalid':
-      return { label: 'not working', tone: 'red' };
+      return { symbol: '✗', word: 'Failed', tone: 'bad' };
     case 'no-creds':
-      return { label: 'no credentials', tone: 'warn' };
+      return { symbol: '!', word: 'No credentials', tone: 'warn' };
     case 'testing':
-      return { label: 'testing…', tone: 'neutral' };
+      return { symbol: '⟳', word: 'Testing…', tone: 'neutral' };
     default:
-      return { label: 'not tested', tone: 'neutral' };
+      return { symbol: '○', word: 'Not tested', tone: 'neutral' };
   }
 }
 

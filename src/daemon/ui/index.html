@@ -27,34 +27,34 @@
 <main id="main" class="page" tabindex="-1"></main>
 <footer class="version" id="version" hidden></footer>
 
-<dialog id="confirm-dialog" class="box">
+<dialog id="confirm-dialog" class="dialog">
   <h2 id="confirm-title"></h2>
   <p id="confirm-body"></p>
-  <form method="dialog" class="row end">
-    <button value="cancel" class="btn" autofocus>Cancel</button>
-    <button value="ok" class="btn red" id="confirm-ok"></button>
+  <form method="dialog" class="actions">
+    <button value="cancel" class="button" autofocus>Cancel</button>
+    <button value="ok" class="button danger" id="confirm-ok"></button>
   </form>
 </dialog>
 
-<dialog id="rename-dialog" class="box">
+<dialog id="rename-dialog" class="dialog">
   <form method="dialog">
     <h2 id="rename-title">Rename</h2>
-    <label class="field">New name<input type="text" id="rename-input" required autocomplete="off"></label>
-    <div class="row end">
-      <button value="cancel" class="btn" formnovalidate>Cancel</button>
-      <button value="ok" class="btn pri">Rename</button>
+    <label class="form-field"><span class="label">New name</span><input class="input" type="text" id="rename-input" required autocomplete="off"></label>
+    <div class="actions">
+      <button value="cancel" class="button" formnovalidate>Cancel</button>
+      <button value="ok" class="button primary">Rename</button>
     </div>
   </form>
 </dialog>
 
-<dialog id="token-dialog" class="box">
+<dialog id="token-dialog" class="dialog">
   <h2>Copy the key now</h2>
   <p class="muted">On the machine, after installing agentio, run one of these. The key is not shown again; if it is lost, replace it.</p>
   <p><b>Save it for this user</b></p>
-  <div class="codebox"><code id="token-save-cmd"></code><button class="btn" type="button" data-copy-from="token-save-cmd">Copy</button></div>
+  <div class="command"><code id="token-save-cmd"></code><button class="button" type="button" data-copy-from="token-save-cmd">Copy</button></div>
   <p><b>Or for one shell or a CI job</b></p>
-  <div class="codebox"><code id="token-env-cmd"></code><button class="btn" type="button" data-copy-from="token-env-cmd">Copy</button></div>
-  <form method="dialog" class="row end"><button class="btn pri" value="ok">Done</button></form>
+  <div class="command"><code id="token-env-cmd"></code><button class="button" type="button" data-copy-from="token-env-cmd">Copy</button></div>
+  <form method="dialog" class="actions"><button class="button primary" value="ok">Done</button></form>
 </dialog>
 
 <div id="toasts" aria-live="polite"></div>
