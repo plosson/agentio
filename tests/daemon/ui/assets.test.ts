@@ -63,7 +63,7 @@ describe('the assembled admin page', () => {
 
   test('the model and every screen are in the script', () => {
     for (const name of ['function escapeHtml', 'function parseRoute', 'function toggleScope']) expect(script).toContain(name);
-    for (const view of ['machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize', 'connect', 'key']) {
+    for (const view of ['overview', 'machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize', 'connect', 'key']) {
       expect(script).toMatch(new RegExp(`VIEWS\\.${view} = `));
     }
   });
@@ -153,11 +153,14 @@ describe('the assembled admin page', () => {
     expect(script).toContain('Revoke instead');
   });
 
-  test('no Overview: waiting sign-ins show as a banner on every page instead', () => {
-    expect(script).not.toMatch(/VIEWS\.overview = /);
-    expect(INDEX_HTML).not.toContain('data-tab="overview"');
-    expect(script).toContain('function signInBanner(');
-    expect(script).toContain("ACTIONS['deny-sign-in']");
+  test('overview: first tab, the vault in the display panel, recently seen machines, no activity log', () => {
+    expect(script).toMatch(/VIEWS\.overview = /);
+    expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">Overview<\/a>/);
+    expect(script).toContain("displayPanel('In the vault'");
+    expect(script).toContain('<h2>Recently seen</h2>');
+    expect(script).toContain('recentlySeen(');
+    expect(script).toContain('attentionParts(');
+    expect(script).not.toMatch(/activity log|Recent activity/i);
   });
 
   test('read-only is shown on a profile, never switched from the page', () => {

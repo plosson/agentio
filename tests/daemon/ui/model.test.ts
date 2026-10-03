@@ -25,6 +25,10 @@ import {
   machineCanUse,
   machinesUsing,
   parseRoute,
+  recentlySeen,
+  attention,
+  attentionParts,
+  overviewStatus,
   plural,
   presetInput,
   raw,
@@ -76,21 +80,20 @@ describe('escaping', () => {
 });
 
 describe('routes', () => {
-  test('known tabs and the default', () => {
-    for (const view of ['machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'] as const) {
+  test('known screens and the default', () => {
+    for (const view of ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'] as const) {
       expect(parseRoute(`#${view}`)).toEqual({ view });
     }
-    // Profiles is the home page; old #overview bookmarks land there too.
-    expect(parseRoute('#overview')).toEqual({ view: 'profiles' });
-    expect(parseRoute('')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#nonsense')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#machines=1')).toEqual({ view: 'profiles' });
+    expect(parseRoute('')).toEqual({ view: 'overview' });
+    expect(parseRoute('#')).toEqual({ view: 'overview' });
+    expect(parseRoute('#nonsense')).toEqual({ view: 'overview' });
+    expect(parseRoute('#machines=1')).toEqual({ view: 'overview' });
+    expect(parseRoute('#__proto__')).toEqual({ view: 'overview' });
   });
 
   test('the approval link the CLI prints keeps working', () => {
     expect(parseRoute('#authorize=KQ7M-2XWD')).toEqual({ view: 'authorize', code: 'KQ7M-2XWD' });
-    expect(parseRoute('#authorize=')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#authorize=')).toEqual({ view: 'overview' });
   });
 
   test('ids and refs survive a round trip, whatever they contain', () => {
@@ -104,12 +107,12 @@ describe('routes', () => {
   });
 
   test('a profile route needs service/name', () => {
-    expect(parseRoute('#profile=gmail')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#profile=/work')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#profile=gmail')).toEqual({ view: 'overview' });
+    expect(parseRoute('#profile=/work')).toEqual({ view: 'overview' });
   });
 
-  test('a mangled percent-encoding falls back to Profiles instead of throwing', () => {
-    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'profiles' });
+  test('a mangled percent-encoding falls back to the Overview instead of throwing', () => {
+    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'overview' });
   });
 
   test('tabOf highlights the parent tab', () => {
@@ -121,6 +124,7 @@ describe('routes', () => {
     expect(tabOf({ view: 'add' })).toBe('profiles');
     expect(tabOf({ view: 'authorize', code: 'X' })).toBeNull();
     expect(tabOf({ view: 'settings' })).toBe('settings');
+    expect(tabOf({ view: 'overview' })).toBe('overview');
   });
 });
 
@@ -527,5 +531,58 @@ describe('when a machine was last seen', () => {
 
   test('a last-seen date that cannot be read counts as never used', () => {
     expect(machineSeen(key('a', { lastUsedAt: 'garbage', createdAt: new Date(NOW - DAY).toISOString() }), NOW)).toEqual({ symbol: '○', word: 'Never used', tone: 'neutral' });
+  });
+});
+
+describe('overview', () => {
+  const seenAgo = (ms: number) => new Date(NOW - ms).toISOString();
+
+  test('recentlySeen: newest first, never-seen last (newest created first), at most the limit', () => {
+    const keys = [
+      key('old', { lastUsedAt: seenAgo(5 * DAY) }),
+      key('never-new', { createdAt: seenAgo(DAY) }),
+      key('fresh', { lastUsedAt: seenAgo(MIN) }),
+      key('never-old', { createdAt: seenAgo(9 * DAY) }),
+      key('ahead', { lastUsedAt: new Date(NOW + 5 * MIN).toISOString() }),
+    ];
+    expect(recentlySeen(keys, 10).map((k) => k.name)).toEqual(['ahead', 'fresh', 'old', 'never-new', 'never-old']);
+    expect(recentlySeen(keys, 2).map((k) => k.name)).toEqual(['ahead', 'fresh']);
+    expect(recentlySeen(keys, 0)).toEqual([]);
+    expect(recentlySeen([], 5)).toEqual([]);
+  });
+
+  test('recentlySeen does not reorder its input, and survives unreadable dates', () => {
+    const keys = [key('b', { lastUsedAt: 'garbage', createdAt: 'garbage' }), key('a', { lastUsedAt: 'garbage', createdAt: 'garbage' })];
+    expect(recentlySeen(keys).map((k) => k.name)).toEqual(['a', 'b']);
+    expect(keys.map((k) => k.name)).toEqual(['b', 'a']);
+  });
+
+  test('attention: failed profiles, profiles without credentials, silent machines', () => {
+    const rows = [row('gmail', 'a', { status: 'invalid' }), row('gmail', 'b', { status: 'no-creds' }), row('jira', 'c')];
+    const keys = [key('quiet', { lastUsedAt: seenAgo(31 * DAY) }), key('busy', { lastUsedAt: seenAgo(MIN) })];
+    const a = attention(rows, keys, new Map(), NOW);
+    expect(a.failing.map((r) => r.profile)).toEqual(['a']);
+    expect(a.noCreds.map((r) => r.profile)).toEqual(['b']);
+    expect(a.silent.map((k) => k.name)).toEqual(['quiet']);
+  });
+
+  test('attentionParts: singular and plural, each linked to where it can be fixed; nothing when all is well', () => {
+    expect(attentionParts({ failing: [row('a', 'b')], noCreds: [], silent: [] })).toEqual([{ text: '1 profile failed its test', href: '#profiles' }]);
+    expect(attentionParts({ failing: [row('a', 'b'), row('a', 'c')], noCreds: [row('a', 'd')], silent: [key('x'), key('y')] })).toEqual([
+      { text: '2 profiles failed their test', href: '#profiles' },
+      { text: '1 profile has no credentials', href: '#profiles' },
+      { text: '2 machines silent for 30+ days', href: '#machines' },
+    ]);
+    expect(attentionParts({ failing: [], noCreds: [row('a', 'd'), row('a', 'e')], silent: [] })[0].text).toBe('2 profiles have no credentials');
+    expect(attentionParts({ failing: [], noCreds: [], silent: [] })).toEqual([]);
+  });
+
+  test('overviewStatus: failures first, then whether anything was tested', () => {
+    const base = { profiles: 12, working: 0, failing: 0, notTested: 12, machines: 1, seenToday: 0, silent: 0 };
+    expect(overviewStatus({ ...base, profiles: 0, notTested: 0 }, NOW)).toEqual({ symbol: '○', word: 'No profiles yet', tone: 'neutral' });
+    expect(overviewStatus(base, NOW)).toEqual({ symbol: '○', word: 'Not tested in this session', tone: 'neutral' });
+    expect(overviewStatus({ ...base, working: 10, failing: 2, notTested: 0, testedAt: NOW - MIN }, NOW)).toEqual({ symbol: '✗', word: '2 of 12 failed', tone: 'bad' });
+    expect(overviewStatus({ ...base, working: 12, notTested: 0, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: 'All 12 working · tested 2 min ago', tone: 'ok' });
+    expect(overviewStatus({ ...base, working: 3, notTested: 9, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: '3 of 12 working · tested 2 min ago', tone: 'ok' });
   });
 });

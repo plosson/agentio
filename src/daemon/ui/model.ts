@@ -45,31 +45,31 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
 
 // ---------- Routes ----------
 
-export type TabView = 'machines' | 'profiles' | 'access' | 'settings' | 'add' | 'connect' | 'key';
+export type TabView = 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | 'add' | 'connect' | 'key';
 export type Route =
   | { view: TabView }
   | { view: 'machine'; id: string }
   | { view: 'profile'; ref: string }
   | { view: 'authorize'; code: string };
 
-const TAB_VIEWS: readonly string[] = ['machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'];
+const TAB_VIEWS: readonly string[] = ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'];
 
-/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else, old `#overview` links included, is Profiles. */
+/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else is the Overview. */
 export function parseRoute(hash: string): Route {
   let text = hash.startsWith('#') ? hash.slice(1) : hash;
   try {
     text = decodeURIComponent(text);
   } catch {
-    return { view: 'profiles' };
+    return { view: 'overview' };
   }
   const eq = text.indexOf('=');
-  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'profiles' };
+  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'overview' };
   const name = text.slice(0, eq);
   const value = text.slice(eq + 1);
   if (name === 'machine' && value) return { view: 'machine', id: value };
   if (name === 'profile' && /^[^/]+\/.+$/.test(value)) return { view: 'profile', ref: value };
   if (name === 'authorize' && value) return { view: 'authorize', code: value };
-  return { view: 'profiles' };
+  return { view: 'overview' };
 }
 
 export function routeHash(route: Route): string {
@@ -86,7 +86,7 @@ export function routeHash(route: Route): string {
 }
 
 /** The navigation tab to highlight; the sign-in page has none. */
-export function tabOf(route: Route): 'machines' | 'profiles' | 'settings' | null {
+export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'settings' | null {
   switch (route.view) {
     case 'machine':
     case 'access':
@@ -462,4 +462,57 @@ export function hubSummary(rows: ProfileRow[], keys: Key[], results: ReadonlyMap
   };
   if (times.length) summary.testedAt = Math.max(...times);
   return summary;
+}
+
+// ---------- Overview ----------
+
+const seenTime = (key: Key): number => {
+  const t = key.lastUsedAt ? Date.parse(key.lastUsedAt) : NaN;
+  return Number.isNaN(t) ? -Infinity : t;
+};
+const createdTime = (key: Key): number => {
+  const t = Date.parse(key.createdAt);
+  return Number.isNaN(t) ? -Infinity : t;
+};
+
+/** Machines by last seen, newest first; never-seen ones last, newest created first; then by name. */
+export function recentlySeen(keys: Key[], limit = 5): Key[] {
+  return [...keys]
+    .sort((a, b) => (seenTime(b) - seenTime(a)) || (createdTime(b) - createdTime(a)) || a.name.localeCompare(b.name))
+    .slice(0, Math.max(0, limit));
+}
+
+/** What needs the owner: profiles that failed a test or have no credentials, machines silent for 30+ days. */
+export interface Attention {
+  failing: ProfileRow[];
+  noCreds: ProfileRow[];
+  silent: Key[];
+}
+
+export function attention(rows: ProfileRow[], keys: Key[], results: ReadonlyMap<string, TestResult>, now: number): Attention {
+  return {
+    failing: rows.filter((r) => effectiveStatus(r, results).status === 'invalid'),
+    noCreds: rows.filter((r) => effectiveStatus(r, results).status === 'no-creds'),
+    silent: keys.filter((k) => isSilent(k, now)),
+  };
+}
+
+/** The attention banner's parts, each linked to where it can be fixed. Empty when all is well. */
+export function attentionParts(a: Attention): Array<{ text: string; href: string }> {
+  const parts: Array<{ text: string; href: string }> = [];
+  const one = (n: number) => n === 1;
+  if (a.failing.length) parts.push({ text: `${plural(a.failing.length, 'profile')} failed ${one(a.failing.length) ? 'its' : 'their'} test`, href: '#profiles' });
+  if (a.noCreds.length) parts.push({ text: `${plural(a.noCreds.length, 'profile')} ${one(a.noCreds.length) ? 'has' : 'have'} no credentials`, href: '#profiles' });
+  if (a.silent.length) parts.push({ text: `${plural(a.silent.length, 'machine')} silent for ${SILENT_DAYS}+ days`, href: '#machines' });
+  return parts;
+}
+
+/** The Overview's status line. */
+export function overviewStatus(s: HubSummary, now: number): StatusWord {
+  if (s.profiles === 0) return { symbol: '○', word: 'No profiles yet', tone: 'neutral' };
+  if (s.failing) return { symbol: '✗', word: `${s.failing} of ${s.profiles} failed`, tone: 'bad' };
+  if (s.testedAt === undefined) return { symbol: '○', word: 'Not tested in this session', tone: 'neutral' };
+  const when = `tested ${relativeTime(s.testedAt, now)}`;
+  if (s.working === s.profiles) return { symbol: '✓', word: `All ${s.profiles} working · ${when}`, tone: 'ok' };
+  return { symbol: '✓', word: `${s.working} of ${s.profiles} working · ${when}`, tone: 'ok' };
 }

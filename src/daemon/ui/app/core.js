@@ -270,7 +270,7 @@ function setTitle() {
 function render() {
   if (!state.loaded) return;
   const route = currentRoute();
-  const view = VIEWS[route.view] || VIEWS.profiles;
+  const view = VIEWS[route.view] || VIEWS.overview;
   setTabs(route);
   $('bar').hidden = false;
   $('version').hidden = !state.version;
