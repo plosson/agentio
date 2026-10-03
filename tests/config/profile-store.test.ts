@@ -3,7 +3,7 @@ import { withTempVault } from '../helpers/vault';
 import { loadVault, updateVault } from '../../src/vault/vault';
 import { setProfileReadOnly } from '../../src/config/config-manager';
 import { createApiKey, listApiKeys, revokeApiKey } from '../../src/auth/api-keys';
-import { chooseProfileName, deleteProfile, deleteProfileForKey, renameProfile, renameProfileForKey, saveProfile, saveProfileForKey } from '../../src/config/profile-store';
+import { chooseProfileName, deleteProfile, deleteProfileForKey, renameProfile, renameProfileForKey, saveProfile, saveProfileForKey, saveProfiles } from '../../src/config/profile-store';
 
 withTempVault('agentio-profile-store-test-', () => ({
   config: { profiles: { gmail: [{ name: 'me@example.com' }], github: ['octocat'] } },
@@ -60,6 +60,45 @@ describe('saveProfile', () => {
     const vault = await loadVault();
     expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com' }]);
     expect(vault.credentials.gmail?.['new@example.com']).toBeUndefined();
+  });
+});
+
+describe('saveProfiles', () => {
+  test('writes every profile in one go, each keeping the read-only flag it had', async () => {
+    await setProfileReadOnly('gmail', 'me@example.com', true);
+    await saveProfiles([
+      { service: 'gmail', name: 'me@example.com', credentials: { access_token: 'new' } },
+      { service: 'gcal', name: 'me@example.com', credentials: { access_token: 'new' } },
+    ]);
+    const vault = await loadVault();
+    expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com', readOnly: true }]);
+    expect(vault.config.profiles.gcal).toEqual([{ name: 'me@example.com' }]);
+    expect(vault.credentials.gcal?.['me@example.com']).toEqual({ access_token: 'new' });
+  });
+
+  test('a stated flag applies to every profile in the batch', async () => {
+    await saveProfiles([
+      { service: 'gmail', name: 'me@example.com', credentials: { a: 1 } },
+      { service: 'gtasks', name: 'me@example.com', credentials: { a: 1 } },
+    ], { readOnly: true });
+    const vault = await loadVault();
+    expect(vault.config.profiles.gmail).toEqual([{ name: 'me@example.com', readOnly: true }]);
+    expect(vault.config.profiles.gtasks).toEqual([{ name: 'me@example.com', readOnly: true }]);
+  });
+
+  test('one bad name and nothing of the batch is written', async () => {
+    const before = await loadVault();
+    await expect(saveProfiles([
+      { service: 'gcal', name: 'fine@example.com', credentials: { a: 1 } },
+      { service: 'gtasks', name: 'a/b', credentials: { a: 1 } },
+    ])).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    expect(await loadVault()).toEqual(before);
+  });
+
+  test('an empty batch writes nothing and does not fail', async () => {
+    const before = await loadVault();
+    await saveProfiles([]);
+    expect(await loadVault()).toEqual(before);
   });
 });
 
