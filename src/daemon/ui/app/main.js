@@ -64,19 +64,27 @@ document.addEventListener('click', (ev) => {
 });
 
 let lastHash = location.hash;
+let leavePrompt = false;
 
 window.addEventListener('hashchange', async () => {
+  // The leave prompt is open: a further move only puts the key page back.
+  if (leavePrompt) {
+    history.replaceState(null, '', lastHash);
+    return;
+  }
   // Leaving the shown-once key before copying it asks first; once left, the key is forgotten.
   const leavingKey = parseRoute(lastHash).view === 'key' && currentRoute().view !== 'key';
   if (leavingKey && state.ui.shownKey) {
     if (!state.ui.shownKey.copied) {
       const target = location.hash;
       history.replaceState(null, '', lastHash);
+      leavePrompt = true;
       const leave = await confirmDialog({
         title: 'Leave without copying the key?',
         body: "It isn't shown again. If you leave now, you'll have to replace the key.",
         action: 'Leave',
       });
+      leavePrompt = false;
       if (!leave) return;
       state.ui.shownKey = null;
       location.hash = target;
@@ -108,11 +116,12 @@ document.addEventListener('toggle', (ev) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !state.loaded) return;
-  loadPending().then(render);
+  loadAll().then((ok) => { if (ok && !formOpen()) render(); });
 });
 
 (async () => {
   const res = await api('/ui/api/session');
-  if (res.ok && res.body.authenticated && !res.body.locked) await openHub();
+  if (res.status === 0) showUnreachable();
+  else if (res.ok && res.body.authenticated && !res.body.locked) await openHub();
   else if (!res.lost) showUnlock(res.ok ? res.body.locked : true);
 })();

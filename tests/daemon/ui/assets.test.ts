@@ -140,10 +140,43 @@ describe('the assembled admin page', () => {
     expect(script.match(/state\.ui\.renameDraft = undefined;/g)!.length).toBeGreaterThanOrEqual(5);
   });
 
-  test('sign-in: three steps, read-only by default, and an ended request is explained', () => {
-    for (const name of ["ACTIONS['auth-yes']", "ACTIONS['auth-deny']", "SUBMITS['auth-approve']"]) expect(script).toContain(name);
-    expect(script).toContain('This sign-in request has ended or was already answered. Run agentio login again on the machine.');
+  test('approval: one screen — the code, who asks with a live countdown, the presets, Approve or Deny', () => {
+    expect(script).not.toContain("ACTIONS['auth-yes']");
+    for (const name of ["ACTIONS['auth-deny']", "SUBMITS['auth-approve']"]) expect(script).toContain(name);
+    expect(script).toContain('Approve this sign-in?');
+    expect(script).toContain("displayPanel('Code', req.userCode)");
+    expect(script).toContain('Is this the code in your terminal? If not, deny it.');
+    expect(script).toContain('data-countdown="${req.expiresAt}"');
     expect(script).toMatch(/name="\$\{prefix\}-preset" value="read-all" checked/);
+    expect(script).toContain('This sign-in request has ended or was already answered. Run agentio login again on the machine.');
+    expect(script).not.toContain('<span class="steps"');
+  });
+
+  test('approval: a request that runs out while the screen is open turns into the ended page', () => {
+    expect(script).toMatch(/function tick\(\) \{[\s\S]*?=== 'ended'[\s\S]*?step: 'error'/);
+  });
+
+  test('system pages: an unreachable hub says so, offers Try again, and when it last loaded', () => {
+    expect(script).toContain('function showUnreachable(');
+    expect(script).toContain('The hub did not answer');
+    expect(script).toContain('Last loaded at');
+    expect(script).toContain('ACTIONS.retry');
+  });
+
+  test('settings: about, the browser session, and locking in the danger zone', () => {
+    expect(script).toContain("pageHead({ title: 'Settings' })");
+    expect(script).toContain('<h2>Danger zone</h2>');
+    expect(script).toContain('Lock the vault…');
+    expect(script).toContain('ACTIONS.lock');
+  });
+
+  test('leaving on purpose forgets the shown-once key', () => {
+    expect(script).toMatch(/function leaveHub\(locked\) \{[\s\S]*?state\.ui\.shownKey = null;/);
+  });
+
+  test('the key leave prompt is not re-entrant', () => {
+    expect(script).toMatch(/if \(leavePrompt\) \{\s*history\.replaceState\(null, '', lastHash\);\s*return;/);
+    expect(script).toMatch(/leavePrompt = true;[\s\S]*?await confirmDialog[\s\S]*?leavePrompt = false;/);
   });
 
   test('access: cells toggle through toggleScope, never by hand', () => {

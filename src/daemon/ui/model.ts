@@ -133,13 +133,6 @@ export function relativeTime(when: string | number | undefined, now: number): st
   return shortDate(t, now);
 }
 
-export function timeLeft(expiresAt: string, now: number): string {
-  const ms = Date.parse(expiresAt) - now;
-  if (!(ms > 0)) return 'ended';
-  if (ms < 60_000) return 'ends in less than a minute';
-  return `ends in ${Math.ceil(ms / 60_000)} min`;
-}
-
 /** A live countdown: "4:12 left", "1:02:05 left"; "ended" at or past the end, or for a date that can't be read. */
 export function countdown(expiresAt: string, now: number): string {
   const s = Math.ceil((Date.parse(expiresAt) - now) / 1000);

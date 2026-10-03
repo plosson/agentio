@@ -43,7 +43,6 @@ import {
   shortDate,
   statusWord,
   tabOf,
-  timeLeft,
   toggleScope,
   type Key,
   type ProfileRow,
@@ -147,13 +146,6 @@ describe('times', () => {
     expect(shortDate(new Date(2026, 0, 5, 12).getTime(), NOW)).toBe('Jan 5');
     expect(clockTime(NOW)).toBe('14:05');
     expect(clockTime(new Date(2026, 9, 1, 9, 7).getTime())).toBe('09:07');
-  });
-
-  test('timeLeft', () => {
-    expect(timeLeft(new Date(NOW + 8 * MIN).toISOString(), NOW)).toBe('ends in 8 min');
-    expect(timeLeft(new Date(NOW + 30_000).toISOString(), NOW)).toBe('ends in less than a minute');
-    expect(timeLeft(new Date(NOW - 1).toISOString(), NOW)).toBe('ended');
-    expect(timeLeft('garbage', NOW)).toBe('ended');
   });
 });
 

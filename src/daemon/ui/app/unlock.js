@@ -66,6 +66,8 @@ function showUnlock(locked) {
 /** Sign out or lock on purpose: forget the screen and show the full-page gate. */
 function leaveHub(locked) {
   state.loaded = false;
+  // The owner chose to leave: a key shown once is forgotten, not kept in memory.
+  state.ui.shownKey = null;
   const dialog = $('gate-dialog');
   if (dialog.open) dialog.close();
   dialog.textContent = '';

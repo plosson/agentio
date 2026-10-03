@@ -181,6 +181,7 @@ async function api(path, options = {}) {
 async function loadAll() {
   const [status, keys, pending] = await Promise.all([api('/ui/api/status?test=false'), api('/ui/api/keys'), api('/ui/api/authorize')]);
   if (status.lost || keys.lost || pending.lost) return false;
+  if (!state.loaded && status.status === 0) { showUnreachable(); return false; }
   for (const res of [status, keys, pending]) if (!res.ok) toast(res.error, 'error');
   if (status.ok) {
     state.version = status.body.version || '';
@@ -198,6 +199,21 @@ async function loadPending() {
   const res = await api('/ui/api/authorize');
   if (res.ok) state.pending = res.body.requests;
 }
+
+/** No answer from the hub before anything loaded: a system page, not a blank screen. */
+function showUnreachable() {
+  $('bar').hidden = true;
+  $('version').hidden = true;
+  main.innerHTML = systemPage({
+    title: 'The hub did not answer',
+    why: 'Check that it is running and that this computer can reach it.',
+    action: html`<button class="button primary" data-action="retry">Try again</button>`,
+    details: state.loadedAt ? html`<p class="muted small">Last loaded at ${clockTime(state.loadedAt)}.</p>` : '',
+  }).__html;
+  setTitle();
+}
+
+ACTIONS.retry = () => location.reload();
 
 /**
  * True while the owner is filling a form that a redraw would clobber: step 2
@@ -311,7 +327,17 @@ function tick() {
   const now = Date.now();
   const live = document.querySelectorAll('[data-countdown]');
   if (live.length === 0) { clearInterval(ticker); ticker = null; return; }
-  live.forEach((el) => { el.textContent = countdown(el.dataset.countdown, now); });
+  let ended = false;
+  live.forEach((el) => {
+    const text = countdown(el.dataset.countdown, now);
+    el.textContent = text;
+    if (text === 'ended') ended = true;
+  });
+  // The request ran out on the approval screen: say so instead of letting Approve fail.
+  if (ended && currentRoute().view === 'authorize' && state.ui.auth && state.ui.auth.step === 'ask') {
+    Object.assign(state.ui.auth, { step: 'error', ended: true, error: ENDED });
+    render();
+  }
 }
 
 function syncCountdowns() {
