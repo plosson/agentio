@@ -59,6 +59,7 @@ src/plugins/
 ├── github/
 ├── kite/             # device sign-in, owned by the service folder
 ├── notes/            # Apple Notes through an apple-notes-api server; API key
+├── pagerio/          # pages to your iPhone and Mac; secret URL, send only
 ├── pocketalert/      # push notifications; API key, send only
 ├── revolut/
 ├── spotify/

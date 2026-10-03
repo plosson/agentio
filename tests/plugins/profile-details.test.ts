@@ -93,6 +93,7 @@ describe('what each service shows about a profile', () => {
     ['revolut', { privateKey: 'SECRETp', refreshToken: 'SECRETr', accessToken: 'SECRETa', clientId: 'id' }, { url: 'https://business.revolut.com' }],
     ['slack', { webhookUrl: 'https://hooks.slack.com/services/SECRETw', channelName: '#ops' }, { account: '#ops', url: 'https://app.slack.com' }],
     ['sql', { url: 'postgres://u:SECRETp@db.example.com/x', displayName: 'analytics' }, { account: 'analytics' }],
+    ['pagerio', { url: 'https://pagerio.chuut.com/p/SECRETtoken12345' }, { url: 'https://pagerio.chuut.com' }],
     ['pocketalert', { apiKey: 'SECRETk' }, { url: 'https://pocketalert.app' }],
     ['whatsapp', {}, { url: 'https://web.whatsapp.com' }],
   ];
