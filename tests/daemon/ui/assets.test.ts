@@ -375,3 +375,60 @@ const FAMILY_CSS = `/* family.css: the same file in every product. */
   }
 }
 `;
+
+describe('final review fixes', () => {
+  const block = (start: string) => {
+    const i = script.indexOf(start);
+    expect(i).toBeGreaterThan(-1);
+    return script.slice(i, i + 1500);
+  };
+
+  test('Deny on the banner leaves open forms alone and cannot be tapped twice', () => {
+    const deny = block("ACTIONS['deny-sign-in']");
+    expect(deny).toMatch(/el\.disabled = true/);
+    expect(deny).toMatch(/if \(formOpen\(\)\) el\.closest\('\.banner'\)\?\.remove\(\);\s*else render\(\);/);
+    expect(deny).not.toMatch(/^\s*render\(\);/m);
+  });
+
+  test('the rename draft is kept on every input and used by every redraw', () => {
+    expect(script).toMatch(/INPUTS\.rename = \(input\) => \{ state\.ui\.renameDraft = input\.value; \};/);
+    expect(script).toContain('data-input="rename"');
+    expect(script).toContain('value="${state.ui.renameDraft ?? title}"');
+    expect(script).not.toContain('state.ui.renameError ? (state.ui.renameDraft ?? title) : title');
+  });
+
+  test('every way out of an uncopied key asks once, through one shared dialog', () => {
+    expect(script.match(/Leave without copying the key\?/g)).toHaveLength(1);
+    expect(script).toMatch(/async function confirmLeaveKey\(\) \{[\s\S]*?shownKey[\s\S]*?copied[\s\S]*?confirmDialog\(LEAVE_KEY\)/);
+    expect(script).toMatch(/await confirmDialog\(LEAVE_KEY\)/);
+    const out = block("ACTIONS['sign-out']");
+    expect(out.indexOf('confirmLeaveKey()')).toBeGreaterThan(-1);
+    expect(out.indexOf('confirmLeaveKey()')).toBeLessThan(out.indexOf('/ui/api/logout'));
+    const lock = block('ACTIONS.lock');
+    expect(lock.indexOf('confirmLeaveKey()')).toBeGreaterThan(-1);
+    expect(lock.indexOf('confirmLeaveKey()')).toBeLessThan(lock.indexOf('/ui/api/lock'));
+  });
+
+  test('an approval in flight is never reported as ended, and a 201 always lands on done', () => {
+    const t = block('function tick()');
+    expect(t).toMatch(/state\.ui\.auth\.step === 'ask' && !state\.ui\.auth\.busy/);
+    const approve = block("SUBMITS['auth-approve']");
+    expect(approve).not.toMatch(/if \(res\.lost\) return;\s*if \(auth\.step !== 'ask'\) return;/);
+    expect(approve).toMatch(/if \(!res\.ok\) \{\s*if \(auth\.step !== 'ask'\) return;/);
+    expect(approve).toMatch(/auth\.step = 'done';\s*state\.keys = /);
+  });
+
+  test('Lock reports what happened: nothing on a lost session, an error on failure', () => {
+    const lock = block('ACTIONS.lock');
+    expect(lock).toMatch(/const res = await api\('\/ui\/api\/lock'/);
+    expect(lock).toMatch(/if \(res\.lost\) return;/);
+    expect(lock).toMatch(/if \(!res\.ok\) \{ toast\(res\.error, 'error'\); return; \}/);
+    expect(lock.indexOf("toast('Vault locked')")).toBeGreaterThan(lock.indexOf('res.ok'));
+  });
+
+  test('moving to another page closes the by-hand and scope-edit forms', () => {
+    const h = block("window.addEventListener('hashchange'");
+    expect(h).toContain('state.ui.byHand = false;');
+    expect(h).toContain('state.ui.editScope = null;');
+  });
+});

@@ -103,12 +103,13 @@ SUBMITS['auth-approve'] = async (form) => {
   });
   setAuthBusy(auth, false);
   if (res.lost) return;
-  if (auth.step !== 'ask') return;
   if (!res.ok) {
+    if (auth.step !== 'ask') return;
     endAuth(auth, res);
     render();
     return;
   }
+  // A successful approval always lands on done, whatever the screen showed meanwhile.
   auth.key = res.body.key;
   auth.step = 'done';
   state.keys = [...state.keys, res.body.key];

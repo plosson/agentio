@@ -79,11 +79,7 @@ window.addEventListener('hashchange', async () => {
       const target = location.hash;
       history.replaceState(null, '', lastHash);
       leavePrompt = true;
-      const leave = await confirmDialog({
-        title: 'Leave without copying the key?',
-        body: "It isn't shown again. If you leave now, you'll have to replace the key.",
-        action: 'Leave',
-      });
+      const leave = await confirmDialog(LEAVE_KEY);
       leavePrompt = false;
       if (!leave) return;
       state.ui.shownKey = null;
@@ -97,6 +93,8 @@ window.addEventListener('hashchange', async () => {
   state.ui.renaming = null;
   state.ui.renameError = '';
   state.ui.renameDraft = undefined;
+  state.ui.byHand = false;
+  state.ui.editScope = null;
   clearToasts();
   render();
   main.focus();

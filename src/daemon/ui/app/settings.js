@@ -17,18 +17,22 @@ VIEWS.settings = () => html`
   </div>`;
 
 ACTIONS['sign-out'] = async () => {
+  if (!(await confirmLeaveKey())) return;
   await api('/ui/api/logout', { method: 'POST' });
   leaveHub(false);
 };
 
 ACTIONS.lock = async () => {
+  if (!(await confirmLeaveKey())) return;
   const ok = await confirmDialog({
     title: 'Lock the vault?',
     body: `Every agent using this hub stops getting credentials until someone unlocks it here. That’s ${plural(state.keys.length, 'machine')}. Scheduled jobs on them fail meanwhile.`,
     action: 'Lock the vault',
   });
   if (!ok) return;
-  await api('/ui/api/lock', { method: 'POST' });
+  const res = await api('/ui/api/lock', { method: 'POST' });
+  if (res.lost) return;
+  if (!res.ok) { toast(res.error, 'error'); return; }
   toast('Vault locked');
   leaveHub(true);
 };

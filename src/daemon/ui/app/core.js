@@ -86,7 +86,7 @@ function pageHead({ path = [], title, count, actions = '', rename = null }) {
   const heading = editing
     ? html`<form class="inline-edit" data-submit="${rename.submit}" data-key="${rename.key}" novalidate>
         <label class="sr-only" for="rename-input">New name</label>
-        <input class="input" id="rename-input" name="name" value="${state.ui.renameError ? (state.ui.renameDraft ?? title) : title}" maxlength="64" autocomplete="off" spellcheck="false"
+        <input class="input" id="rename-input" name="name" value="${state.ui.renameDraft ?? title}" data-input="rename" maxlength="64" autocomplete="off" spellcheck="false"
           ${state.ui.renameError ? raw('aria-invalid="true" aria-describedby="rename-error"') : ''}>
         <button class="button">Save</button>
         <button type="button" class="button link" data-action="cancel-rename">Cancel</button>
@@ -105,6 +105,9 @@ ACTIONS['start-rename'] = (el) => {
   const input = $('rename-input');
   if (input) { input.focus(); input.select(); }
 };
+
+/** Keep what was typed, so any redraw (a banner, a refresh) puts it back. */
+INPUTS.rename = (input) => { state.ui.renameDraft = input.value; };
 
 ACTIONS['cancel-rename'] = () => {
   state.ui.renaming = null;
@@ -334,7 +337,7 @@ function tick() {
     if (text === 'ended') ended = true;
   });
   // The request ran out on the approval screen: say so instead of letting Approve fail.
-  if (ended && currentRoute().view === 'authorize' && state.ui.auth && state.ui.auth.step === 'ask') {
+  if (ended && currentRoute().view === 'authorize' && state.ui.auth && state.ui.auth.step === 'ask' && !state.ui.auth.busy) {
     Object.assign(state.ui.auth, { step: 'error', ended: true, error: ENDED });
     render();
   }
@@ -347,12 +350,16 @@ function syncCountdowns() {
 }
 
 ACTIONS['deny-sign-in'] = async (el) => {
+  if (el.disabled) return;
+  el.disabled = true;
   const res = await api(`/ui/api/authorize/${encodeURIComponent(el.dataset.code)}`, { method: 'POST', body: JSON.stringify({ approve: false }) });
   if (res.lost) return;
   if (res.ok || res.status === 404) toast(res.ok ? 'Denied. The terminal is told no.' : 'That request had already ended.');
-  else toast(res.error, 'error');
+  else { toast(res.error, 'error'); el.disabled = false; }
   await loadPending();
-  render();
+  // Over a form the owner is filling, only this banner goes; a redraw would wipe what they typed.
+  if (formOpen()) el.closest('.banner')?.remove();
+  else render();
 };
 
 // ---------- Filtering profiles (Profiles, Who can use what) ----------
@@ -406,6 +413,20 @@ async function confirmDialog({ title, body, action }) {
   $('confirm-body').textContent = body;
   $('confirm-ok').textContent = action;
   return (await modal('confirm-dialog')) === 'ok';
+}
+
+/** The question asked before leaving a key nobody has copied. One definition for every way out. */
+const LEAVE_KEY = {
+  title: 'Leave without copying the key?',
+  body: "It isn't shown again. If you leave now, you'll have to replace the key.",
+  action: 'Leave',
+};
+
+/** True when leaving is fine: no key is on screen, it was copied, or the owner chose to leave. */
+async function confirmLeaveKey() {
+  const key = state.ui.shownKey;
+  if (!key || key.copied) return true;
+  return confirmDialog(LEAVE_KEY);
 }
 
 async function copyText(text) {
