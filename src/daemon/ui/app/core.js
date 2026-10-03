@@ -175,6 +175,12 @@ function setTabs(route) {
   document.querySelectorAll('[data-tab]').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
 }
 
+/** The browser title follows the H1, as "Profiles · agentio". */
+function setTitle() {
+  const h1 = main.querySelector('h1');
+  if (h1) document.title = `${h1.textContent.trim()} · agentio`;
+}
+
 /** Draws the current route into #main. Views read `state`; nothing else writes to the page. */
 function render() {
   if (!state.loaded) return;
@@ -182,13 +188,15 @@ function render() {
   const view = VIEWS[route.view] || VIEWS.profiles;
   setTabs(route);
   $('bar').hidden = false;
-  $('tabbar').hidden = route.view === 'authorize';
+  $('version').hidden = !state.version;
+  $('version').textContent = state.version ? `v${state.version}` : '';
   $('hub-host').textContent = location.host;
   // Redrawing replaces every element: put focus, and the caret of a text field, back where they were.
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   main.innerHTML = (route.view === 'authorize' ? '' : signInBanner().__html) + view(route).__html;
+  setTitle();
   const again = focused && $(focused);
   if (!again) return;
   again.focus();

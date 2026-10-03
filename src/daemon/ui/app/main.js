@@ -44,7 +44,18 @@ document.addEventListener('submit', (ev) => {
   SUBMITS[form.dataset.submit](form, ev);
 });
 
+ACTIONS['toggle-menu'] = () => {
+  const open = $('tabs').classList.toggle('open');
+  $('menu-button').setAttribute('aria-expanded', String(open));
+};
+
+function closeMenu() {
+  $('tabs').classList.remove('open');
+  $('menu-button').setAttribute('aria-expanded', 'false');
+}
+
 window.addEventListener('hashchange', () => {
+  closeMenu();
   clearToasts();
   render();
   main.focus();

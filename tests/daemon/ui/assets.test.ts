@@ -37,6 +37,30 @@ describe('the assembled admin page', () => {
     expect(script).toContain('${');
   });
 
+    test('the header: lockup, text tabs, where you are, Sign out; no bottom tab bar, no gear', () => {
+    expect(INDEX_HTML).toContain('<a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>');
+    expect(INDEX_HTML).toContain('<nav class="tabs" id="tabs" aria-label="Main">');
+    expect(INDEX_HTML).not.toContain('id="tabbar"');
+    expect(INDEX_HTML).not.toContain('class="gear"');
+    expect(INDEX_HTML).not.toContain('agentio hub');
+    expect(INDEX_HTML).toMatch(/<button[^>]*class="button link sign-out"[^>]*data-action="sign-out"/);
+    expect(INDEX_HTML).toMatch(/<button[^>]*id="menu-button"[^>]*aria-expanded="false"[^>]*aria-controls="tabs"/);
+    expect(INDEX_HTML).toContain('<footer class="version" id="version" hidden></footer>');
+    expect(script).toContain("ACTIONS['toggle-menu']");
+  });
+
+  test('the browser title follows the H1: "<H1> · agentio"', () => {
+    expect(script).toContain('function setTitle(');
+    expect(script).toContain("`${h1.textContent.trim()} · agentio`");
+  });
+
+  test('layout: one column under 600 px with the menu, 720 px up to 959 px, 1120 px and two columns from 960 px', () => {
+    expect(style).toMatch(/@media \(max-width: 599px\)[\s\S]*\.tabs \{[^}]*display: none/);
+    expect(style).toMatch(/@media \(min-width: 600px\) and \(max-width: 959px\) \{ \.page \{ max-width: 720px; \} \}/);
+    expect(style).toMatch(/\.page \{[^}]*max-width: 1120px/);
+    expect(style).toMatch(/@media \(min-width: 960px\) \{[^@]*\.columns \{[^}]*grid-template-columns/);
+  });
+
   test('the model and every screen are in the script', () => {
     for (const name of ['function escapeHtml', 'function parseRoute', 'function toggleScope']) expect(script).toContain(name);
     for (const view of ['machines', 'machine', 'profiles', 'profile', 'add', 'access', 'settings', 'authorize']) {

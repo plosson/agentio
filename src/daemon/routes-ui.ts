@@ -43,7 +43,7 @@ export const unlockLimiter = new RateLimiter(5, 60_000);
 function securityHeaders(nonce: string): Record<string, string> {
   return {
     'Content-Security-Policy':
-      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';` +
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; ` +
       `connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',

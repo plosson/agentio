@@ -11,23 +11,21 @@
 </style>
 </head>
 <body>
-<header class="bar" id="bar" hidden>
-  <a class="logo" href="#profiles">agentio hub</a>
-  <nav class="nav" aria-label="Main">
+<header class="top" id="bar" hidden>
+  <a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>
+  <nav class="tabs" id="tabs" aria-label="Main">
     <a href="#profiles" data-tab="profiles">Profiles</a>
     <a href="#machines" data-tab="machines">Machines</a>
     <a href="#access" data-tab="access">Access</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+    <a href="#settings" class="menu-only" data-action="sign-out">Sign out</a>
   </nav>
-  <span class="r"><span id="hub-host"></span><a href="#settings" class="gear" data-tab="settings" aria-label="Settings" title="Settings">⚙</a></span>
+  <span class="where"><span id="hub-host"></span><button type="button" class="button link sign-out" data-action="sign-out">Sign out</button></span>
+  <button type="button" class="button menu-button" id="menu-button" data-action="toggle-menu" aria-expanded="false" aria-controls="tabs" aria-label="Menu">☰</button>
 </header>
 
-<main id="main" class="body" tabindex="-1"></main>
-
-<nav class="tabbar" id="tabbar" aria-label="Main" hidden>
-  <a href="#profiles" data-tab="profiles">Profiles</a>
-  <a href="#machines" data-tab="machines">Machines</a>
-  <a href="#access" data-tab="access">Access</a>
-</nav>
+<main id="main" class="page" tabindex="-1"></main>
+<footer class="version" id="version" hidden></footer>
 
 <dialog id="confirm-dialog" class="box">
   <h2 id="confirm-title"></h2>

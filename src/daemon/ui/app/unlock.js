@@ -42,7 +42,7 @@ function showUnlock(locked) {
   if (state.ui.auth && state.ui.auth.step === 'loading') state.ui.auth = null;
   state.loaded = false;
   $('bar').hidden = true;
-  $('tabbar').hidden = true;
+  $('version').hidden = true;
   main.innerHTML = html`
     <div class="welcome">
       ${lockArt()}
@@ -56,6 +56,7 @@ function showUnlock(locked) {
         <button class="btn pri block mt-12" id="unlock-btn">${locked ? 'Unlock' : 'Sign in'}</button>
       </form>
     </div>`.__html;
+  setTitle();
   $('passphrase').focus();
 }
 
