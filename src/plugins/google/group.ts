@@ -1,9 +1,11 @@
+import { getCredentials, setCredentials } from '../../auth/token-store';
 import { getProfile, profileRef } from '../../config/config-manager';
 import { saveProfiles, validateProfileName } from '../../config/profile-store';
 import { CliError } from '../../utils/errors';
 import { interactiveCheckbox, interactiveConfirm, isInteractive } from '../../utils/interactive';
 import { missingScopes, performOAuthFlow, type OAuthService } from './oauth';
-import { GOOGLE_SUITE, type GoogleSuiteEntry, type GrantContext } from './suite';
+import { assertSameAccount } from './shared';
+import { GOOGLE_SUITE, type GoogleSuiteEntry, type GrantContext, type StoredGoogleCredentials } from './suite';
 import { fetchGoogleUserEmail } from './token-manager';
 import type { OAuthTokens } from './tokens';
 
@@ -133,4 +135,65 @@ export async function addGoogleProfiles(options: GoogleAddOptions, deps: GoogleG
   );
   for (const entry of usable) console.log(`Profile "${name}" configured for ${entry.service}`);
   return usable.map((entry) => profileRef(entry.service, name));
+}
+
+interface GroupMember<T> {
+  status: T;
+  entry: GoogleSuiteEntry;
+  existing: StoredGoogleCredentials;
+}
+
+/**
+ * Renew the selected Google profiles of one account with one consent each.
+ * A profile joins a group when its service is a Google one and its stored
+ * credentials name an account; a group needs two. Everything else comes back,
+ * in order, for the one-at-a-time path.
+ */
+export async function reauthGoogleGroups<T extends { service: string; profile: string }>(
+  selected: readonly T[],
+  deps: GoogleGrantDeps = {},
+): Promise<T[]> {
+  const suite = deps.suite ?? GOOGLE_SUITE;
+  const groups = new Map<string, GroupMember<T>[]>();
+  for (const status of selected) {
+    const entry = suite.find((e) => e.service === status.service);
+    if (!entry) continue;
+    const existing = await getCredentials<StoredGoogleCredentials>(status.service, status.profile);
+    if (!existing || typeof existing.email !== 'string' || !existing.email) continue;
+    const account = existing.email.toLowerCase();
+    groups.set(account, [...(groups.get(account) ?? []), { status, entry, existing }]);
+  }
+
+  const handled = new Set<T>();
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    for (const member of members) handled.add(member.status);
+    try {
+      await renewGroup(members, deps);
+    } catch (error) {
+      const account = members[0]!.existing.email as string;
+      console.error(`\n  Failed to reauth ${account}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return selected.filter((status) => !handled.has(status));
+}
+
+async function renewGroup<T extends { service: string; profile: string }>(members: GroupMember<T>[], deps: GoogleGrantDeps): Promise<void> {
+  const account = members[0]!.existing.email as string;
+  const keys = members.map((m) => m.entry.scopeKey({ existing: m.existing }));
+  console.error(`\nRe-authenticating ${account} for: ${members.map((m, i) => grantLabel(m.entry, keys[i]!)).join(', ')}...`);
+
+  const tokens = await (deps.performOAuth ?? performOAuthFlow)(keys);
+  const email = await fetchAccountEmail(tokens, deps.fetchEmail ?? fetchGoogleUserEmail);
+  assertSameAccount(account, email);
+
+  for (const [i, m] of members.entries()) {
+    const reason = await unusableReason(m.entry, keys[i]!, tokens);
+    if (reason) {
+      console.error(`\n  Failed to reauth ${m.status.service} / ${m.status.profile}: ${reason}`);
+      continue;
+    }
+    await setCredentials(m.status.service, m.status.profile, m.entry.toCredentials(tokens, email, { existing: m.existing }));
+    console.error(`  Done: ${m.status.service} / ${m.status.profile}`);
+  }
 }

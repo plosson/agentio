@@ -5,6 +5,7 @@ import { interactiveCheckbox } from '../utils/interactive';
 import { handleError } from '../utils/errors';
 import type { ServiceName } from '../types/config';
 import { findServicePlugin } from '../plugins/registry';
+import { reauthGoogleGroups, type GoogleGrantDeps } from '../plugins/google/group';
 import { createSetupContext } from '../plugins/host-context';
 import { isDeclarativePlugin } from '../plugins/types';
 
@@ -26,6 +27,20 @@ export async function reauthProfile(service: ServiceName, profileName: string): 
   }
 
   console.error(`\nSkipping ${service} / ${profileName}: no automatic reauthentication is registered. Run 'agentio ${service} profile add --profile ${profileName}' to update.`);
+}
+
+/** Renew the chosen profiles: Google ones of one account together, then the rest one at a time. */
+export async function reauthSelected(selected: ProfileStatus[], googleDeps: GoogleGrantDeps = {}): Promise<void> {
+  const remaining = await reauthGoogleGroups(selected, googleDeps);
+  for (const s of remaining) {
+    try {
+      await reauthProfile(s.service, s.profile);
+    } catch (error) {
+      console.error(
+        `\n  Failed to reauth ${s.service} / ${s.profile}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
 }
 
 export function registerReauthCommand(program: Command): void {
@@ -65,15 +80,7 @@ export function registerReauthCommand(program: Command): void {
           });
         }
 
-        for (const s of selected) {
-          try {
-            await reauthProfile(s.service, s.profile);
-          } catch (error) {
-            console.error(
-              `\n  Failed to reauth ${s.service} / ${s.profile}: ${error instanceof Error ? error.message : String(error)}`
-            );
-          }
-        }
+        await reauthSelected(selected);
 
         console.log('\nDone.');
       } catch (error) {

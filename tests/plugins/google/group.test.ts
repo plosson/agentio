@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
-import { withTempVault } from '../../helpers/vault';
+import { seedVault, withTempVault } from '../../helpers/vault';
 import { loadVault } from '../../../src/vault/vault';
 import { scopesFor, type OAuthService } from '../../../src/plugins/google/oauth';
 import { GOOGLE_SUITE } from '../../../src/plugins/google/suite';
-import { addGoogleProfiles, type GoogleGrantDeps } from '../../../src/plugins/google/group';
+import { addGoogleProfiles, reauthGoogleGroups, type GoogleGrantDeps } from '../../../src/plugins/google/group';
 import { CliError } from '../../../src/utils/errors';
 
 const OLD_GMAIL = { access_token: 'old', refresh_token: 'rt-old', token_type: 'Bearer', email: 'me@x.com' };
@@ -155,5 +155,76 @@ describe('addGoogleProfiles: choosing in a terminal', () => {
     const saved = await addGoogleProfiles({ profile: 'w' }, deps({ interactive: () => true, chooseServices }));
     expect(chooseServices.mock.calls[0]![0]).toEqual(GOOGLE_SUITE.map((e) => e.service));
     expect(saved).toEqual(['gtasks/w']);
+  });
+});
+
+describe('reauthGoogleGroups', () => {
+  const ME = 'me@x.com';
+  const snake = (email?: string) => ({ access_token: 'old', refresh_token: 'rt-old', token_type: 'Bearer', ...(email ? { email } : {}) });
+  const camel = (email: string, extra = {}) => ({ accessToken: 'old', refreshToken: 'rt-old', tokenType: 'Bearer', email, ...extra });
+
+  beforeEach(async () => {
+    await seedVault({
+      config: { profiles: {
+        gmail: [{ name: 'me', readOnly: true }, { name: 'legacy' }, { name: 'other' }],
+        gcal: [{ name: 'me' }, { name: 'other' }],
+        gdrive: [{ name: 'me' }],
+        gchat: [{ name: 'hook' }],
+        gtasks: [{ name: 'solo' }],
+        slack: [{ name: 'ops' }],
+      } },
+      credentials: {
+        gmail: { me: snake(ME), legacy: snake(), other: snake('other@y.com') },
+        gcal: { me: snake('ME@x.com'), other: snake('other@y.com') },
+        gdrive: { me: camel(ME, { accessLevel: 'full' }) },
+        gchat: { hook: { type: 'webhook', webhookUrl: 'https://chat.example.test/hook' } },
+        gtasks: { solo: snake('solo@z.com') },
+        slack: { ops: { type: 'webhook', webhookUrl: 'https://hooks.slack.com/x' } },
+      },
+    });
+  });
+
+  const pick = (...refs: string[]) => refs.map((ref) => { const [service, profile] = ref.split('/'); return { service: service!, profile: profile! }; });
+
+  test('one consent per account, case-insensitive, with each profile\'s own scopes', async () => {
+    const performOAuth = grantAll();
+    const fetchEmail = mock(async (_at: string) => ME);
+    await reauthGoogleGroups(pick('gmail/me', 'gcal/me', 'gdrive/me'), deps({ performOAuth, fetchEmail }));
+    expect(performOAuth.mock.calls.map((c) => c[0])).toEqual([['gmail', 'gcal', 'gdrive-full']]);
+    const { config, credentials } = await loadVault();
+    expect(credentials.gmail?.me).toMatchObject({ refresh_token: 'rt-new' });
+    expect(credentials.gdrive?.me).toMatchObject({ refreshToken: 'rt-new', accessLevel: 'full' });
+    expect(config.profiles.gmail?.[0]).toEqual({ name: 'me', readOnly: true });
+  });
+
+  test('two accounts give two consents', async () => {
+    const performOAuth = grantAll();
+    const emails = ['me@x.com', 'other@y.com'];
+    await reauthGoogleGroups(pick('gmail/me', 'gcal/me', 'gmail/other', 'gcal/other'), deps({ performOAuth, fetchEmail: mock(async () => emails.shift()!) }));
+    expect(performOAuth).toHaveBeenCalledTimes(2);
+  });
+
+  test('what cannot be grouped comes back untouched, in order, with no consent', async () => {
+    const performOAuth = grantAll();
+    const selected = pick('slack/ops', 'gmail/legacy', 'gchat/hook', 'gtasks/solo', 'gcal/other');
+    expect(await reauthGoogleGroups(selected, deps({ performOAuth }))).toEqual(selected);
+    expect(performOAuth).not.toHaveBeenCalled();
+  });
+
+  test('a consent with the wrong account changes nothing in the group', async () => {
+    const before = await loadVault();
+    const remaining = await reauthGoogleGroups(pick('gmail/me', 'gcal/me'), deps({ fetchEmail: mock(async () => 'home@q.com') }));
+    expect(remaining).toEqual([]);
+    expect(await loadVault()).toEqual(before);
+    expect(stderr.join('\n')).toContain('Signed in as home@q.com, but this profile belongs to me@x.com');
+  });
+
+  test('a scope left unticked keeps that profile\'s old credentials and renews the rest', async () => {
+    const d = deps({ performOAuth: grantAll(['https://www.googleapis.com/auth/calendar']), fetchEmail: mock(async () => ME) });
+    await reauthGoogleGroups(pick('gmail/me', 'gcal/me'), d);
+    const { credentials } = await loadVault();
+    expect(credentials.gmail?.me).toMatchObject({ refresh_token: 'rt-new' });
+    expect(credentials.gcal?.me).toMatchObject({ refresh_token: 'rt-old' });
+    expect(stderr.join('\n')).toContain('Failed to reauth gcal / me: Google did not grant https://www.googleapis.com/auth/calendar');
   });
 });
