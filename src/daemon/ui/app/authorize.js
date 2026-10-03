@@ -13,13 +13,24 @@ function authState(code) {
   return state.ui.auth;
 }
 
+/** The request could not be loaded or answered: a 404 means it ended or was already answered. */
+function endAuth(auth, res) {
+  Object.assign(auth, { step: 'error', ended: res.status === 404, error: res.status === 404 ? ENDED : res.error });
+}
+
+/** Approve and Deny are one-shot: busy blocks a second tap while the first answer is in flight. */
+function setAuthBusy(auth, busy) {
+  auth.busy = busy;
+  document.querySelectorAll('[data-action="auth-deny"], form[data-submit="auth-approve"] button').forEach((el) => { el.disabled = busy; });
+}
+
 async function loadRequest(code) {
   const res = await api(`/ui/api/authorize/${encodeURIComponent(code)}`);
   if (res.lost) return;
   const auth = state.ui.auth;
   if (!auth || auth.code !== code) return;
   if (res.ok) Object.assign(auth, { step: 'ask', request: res.body });
-  else Object.assign(auth, { step: 'error', ended: res.status === 404, error: res.status === 404 ? ENDED : res.error });
+  else endAuth(auth, res);
   render();
 }
 
@@ -62,16 +73,22 @@ VIEWS.authorize = (route) => {
 
 ACTIONS['auth-deny'] = async () => {
   const auth = state.ui.auth;
+  if (auth.step !== 'ask' || auth.busy) return;
+  setAuthBusy(auth, true);
   const res = await api(`/ui/api/authorize/${encodeURIComponent(auth.code)}`, { method: 'POST', body: JSON.stringify({ approve: false }) });
+  setAuthBusy(auth, false);
   if (res.lost) return;
-  if (res.ok) auth.step = 'denied';
-  else Object.assign(auth, { step: 'error', ended: res.status === 404, error: res.status === 404 ? ENDED : res.error });
+  if (auth.step === 'ask') {
+    if (res.ok) auth.step = 'denied';
+    else endAuth(auth, res);
+  }
   await loadPending();
   render();
 };
 
 SUBMITS['auth-approve'] = async (form) => {
   const auth = state.ui.auth;
+  if (auth.step !== 'ask' || auth.busy) return;
   let input;
   try {
     input = presetInput(readAccessChoice(form, 'auth'), auth.request.name);
@@ -79,13 +96,16 @@ SUBMITS['auth-approve'] = async (form) => {
     toast(err.message, 'error');
     return;
   }
+  setAuthBusy(auth, true);
   const res = await api(`/ui/api/authorize/${encodeURIComponent(auth.code)}`, {
     method: 'POST',
     body: JSON.stringify({ approve: true, ...input, url: location.origin }),
   });
+  setAuthBusy(auth, false);
   if (res.lost) return;
+  if (auth.step !== 'ask') return;
   if (!res.ok) {
-    Object.assign(auth, { step: 'error', ended: res.status === 404, error: res.status === 404 ? ENDED : res.error });
+    endAuth(auth, res);
     render();
     return;
   }

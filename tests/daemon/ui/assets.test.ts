@@ -152,6 +152,13 @@ describe('the assembled admin page', () => {
     expect(script).not.toContain('<span class="steps"');
   });
 
+  test('approval: Approve and Deny cannot run twice, and a late answer never overwrites a finished screen', () => {
+    expect(script).toMatch(/ACTIONS\['auth-deny'\] = async \(\) => \{\s*const auth = state\.ui\.auth;\s*if \(auth\.step !== 'ask' \|\| auth\.busy\) return;/);
+    expect(script).toMatch(/SUBMITS\['auth-approve'\] = async \(form\) => \{\s*const auth = state\.ui\.auth;\s*if \(auth\.step !== 'ask' \|\| auth\.busy\) return;/);
+    expect(script).toContain('function endAuth(auth, res)');
+    expect(script.match(/step: 'error', ended: res\.status === 404/g)?.length).toBe(1);
+  });
+
   test('approval: a request that runs out while the screen is open turns into the ended page', () => {
     expect(script).toMatch(/function tick\(\) \{[\s\S]*?=== 'ended'[\s\S]*?step: 'error'/);
   });
