@@ -31,6 +31,7 @@ const SERVICE_ORDER = [
   'jira',
   'kite',
   'notes',
+  'pagerio',
   'pocketalert',
   'revolut',
   'rss',

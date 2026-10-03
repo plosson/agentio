@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-01. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-03. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -19,6 +19,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
+| pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
@@ -464,6 +465,25 @@ agentio does not talk to Notes.app itself. It talks to [apple-notes-api](https:/
 4. Run `agentio notes profile add --url <server URL>` and paste the key.
 
 **What's needed:** a Mac with Notes signed in, and a network path from the agent to the server. Optional: Full Disk Access for the server's `node` binary, so `notes get` shows which checklist items are ticked; the server reads them from Notes' database, read-only.
+
+---
+
+## Pocket Pager
+
+**Code:** `src/plugins/pagerio/`
+
+Sends a page (a push notification on the owner's iPhone and Mac) by posting to a [Pocket Pager](https://pagerio.chuut.com) URL. Only `send` is implemented.
+
+**Sign-in:** the pager URL, `https://pagerio.chuut.com/p/<16 letters and digits>`, copied from the dashboard. The URL is the only secret: there is no account key.
+- `agentio pagerio profile add` asks for the URL when `--url` is absent, so it can stay out of shell history.
+- Setup refuses anything not shaped like a pager URL, then checks it with one POST whose body is not valid JSON. The server looks the URL up before it reads the body, so a known URL answers 400 and an unknown one 404. Nobody is paged. An unknown URL stops setup.
+- There is no expiry and no refresh.
+
+**What the vault stores:** the pager URL. Errors and output show only its host, never the URL.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, URL included, as with the other static-token plugins.
+
+**What's needed:** a Pocket Pager account (Google sign-in on the dashboard), and the iPhone or Mac app signed in to receive pages.
 
 ---
 
