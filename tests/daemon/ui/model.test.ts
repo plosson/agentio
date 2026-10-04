@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   accessCell,
+  accountShown,
   accessLevel,
   problemsFirst,
   matchesService,
@@ -576,5 +577,23 @@ describe('overview', () => {
     expect(overviewStatus({ ...base, working: 10, failing: 2, notTested: 0, testedAt: NOW - MIN }, NOW)).toEqual({ symbol: '✗', word: '2 of 12 failed', tone: 'bad' });
     expect(overviewStatus({ ...base, working: 12, notTested: 0, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: 'All 12 working · tested 2 min ago', tone: 'ok' });
     expect(overviewStatus({ ...base, working: 3, notTested: 9, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: '3 of 12 working · tested 2 min ago', tone: 'ok' });
+  });
+});
+
+describe('accountShown', () => {
+  test('an account that only repeats the name is not shown, whatever its case or spaces', () => {
+    expect(accountShown('pal_hexrays', 'pal_hexrays')).toBe('');
+    expect(accountShown('plosson@gmail.com', ' Plosson@Gmail.com ')).toBe('');
+  });
+  test('a missing or blank account shows nothing', () => {
+    expect(accountShown('work', undefined)).toBe('');
+    expect(accountShown('work', '   ')).toBe('');
+  });
+  test('an account that only starts like the name is still shown, trimmed', () => {
+    expect(accountShown('pal', 'pal@hex-rays.com')).toBe('pal@hex-rays.com');
+    expect(accountShown('letschill-srl', '  pierre@letschill.be · LETSCHILL SRL ')).toBe('pierre@letschill.be · LETSCHILL SRL');
+  });
+  test('an empty profile name never hides a real account', () => {
+    expect(accountShown('', 'someone')).toBe('someone');
   });
 });

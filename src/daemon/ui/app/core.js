@@ -117,8 +117,8 @@ ACTIONS['cancel-rename'] = () => {
 };
 
 /** One list row: an optional dot (true = new or active), a bold title, a muted message, small meta. A link with `href`. */
-function listItem({ href, dot, title, message = '', meta = '' }) {
-  const cls = dot === undefined ? 'item no-dot' : 'item';
+function listItem({ href, dot, title, message = '', meta = '', dense = false }) {
+  const cls = `${dot === undefined ? 'item no-dot' : 'item'}${dense ? ' dense' : ''}`;
   const body = html`${dot === undefined ? '' : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`}<span>
     <span class="item-title">${title}</span>${message ? html`<span class="item-message">${message}</span>` : ''}${meta ? html`<span class="item-meta">${meta}</span>` : ''}</span>`;
   return href ? html`<li><a class="${cls}" href="${href}">${body}</a></li>` : html`<li><div class="${cls}">${body}</div></li>`;

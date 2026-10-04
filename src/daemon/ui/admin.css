@@ -102,6 +102,18 @@ button.item { width: 100%; border: 0; background: none; font: inherit; text-alig
 .item-title { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .item-message { display: block; color: var(--muted); overflow-wrap: anywhere; }
 .item-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; color: var(--muted); font-size: var(--size-small); }
+/* A dense row: name and details on one line, status on the next; one line from 600 px. */
+.item.dense { padding-block: 10px; }
+.item.dense > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--s2); min-width: 0; }
+.item.dense .item-title { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.dense .item-message { flex: 1 1 0; min-width: 0; }
+.item.dense .details { flex-wrap: nowrap; }
+.item.dense .item-meta { flex: 1 0 100%; min-width: 0; margin-top: 0; }
+@media (min-width: 600px) {
+  .item.dense > span { flex-wrap: nowrap; }
+  .item.dense .item-title { max-width: 40%; }
+  .item.dense .item-meta { flex: 0 1 auto; max-width: 45%; flex-wrap: nowrap; justify-content: flex-end; }
+}
 .list > .more { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s2); padding: 0 var(--s2); color: var(--muted); font-size: var(--size-small); }
 .list > .more a { display: inline-flex; align-items: center; min-height: var(--tap); font-weight: 600; }
 
