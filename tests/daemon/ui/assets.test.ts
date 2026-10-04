@@ -213,8 +213,18 @@ describe('the assembled admin page', () => {
 
   test('profiles: a grouped list, problems first in each group, no table', () => {
     expect(script).not.toContain('<table class="stack compact">');
-    expect(script).toContain('<li class="group-heading">');
+    expect(script).not.toContain('group-heading');
+    expect(script).toContain('<li class="group">');
+    expect(script).toMatch(/<span class="group-name">\$\{icon\(g\.service\)\}/);
+    expect(script).toContain('<ul class="group-rows" aria-label="${g.name}">');
     expect(script).toContain('problemsFirst(');
+  });
+
+  test('profiles: the service is a column from 600 px and a heading on a phone; lines only between services', () => {
+    expect(style).toMatch(/\.list > \.group \{[^}]*\}/);
+    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.list > \.group \{[^}]*display: grid; grid-template-columns: [^;]+ minmax\(0, 1fr\)/);
+    expect(style).toMatch(/\.group-rows \{[^}]*list-style: none/);
+    expect(style).not.toMatch(/\.group-rows > li \+ li \{[^}]*border/);
   });
 
   test('profiles: one line per profile on a wide screen, two on a phone; a long value is cut, never wrapped', () => {
