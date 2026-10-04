@@ -29,14 +29,14 @@ VIEWS.profiles = () => {
     ${pageHead({ title: 'Profiles', count: state.rows.length, actions })}
     ${filterBox(visible.length, state.rows.length)}
     ${visible.length === 0 ? noMatch() : html`<ul class="list">${groups.map((g) => html`
-      <li class="group-heading">${icon(g.service)}<span>${g.name}</span></li>
-      ${problemsFirst(g.rows, state.results).map((r) => listItem({
+      <li class="group"><span class="group-name">${icon(g.service)}<span>${g.name}</span></span>
+      <ul class="group-rows" aria-label="${g.name}">${problemsFirst(g.rows, state.results).map((r) => listItem({
         href: routeHash({ view: 'profile', ref: refOf(r) }),
         title: r.profile,
         dense: true,
         message: html`<span class="details">${accountShown(r.profile, r.account) ? accountText(r) : ''}${r.url ? html`<span class="clip">${linkLabel(r.url)}</span>` : ''}</span>`,
         meta: html`<span class="clip">${profileStatusLine(r, now)}</span>${r.readOnly ? html`<span>Read-only</span>` : ''}<span>${plural(machinesUsing(state.keys, r).length, 'machine')}</span>`,
-      }))}`)}</ul>`}`;
+      }))}</ul></li>`)}</ul>`}`;
 };
 
 VIEWS.profile = (route) => {
