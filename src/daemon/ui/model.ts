@@ -45,31 +45,31 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
 
 // ---------- Routes ----------
 
-export type TabView = 'machines' | 'profiles' | 'access' | 'settings' | 'add';
+export type TabView = 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | 'add' | 'connect' | 'key';
 export type Route =
   | { view: TabView }
   | { view: 'machine'; id: string }
   | { view: 'profile'; ref: string }
   | { view: 'authorize'; code: string };
 
-const TAB_VIEWS: readonly string[] = ['machines', 'profiles', 'access', 'settings', 'add'];
+const TAB_VIEWS: readonly string[] = ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'];
 
-/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else, old `#overview` links included, is Profiles. */
+/** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else is the Overview. */
 export function parseRoute(hash: string): Route {
   let text = hash.startsWith('#') ? hash.slice(1) : hash;
   try {
     text = decodeURIComponent(text);
   } catch {
-    return { view: 'profiles' };
+    return { view: 'overview' };
   }
   const eq = text.indexOf('=');
-  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'profiles' };
+  if (eq === -1) return TAB_VIEWS.includes(text) ? { view: text as TabView } : { view: 'overview' };
   const name = text.slice(0, eq);
   const value = text.slice(eq + 1);
   if (name === 'machine' && value) return { view: 'machine', id: value };
   if (name === 'profile' && /^[^/]+\/.+$/.test(value)) return { view: 'profile', ref: value };
   if (name === 'authorize' && value) return { view: 'authorize', code: value };
-  return { view: 'profiles' };
+  return { view: 'overview' };
 }
 
 export function routeHash(route: Route): string {
@@ -86,9 +86,12 @@ export function routeHash(route: Route): string {
 }
 
 /** The navigation tab to highlight; the sign-in page has none. */
-export function tabOf(route: Route): 'machines' | 'profiles' | 'access' | 'settings' | null {
+export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'settings' | null {
   switch (route.view) {
     case 'machine':
+    case 'access':
+    case 'connect':
+    case 'key':
       return 'machines';
     case 'profile':
     case 'add':
@@ -130,17 +133,31 @@ export function relativeTime(when: string | number | undefined, now: number): st
   return shortDate(t, now);
 }
 
-export function timeLeft(expiresAt: string, now: number): string {
-  const ms = Date.parse(expiresAt) - now;
-  if (!(ms > 0)) return 'ended';
-  if (ms < 60_000) return 'ends in less than a minute';
-  return `ends in ${Math.ceil(ms / 60_000)} min`;
+/** A live countdown: "4:12 left", "1:02:05 left"; "ended" at or past the end, or for a date that can't be read. */
+export function countdown(expiresAt: string, now: number): string {
+  const s = Math.ceil((Date.parse(expiresAt) - now) / 1000);
+  if (!(s > 0)) return 'ended';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h ? `${h}:${pad(m)}:${pad(sec)} left` : `${m}:${pad(sec)} left`;
 }
 
 // ---------- Words and commands ----------
 
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** Up to `max` names, then "N more"; when only one would be left over, it is shown instead of "1 more". */
+export function listSummary(names: string[], max = 3): string {
+  if (names.length <= max + 1) return names.join(' · ');
+  return `${names.slice(0, max).join(' · ')} · ${names.length - max} more`;
+}
+
+/** The services of these profiles by display name, once each, sorted. Falls back to the id. */
+export function serviceNames(rows: Array<Pick<ProfileRow, 'service'>>, displayName: (service: string) => string): string[] {
+  return [...new Set(rows.map((r) => displayName(r.service) || r.service))].sort((a, b) => a.localeCompare(b));
 }
 
 /** A word a POSIX shell reads back unchanged. */
@@ -226,11 +243,11 @@ export function canWrite(key: Pick<Key, 'readOnly'>, profile: Pick<ProfileRow, '
   return !key.readOnly && !profile.readOnly;
 }
 
-export type Cell = 'W' | 'R' | '·';
+export type Cell = 'Write' | 'Read' | 'None';
 
 export function accessCell(key: Key, profile: ProfileRow): Cell {
-  if (!scopeIncludes(key, refOf(profile))) return '·';
-  return canWrite(key, profile) ? 'W' : 'R';
+  if (!scopeIncludes(key, refOf(profile))) return 'None';
+  return canWrite(key, profile) ? 'Write' : 'Read';
 }
 
 /**
@@ -253,6 +270,14 @@ export function machinesUsing(keys: Key[], profile: ProfileRow): Array<{ key: Ke
     .map((k) => ({ key: k, canWrite: canWrite(k, profile) }));
 }
 
+/** What a machine can do through a profile, and why when it can only read. */
+export function accessLevel(key: Pick<Key, 'readOnly'>, profile: Pick<ProfileRow, 'readOnly'>): { level: 'Write' | 'Read only'; reason: string } {
+  if (key.readOnly && profile.readOnly) return { level: 'Read only', reason: 'because both the machine and the profile are read-only' };
+  if (profile.readOnly) return { level: 'Read only', reason: 'because the profile is read-only' };
+  if (key.readOnly) return { level: 'Read only', reason: 'because the machine is read-only' };
+  return { level: 'Write', reason: '' };
+}
+
 /** The existing profiles a machine could read: after a revoke, the ones to reauthorise. */
 export function reachableRefs(key: Pick<Key, 'allowedProfiles'>, allRefs: string[]): string[] {
   const refs = key.allowedProfiles === '*' ? allRefs : key.allowedProfiles.filter((r) => allRefs.includes(r));
@@ -270,6 +295,17 @@ export function seenToday(key: Key, now: number): boolean {
   if (!key.lastUsedAt) return false;
   const t = Date.parse(key.lastUsedAt);
   return !Number.isNaN(t) && now - t < DAY_MS;
+}
+
+/** When a machine was last seen, as a status. Never-used machines count from their creation. */
+export function machineSeen(key: Key, now: number): StatusWord {
+  const seen = key.lastUsedAt ? Date.parse(key.lastUsedAt) : NaN;
+  if (isSilent(key, now)) {
+    const days = Math.floor((now - lastActivity(key)) / DAY_MS);
+    return { symbol: '!', word: Number.isNaN(seen) ? `Never used, created ${days} days ago` : `Silent for ${days} days`, tone: 'warn' };
+  }
+  if (Number.isNaN(seen)) return { symbol: '○', word: 'Never used', tone: 'neutral' };
+  return { symbol: '✓', word: `Seen ${relativeTime(seen, now)}`, tone: 'ok' };
 }
 
 export function machineCanUse(key: Key, allRefs: string[]): string {
@@ -321,7 +357,14 @@ export interface PendingSignIn {
   expiresAt: string;
 }
 
-export type Tone = 'ok' | 'red' | 'warn' | 'neutral';
+export type Tone = 'ok' | 'bad' | 'warn' | 'neutral';
+
+/** A status as the page shows it: a symbol and words, coloured by tone, never by colour alone. */
+export interface StatusWord {
+  symbol: string;
+  word: string;
+  tone: Tone;
+}
 
 export function effectiveStatus(row: ProfileRow, results: ReadonlyMap<string, TestResult>): { status: Status; detail: string; at?: number } {
   const result = results.get(refOf(row));
@@ -329,18 +372,18 @@ export function effectiveStatus(row: ProfileRow, results: ReadonlyMap<string, Te
   return { status: row.status, detail: row.error ?? row.info ?? '' };
 }
 
-export function statusPill(status: Status, session: boolean): { label: string; tone: Tone } {
+export function statusWord(status: Status | string, session: boolean): StatusWord {
   switch (status) {
     case 'ok':
-      return { label: session ? 'connected' : 'working', tone: 'ok' };
+      return { symbol: '✓', word: session ? 'Connected' : 'Working', tone: 'ok' };
     case 'invalid':
-      return { label: 'not working', tone: 'red' };
+      return { symbol: '✗', word: 'Failed', tone: 'bad' };
     case 'no-creds':
-      return { label: 'no credentials', tone: 'warn' };
+      return { symbol: '!', word: 'No credentials', tone: 'warn' };
     case 'testing':
-      return { label: 'testing…', tone: 'neutral' };
+      return { symbol: '⟳', word: 'Testing…', tone: 'neutral' };
     default:
-      return { label: 'not tested', tone: 'neutral' };
+      return { symbol: '○', word: 'Not tested', tone: 'neutral' };
   }
 }
 
@@ -350,6 +393,14 @@ export function groupProfiles(rows: ProfileRow[], displayName: (service: string)
   return [...groups.entries()]
     .map(([service, list]) => ({ service, name: displayName(service), rows: [...list].sort((a, b) => a.profile.localeCompare(b.profile)) }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const PROBLEM_RANK: Partial<Record<Status, number>> = { invalid: 0, 'no-creds': 1 };
+
+/** Failed profiles first, then those with no credentials, then the rest; each keeps its order. */
+export function problemsFirst(rows: ProfileRow[], results: ReadonlyMap<string, TestResult>): ProfileRow[] {
+  const rank = (r: ProfileRow): number => PROBLEM_RANK[effectiveStatus(r, results).status] ?? 2;
+  return [...rows].sort((a, b) => rank(a) - rank(b));
 }
 
 /**
@@ -367,6 +418,13 @@ export function matchesFilter(row: ProfileRow, query: string, displayName: (serv
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
   const haystack = `${row.service} ${displayName(row.service)} ${row.profile} ${row.info ?? ''} ${row.account ?? ''} ${row.url ?? ''}`.toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+/** Whether a service matches the Add a profile filter: every word, ignoring case, in its id or display name. */
+export function matchesService(service: string, query: string, displayName: (service: string) => string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = `${service} ${displayName(service)}`.toLowerCase();
   return words.every((word) => haystack.includes(word));
 }
 
@@ -397,4 +455,57 @@ export function hubSummary(rows: ProfileRow[], keys: Key[], results: ReadonlyMap
   };
   if (times.length) summary.testedAt = Math.max(...times);
   return summary;
+}
+
+// ---------- Overview ----------
+
+const seenTime = (key: Key): number => {
+  const t = key.lastUsedAt ? Date.parse(key.lastUsedAt) : NaN;
+  return Number.isNaN(t) ? -Infinity : t;
+};
+const createdTime = (key: Key): number => {
+  const t = Date.parse(key.createdAt);
+  return Number.isNaN(t) ? -Infinity : t;
+};
+
+/** Machines by last seen, newest first; never-seen ones last, newest created first; then by name. */
+export function recentlySeen(keys: Key[], limit = 5): Key[] {
+  return [...keys]
+    .sort((a, b) => (seenTime(b) - seenTime(a)) || (createdTime(b) - createdTime(a)) || a.name.localeCompare(b.name))
+    .slice(0, Math.max(0, limit));
+}
+
+/** What needs the owner: profiles that failed a test or have no credentials, machines silent for 30+ days. */
+export interface Attention {
+  failing: ProfileRow[];
+  noCreds: ProfileRow[];
+  silent: Key[];
+}
+
+export function attention(rows: ProfileRow[], keys: Key[], results: ReadonlyMap<string, TestResult>, now: number): Attention {
+  return {
+    failing: rows.filter((r) => effectiveStatus(r, results).status === 'invalid'),
+    noCreds: rows.filter((r) => effectiveStatus(r, results).status === 'no-creds'),
+    silent: keys.filter((k) => isSilent(k, now)),
+  };
+}
+
+/** The attention banner's parts, each linked to where it can be fixed. Empty when all is well. */
+export function attentionParts(a: Attention): Array<{ text: string; href: string }> {
+  const parts: Array<{ text: string; href: string }> = [];
+  const one = (n: number) => n === 1;
+  if (a.failing.length) parts.push({ text: `${plural(a.failing.length, 'profile')} failed ${one(a.failing.length) ? 'its' : 'their'} test`, href: '#profiles' });
+  if (a.noCreds.length) parts.push({ text: `${plural(a.noCreds.length, 'profile')} ${one(a.noCreds.length) ? 'has' : 'have'} no credentials`, href: '#profiles' });
+  if (a.silent.length) parts.push({ text: `${plural(a.silent.length, 'machine')} silent for ${SILENT_DAYS}+ days`, href: '#machines' });
+  return parts;
+}
+
+/** The Overview's status line. */
+export function overviewStatus(s: HubSummary, now: number): StatusWord {
+  if (s.profiles === 0) return { symbol: '○', word: 'No profiles yet', tone: 'neutral' };
+  if (s.failing) return { symbol: '✗', word: `${s.failing} of ${s.profiles} failed`, tone: 'bad' };
+  if (s.testedAt === undefined) return { symbol: '○', word: 'Not tested in this session', tone: 'neutral' };
+  const when = `tested ${relativeTime(s.testedAt, now)}`;
+  if (s.working === s.profiles) return { symbol: '✓', word: `All ${s.profiles} working · ${when}`, tone: 'ok' };
+  return { symbol: '✓', word: `${s.working} of ${s.profiles} working · ${when}`, tone: 'ok' };
 }

@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
   accessCell,
+  accessLevel,
+  problemsFirst,
+  matchesService,
   addCommand,
   canWrite,
   clockTime,
+  countdown,
   effectiveStatus,
   escapeHtml,
   fixCommand,
@@ -14,10 +18,17 @@ import {
   matchesFilter,
   allowWritesCommand,
   isSilent,
+  listSummary,
+  machineSeen,
+  serviceNames,
   loginCommand,
   machineCanUse,
   machinesUsing,
   parseRoute,
+  recentlySeen,
+  attention,
+  attentionParts,
+  overviewStatus,
   plural,
   presetInput,
   raw,
@@ -30,9 +41,8 @@ import {
   seenToday,
   shellQuote,
   shortDate,
-  statusPill,
+  statusWord,
   tabOf,
-  timeLeft,
   toggleScope,
   type Key,
   type ProfileRow,
@@ -69,21 +79,20 @@ describe('escaping', () => {
 });
 
 describe('routes', () => {
-  test('known tabs and the default', () => {
-    for (const view of ['machines', 'profiles', 'access', 'settings', 'add'] as const) {
+  test('known screens and the default', () => {
+    for (const view of ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'] as const) {
       expect(parseRoute(`#${view}`)).toEqual({ view });
     }
-    // Profiles is the home page; old #overview bookmarks land there too.
-    expect(parseRoute('#overview')).toEqual({ view: 'profiles' });
-    expect(parseRoute('')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#nonsense')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#machines=1')).toEqual({ view: 'profiles' });
+    expect(parseRoute('')).toEqual({ view: 'overview' });
+    expect(parseRoute('#')).toEqual({ view: 'overview' });
+    expect(parseRoute('#nonsense')).toEqual({ view: 'overview' });
+    expect(parseRoute('#machines=1')).toEqual({ view: 'overview' });
+    expect(parseRoute('#__proto__')).toEqual({ view: 'overview' });
   });
 
   test('the approval link the CLI prints keeps working', () => {
     expect(parseRoute('#authorize=KQ7M-2XWD')).toEqual({ view: 'authorize', code: 'KQ7M-2XWD' });
-    expect(parseRoute('#authorize=')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#authorize=')).toEqual({ view: 'overview' });
   });
 
   test('ids and refs survive a round trip, whatever they contain', () => {
@@ -97,20 +106,24 @@ describe('routes', () => {
   });
 
   test('a profile route needs service/name', () => {
-    expect(parseRoute('#profile=gmail')).toEqual({ view: 'profiles' });
-    expect(parseRoute('#profile=/work')).toEqual({ view: 'profiles' });
+    expect(parseRoute('#profile=gmail')).toEqual({ view: 'overview' });
+    expect(parseRoute('#profile=/work')).toEqual({ view: 'overview' });
   });
 
-  test('a mangled percent-encoding falls back to Profiles instead of throwing', () => {
-    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'profiles' });
+  test('a mangled percent-encoding falls back to the Overview instead of throwing', () => {
+    expect(parseRoute('#machine=%E0%A4%A')).toEqual({ view: 'overview' });
   });
 
   test('tabOf highlights the parent tab', () => {
     expect(tabOf({ view: 'machine', id: 'x' })).toBe('machines');
+    expect(tabOf({ view: 'access' })).toBe('machines');
+    expect(tabOf({ view: 'connect' })).toBe('machines');
+    expect(tabOf({ view: 'key' })).toBe('machines');
     expect(tabOf({ view: 'profile', ref: 'a/b' })).toBe('profiles');
     expect(tabOf({ view: 'add' })).toBe('profiles');
     expect(tabOf({ view: 'authorize', code: 'X' })).toBeNull();
     expect(tabOf({ view: 'settings' })).toBe('settings');
+    expect(tabOf({ view: 'overview' })).toBe('overview');
   });
 });
 
@@ -133,13 +146,6 @@ describe('times', () => {
     expect(shortDate(new Date(2026, 0, 5, 12).getTime(), NOW)).toBe('Jan 5');
     expect(clockTime(NOW)).toBe('14:05');
     expect(clockTime(new Date(2026, 9, 1, 9, 7).getTime())).toBe('09:07');
-  });
-
-  test('timeLeft', () => {
-    expect(timeLeft(new Date(NOW + 8 * MIN).toISOString(), NOW)).toBe('ends in 8 min');
-    expect(timeLeft(new Date(NOW + 30_000).toISOString(), NOW)).toBe('ends in less than a minute');
-    expect(timeLeft(new Date(NOW - 1).toISOString(), NOW)).toBe('ended');
-    expect(timeLeft('garbage', NOW)).toBe('ended');
   });
 });
 
@@ -184,12 +190,12 @@ const key = (name: string, extra: Partial<Key> = {}): Key =>
 const ALL = ['gmail/perso', 'gmail/work', 'jira/hex-rays'];
 
 describe('who can use what', () => {
-  test('a cell is W only when neither the machine nor the profile is read-only', () => {
+  test('a cell says Write only when neither the machine nor the profile is read-only', () => {
     const p = row('gmail', 'work');
-    expect(accessCell(key('mac'), p)).toBe('W');
-    expect(accessCell(key('mac', { readOnly: true }), p)).toBe('R');
-    expect(accessCell(key('mac'), row('gmail', 'work', { readOnly: true }))).toBe('R');
-    expect(accessCell(key('ci', { allowedProfiles: ['jira/hex-rays'] }), p)).toBe('·');
+    expect(accessCell(key('mac'), p)).toBe('Write');
+    expect(accessCell(key('mac', { readOnly: true }), p)).toBe('Read');
+    expect(accessCell(key('mac'), row('gmail', 'work', { readOnly: true }))).toBe('Read');
+    expect(accessCell(key('ci', { allowedProfiles: ['jira/hex-rays'] }), p)).toBe('None');
     expect(canWrite({ readOnly: false }, { readOnly: false })).toBe(true);
   });
 
@@ -284,13 +290,18 @@ describe('statuses', () => {
     expect(effectiveStatus(row('x', 'y', { status: 'invalid', error: 'boom', info: 'acct' }), new Map()).detail).toBe('boom');
   });
 
-  test('pills', () => {
-    expect(statusPill('ok', false)).toEqual({ label: 'working', tone: 'ok' });
-    expect(statusPill('ok', true)).toEqual({ label: 'connected', tone: 'ok' });
-    expect(statusPill('invalid', false)).toEqual({ label: 'not working', tone: 'red' });
-    expect(statusPill('no-creds', false)).toEqual({ label: 'no credentials', tone: 'warn' });
-    expect(statusPill('skipped', false)).toEqual({ label: 'not tested', tone: 'neutral' });
-    expect(statusPill('testing', false)).toEqual({ label: 'testing…', tone: 'neutral' });
+  test('status words: a symbol and a word for every status, never colour alone', () => {
+    expect(statusWord('ok', false)).toEqual({ symbol: '✓', word: 'Working', tone: 'ok' });
+    expect(statusWord('ok', true)).toEqual({ symbol: '✓', word: 'Connected', tone: 'ok' });
+    expect(statusWord('invalid', false)).toEqual({ symbol: '✗', word: 'Failed', tone: 'bad' });
+    expect(statusWord('no-creds', false)).toEqual({ symbol: '!', word: 'No credentials', tone: 'warn' });
+    expect(statusWord('testing', false)).toEqual({ symbol: '⟳', word: 'Testing…', tone: 'neutral' });
+    expect(statusWord('skipped', false)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
+  });
+
+  test('a status the page does not know reads as not tested, not as working', () => {
+    expect(statusWord('exploded', false)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
+    expect(statusWord('', true)).toEqual({ symbol: '○', word: 'Not tested', tone: 'neutral' });
   });
 
   test('groups by display name, profiles by name', () => {
@@ -387,5 +398,183 @@ describe('link labels', () => {
     expect(linkLabel('javascript:alert(1)')).toBe('javascript:alert(1)');
     expect(linkLabel('')).toBe('');
     expect(linkLabel('HTTPS://Upper.example')).toBe('Upper.example');
+  });
+});
+
+describe('countdown', () => {
+  const at = (seconds: number) => new Date(NOW + seconds * 1000).toISOString();
+
+  test('minutes and seconds, padded', () => {
+    expect(countdown(at(252), NOW)).toBe('4:12 left');
+    expect(countdown(at(60), NOW)).toBe('1:00 left');
+    expect(countdown(at(9), NOW)).toBe('0:09 left');
+  });
+
+  test('hours when there are any', () => {
+    expect(countdown(at(3725), NOW)).toBe('1:02:05 left');
+  });
+
+  test('a fraction of a second left still shows as a second, not as ended', () => {
+    expect(countdown(new Date(NOW + 400).toISOString(), NOW)).toBe('0:01 left');
+  });
+
+  test('at or past the end, or for a date that cannot be read, it has ended', () => {
+    expect(countdown(at(0), NOW)).toBe('ended');
+    expect(countdown(at(-30), NOW)).toBe('ended');
+    expect(countdown('not a date', NOW)).toBe('ended');
+    expect(countdown('', NOW)).toBe('ended');
+  });
+});
+
+describe('access level', () => {
+  test('write only when neither side is read-only; otherwise read only, with the reason', () => {
+    expect(accessLevel({ readOnly: false }, { readOnly: false })).toEqual({ level: 'Write', reason: '' });
+    expect(accessLevel({ readOnly: false }, { readOnly: true })).toEqual({ level: 'Read only', reason: 'because the profile is read-only' });
+    expect(accessLevel({ readOnly: true }, { readOnly: false })).toEqual({ level: 'Read only', reason: 'because the machine is read-only' });
+    expect(accessLevel({ readOnly: true }, { readOnly: true })).toEqual({ level: 'Read only', reason: 'because both the machine and the profile are read-only' });
+  });
+
+  test('agrees with canWrite for every combination', () => {
+    for (const k of [true, false]) for (const p of [true, false]) {
+      expect(accessLevel({ readOnly: k }, { readOnly: p }).level === 'Write').toBe(canWrite({ readOnly: k }, { readOnly: p }));
+    }
+  });
+});
+
+describe('problems first', () => {
+  test('failed, then no credentials, then the rest, each in the order given', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'no-creds' }), row('gmail', 'c'), row('gmail', 'd')];
+    const results = new Map<string, TestResult>([['gmail/d', { status: 'invalid', detail: 'x', at: NOW }]]);
+    expect(problemsFirst(rows, results).map((r) => r.profile)).toEqual(['d', 'b', 'a', 'c']);
+  });
+
+  test('does not touch its input, and copes with nothing', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'invalid' })];
+    problemsFirst(rows, new Map());
+    expect(rows.map((r) => r.profile)).toEqual(['a', 'b']);
+    expect(problemsFirst([], new Map())).toEqual([]);
+  });
+
+  test('a test that passed in this session lifts a profile the page loaded as failed', () => {
+    const rows = [row('gmail', 'a'), row('gmail', 'b', { status: 'invalid' })];
+    const results = new Map<string, TestResult>([['gmail/b', { status: 'ok', detail: '', at: NOW }]]);
+    expect(problemsFirst(rows, results).map((r) => r.profile)).toEqual(['a', 'b']);
+  });
+});
+
+describe('matching services', () => {
+  const names: Record<string, string> = { gcal: 'Google Calendar', gmail: 'Gmail' };
+  const name = (s: string) => names[s] ?? s;
+
+  test('every word, ignoring case, in the id or the display name', () => {
+    expect(matchesService('gcal', 'google cal', name)).toBe(true);
+    expect(matchesService('gcal', 'GCAL', name)).toBe(true);
+    expect(matchesService('gmail', 'google', name)).toBe(false);
+    expect(matchesService('gmail', '', name)).toBe(true);
+    expect(matchesService('gmail', '   ', name)).toBe(true);
+  });
+
+  test('typed text is never a pattern', () => {
+    expect(matchesService('gmail', '.*', name)).toBe(false);
+    expect(matchesService('gmail', '(', name)).toBe(false);
+  });
+});
+
+describe('summaries', () => {
+  test('listSummary: up to three, then "N more"; never "1 more"', () => {
+    expect(listSummary([])).toBe('');
+    expect(listSummary(['Gmail'])).toBe('Gmail');
+    expect(listSummary(['A', 'B', 'C'])).toBe('A · B · C');
+    expect(listSummary(['A', 'B', 'C', 'D'])).toBe('A · B · C · D');
+    expect(listSummary(['A', 'B', 'C', 'D', 'E'])).toBe('A · B · C · 2 more');
+    expect(listSummary(Array.from({ length: 40 }, (_, i) => `S${i}`))).toBe('S0 · S1 · S2 · 37 more');
+    expect(listSummary(['A', 'B', 'C'], 1)).toBe('A · 2 more');
+  });
+
+  test('serviceNames: display names, once each, sorted; unknown services fall back to their id', () => {
+    const names: Record<string, string> = { gmail: 'Gmail', jira: 'Jira' };
+    const name = (s: string) => names[s] ?? s;
+    expect(serviceNames([{ service: 'jira' }, { service: 'gmail' }, { service: 'gmail' }, { service: 'zzz-new' }], name)).toEqual(['Gmail', 'Jira', 'zzz-new']);
+    expect(serviceNames([], name)).toEqual([]);
+  });
+
+  test('serviceNames never shows "undefined" for a service the page has no name for', () => {
+    expect(serviceNames([{ service: 'mystery' }], () => undefined as unknown as string)).toEqual(['mystery']);
+  });
+});
+
+describe('when a machine was last seen', () => {
+  test('seen recently: ✓ with the relative time', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW - 2 * MIN).toISOString() }), NOW)).toEqual({ symbol: '✓', word: 'Seen 2 min ago', tone: 'ok' });
+  });
+
+  test('a clock ahead of ours reads as just now, not as the future', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW + 10 * MIN).toISOString() }), NOW).word).toBe('Seen just now');
+  });
+
+  test('silent for 30+ days: ! with the number of days', () => {
+    expect(machineSeen(key('a', { lastUsedAt: new Date(NOW - 34 * DAY).toISOString() }), NOW)).toEqual({ symbol: '!', word: 'Silent for 34 days', tone: 'warn' });
+  });
+
+  test('never used: ○ while new, ! once it is 30+ days old', () => {
+    expect(machineSeen(key('a', { createdAt: new Date(NOW - 2 * DAY).toISOString() }), NOW)).toEqual({ symbol: '○', word: 'Never used', tone: 'neutral' });
+    expect(machineSeen(key('a', { createdAt: new Date(NOW - 40 * DAY).toISOString() }), NOW)).toEqual({ symbol: '!', word: 'Never used, created 40 days ago', tone: 'warn' });
+  });
+
+  test('a last-seen date that cannot be read counts as never used', () => {
+    expect(machineSeen(key('a', { lastUsedAt: 'garbage', createdAt: new Date(NOW - DAY).toISOString() }), NOW)).toEqual({ symbol: '○', word: 'Never used', tone: 'neutral' });
+  });
+});
+
+describe('overview', () => {
+  const seenAgo = (ms: number) => new Date(NOW - ms).toISOString();
+
+  test('recentlySeen: newest first, never-seen last (newest created first), at most the limit', () => {
+    const keys = [
+      key('old', { lastUsedAt: seenAgo(5 * DAY) }),
+      key('never-new', { createdAt: seenAgo(DAY) }),
+      key('fresh', { lastUsedAt: seenAgo(MIN) }),
+      key('never-old', { createdAt: seenAgo(9 * DAY) }),
+      key('ahead', { lastUsedAt: new Date(NOW + 5 * MIN).toISOString() }),
+    ];
+    expect(recentlySeen(keys, 10).map((k) => k.name)).toEqual(['ahead', 'fresh', 'old', 'never-new', 'never-old']);
+    expect(recentlySeen(keys, 2).map((k) => k.name)).toEqual(['ahead', 'fresh']);
+    expect(recentlySeen(keys, 0)).toEqual([]);
+    expect(recentlySeen([], 5)).toEqual([]);
+  });
+
+  test('recentlySeen does not reorder its input, and survives unreadable dates', () => {
+    const keys = [key('b', { lastUsedAt: 'garbage', createdAt: 'garbage' }), key('a', { lastUsedAt: 'garbage', createdAt: 'garbage' })];
+    expect(recentlySeen(keys).map((k) => k.name)).toEqual(['a', 'b']);
+    expect(keys.map((k) => k.name)).toEqual(['b', 'a']);
+  });
+
+  test('attention: failed profiles, profiles without credentials, silent machines', () => {
+    const rows = [row('gmail', 'a', { status: 'invalid' }), row('gmail', 'b', { status: 'no-creds' }), row('jira', 'c')];
+    const keys = [key('quiet', { lastUsedAt: seenAgo(31 * DAY) }), key('busy', { lastUsedAt: seenAgo(MIN) })];
+    const a = attention(rows, keys, new Map(), NOW);
+    expect(a.failing.map((r) => r.profile)).toEqual(['a']);
+    expect(a.noCreds.map((r) => r.profile)).toEqual(['b']);
+    expect(a.silent.map((k) => k.name)).toEqual(['quiet']);
+  });
+
+  test('attentionParts: singular and plural, each linked to where it can be fixed; nothing when all is well', () => {
+    expect(attentionParts({ failing: [row('a', 'b')], noCreds: [], silent: [] })).toEqual([{ text: '1 profile failed its test', href: '#profiles' }]);
+    expect(attentionParts({ failing: [row('a', 'b'), row('a', 'c')], noCreds: [row('a', 'd')], silent: [key('x'), key('y')] })).toEqual([
+      { text: '2 profiles failed their test', href: '#profiles' },
+      { text: '1 profile has no credentials', href: '#profiles' },
+      { text: '2 machines silent for 30+ days', href: '#machines' },
+    ]);
+    expect(attentionParts({ failing: [], noCreds: [row('a', 'd'), row('a', 'e')], silent: [] })[0].text).toBe('2 profiles have no credentials');
+    expect(attentionParts({ failing: [], noCreds: [], silent: [] })).toEqual([]);
+  });
+
+  test('overviewStatus: failures first, then whether anything was tested', () => {
+    const base = { profiles: 12, working: 0, failing: 0, notTested: 12, machines: 1, seenToday: 0, silent: 0 };
+    expect(overviewStatus({ ...base, profiles: 0, notTested: 0 }, NOW)).toEqual({ symbol: '○', word: 'No profiles yet', tone: 'neutral' });
+    expect(overviewStatus(base, NOW)).toEqual({ symbol: '○', word: 'Not tested in this session', tone: 'neutral' });
+    expect(overviewStatus({ ...base, working: 10, failing: 2, notTested: 0, testedAt: NOW - MIN }, NOW)).toEqual({ symbol: '✗', word: '2 of 12 failed', tone: 'bad' });
+    expect(overviewStatus({ ...base, working: 12, notTested: 0, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: 'All 12 working · tested 2 min ago', tone: 'ok' });
+    expect(overviewStatus({ ...base, working: 3, notTested: 9, testedAt: NOW - 2 * MIN }, NOW)).toEqual({ symbol: '✓', word: '3 of 12 working · tested 2 min ago', tone: 'ok' });
   });
 });

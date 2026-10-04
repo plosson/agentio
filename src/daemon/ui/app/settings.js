@@ -1,31 +1,38 @@
-// Settings, behind the gear: the hub, the browser session, and locking.
+// Settings: this hub, the browser session, and locking the vault.
 
 VIEWS.settings = () => html`
-  <h1>Settings</h1>
-  <p class="muted">This hub, your browser session, and the vault.</p>
-  <h2>Hub</h2>
-  <div class="box">
-    <div class="row"><span class="grow">Address</span><code>${location.origin}</code></div>
-    <div class="row mt-6"><span class="grow">Version</span><code>${state.version ? 'v' + state.version : '—'}</code></div>
-  </div>
-  <h2>Browser session</h2>
-  <div class="box row"><span class="grow">Ends after 30 idle minutes. Signing out leaves the vault unlocked.</span><button class="btn" data-action="sign-out">Sign out</button></div>
-  <h2 class="text-red">Danger zone</h2>
-  <div class="box alert row"><span class="grow"><b>Lock the vault</b><br><span class="muted">Every agent fails until someone unlocks it here with the passphrase.</span></span><button class="btn red" data-action="lock">Lock vault…</button></div>`;
+  ${pageHead({ title: 'Settings' })}
+  <div class="readable">
+    <h2>About</h2>
+    <ul class="list">
+      ${listItem({ title: 'Address', message: html`<span class="mono">${location.origin}</span>` })}
+      ${listItem({ title: 'Version', message: html`<span class="mono">${state.version ? 'v' + state.version : 'unknown'}</span>` })}
+    </ul>
+    <h2>Browser session</h2>
+    <p>Ends after 30 idle minutes. Signing out leaves the vault unlocked.</p>
+    <div class="actions"><button class="button" data-action="sign-out">Sign out</button></div>
+    <h2>Danger zone</h2>
+    <p><b>Lock the vault.</b> Every agent fails until someone unlocks it here with the passphrase.</p>
+    <div class="actions"><button class="button danger" data-action="lock">Lock the vault…</button></div>
+  </div>`;
 
 ACTIONS['sign-out'] = async () => {
+  if (!(await confirmLeaveKey())) return;
   await api('/ui/api/logout', { method: 'POST' });
-  showUnlock(false);
+  leaveHub(false);
 };
 
 ACTIONS.lock = async () => {
+  if (!(await confirmLeaveKey())) return;
   const ok = await confirmDialog({
     title: 'Lock the vault?',
-    body: `Every agent using this hub stops getting credentials until someone unlocks it here. That is ${plural(state.keys.length, 'machine')}. Scheduled jobs on them fail meanwhile.`,
-    action: 'Lock vault',
+    body: `Every agent using this hub stops getting credentials until someone unlocks it here. That’s ${plural(state.keys.length, 'machine')}. Scheduled jobs on them fail meanwhile.`,
+    action: 'Lock the vault',
   });
   if (!ok) return;
-  await api('/ui/api/lock', { method: 'POST' });
+  const res = await api('/ui/api/lock', { method: 'POST' });
+  if (res.lost) return;
+  if (!res.ok) { toast(res.error, 'error'); return; }
   toast('Vault locked');
-  showUnlock(true);
+  leaveHub(true);
 };

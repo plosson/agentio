@@ -1,98 +1,105 @@
 // Machines: every key, presented as the machine that holds it.
 
+const machineViews = (current) => segmented([
+  { id: 'list', href: '#machines', label: 'List' },
+  { id: 'access', href: '#access', label: 'Access' },
+], current);
+
+/** The top of both Machines views: H1 and count, the view switch, Connect a machine. */
+const machinesHead = (current) => pageHead({
+  title: 'Machines',
+  count: state.keys.length,
+  actions: html`<div class="actions m-0">${machineViews(current)}<a class="button primary" href="#connect">Connect a machine</a></div>`,
+});
+
+/** One machine as a list row: name, what it can use, when it was last seen. Also used by the Overview. */
+function machineItem(k, now) {
+  return listItem({
+    href: routeHash({ view: 'machine', id: k.id }),
+    dot: seenToday(k, now),
+    title: k.name,
+    message: `Can use ${machineCanUse(k, allRefs())}${k.readOnly ? ' · read-only' : ''}`,
+    meta: html`${statusMarkup(machineSeen(k, now))}<span>created ${shortDate(Date.parse(k.createdAt), now)}</span>`,
+  });
+}
+
 VIEWS.machines = () => {
   const now = Date.now();
   const keys = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
-  const refs = allRefs();
-  const connect = state.ui.connectOpen ? html`
-    <div class="box mt-14">
-      <h2 class="mt-0">Connect a machine</h2>
-      <p>On the machine, after installing agentio, run this and approve the code it shows. Nothing to copy back.</p>
-      <div class="codebox"><code>${loginCommand(location.origin)}</code>${copyButton(loginCommand(location.origin))}</div>
-      <details class="mt-8"><summary>Or create a key by hand, to paste on the machine</summary>
-        <form class="mt-10" data-submit="create-key">
-          <label class="field">Name<input type="text" name="name" placeholder="e.g. laptop, ci, build-box" required maxlength="64" autocomplete="off"></label>
-          ${accessChooser('create')}
-          <div class="row end"><button type="button" class="btn" data-action="toggle-connect">Cancel</button><button class="btn pri">Create key</button></div>
-        </form></details>
-    </div>` : '';
-
-  return html`
-    <div class="row"><div class="grow"><h1>Machines</h1><span class="muted">Each machine has its own key to this hub.</span></div>
-      <button class="btn pri" data-action="toggle-connect">Connect a machine</button></div>
-    ${connect}
+  return html`${machinesHead('list')}
     ${keys.length === 0
-      ? html`<div class="box empty mt-14"><h2>No machines yet.</h2><p class="muted">Connect one with <code>${loginCommand(location.origin)}</code>.</p></div>`
-      : html`<div class="box mt-14"><table class="stack">
-          <tr><th>Machine</th><th>Can use</th><th>Access</th><th>Last seen</th></tr>
-          ${keys.map((k) => html`<tr>
-            <td><a href="${routeHash({ view: 'machine', id: k.id })}"><b>${k.name}</b></a><div class="muted">created ${shortDate(Date.parse(k.createdAt), now)}</div></td>
-            <td>${machineCanUse(k, refs)}</td>
-            <td>${k.readOnly ? html`<span class="pill ro">read-only</span>` : 'read and write'}</td>
-            <td>${isSilent(k, now) ? html`<span class="pill warn" title="Silent for over ${SILENT_DAYS} days">${relativeTime(k.lastUsedAt, now)}</span>` : relativeTime(k.lastUsedAt, now)}</td>
-          </tr>`)}
-        </table></div>`}`;
+      ? html`<div class="empty-state"><p>No machines yet. On the machine, after installing agentio, run this and approve the code it shows:</p>${command(loginCommand(location.origin))}</div>`
+      : html`<ul class="list">${keys.map((k) => machineItem(k, now))}</ul>`}`;
 };
 
 VIEWS.machine = (route) => {
   const revoked = state.ui.revoked && state.ui.revoked.id === route.id ? state.ui.revoked : null;
   if (revoked) return revokedView(revoked);
   const k = keyById(route.id);
-  if (!k) return html`<a class="muted" href="#machines">Machines ›</a><h1>Machine not found</h1><p>It may have been revoked.</p><a class="btn" href="#machines">Back to machines</a>`;
+  if (!k) return systemPage({ title: 'Not found', why: 'This machine was revoked or renamed.', action: html`<a class="button" href="#machines">Back to machines</a>` });
   const now = Date.now();
   const refs = reachableRefs(k, allRefs());
   const editing = state.ui.editScope === k.id;
+  const names = serviceNames(refs.map((ref) => ({ service: ref.slice(0, ref.indexOf('/')) })), displayName);
+  const value = k.allowedProfiles === '*' ? 'All profiles' : names.length ? listSummary(names) : 'No profiles';
+  const seen = machineSeen(k, now);
 
   return html`
-    <a class="muted" href="#machines">Machines ›</a>
-    <div class="row"><div class="grow"><h1>${k.name}</h1>
-      <span class="muted">Created ${shortDate(Date.parse(k.createdAt), now)} · last seen ${relativeTime(k.lastUsedAt, now)}${k.hint ? html` · key …${k.hint}` : ''}</span></div>
-      <button class="btn" data-action="rename-machine" data-id="${k.id}">Rename</button></div>
-    <div class="grid2 mt-12">
-      <div>
-        <div class="section-title">Can use ${editing ? '' : html`<button class="btn link" data-action="edit-scope" data-id="${k.id}">Change</button>`}</div>
+    ${pageHead({ path: [{ href: '#machines', label: 'Machines' }], title: k.name, rename: { key: `machine:${k.id}`, submit: 'rename-machine' } })}
+    <div class="columns">
+      <section>
+        ${displayPanel('Can use', value, `${k.readOnly ? 'Read-only' : 'Read and write'} · ${seen.word.toLowerCase()}`)}
+        <h2>Profiles ${editing ? '' : html`<button class="button link" data-action="edit-scope" data-id="${k.id}">Change</button>`}</h2>
         ${editing
-          ? html`<form class="box" data-submit="save-scope" data-id="${k.id}">${profileChooser('scope', k.allowedProfiles)}
-              <div class="row end"><button type="button" class="btn" data-action="cancel-scope">Cancel</button><button class="btn pri">Save</button></div></form>`
-          : html`<div class="box">${refs.length
-              ? html`<table>${refs.map((ref) => {
-                  const r = rowByRef(ref);
-                  return html`<tr><td><a href="${routeHash({ view: 'profile', ref })}">${profileLabel(r)}</a></td><td>${pill(effectiveStatus(r, state.results).status, r.service)}</td></tr>`;
-                })}</table>`
-              : html`<span class="muted">No profiles.</span>`}
-              ${k.allowedProfiles === '*' ? html`<div class="muted mt-6">All profiles, including ones added later.</div>` : ''}</div>`}
-      </div>
-      <div class="col">
-        <div class="section-title">Settings</div>
-        <div class="box">
-          <div class="row"><span class="grow">Read-only on every profile</span><label class="tog"><input type="checkbox" data-change="machine-ro" data-id="${k.id}" ${k.readOnly ? raw('checked') : ''} aria-label="Read-only on every profile"><span></span></label></div>
-          <div class="row mt-8"><span class="grow">Can add and delete profiles</span><label class="tog"><input type="checkbox" data-change="machine-manage" data-id="${k.id}" ${k.canManageProfiles ? raw('checked') : ''} aria-label="Can add and delete profiles"><span></span></label></div>
+          ? html`<form data-submit="save-scope" data-id="${k.id}">${profileChooser('scope', k.allowedProfiles)}
+              <div class="actions"><button type="button" class="button" data-action="cancel-scope">Cancel</button><button class="button primary">Save</button></div></form>`
+          : refs.length
+            ? html`<ul class="list">${refs.map((ref) => {
+                const r = rowByRef(ref);
+                return listItem({
+                  href: routeHash({ view: 'profile', ref }),
+                  title: html`<span class="svc">${icon(r.service)}<span>${displayName(r.service)} / ${r.profile}</span></span>`,
+                  meta: html`${statusText(effectiveStatus(r, state.results).status, r.service)}<span>${accessLevel(k, r).level}</span>`,
+                });
+              })}</ul>
+              ${k.allowedProfiles === '*' ? html`<p class="note">All profiles, including ones added later.</p>` : ''}`
+            : emptyState('It can use no profile. Change that above, or revoke it.')}
+      </section>
+      <section>
+        <h2>Settings</h2>
+        <div class="list">
+          <label class="setting"><span class="text">Read-only on every profile</span>
+            <span class="switch"><input type="checkbox" data-change="machine-ro" data-id="${k.id}" ${k.readOnly ? raw('checked') : ''}><span></span></span></label>
+          <label class="setting"><span class="text">Can add and delete profiles</span>
+            <span class="switch"><input type="checkbox" data-change="machine-manage" data-id="${k.id}" ${k.canManageProfiles ? raw('checked') : ''}><span></span></span></label>
         </div>
-        <div class="box"><div class="muted">Lost the key file?</div><button class="btn" data-action="replace-key" data-id="${k.id}">Replace key</button></div>
-        <div class="box alert"><b>Revoke access</b><div class="muted">${k.name} loses ${refs.length === 1 ? 'its profile' : `its ${plural(refs.length, 'profile')}`} now.</div>
-          <button class="btn red mt-6" data-action="revoke-machine" data-id="${k.id}">Revoke…</button></div>
-      </div>
+        <p class="note">${k.hint ? html`Key <span class="mono">…${k.hint}</span> · ` : ''}created ${shortDate(Date.parse(k.createdAt), now)}</p>
+        <h2>Danger zone</h2>
+        <div class="actions">
+          <button class="button" data-action="replace-key" data-id="${k.id}">Replace key…</button>
+          <button class="button danger" data-action="revoke-machine" data-id="${k.id}">Revoke…</button>
+        </div>
+      </section>
     </div>`;
 };
 
 /** After a revoke: the credentials it already fetched still work until reauthorised. */
 function revokedView(revoked) {
   return html`
-    <a class="muted" href="#machines">Machines ›</a>
-    <h1>${revoked.name} is revoked</h1>
-    <p>It can no longer fetch credentials from this hub. But it already received the credentials of the profiles it could read; reauthorise them on the hub to make those copies useless.</p>
-    ${revoked.refs.length
-      ? html`<div class="box">${revoked.refs.map((ref) => {
-          const i = ref.indexOf('/');
-          const service = ref.slice(0, i);
-          const command = fixCommand(service, ref.slice(i + 1), Boolean(PLUGIN_METADATA[service]?.reauth));
-          return html`<div class="codebox"><code>${command}</code>${copyButton(command)}</div>`;
-        })}</div>`
-      : html`<p class="muted">It could not read any profile.</p>`}
-    <a class="btn" href="#machines">Back to machines</a>`;
+    ${pageHead({ path: [{ href: '#machines', label: 'Machines' }], title: `${revoked.name} is revoked` })}
+    <div class="readable">
+      <p>It can no longer get credentials from this hub. But it already received the credentials of the profiles it could read. Reauthorise them on the hub to make those copies useless.</p>
+      ${revoked.refs.length
+        ? revoked.refs.map((ref) => {
+            const i = ref.indexOf('/');
+            const service = ref.slice(0, i);
+            return command(fixCommand(service, ref.slice(i + 1), Boolean(PLUGIN_METADATA[service]?.reauth)));
+          })
+        : html`<p class="muted">It could not read any profile.</p>`}
+      <div class="actions"><a class="button" href="#machines">Back to machines</a></div>
+    </div>`;
 }
 
-ACTIONS['toggle-connect'] = () => { state.ui.connectOpen = !state.ui.connectOpen; render(); };
 ACTIONS['edit-scope'] = (el) => { state.ui.editScope = el.dataset.id; render(); };
 ACTIONS['cancel-scope'] = () => { state.ui.editScope = null; render(); };
 
@@ -108,24 +115,6 @@ async function patchKey(id, body) {
   storeKey(res.body);
   return res.body;
 }
-
-SUBMITS['create-key'] = async (form) => {
-  const name = form.elements.name.value.trim();
-  let input;
-  try {
-    input = presetInput(readAccessChoice(form, 'create'), name);
-  } catch (err) {
-    toast(err.message, 'error');
-    return;
-  }
-  const res = await api('/ui/api/keys', { method: 'POST', body: JSON.stringify({ ...input, url: location.origin }) });
-  if (res.lost) return;
-  if (!res.ok) { toast(res.error, 'error'); return; }
-  state.keys = [...state.keys, res.body.key];
-  state.ui.connectOpen = false;
-  render();
-  showToken(res.body.token);
-};
 
 SUBMITS['save-scope'] = async (form) => {
   const allowedProfiles = readProfileChoice(form, 'scope');
@@ -154,12 +143,22 @@ CHANGES['machine-manage'] = async (input) => {
   render();
 };
 
-ACTIONS['rename-machine'] = async (el) => {
-  const k = keyById(el.dataset.id);
-  if (!k) return;
-  const name = await renameDialog(k.name, k.name);
-  if (!name) return;
-  if (await patchKey(k.id, { name })) { toast(`Renamed to ${name}`); render(); }
+SUBMITS['rename-machine'] = async (form) => {
+  const id = form.dataset.key.slice('machine:'.length);
+  const k = keyById(id);
+  const name = form.elements.name.value.trim();
+  if (!k || name === k.name) { ACTIONS['cancel-rename'](); return; }
+  state.ui.renameDraft = name;
+  if (!name) { state.ui.renameError = 'Give the machine a name.'; render(); return; }
+  const res = await api(`/ui/api/keys/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+  if (res.lost) return;
+  if (!res.ok) { state.ui.renameError = res.error; render(); return; }
+  storeKey(res.body);
+  state.ui.renaming = null;
+  state.ui.renameError = '';
+  state.ui.renameDraft = undefined;
+  toast(`Renamed to ${name}`);
+  render();
 };
 
 ACTIONS['replace-key'] = async (el) => {
@@ -175,8 +174,7 @@ ACTIONS['replace-key'] = async (el) => {
   if (res.lost) return;
   if (!res.ok) { toast(res.error, 'error'); return; }
   storeKey(res.body.key);
-  render();
-  showToken(res.body.token);
+  showKey(res.body.key, res.body.token, 'replaced');
 };
 
 ACTIONS['revoke-machine'] = async (el) => {
@@ -185,7 +183,7 @@ ACTIONS['revoke-machine'] = async (el) => {
   const refs = reachableRefs(k, allRefs());
   const ok = await confirmDialog({
     title: `Revoke ${k.name}?`,
-    body: `${k.name} loses access to ${plural(refs.length, 'profile')} now, and its key is deleted. This cannot be undone.`,
+    body: `${k.name} loses access to ${plural(refs.length, 'profile')} now, and its key is deleted. This can't be undone.`,
     action: 'Revoke access',
   });
   if (!ok) return;
