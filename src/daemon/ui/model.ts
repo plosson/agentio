@@ -155,6 +155,12 @@ export function listSummary(names: string[], max = 3): string {
   return `${names.slice(0, max).join(' · ')} · ${names.length - max} more`;
 }
 
+/** The account to show next to a profile's name; empty when it only repeats the name. */
+export function accountShown(profile: string, account: string | undefined): string {
+  const a = (account ?? '').trim();
+  return a.toLowerCase() === profile.trim().toLowerCase() ? '' : a;
+}
+
 /** The services of these profiles by display name, once each, sorted. Falls back to the id. */
 export function serviceNames(rows: Array<Pick<ProfileRow, 'service'>>, displayName: (service: string) => string): string[] {
   return [...new Set(rows.map((r) => displayName(r.service) || r.service))].sort((a, b) => a.localeCompare(b));

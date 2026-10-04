@@ -217,6 +217,17 @@ describe('the assembled admin page', () => {
     expect(script).toContain('problemsFirst(');
   });
 
+  test('profiles: one line per profile on a wide screen, two on a phone; a long value is cut, never wrapped', () => {
+    const view = script.slice(script.indexOf('VIEWS.profiles ='), script.indexOf('VIEWS.profile ='));
+    expect(view).toContain('dense: true');
+    expect(view).toContain('accountShown(r.profile, r.account)');
+    expect(view).not.toContain('used by');
+    expect(script).toMatch(/function listItem\(\{[^}]*dense[^}]*\}\)/);
+    expect(style).toMatch(/\.item\.dense \.item-meta \{[^}]*flex: 1 0 100%/);
+    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.item\.dense > span \{[^}]*flex-wrap: nowrap/);
+    expect(style).toMatch(/\.item\.dense \.item-title \{[^}]*text-overflow: ellipsis/);
+  });
+
   test('a profile: Signed in as in the display panel, renamed in place, the reason it is read only', () => {
     expect(script).toContain("displayPanel('Signed in as'");
     expect(script).toContain("submit: 'rename-profile'");
@@ -430,5 +441,12 @@ describe('final review fixes', () => {
     const h = block("window.addEventListener('hashchange'");
     expect(h).toContain('state.ui.byHand = false;');
     expect(h).toContain('state.ui.editScope = null;');
+  });
+
+  test('a new page opens at the top with the header in view; focus never scrolls it away', () => {
+    const h = block("window.addEventListener('hashchange'");
+    expect(h).toContain('main.focus({ preventScroll: true });');
+    expect(h).not.toMatch(/main\.focus\(\);/);
+    expect(h).toContain('window.scrollTo(0, 0);');
   });
 });

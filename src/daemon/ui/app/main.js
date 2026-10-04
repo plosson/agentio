@@ -97,7 +97,10 @@ window.addEventListener('hashchange', async () => {
   state.ui.editScope = null;
   clearToasts();
   render();
-  main.focus();
+  // A new page starts at the top. Focus moves to it for screen readers,
+  // without the browser scrolling the header out of view.
+  window.scrollTo(0, 0);
+  main.focus({ preventScroll: true });
   // Tests stay on demand, but a sign-in started elsewhere should show up
   // in the banner without a reload: refresh the waiting list on every move.
   if (state.loaded) loadPending().then(render);

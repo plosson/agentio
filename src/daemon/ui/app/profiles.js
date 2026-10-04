@@ -33,8 +33,9 @@ VIEWS.profiles = () => {
       ${problemsFirst(g.rows, state.results).map((r) => listItem({
         href: routeHash({ view: 'profile', ref: refOf(r) }),
         title: r.profile,
-        message: r.account || r.url ? html`<span class="details">${accountText(r)}${r.url ? html`<span class="clip">${linkLabel(r.url)}</span>` : ''}</span>` : '',
-        meta: html`<span>${profileStatusLine(r, now)}</span>${r.readOnly ? html`<span>Read-only</span>` : ''}<span>used by ${plural(machinesUsing(state.keys, r).length, 'machine')}</span>`,
+        dense: true,
+        message: html`<span class="details">${accountShown(r.profile, r.account) ? accountText(r) : ''}${r.url ? html`<span class="clip">${linkLabel(r.url)}</span>` : ''}</span>`,
+        meta: html`<span class="clip">${profileStatusLine(r, now)}</span>${r.readOnly ? html`<span>Read-only</span>` : ''}<span>${plural(machinesUsing(state.keys, r).length, 'machine')}</span>`,
       }))}`)}</ul>`}`;
 };
 
