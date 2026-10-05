@@ -53,8 +53,8 @@ export const deviceLimiter = new RateLimiter(40, 60_000, 'Too many login request
 
 /** `agentio login` starts here: no token yet, so no bearer check, and the vault may still be locked. */
 async function handleDeviceStart(request: Request): Promise<Response> {
-  const { name } = await readJson<{ name?: unknown }>(request);
-  return json(startDeviceAuth(name), 201);
+  const body = await readJson<{ name?: unknown; scopes?: unknown; replaces?: unknown; nameIsDefault?: unknown }>(request);
+  return json(startDeviceAuth(body.name, Date.now(), body), 201);
 }
 
 async function handleDevicePoll(request: Request): Promise<Response> {

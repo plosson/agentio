@@ -39,8 +39,13 @@ function hashSecret(secret: string): string {
 
 /** Random secrets need no slow hash; equality is checked in constant time. */
 function secretMatches(secret: string, storedHash: string): boolean {
-  const a = Buffer.from(hashSecret(secret), 'hex');
-  const b = Buffer.from(storedHash, 'hex');
+  return hashesMatch(hashSecret(secret), storedHash);
+}
+
+/** Two hex hashes, compared in constant time; different lengths simply differ. */
+function hashesMatch(aHex: string, bHex: string): boolean {
+  const a = Buffer.from(aHex, 'hex');
+  const b = Buffer.from(bHex, 'hex');
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -54,6 +59,39 @@ export function newKeyId(): string {
   return id;
 }
 const findKey = (config: Config, id: string) => config.apiKeys?.find((k) => k.id === id);
+
+/**
+ * What a pending login keeps of the token it would replace: the key id and
+ * the secret's hash, never the secret, so a request held in memory proves
+ * nothing to anyone who reads it.
+ */
+export interface TokenProof {
+  kid: string;
+  secretHash: string;
+}
+
+/** The proof a token carries, or null when it is not a token at all. */
+export function tokenProof(token: unknown): TokenProof | null {
+  if (typeof token !== 'string') return null;
+  try {
+    const { kid, secret } = decodeToken(token);
+    return { kid, secretHash: hashSecret(secret) };
+  } catch {
+    return null;
+  }
+}
+
+/** The stored key a proof still stands for: gone once revoked or rotated. */
+function provenKey(config: Config, proof: TokenProof): ApiKey | undefined {
+  const key = findKey(config, proof.kid);
+  return key && hashesMatch(proof.secretHash, key.secretHash) ? key : undefined;
+}
+
+/** The key a proof stands for now, or null. */
+export async function keyProvenBy(proof: TokenProof): Promise<ApiKeyView | null> {
+  const key = provenKey(await loadConfig(), proof);
+  return key ? view(key) : null;
+}
 
 /**
  * The owner, as a CLI on the daemon's own machine proves to be: it read the
@@ -158,7 +196,16 @@ export async function listApiKeys(): Promise<ApiKeyView[]> {
   return ((await loadConfig()).apiKeys ?? []).map(view);
 }
 
-export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise<IssuedKey> {
+/**
+ * A new key. With `replaces`, the key that proof still stands for is revoked
+ * in the same write, so the machine never has two keys nor none; a proof
+ * that no longer stands replaces nothing.
+ */
+export async function createApiKey(
+  input: ApiKeyInput,
+  hubUrl: unknown,
+  replaces: TokenProof | null = null,
+): Promise<IssuedKey & { replaced: ApiKeyView | null }> {
   const name = validateName(input.name);
   const readOnly = validateFlag('readOnly', input.readOnly ?? false);
   const canManageProfiles = validateFlag('canManageProfiles', input.canManageProfiles ?? false);
@@ -166,16 +213,17 @@ export async function createApiKey(input: ApiKeyInput, hubUrl: unknown): Promise
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
   const secret = newSecret();
-  const key = await updateConfig((config) => {
-    const keys = (config.apiKeys ??= []);
+  const { key, replaced } = await updateConfig((config) => {
+    const old = replaces ? provenKey(config, replaces) : undefined;
+    const keys = (config.apiKeys = (config.apiKeys ?? []).filter((k) => k !== old));
     let id = newKeyId();
-    while (keys.some((k) => k.id === id)) id = newKeyId();
+    while (id === old?.id || keys.some((k) => k.id === id)) id = newKeyId();
     const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canManageProfiles, createdAt: new Date().toISOString() };
     keys.push(created);
-    return created;
+    return { key: created, replaced: old ? view(old) : null };
   });
 
-  return { key: view(key), token: encodeToken({ url, kid: key.id, secret }) };
+  return { key: view(key), token: encodeToken({ url, kid: key.id, secret }), replaced };
 }
 
 export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView> {

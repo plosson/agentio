@@ -46,14 +46,19 @@ VIEWS.authorize = (route) => {
 
   const req = auth.request;
   if (auth.step === 'ask') {
+    const replaces = req.replaces ? html`<p class="note">${replacementLine(req.replaces, now)}</p>` : '';
+    const what = req.scopes
+      ? html`<ul class="scopes">${scopeLines(req.scopes).map((line) => html`<li>${line}</li>`)}</ul>
+          <p class="note mono small">${req.scopes.join(' ')}</p>`
+      : html`<h2>What it can use</h2>${accessChooser('auth')}`;
     return html`<div class="narrow">
       <h1>Approve this sign-in?</h1>
       <div class="mt-16">${displayPanel('Code', req.userCode)}</div>
-      <p class="note">Is this the code in your terminal? If not, deny it.</p>
-      <p class="mt-16"><b>${req.name}</b> asks · <span data-countdown="${req.expiresAt}">${countdown(req.expiresAt, now)}</span></p>
+      <p class="note">Is this the code on the machine signing in? If not, deny it.</p>
+      <p class="mt-16"><b>${req.name}</b> ${req.scopes ? 'asks to:' : 'asks'} · <span data-countdown="${req.expiresAt}">${countdown(req.expiresAt, now)}</span></p>
+      ${replaces}
       <form data-submit="auth-approve">
-        <h2>What it can use</h2>
-        ${accessChooser('auth')}
+        ${what}
         <div class="actions stack">
           <button type="button" class="button" data-action="auth-deny">Deny</button>
           <button class="button primary">Approve</button>
@@ -89,12 +94,14 @@ ACTIONS['auth-deny'] = async () => {
 SUBMITS['auth-approve'] = async (form) => {
   const auth = state.ui.auth;
   if (auth.step !== 'ask' || auth.busy) return;
-  let input;
-  try {
-    input = presetInput(readAccessChoice(form, 'auth'), auth.request.name);
-  } catch (err) {
-    toast(err.message, 'error');
-    return;
+  let input = {};
+  if (!auth.request.scopes) {
+    try {
+      input = presetInput(readAccessChoice(form, 'auth'), auth.request.name);
+    } catch (err) {
+      toast(err.message, 'error');
+      return;
+    }
   }
   setAuthBusy(auth, true);
   const res = await api(`/ui/api/authorize/${encodeURIComponent(auth.code)}`, {
@@ -112,7 +119,8 @@ SUBMITS['auth-approve'] = async (form) => {
   // A successful approval always lands on done, whatever the screen showed meanwhile.
   auth.key = res.body.key;
   auth.step = 'done';
-  state.keys = [...state.keys, res.body.key];
+  // The replaced key is gone on the hub; drop it here too.
+  state.keys = [...state.keys.filter((k) => k.id !== res.body.replaced), res.body.key];
   await loadPending();
   render();
 };

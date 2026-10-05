@@ -76,6 +76,8 @@ code, pre, .mono { font: var(--size-mono)/1.5 var(--mono); overflow-wrap: anywhe
 .display .value { display: block; font: 1.1875rem/1.5 var(--mono); overflow-wrap: anywhere; unicode-bidi: plaintext; }
 .display .second { display: block; margin-top: 4px; color: var(--display-label); font: var(--size-small)/1.4 var(--mono); overflow-wrap: anywhere; }
 .note { margin: var(--s1) 0 0; color: var(--muted); }
+.scopes { margin: var(--s1) 0 0; padding-left: 1.25em; }
+.scopes > li + li { margin-top: 4px; }
 
 .status { font-weight: 600; }
 .status.ok { color: var(--ok); }

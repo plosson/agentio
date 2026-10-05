@@ -4,8 +4,9 @@ import { addExamples } from '../utils/command-tree';
 import { addJsonOption, printJson } from '../utils/output';
 import { launchBrowser } from '../auth/oauth-server';
 import { deviceLogin, LoginNotApproved } from '../auth/device-login';
-import { clearRemoteToken, saveRemoteToken, tokenFilePath, tokenSource } from '../auth/remote';
+import { clearRemoteToken, remoteToken, saveRemoteToken, tokenFilePath, tokenSource } from '../auth/remote';
 import { describeScope } from '../auth/api-keys';
+import { validateScopes } from '../auth/scopes';
 
 export function registerLoginCommands(program: Command): void {
   addExamples(
@@ -15,9 +16,15 @@ export function registerLoginCommands(program: Command): void {
         .description('Get a key from a vault hub by approving a code in its admin UI')
         .argument('<hub-url>', 'The hub, e.g. https://vault.example.com')
         .option('--name <name>', 'How this machine introduces itself (default: hostname)')
-        .option('--no-browser', 'Print the approval URL instead of opening it'),
+        .option('--no-browser', 'Print the approval URL instead of opening it')
+        .option(
+          '--scope <scope>',
+          'Ask for this access (profiles:read, profiles:write, profiles:manage); repeat for several. The owner approves all of it or nothing',
+          (value: string, previous: string[]) => [...previous, value],
+          [] as string[],
+        ),
       'Print one JSON event per line (code, then approved, denied, expired or error); never opens a browser',
-    ).action(async (hubUrl: string, opts: { name?: string; browser: boolean; json?: boolean }) => {
+    ).action(async (hubUrl: string, opts: { name?: string; browser: boolean; json?: boolean; scope: string[] }) => {
       try {
         if (tokenSource() === 'env') {
           throw new CliError('CONFIG_ERROR', 'AGENTIO_TOKEN is set, so a stored login would be ignored', 'Unset AGENTIO_TOKEN first, or keep using it');
@@ -25,6 +32,9 @@ export function registerLoginCommands(program: Command): void {
         const result = await deviceLogin({
           url: hubUrl,
           name: opts.name,
+          scopes: opts.scope.length > 0 ? validateScopes(opts.scope) : undefined,
+          // AGENTIO_TOKEN was refused above, so this is the stored login, if any.
+          currentToken: remoteToken(),
           onCode: ({ userCode, verifyUrl, expiresIn }) => {
             // The program reading the events opens verifyUrl itself.
             if (opts.json) {
@@ -60,6 +70,10 @@ export function registerLoginCommands(program: Command): void {
 
   # from a VPS over SSH: approve from any device that can reach the hub
   agentio login https://vault.example.com --no-browser --name build-box
+
+  # ask for read and write on every profile plus the right to add profiles;
+  # the owner approves all of it or nothing
+  agentio login https://vault.example.com --scope profiles:write --scope profiles:manage
 
   # from a program: one JSON event per line on stdout
   agentio login https://vault.example.com --json`,
