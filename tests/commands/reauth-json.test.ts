@@ -209,6 +209,88 @@ describe('profile reauth --json against a hub', () => {
     expect((await loadVault()).credentials.kite?.[OLD_EMAIL]).toMatchObject({ token: OLD_TOKEN });
   }, 30_000);
 
+  describe('a profile whose refresh fails on the hub', () => {
+    // Dropbox's stored token expired long ago (expiryDate 0), and Dropbox refuses the refresh.
+    const originalFetch = globalThis.fetch;
+    let refreshCalls = 0;
+    beforeEach(() => {
+      refreshCalls = 0;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input instanceof Request ? input.url : input);
+        if (target.startsWith('https://api.dropboxapi.com/')) {
+          refreshCalls++;
+          return Response.json({ error: 'invalid_grant' }, { status: 400 });
+        }
+        if (!target.startsWith('http://127.0.0.1:')) throw new TypeError(`blocked: ${target}`);
+        return originalFetch(input, init);
+      }) as typeof fetch;
+    });
+    afterEach(() => { globalThis.fetch = originalFetch; });
+
+    const manager = async () => (await createApiKey({ name: 'manager', allowedProfiles: ['dropbox/box'], canManageProfiles: true }, hubUrl)).token;
+    const post = (path: string, token: string) =>
+      fetch(`${hubUrl}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+
+    test('the normal credentials read fails with TOKEN_EXPIRED: the case reauth must get past', async () => {
+      const res = await post('/v1/profiles/dropbox/box/credentials', await manager());
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: 'TOKEN_EXPIRED' });
+      expect(refreshCalls).toBe(1);
+    });
+
+    test('the stored read skips the refresh, strips the secrets, and keeps the allow-list', async () => {
+      const token = await manager();
+      const res = await post('/v1/profiles/dropbox/box/credentials?refresh=false', token);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ service: 'dropbox', name: 'box', refreshed: false, credentials: { appKey: 'my-app-key', accessToken: 'a' } });
+      expect(body.credentials).not.toHaveProperty('refreshToken');
+      expect(refreshCalls).toBe(0);
+      // Outside the key's list, the stored read is refused like the normal one.
+      const other = await post('/v1/profiles/kite/old%40example.com/credentials?refresh=false', token);
+      expect(other.status).toBe(403);
+      const plain = await post('/v1/profiles/kite/old%40example.com/credentials', token);
+      expect(plain.status).toBe(other.status);
+    });
+
+    test('profile reauth --json reaches the sign-in instead of stopping at the dead refresh', async () => {
+      const res = await remote(['profile', 'reauth', 'dropbox', 'box', '--json'], await manager());
+      expect(res.exitCode).not.toBe(0);
+      expect(res.events.map((e) => e.event)).toEqual(['open', 'ask', 'error']);
+      expect(new URL(res.events[0].url).searchParams.get('client_id')).toBe('my-app-key');
+      expect(res.events[2]).toMatchObject({ code: 'INVALID_PARAMS', message: 'No answer for "Code Dropbox shows after you allow access"' });
+      expect(refreshCalls).toBe(0);
+      expect((await loadVault()).credentials.dropbox?.box).toMatchObject({ refreshToken: 'r', accessToken: 'a' });
+    }, 30_000);
+  });
+
+  test('a credentials read the hub refuses for another reason is an error event, before anything opens', async () => {
+    const paths: string[] = [];
+    const broken = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const { pathname, search } = new URL(req.url);
+        paths.push(`${req.method} ${pathname}${search}`);
+        if (pathname === '/v1/profiles') {
+          return Response.json({ profiles: [{ service: 'dropbox', name: 'box', readOnly: false, hasCredentials: true }], canManageProfiles: true });
+        }
+        return Response.json({ error: 'Plugin "dropbox" is not installed on this hub', code: 'NOT_FOUND' }, { status: 404 });
+      },
+    });
+    try {
+      const token = (await createApiKey({ name: 'k', allowedProfiles: '*', canManageProfiles: true }, `http://127.0.0.1:${broken.port}`)).token;
+      const res = await remote(['profile', 'reauth', 'dropbox', 'box', '--json'], token);
+      expect(res.exitCode).not.toBe(0);
+      expect(res.events).toEqual([expect.objectContaining({
+        event: 'error', code: 'NOT_FOUND', message: expect.stringContaining('Plugin "dropbox" is not installed on this hub'),
+      })]);
+      // The reauth asked for the stored credentials, not a refresh.
+      expect(paths).toContain('POST /v1/profiles/dropbox/box/credentials?refresh=false');
+    } finally {
+      broken.stop(true);
+    }
+  }, 30_000);
+
   test('the bulk agentio reauth stays owner-only on the hub host', async () => {
     const token = (await createApiKey({ name: 'manager', allowedProfiles: '*', canManageProfiles: true }, hubUrl)).token;
     const res = await remote(['reauth', '--all'], token);

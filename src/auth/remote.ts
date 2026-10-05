@@ -301,6 +301,11 @@ export interface CredentialReadOptions {
    * than answering null as if none were stored. For a caller about to use them.
    */
   strict?: boolean;
+  /**
+   * false: the credentials as stored, without the hub refreshing them first. For a re-sign-in,
+   * which replaces them anyway and must not stop at a refresh that can no longer succeed.
+   */
+  refresh?: boolean;
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
@@ -310,7 +315,8 @@ export async function remoteCredentials<T = Record<string, unknown>>(
   options: CredentialReadOptions = {},
 ): Promise<T | null> {
   try {
-    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials`, 'POST')).credentials;
+    const query = options.refresh === false ? '?refresh=false' : '';
+    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials${query}`, 'POST')).credentials;
   } catch (err) {
     // NOT_FOUND is "nothing to hand out"; an unknown profile stays PROFILE_NOT_FOUND.
     if (!(err instanceof CliError) || err.code !== 'NOT_FOUND') throw err;

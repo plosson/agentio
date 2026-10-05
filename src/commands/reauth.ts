@@ -35,7 +35,9 @@ export async function reauthProfile(service: ServiceName, profileName: string, c
 
   const lines = json ? createLineReader(process.stdin) : undefined;
   try {
-    const existing = await getCredentials<Record<string, unknown>>(service, profileName);
+    // As stored: a hub would otherwise refresh them first, and a dead refresh token is why we are here.
+    // Strict, so a hub that cannot hand them out says why instead of the sign-in starting from nothing.
+    const existing = await getCredentials<Record<string, unknown>>(service, profileName, { strict: true, refresh: false });
     const setup = context ?? (lines ? createJsonSetupContext({}, lines) : createSetupContext());
     const replacement = await profile.reauthenticate(existing, profileName, setup);
     await saveProfileCredentials(service, profileName, replacement);

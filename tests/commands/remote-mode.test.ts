@@ -102,7 +102,7 @@ describe('remote mode end to end', () => {
   });
 
   test('a malformed token refuses an owner-only command with the token error, not a crash', async () => {
-    for (const args of [['daemon', 'status'], ['vault', 'status'], ['profile', 'reauth', 'discourse']]) {
+    for (const args of [['daemon', 'status'], ['vault', 'status'], ['reauth', '--all']]) {
       const res = await cli(args, { AGENTIO_TOKEN: 'agio1.xx' });
       expect(res.exitCode).toBe(3);
       expect(res.stdout).toBe('');
