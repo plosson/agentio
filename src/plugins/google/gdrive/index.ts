@@ -1,6 +1,5 @@
-import { gdriveProfileAdd, registerGDriveCommands } from './commands';
-import { performOAuthFlow, type OAuthService } from '../oauth';
-import { fetchGoogleUserEmail } from '../token-manager';
+import { gdriveProfileAdd, gdriveReauthenticate, registerGDriveCommands } from './commands';
+import { GDRIVE_SETUP_NEEDS } from '../setup-needs';
 import { GDriveClient } from './client';
 import type { GDriveCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
@@ -18,26 +17,8 @@ export default defineServicePlugin<GDriveCredentials, GoogleCamelTokens>()({
     setup: gdriveProfileAdd,
     createClient: (credentials) => new GDriveClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
-    async reauthenticate(credentials, profileName) {
-      const existing = credentials;
-      const accessLevel = existing?.accessLevel || 'readonly';
-      const oauthService: OAuthService = accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly';
-
-      console.error(`\nRe-authenticating gdrive / ${profileName}...`);
-      const tokens = await performOAuthFlow(oauthService);
-      const email = await fetchGoogleUserEmail(tokens.access_token);
-      console.error(`  Done (${email}, ${accessLevel})`);
-      return {
-        ...existing,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiryDate: tokens.expiry_date,
-        tokenType: tokens.token_type,
-        scope: tokens.scope,
-        email,
-        accessLevel,
-      };
-    },
+    reauthenticate: gdriveReauthenticate(),
+    needs: GDRIVE_SETUP_NEEDS,
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });
