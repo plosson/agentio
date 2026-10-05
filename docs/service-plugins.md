@@ -52,6 +52,7 @@ src/plugins/
 │   ├── client.ts
 │   ├── output.ts
 │   └── types.ts
+├── secrets/          # named secrets per profile; no remote service
 ├── confluence/          # OAuth lifecycle owned by the service folder
 ├── discourse/
 ├── dropbox/

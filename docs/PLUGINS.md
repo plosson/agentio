@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-03. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-05. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -23,6 +23,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
+| secrets | None: the user types or imports the values | **The user's own values** | No | Anyone with a hub key that covers the profile receives every value in it |
 | rss | None (public feed URL) | — | No | None |
 
 A plugin that uses **agentio's shared app** depends on agentio's standing with the provider: its secret, its quota, its user limits and its approval. A plugin that uses **the user's own app or key** has none of these dependencies.
@@ -532,6 +533,23 @@ Sends push notifications to the user's devices through the [Pocket Alert](https:
 **What the vault stores:** connection URL (with the password, if the URL has one) and a display name.
 
 **What's needed:** nothing. For safety, use a database user with the least access needed, ideally read-only.
+
+---
+
+## Secrets
+
+**Code:** `src/plugins/secrets/`
+
+Stores named secrets, such as passwords and API keys, in the vault, grouped by profile. Nothing is called outside agentio.
+
+**Sign-in:** none. `agentio secrets profile add --profile <name>` creates an empty profile; `set` and `import` fill it.
+- `set` without a value reads it from stdin, or asks for it without echo, so it can stay out of shell history.
+
+**What the vault stores:** the profile's names and values, as `{ values: { NAME: "value" } }`.
+
+**Remote mode:** agents with a key that covers the profile receive every value in it. A write from a remote machine replaces the whole profile on the hub, so two machines writing at the same moment can lose one of the writes.
+
+**What's needed:** nothing.
 
 ---
 
