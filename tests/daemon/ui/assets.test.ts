@@ -216,6 +216,28 @@ describe('the assembled admin page', () => {
     expect(script).toContain("VIEWS.add = () => {\n  const services = addableServices()");
   });
 
+  test('inside the app, a service that can be set up with --json is added by the app, not by a command', () => {
+    const fn = script.match(/function addInApp\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    // Only when the page runs in the app, the key may manage profiles, the service supports it, and the app has the call.
+    expect(fn).toContain('window.agentioCompanion?.canManageProfiles !== true');
+    expect(fn).toContain('!PLUGIN_METADATA[service]?.json');
+    expect(fn).toContain("typeof window.agentioCompanion.addProfile !== 'function'");
+    expect(fn).toContain('window.agentioCompanion.addProfile(service, displayName(service))');
+    // The welcome card and the Add page try the app first, then fall back to the command.
+    expect(script).toMatch(/ACTIONS\['add-service'\] = async \(el\) => \{\s*const service = el\.dataset\.service;\s*if \(!addableServices\(\)\.includes\(service\)\) return;\s*if \(addInApp\(service\)\) return;/);
+    expect(script).toMatch(/ACTIONS\['pick-service'\] = \(el\) => \{\s*if \(el\.dataset\.service && addInApp\(el\.dataset\.service\)\) return;/);
+    // A service the app cannot add says so, next to its command.
+    expect(script).toContain('Add this one from a terminal for now.');
+  });
+
+  test('after the app adds a profile, the page reloads and opens it', () => {
+    const listener = script.match(/window\.addEventListener\('agentio:profiles-changed', [\s\S]*?\n\}\);/)?.[0] ?? '';
+    expect(listener).toContain('await loadAll()');
+    expect(listener).toContain("routeHash({ view: 'profile', ref: `${service}/${profile}` })");
+    // A detail that is not two strings opens the list instead of a broken route.
+    expect(listener).toContain("typeof service === 'string' && typeof profile === 'string'");
+  });
+
   test('the browser title follows the H1: "<H1> · agentio"', () => {
     expect(script).toContain('function setTitle(');
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");

@@ -34,6 +34,17 @@ const isSession = (service) => Boolean(PLUGIN_METADATA[service]?.session);
 function addableServices() {
   return Object.entries(PLUGIN_METADATA).filter(([, m]) => m.addable).map(([id]) => id);
 }
+/**
+ * Inside AgentIO Companion, a service whose setup runs with --json is added by the app, in a native
+ * sheet. True when the app took it; false when the page should show the command instead.
+ */
+function addInApp(service) {
+  if (window.agentioCompanion?.canManageProfiles !== true) return false;
+  if (!PLUGIN_METADATA[service]?.json) return false;
+  if (typeof window.agentioCompanion.addProfile !== 'function') return false;
+  window.agentioCompanion.addProfile(service, displayName(service));
+  return true;
+}
 const allRefs = () => state.rows.map(refOf).sort();
 const rowByRef = (ref) => state.rows.find((r) => refOf(r) === ref);
 const keyById = (id) => state.keys.find((k) => k.id === id);

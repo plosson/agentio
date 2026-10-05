@@ -492,5 +492,10 @@ describe('daemon HTTP surface', () => {
     expect(html).toMatch(/"whatsapp":\{[^}]*"addable":true[^}]*"session":true/);
     expect(html).toMatch(/"rss":\{[^}]*"addable":false/);
     expect(html).toMatch(/"notes":\{[^}]*"reauth":false/);
+    // Which services a program can set up with --json (they declare their needs).
+    expect(html).toMatch(/"kite":\{[^}]*"json":true/);
+    expect(html).toMatch(/"gmail":\{[^}]*"json":true/);
+    expect(html).toMatch(/"gcal":\{[^}]*"json":false/);
+    expect(html).toMatch(/"whatsapp":\{[^}]*"json":false/);
   });
 });
