@@ -155,6 +155,24 @@ describe('the assembled admin page', () => {
     expect(style).not.toContain('app-region');
   });
 
+  test('inside AgentIO Companion: an empty part of the sidebar or a header drags the window', () => {
+    const drag = script.match(/document\.addEventListener\('mousedown', \(ev\) => \{[\s\S]*?\n\}\);/)?.[0] ?? '';
+    // Only in the app, only the main button, not on a double-click, and only when the app has the call.
+    expect(drag).toContain("document.documentElement.classList.contains('app')");
+    expect(drag).toContain('ev.button !== 0');
+    expect(drag).toContain('ev.detail > 1');
+    expect(drag).toContain('window.agentioCompanion.dragWindow?.()');
+    // Controls keep their clicks: the check for them comes before the call.
+    expect(script).toMatch(/const WINDOW_CONTROLS = 'a, button, input, select, textarea, label, summary, \[data-action\], \[role="button"\]';/);
+    expect(drag.indexOf('closest(WINDOW_CONTROLS)')).toBeGreaterThan(-1);
+    expect(drag.indexOf('closest(WINDOW_CONTROLS)')).toBeLessThan(drag.indexOf('dragWindow'));
+    // The drag areas: the sidebar, the pane headers, and the bare page's own background (the gate).
+    expect(drag).toContain("closest('.sidebar, .pane-head')");
+    expect(drag).toContain("matches('.shell.bare > #main')");
+    // The list's rows and the details' content stay clickable and selectable.
+    expect(drag).not.toMatch(/closest\('[^']*(\.list-pane|#main|\.rows)/);
+  });
+
   test('the browser title follows the H1: "<H1> · agentio"', () => {
     expect(script).toContain('function setTitle(');
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");
@@ -168,6 +186,12 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.pane-head \.back \{[^}]*display: inline-flex/);
     expect(style).not.toMatch(/\.columns \{[^}]*grid/);
     expect(style).not.toMatch(/\.page \{/);
+  });
+
+  test('the window never scrolls: each scrolling pane holds its screen-reader text, which would otherwise stick out below the window', () => {
+    expect(style).toMatch(/\.sr-only \{[^}]*position: absolute/);
+    expect(style).toMatch(/\.sidebar, \.list-pane, #main \{[^}]*position: relative/);
+    expect(style).toMatch(/\.sidebar, \.list-pane, #main \{[^}]*overflow: auto/);
   });
 
   test('the gate and system pages are never hidden on a narrow window', () => {

@@ -37,7 +37,10 @@ code, pre, .mono { font: var(--size-mono)/1.5 var(--mono); overflow-wrap: anywhe
 .where { margin-top: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 8px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: var(--size-small); }
 #hub-host { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
 
-.list-pane, #main { min-width: 0; min-height: 0; overflow: auto; outline: none; }
+/* Each pane scrolls on its own, and holds its absolutely placed children (the .sr-only status words):
+   without position: relative they would be placed on the page and make the whole window scroll. */
+.sidebar, .list-pane, #main { position: relative; min-width: 0; min-height: 0; overflow: auto; }
+.list-pane, #main { outline: none; }
 .list-pane { background: var(--window); border-right: 1px solid var(--line); }
 #main { padding: 0 var(--s3) var(--s4); background: var(--bg); }
 .shell.bare > #main { padding-top: var(--s3); }
