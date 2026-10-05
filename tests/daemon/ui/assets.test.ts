@@ -3,9 +3,65 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ICON_SVG, INDEX_HTML } from '../../../src/daemon/ui/assets';
 
+const FAMILY_CSS = `/* family.css: the same file in every product. */
+:root {
+  color-scheme: light dark;
+  --bg: #F8F0E0;
+  --fg: #283030;
+  --muted: #6B6459;
+  --card: #FFFDF8;
+  --line: #E4DAC6;
+  --code-bg: #F1E9D8;
+  --badge-bg: #EFE6D4;
+  --strong-bg: #283030;
+  --strong-fg: #F8F0E0;
+  --display-bg: #283030;
+  --ok: #1E7A34;
+  --bad: #B42318;
+  --warn-bg: #F6DFB2;
+  --old-dot: #E4DAC6;
+  --link: var(--brand-deep);
+  --primary-bg: var(--brand);
+  --new-dot: var(--brand);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --size-title: 1.75rem; --size-section: 1.25rem; --size-body: 1rem;
+  --size-small: 0.875rem; --size-mono: 0.9375rem;
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
+  --radius: 14px; --radius-small: 10px; --tap: 44px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181820;
+    --fg: #F1EADB;
+    --muted: #A39E94;
+    --card: #22232B;
+    --line: #34363F;
+    --code-bg: #2C2D36;
+    --badge-bg: #34363F;
+    --strong-bg: #F1EADB;
+    --strong-fg: #181820;
+    --display-bg: #101615;
+    --ok: #5BD07A;
+    --bad: #FF6B5E;
+    --warn-bg: #4A3A1C;
+    --old-dot: #3A3C46;
+    --link: var(--link-dark);
+  }
+}
+`;
+
 const UI = join(import.meta.dir, '../../../src/daemon/ui');
 const familyCss = readFileSync(join(UI, 'family.css'), 'utf8');
 const adminCss = readFileSync(join(UI, 'admin.css'), 'utf8');
+const brandCss = readFileSync(join(UI, 'brand.css'), 'utf8');
+
+/** `--role: value` pairs of one CSS block. */
+const roles = (block: string) => new Map([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+const brandLight = roles(brandCss.slice(0, brandCss.indexOf('@media')));
+const brandDark = roles(brandCss.slice(brandCss.indexOf('@media (prefers-color-scheme: dark)'), brandCss.indexOf('@media (pointer: coarse)')));
+const brandTouch = roles(brandCss.slice(brandCss.indexOf('@media (pointer: coarse)')));
+const familyLight = roles(FAMILY_CSS.slice(0, FAMILY_CSS.indexOf('@media')));
 
 const script = INDEX_HTML.slice(INDEX_HTML.indexOf('<script nonce="__CSP_NONCE__">') + '<script nonce="__CSP_NONCE__">'.length, INDEX_HTML.lastIndexOf('</script>'));
 const style = INDEX_HTML.slice(INDEX_HTML.indexOf('<style nonce="__CSP_NONCE__">'), INDEX_HTML.indexOf('</style>'));
@@ -77,11 +133,40 @@ describe('the assembled admin page', () => {
     expect(style).not.toMatch(/@font-face|url\(/);
     expect(style).not.toContain('Balsamiq');
     const family = style.indexOf('--bg: #F8F0E0;');
-    const brand = style.indexOf('--brand: #2F5FD8;');
+    const brand = style.indexOf('--brand: #007AFF;');
     expect(family).toBeGreaterThan(-1);
     expect(brand).toBeGreaterThan(family);
-    expect(style).toContain('--primary-fg: #F8F0E0;');
-    expect(style).toContain('--display-fg: #F2C14E;');
+    expect(style.indexOf('/* admin.css')).toBeGreaterThan(brand);
+  });
+
+  test('brand.css gives every family colour a macOS value, so no paper colour shows', () => {
+    for (const [role, value] of familyLight) {
+      if (value.startsWith('#') || value.startsWith('var(')) expect(brandLight.has(role)).toBe(true);
+    }
+  });
+
+  test('every colour role brand.css sets for light, it sets for dark', () => {
+    const sameInBoth = new Set(['--brand', '--brand-top', '--brand-deep', '--link-dark', '--primary-fg']);
+    for (const [role, value] of brandLight) {
+      if (sameInBoth.has(role)) continue;
+      if (value.startsWith('#') || value.startsWith('var(') || value.includes('#')) expect(brandDark.has(role)).toBe(true);
+    }
+  });
+
+  test('sizes: compact with a mouse, 44 px controls and larger text on a touch screen', () => {
+    expect(brandLight.get('--tap')).toBe('24px');
+    expect(brandLight.get('--size-body')).toBe('0.8125rem');
+    expect(brandTouch.get('--tap')).toBe('44px');
+    expect(brandTouch.get('--size-body')).toBe('1rem');
+    // The touch block comes last, so it wins over the light and dark blocks.
+    expect(brandCss.lastIndexOf('@media (pointer: coarse)')).toBeGreaterThan(brandCss.indexOf('@media (prefers-color-scheme: dark)'));
+  });
+
+  test('the Mac palette: system blue for links and the primary button, white on it', () => {
+    expect(brandLight.get('--link')).toBe('var(--brand)');
+    expect(brandDark.get('--link')).toBe('var(--link-dark)');
+    expect(brandDark.get('--primary-bg')).toBe('var(--link-dark)');
+    expect(brandLight.get('--primary-fg')).toBe('#FFFFFF');
   });
 
   test('admin.css uses roles, never a hex colour', () => {
@@ -348,54 +433,6 @@ describe('the assembled admin page', () => {
     expect(script).not.toMatch(/toast\('[^']*!'/);
   });
 });
-
-const FAMILY_CSS = `/* family.css: the same file in every product. */
-:root {
-  color-scheme: light dark;
-  --bg: #F8F0E0;
-  --fg: #283030;
-  --muted: #6B6459;
-  --card: #FFFDF8;
-  --line: #E4DAC6;
-  --code-bg: #F1E9D8;
-  --badge-bg: #EFE6D4;
-  --strong-bg: #283030;
-  --strong-fg: #F8F0E0;
-  --display-bg: #283030;
-  --ok: #1E7A34;
-  --bad: #B42318;
-  --warn-bg: #F6DFB2;
-  --old-dot: #E4DAC6;
-  --link: var(--brand-deep);
-  --primary-bg: var(--brand);
-  --new-dot: var(--brand);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --size-title: 1.75rem; --size-section: 1.25rem; --size-body: 1rem;
-  --size-small: 0.875rem; --size-mono: 0.9375rem;
-  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
-  --radius: 14px; --radius-small: 10px; --tap: 44px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #181820;
-    --fg: #F1EADB;
-    --muted: #A39E94;
-    --card: #22232B;
-    --line: #34363F;
-    --code-bg: #2C2D36;
-    --badge-bg: #34363F;
-    --strong-bg: #F1EADB;
-    --strong-fg: #181820;
-    --display-bg: #101615;
-    --ok: #5BD07A;
-    --bad: #FF6B5E;
-    --warn-bg: #4A3A1C;
-    --old-dot: #3A3C46;
-    --link: var(--link-dark);
-  }
-}
-`;
 
 describe('final review fixes', () => {
   const block = (start: string) => {
