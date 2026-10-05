@@ -50,6 +50,30 @@ function icon(service, cls = '') {
   return raw(`<svg class="ico ${escapeHtml(cls)}" viewBox="0 0 24 24" fill="${escapeHtml(colour)}" aria-hidden="true">${shapes}</svg>`);
 }
 
+/** A service's logo in white on its colour, as a rounded square: the lead of a profile row, and the top of its page. */
+function tile(service, cls = '') {
+  const entry = ICONS[service];
+  const colour = PLUGIN_METADATA[service]?.color || entry?.[1] || '';
+  const shapes = !entry
+    ? `<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="700">${escapeHtml((displayName(service)[0] || '?').toUpperCase())}</text>`
+    : Array.isArray(entry[2])
+      ? entry[2].map(([, d]) => `<path d="${escapeHtml(d)}"/>`).join('')
+      : `<path d="${escapeHtml(entry[2])}"/>`;
+  // Shapes are drawn at 24 units and shrunk to leave a margin; without a colour, the tile is grey (admin.css).
+  return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/><g fill="white" transform="translate(5 5) scale(0.5833)">${shapes}</g></svg>`);
+}
+
+/** Toolbar symbols, drawn in the text colour. */
+const GLYPHS = {
+  reload: '<path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  add: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7"/>',
+  grid: '<path d="M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z" fill="none" stroke="currentColor" stroke-width="1.3"/>',
+  search: '<circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 11l4 4" stroke="currentColor" stroke-width="2"/>',
+};
+function glyph(name) {
+  return raw(`<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">${GLYPHS[name]}</svg>`);
+}
+
 const profileLabel = (row) => html`<span class="svc">${icon(row.service)}${row.service} / ${row.profile}</span>`;
 
 /** A status as symbol and word, coloured by tone. The symbol is decoration; the word carries the meaning. */
@@ -119,12 +143,22 @@ ACTIONS['cancel-rename'] = () => {
   render();
 };
 
-/** One list row: an optional dot (true = new or active), a bold title, a muted message, small meta. A link with `href`. */
-function listItem({ href, dot, title, message = '', meta = '', dense = false }) {
-  const cls = `${dot === undefined ? 'item no-dot' : 'item'}${dense ? ' dense' : ''}`;
-  const body = html`${dot === undefined ? '' : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`}<span>
+/**
+ * One list row: an optional lead (a service tile), a bold title, a muted message, small meta, and a dot.
+ * `dot` is true or false (new or active, or not), or a status word, whose word screen readers read.
+ * A link with `href`; `current` marks the row whose details are open.
+ */
+function listItem({ href, dot, lead = '', title, message = '', meta = '', current = false }) {
+  const cls = `item${dot === undefined ? ' no-dot' : ''}${lead ? ' lead' : ''}`;
+  const mark = dot === undefined ? ''
+    : typeof dot === 'object'
+      ? html`<span class="dot ${dot.tone}" title="${dot.word}" aria-hidden="true"></span><span class="sr-only">${dot.word}</span>`
+      : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`;
+  const body = html`${lead}${mark}<span>
     <span class="item-title">${title}</span>${message ? html`<span class="item-message">${message}</span>` : ''}${meta ? html`<span class="item-meta">${meta}</span>` : ''}</span>`;
-  return href ? html`<li><a class="${cls}" href="${href}">${body}</a></li>` : html`<li><div class="${cls}">${body}</div></li>`;
+  return href
+    ? html`<li><a class="${cls}" href="${href}"${current ? raw(' aria-current="page"') : ''}>${body}</a></li>`
+    : html`<li><div class="${cls}">${body}</div></li>`;
 }
 
 /** One sentence at the top of the page, then the next action. `problem` uses the warning background. */
@@ -396,10 +430,10 @@ const filteredRows = (rows) => rows.filter((r) => matchesFilter(r, state.ui.filt
 
 function filterBox(shown, total) {
   const query = state.ui.filter || '';
-  return html`<div class="actions">
-    <input type="search" id="profile-filter" class="input grow" data-input="filter" value="${query}"
-      placeholder="Filter profiles (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
-    ${query.trim() ? html`<span class="muted">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
+  return html`<div class="search">${glyph('search')}
+    <input type="search" id="profile-filter" class="input" data-input="filter" value="${query}"
+      placeholder="Search (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
+    ${query.trim() ? html`<span class="muted small">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
   </div>`;
 }
 

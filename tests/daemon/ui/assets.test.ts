@@ -346,35 +346,69 @@ describe('the assembled admin page', () => {
   test('read-only is shown on a profile, never switched from the page', () => {
     expect(script).not.toContain("CHANGES['profile-ro']");
     expect(script).not.toContain('data-change="profile-ro"');
-    expect(script).toContain('<span>Read-only</span>');
     expect(script).toContain('profile update --profile');
   });
 
-  test('profiles: a grouped list, problems first in each group, no table', () => {
-    expect(script).not.toContain('<table class="stack compact">');
-    expect(script).not.toContain('group-heading');
-    expect(script).toContain('<li class="group">');
-    expect(script).toMatch(/<span class="group-name">\$\{icon\(g\.service\)\}/);
-    expect(script).toContain('<ul class="group-rows" aria-label="${g.name}">');
-    expect(script).toContain('problemsFirst(');
+  test('profiles: the list pane groups profiles under a plain service heading, problems first', () => {
+    const list = script.slice(script.indexOf('LISTS.profiles ='), script.indexOf('VIEWS.profile ='));
+    expect(list).toContain('groupProfiles(visible, displayName)');
+    expect(list).toContain('problemsFirst(g.rows, state.results)');
+    expect(list).toContain('<h2 class="group-name">${g.name}</h2>');
+    expect(list).toContain('<ul class="rows" aria-label="${g.name}">');
+    expect(list).not.toMatch(/group-name">\$\{icon\(/);
+    expect(list).toContain('lead: tile(r.service)');
+    expect(list).toContain('current: ref === current');
+    expect(list).toContain('accountShown(r.profile, r.account) ? r.account : displayName(r.service)');
+    expect(list).toContain('href="#add"');
+    expect(list).toContain('data-action="test-all"');
   });
 
-  test('profiles: the service is a column from 600 px and a heading on a phone; lines only between services', () => {
-    expect(style).toMatch(/\.list > \.group \{[^}]*\}/);
-    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.list > \.group \{[^}]*display: grid; grid-template-columns: [^;]+ minmax\(0, 1fr\)/);
-    expect(style).toMatch(/\.group-rows \{[^}]*list-style: none/);
-    expect(style).not.toMatch(/\.group-rows > li \+ li \{[^}]*border/);
+  test('profiles: the details pane no longer lists the profiles; it asks to choose one', () => {
+    const view = script.slice(script.indexOf('VIEWS.profiles ='), script.indexOf('LISTS.profiles ='));
+    expect(view).not.toContain('listItem(');
+    expect(view).toContain('Choose a profile in the list to see it here.');
   });
 
-  test('profiles: one line per profile on a wide screen, two on a phone; a long value is cut, never wrapped', () => {
-    const view = script.slice(script.indexOf('VIEWS.profiles ='), script.indexOf('VIEWS.profile ='));
-    expect(view).toContain('dense: true');
-    expect(view).toContain('accountShown(r.profile, r.account)');
-    expect(view).not.toContain('used by');
-    expect(script).toMatch(/function listItem\(\{[^}]*dense[^}]*\}\)/);
-    expect(style).toMatch(/\.item\.dense \.item-meta \{[^}]*flex: 1 0 100%/);
-    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.item\.dense > span \{[^}]*flex-wrap: nowrap/);
-    expect(style).toMatch(/\.item\.dense \.item-title \{[^}]*text-overflow: ellipsis/);
+  test("a row's status dot carries its word, for screen readers and as a tooltip", () => {
+    const item = script.slice(script.indexOf('function listItem('), script.indexOf('function banner('));
+    expect(item).toContain('<span class="dot ${dot.tone}" title="${dot.word}" aria-hidden="true"></span><span class="sr-only">${dot.word}</span>');
+    expect(item).toContain('aria-current="page"');
+    expect(item).not.toContain('dense');
+    const list = script.slice(script.indexOf('LISTS.profiles ='), script.indexOf('VIEWS.profile ='));
+    expect(list).toContain('dot: statusWord(effectiveStatus(r, state.results).status, isSession(r.service))');
+  });
+
+  test('tile() escapes the colour and the letter, and never uses a style attribute', () => {
+    const t = script.slice(script.indexOf('function tile('), script.indexOf('const GLYPHS'));
+    expect(t).toContain('fill="${escapeHtml(colour)}"');
+    expect(t).toContain('escapeHtml((displayName(service)[0] || ');
+    expect(t).toContain('<g fill="white" transform="translate(5 5) scale(0.5833)">');
+    expect(t).not.toMatch(/style=/);
+    expect(script.split('function tile(')).toHaveLength(2);
+    expect(script.split('function glyph(')).toHaveLength(2);
+  });
+
+  test('a tile with no brand colour is grey, and the logo stays white in both modes', () => {
+    expect(style).toMatch(/\.svc-tile rect:not\(\[fill\]\) \{ fill: var\(--muted\); \}/);
+    expect(adminCss).not.toMatch(/\.svc-tile g \{/);
+  });
+
+  test('read-only shows in the profile row', () => {
+    expect(script).toContain("r.readOnly ? ' · Read-only' : ''");
+  });
+
+  test("a profile's page leads with its service tile", () => {
+    const view = script.slice(script.indexOf('VIEWS.profile ='), script.indexOf('VIEWS.add ='));
+    expect(view).toContain("<div class=\"lead-panel\">${tile(r.service, 'lg')}${displayPanel('Signed in as'");
+  });
+
+  test('the list pane: search box with a magnifier, selected row in the accent colour, old grouped list gone', () => {
+    expect(script).toMatch(/function filterBox\(shown, total\) \{[\s\S]*?<div class="search">\$\{glyph\('search'\)\}/);
+    expect(script).toContain('placeholder="Search (press /)"');
+    expect(style).toMatch(/\.list-pane \.item\[aria-current="page"\] \{[^}]*background: var\(--link\)/);
+    expect(style).not.toMatch(/\.list > \.group/);
+    expect(style).not.toMatch(/\.group-rows/);
+    expect(style).not.toMatch(/\.item\.dense/);
   });
 
   test('a profile: Signed in as in the display panel, renamed in place, the reason it is read only', () => {
