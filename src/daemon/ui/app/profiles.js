@@ -97,7 +97,7 @@ VIEWS.add = () => {
     <div class="readable">
       <p class="muted">Profiles are added from a terminal on the hub. Choose the service to get the command.</p>
       ${picked ? html`<section class="mb-24"><h2>${displayName(picked)}: run this on the hub</h2>
-        ${window.agentioCompanion?.present === true && !PLUGIN_METADATA[picked]?.json ? html`<p class="muted">Add this one from a terminal for now.</p>` : ''}${command(addCommand(picked))}
+        ${onlyFromTerminal(picked) ? html`<p class="muted">Add this one from a terminal for now.</p>` : ''}${command(addCommand(picked))}
         <div class="actions"><button class="button" data-action="check-again">Check again</button>
           <button class="button link" data-action="pick-service" data-service="">Choose another service</button></div></section>` : ''}
       <input type="search" id="service-filter" class="input" data-input="service-filter" value="${query}"

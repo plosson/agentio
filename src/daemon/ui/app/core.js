@@ -45,6 +45,10 @@ function addInApp(service) {
   window.agentioCompanion.addProfile(service, displayName(service));
   return true;
 }
+/** Inside the app, for a key that may manage profiles, a service the app cannot set up yet: its command is all there is. */
+function onlyFromTerminal(service) {
+  return window.agentioCompanion?.canManageProfiles === true && !PLUGIN_METADATA[service]?.json;
+}
 const allRefs = () => state.rows.map(refOf).sort();
 const rowByRef = (ref) => state.rows.find((r) => refOf(r) === ref);
 const keyById = (id) => state.keys.find((k) => k.id === id);

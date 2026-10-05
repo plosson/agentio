@@ -73,7 +73,7 @@ ACTIONS['add-service'] = async (el) => {
   const service = el.dataset.service;
   if (!addableServices().includes(service)) return;
   if (addInApp(service)) return;
-  const appCannot = window.agentioCompanion?.present === true && !PLUGIN_METADATA[service]?.json;
+  const appCannot = onlyFromTerminal(service);
   $('add-dialog').innerHTML = html`
     <div class="sheet-head">${tile(service)}<h2 id="add-title">Add ${displayName(service)}</h2></div>
     <p>Run this in a terminal on the hub. It signs in to ${displayName(service)}, or asks for what it needs, such as a token.${appCannot ? ' Add this one from a terminal for now.' : ''}</p>

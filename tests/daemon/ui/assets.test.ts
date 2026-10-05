@@ -226,8 +226,15 @@ describe('the assembled admin page', () => {
     // The welcome card and the Add page try the app first, then fall back to the command.
     expect(script).toMatch(/ACTIONS\['add-service'\] = async \(el\) => \{\s*const service = el\.dataset\.service;\s*if \(!addableServices\(\)\.includes\(service\)\) return;\s*if \(addInApp\(service\)\) return;/);
     expect(script).toMatch(/ACTIONS\['pick-service'\] = \(el\) => \{\s*if \(el\.dataset\.service && addInApp\(el\.dataset\.service\)\) return;/);
-    // A service the app cannot add says so, next to its command.
+    // A service the app cannot add says so, next to its command, but only to a key that could otherwise add in the app.
+    const helper = script.match(/function onlyFromTerminal\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(helper).toContain('window.agentioCompanion?.canManageProfiles === true');
+    expect(helper).toContain('!PLUGIN_METADATA[service]?.json');
+    expect(helper).not.toContain('present');
     expect(script).toContain('Add this one from a terminal for now.');
+    expect(script).toContain('const appCannot = onlyFromTerminal(service);');
+    expect(script).toContain('${onlyFromTerminal(picked) ?');
+    expect(script).not.toContain('agentioCompanion?.present === true && !PLUGIN_METADATA');
   });
 
   test('after the app adds a profile, the page reloads and opens it', () => {
