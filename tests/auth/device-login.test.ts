@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { withTempVault } from '../helpers/vault';
 import { createRequestHandler } from '../../src/daemon/api';
-import { approveDeviceAuth, denyDeviceAuth, resetDeviceAuth } from '../../src/daemon/device-auth';
+import { approveDeviceAuth, denyDeviceAuth, describeDeviceAuth, resetDeviceAuth } from '../../src/daemon/device-auth';
 import { deviceLimiter } from '../../src/daemon/routes-v1';
-import { deviceLogin, hubOrigin } from '../../src/auth/device-login';
+import { deviceLogin, hubOrigin, replacementToken } from '../../src/auth/device-login';
+import { authenticateToken } from '../../src/auth/api-keys';
+import { encodeToken } from '../../src/auth/token';
 import { isRemoteMode, resetRemoteCache } from '../../src/auth/remote';
 
 /**
@@ -36,6 +38,48 @@ describe('device login', () => {
     expect(hubOrigin('http://127.0.0.1:7890')).toBe('http://127.0.0.1:7890');
     expect(() => hubOrigin('ftp://x')).toThrow('http');
     expect(() => hubOrigin('not a url')).toThrow('hub URL');
+  });
+
+  test('a stored token is only ever offered to the hub it belongs to', () => {
+    const mine = encodeToken({ url: 'https://vault.example.com', kid: 'k1', secret: 's'.repeat(43) });
+    expect(replacementToken(mine, 'https://vault.example.com')).toBe(mine);
+    expect(replacementToken(mine, 'https://other.example.com')).toBeUndefined();
+    expect(replacementToken(mine, 'https://vault.example.com:8443')).toBeUndefined();
+    expect(replacementToken(encodeToken({ url: 'https://vault.example.com/ui/', kid: 'k1', secret: 's' }), 'https://vault.example.com')).toBeDefined();
+    for (const bad of [null, undefined, '', 'garbage']) expect(replacementToken(bad, 'https://vault.example.com')).toBeUndefined();
+  });
+
+  test('scopes are granted exactly, and a second login replaces the first key', async () => {
+    const approveWhenShown = (onRequest?: (view: Awaited<ReturnType<typeof describeDeviceAuth>>) => void) =>
+      (info: { userCode: string }) => setTimeout(async () => {
+        onRequest?.(await describeDeviceAuth(info.userCode));
+        await approveDeviceAuth(info.userCode, { name: 'ignored', allowedProfiles: ['slack/ops'], readOnly: true }, url);
+      }, 40);
+
+    const first = await deviceLogin({ url, pollMs: 20, name: 'first-name', scopes: ['profiles:write', 'profiles:manage'], onCode: approveWhenShown() });
+    expect(first.key).toMatchObject({ allowedProfiles: '*', readOnly: false, canManageProfiles: true });
+
+    let seen: Awaited<ReturnType<typeof describeDeviceAuth>> | null = null;
+    const second = await deviceLogin({ url, pollMs: 20, scopes: ['profiles:read'], currentToken: first.token, onCode: approveWhenShown((v) => (seen = v)) });
+    expect(seen!.replaces).toMatchObject({ id: first.key.id });
+    // No --name this time: the key keeps the name it had, not the hostname.
+    expect(first.key.name).toBe('first-name');
+    expect(second.key.name).toBe('first-name');
+    expect(await authenticateToken(first.token)).toBeNull();
+    expect(await authenticateToken(second.token)).toMatchObject({ readOnly: true });
+  });
+
+  test('a token for another hub is not sent, so nothing is replaced', async () => {
+    const other = encodeToken({ url: 'https://elsewhere.example.com', kid: 'k1', secret: 's'.repeat(43) });
+    let seen: Awaited<ReturnType<typeof describeDeviceAuth>> | null = null;
+    await deviceLogin({
+      url, pollMs: 20, scopes: ['profiles:read'], currentToken: other,
+      onCode: ({ userCode }) => setTimeout(async () => {
+        seen = await describeDeviceAuth(userCode);
+        await approveDeviceAuth(userCode, {}, url);
+      }, 40),
+    });
+    expect(seen).not.toHaveProperty('replaces');
   });
 
   test('polls until the owner approves, then returns the token and key', async () => {
