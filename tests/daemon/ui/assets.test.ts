@@ -170,6 +170,12 @@ describe('the assembled admin page', () => {
     expect(style).not.toMatch(/\.page \{/);
   });
 
+  test('the window never scrolls: each scrolling pane holds its screen-reader text, which would otherwise stick out below the window', () => {
+    expect(style).toMatch(/\.sr-only \{[^}]*position: absolute/);
+    expect(style).toMatch(/\.sidebar, \.list-pane, #main \{[^}]*position: relative/);
+    expect(style).toMatch(/\.sidebar, \.list-pane, #main \{[^}]*overflow: auto/);
+  });
+
   test('the gate and system pages are never hidden on a narrow window', () => {
     const narrow = style.slice(style.indexOf('@media (max-width: 899px)'));
     expect(narrow).toContain('.shell:not(.selected):not(.no-list):not(.bare) > #main { display: none; }');
