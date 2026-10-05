@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { writeFile, readFile } from 'fs/promises';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup } from '../../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GDocsClient } from './client';
@@ -365,11 +365,13 @@ https://developers.google.com/docs/api/reference/rest/v1/documents/request`,
     getExtraInfo: (credentials) => credentials?.email ? ` - ${credentials.email}` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new Google Docs profile')
-    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Google Docs profile')
+      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('gdocs', gdocsProfileAdd, options);

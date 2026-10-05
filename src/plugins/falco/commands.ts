@@ -7,7 +7,7 @@ import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import type { ProfileAddOptions } from '../types';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import { loginToFalco } from './auth';
 import { FalcoClient } from './client';
@@ -494,11 +494,13 @@ export function registerFalcoCommands(program: Command): void {
   });
 
   addExamples(
-    profile
-      .command('add')
-      .description('Add a new Falco profile')
-      .option('--profile <name>', 'Profile name (defaults to a slug of the organization)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    addSetupOptions(
+      profile
+        .command('add')
+        .description('Add a new Falco profile')
+        .option('--profile <name>', 'Profile name (defaults to a slug of the organization)')
+        .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    )
       .action(async (options) => {
         try {
           await addProfileWithSetup('falco', falcoProfileAdd, options);

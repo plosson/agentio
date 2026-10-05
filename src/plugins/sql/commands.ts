@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { SqlClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
@@ -88,12 +88,14 @@ export function registerSqlCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.displayName ? ` - ${credentials.displayName}` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new SQL database profile')
-    .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
-    .option('--interactive', 'Interactive mode: prompt for individual connection components')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new SQL database profile')
+      .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
+      .option('--interactive', 'Interactive mode: prompt for individual connection components')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('sql', sqlProfileAdd, options);

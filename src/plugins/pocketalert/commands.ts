@@ -6,7 +6,7 @@ import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { prompt } from '../../utils/stdin';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { parseLevel, PocketAlertClient } from './client';
@@ -89,12 +89,14 @@ export function registerPocketAlertCommands(program: Command): void {
   });
 
   addExamples(
-    profile
-      .command('add')
-      .description('Add a Pocket Alert account with its API key')
-      .option('--api-key <key>', 'API key, from Settings in the Pocket Alert app (asked for when absent)')
-      .option('--profile <name>', 'Profile name (default: default)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    addSetupOptions(
+      profile
+        .command('add')
+        .description('Add a Pocket Alert account with its API key')
+        .option('--api-key <key>', 'API key, from Settings in the Pocket Alert app (asked for when absent)')
+        .option('--profile <name>', 'Profile name (default: default)')
+        .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    )
       .action(async (options: PocketAlertProfileAddOptions) => {
         try {
           await addProfileWithSetup('pocketalert', (o) => pocketAlertProfileAdd(o as PocketAlertProfileAddOptions), options);

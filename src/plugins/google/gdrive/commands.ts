@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup } from '../../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GDriveClient } from './client';
@@ -564,13 +564,15 @@ before Google deletes them permanently.`,
     },
   });
 
-  profile
-    .command('add')
-    .description('Add a new Google Drive profile')
-    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-    .option('--readonly', 'Create a read-only profile (skip access level prompt)')
-    .option('--full', 'Create a full access profile (skip access level prompt)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Google Drive profile')
+      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+      .option('--readonly', 'Create a read-only profile (skip access level prompt)')
+      .option('--full', 'Create a full access profile (skip access level prompt)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('gdrive', gdriveProfileAdd, options);

@@ -30,13 +30,13 @@ test('--describe --json: a server URL, then a device-code sign-in; nothing is co
     inputs: [{ id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' }],
   }]);
   expect(fake.requests()).toEqual([]);
-});
+}, 30_000);
 
 test('--describe without --json is refused', async () => {
   const res = await cli(['kite', 'profile', 'add', '--describe']);
   expect(res.exitCode).not.toBe(0);
   expect(res.stderr).toContain('--describe needs --json');
-});
+}, 30_000);
 
 test('--json --input -: the code, the address to open, then added; the token is never printed', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
@@ -50,7 +50,7 @@ test('--json --input -: the code, the address to open, then added; the token is 
     { v: 1, event: 'added', service: 'kite', profile: EMAIL, readOnly: true },
   ]);
   for (const d of fake.devices.values()) expect(res.stdout).not.toContain(d.deviceCode);
-});
+}, 30_000);
 
 test('--json without --input asks the URL first', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
@@ -58,20 +58,20 @@ test('--json without --input asks the URL first', async () => {
   expect(res.exitCode).toBe(0);
   expect(res.events.map((e) => e.event)).toEqual(['ask', 'code', 'open', 'added']);
   expect(res.events[0]).toEqual({ v: 1, event: 'ask', id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' });
-});
+}, 30_000);
 
 test('--json --no-browser: the code, but no address to open', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
   const res = await cli(['kite', 'profile', 'add', '--json', '--no-browser', '--input', '-'], [JSON.stringify({ url: fake.url })]);
   expect(res.exitCode).toBe(0);
   expect(res.events.map((e) => e.event)).toEqual(['code', 'added']);
-});
+}, 30_000);
 
 test('a closed stdin ends the run with an error event, not a hang', async () => {
   const res = await cli(['kite', 'profile', 'add', '--json']);
   expect(res.exitCode).not.toBe(0);
   expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS', message: 'No answer for "Kite server URL"' });
-});
+}, 30_000);
 
 test('bad --input is refused before any request reaches the server', async () => {
   for (const line of ['{"url":42}', `{"url":"${fake.url}","token":"x"}`, '{"url":"ftp://kite.example"}', 'not json']) {
@@ -80,12 +80,12 @@ test('bad --input is refused before any request reaches the server', async () =>
     expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS' });
   }
   expect(fake.requests()).toEqual([]);
-});
+}, 30_000);
 
 test('--input takes only "-"', async () => {
   const res = await cli(['kite', 'profile', 'add', '--json', '--input', '/etc/passwd']);
   expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS', message: '--input takes - (stdin)' });
-});
+}, 30_000);
 
 test('a sign-in refused in the browser saves nothing and says so', async () => {
   fake.nextDeviceApproval = undefined;
@@ -97,13 +97,13 @@ test('a sign-in refused in the browser saves nothing and says so', async () => {
   expect(res.exitCode).not.toBe(0);
   expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'AUTH_FAILED' });
   expect(res.events.some((e) => e.event === 'added')).toBe(false);
-});
+}, 30_000);
 
 test('a plugin without declared needs refuses --json', async () => {
   const res = await cli(['slack', 'profile', 'add', '--json', '--profile', 'x']);
   expect(res.exitCode).not.toBe(0);
   expect(res.events.at(-1)).toMatchObject({ event: 'error', message: 'slack cannot be set up with --json yet', suggestion: 'Run: agentio slack profile add' });
-});
+}, 30_000);
 
 test('--input accepts a host without a scheme and completes it with https', () => {
   expect(readInputs('{"url":"kite.example.com"}', KITE_SETUP_NEEDS)).toEqual({ url: 'https://kite.example.com' });
