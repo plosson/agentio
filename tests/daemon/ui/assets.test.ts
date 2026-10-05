@@ -185,6 +185,37 @@ describe('the assembled admin page', () => {
     expect(script).toContain("const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + signInBanner().__html;");
   });
 
+  test('an empty vault welcomes the owner with service cards, not a command', () => {
+    const first = script.slice(script.indexOf('function firstRun('), script.indexOf('// ---------- Add one service'));
+    expect(first).toContain('Welcome to your vault');
+    expect(first).toContain('<img class="welcome-icon" src="/ui/icon.svg?v=${state.version}" alt="">');
+    expect(first).toContain('welcomeServices(addableServices(), FEATURED, Boolean(state.ui.allServices), displayName)');
+    // Each card is a button that opens the sheet for its service, with the service's tile and name.
+    expect(first).toMatch(/<button type="button" class="svc-card" data-action="add-service" data-service="\$\{id\}">\$\{tile\(id\)\}/);
+    expect(first).toContain('data-action="all-services"');
+    expect(first).toContain('href="#connect"');
+    // The old first run is gone: no command on the page itself.
+    expect(first).not.toContain('command(');
+    expect(script).not.toContain('Two steps get an agent going');
+  });
+
+  test('adding one service: a sheet with the command, closed by Close, Esc, or Check again', () => {
+    expect(INDEX_HTML).toContain('<dialog id="add-dialog" class="dialog add-dialog" aria-labelledby="add-title"></dialog>');
+    const add = script.slice(script.indexOf('// ---------- Add one service'), script.indexOf("ACTIONS['all-services']"));
+    // Only a service this hub can add opens a sheet; anything else (a stale or forged button) does nothing.
+    expect(add).toMatch(/if \(!addableServices\(\)\.includes\(service\)\) return;/);
+    expect(add).toContain('command(addCommand(service))');
+    expect(add).toContain("modal('add-dialog')");
+    // The sheet's markup goes through html``, so a service name cannot inject markup.
+    expect(add).toMatch(/\$\('add-dialog'\)\.innerHTML = html`/);
+    expect(add).toContain('<form method="dialog" class="actions">');
+    expect(add).toContain('value="check"');
+    expect(add).toMatch(/=== 'check'\) ACTIONS\['check-again'\]\(\)/);
+    // The Add page and the welcome page list the same services.
+    expect(script.split('function addableServices(')).toHaveLength(2);
+    expect(script).toContain("VIEWS.add = () => {\n  const services = addableServices()");
+  });
+
   test('the browser title follows the H1: "<H1> · agentio"', () => {
     expect(script).toContain('function setTitle(');
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");
