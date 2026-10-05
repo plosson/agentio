@@ -27,6 +27,7 @@ import {
   loginCommand,
   machineCanUse,
   machinesUsing,
+  paneOf,
   parseRoute,
   recentlySeen,
   attention,
@@ -127,6 +128,26 @@ describe('routes', () => {
     expect(tabOf({ view: 'authorize', code: 'X' })).toBeNull();
     expect(tabOf({ view: 'settings' })).toBe('settings');
     expect(tabOf({ view: 'overview' })).toBe('overview');
+  });
+});
+
+describe('panes', () => {
+  test('Profiles and Machines have a list; a chosen row opens beside it', () => {
+    expect(paneOf(parseRoute('#profiles'))).toEqual({ list: 'profiles', selected: false });
+    expect(paneOf(parseRoute('#profile=gmail/me@example.com'))).toEqual({ list: 'profiles', selected: true });
+    expect(paneOf(parseRoute('#machines'))).toEqual({ list: 'machines', selected: false });
+    expect(paneOf(parseRoute('#machine=k_123'))).toEqual({ list: 'machines', selected: true });
+  });
+
+  test('every other page fills the space right of the sidebar, with no list', () => {
+    for (const hash of ['#overview', '#access', '#add', '#connect', '#key', '#settings', '#authorize=KQ7M-2XWD', '', '#nonsense', '#profile=', '#profile=noslash', '#machine=']) {
+      expect(paneOf(parseRoute(hash))).toEqual({ list: null, selected: false });
+    }
+  });
+
+  test('a ref or id that looks like a section name is still a chosen row', () => {
+    expect(paneOf(parseRoute('#machine=profiles'))).toEqual({ list: 'machines', selected: true });
+    expect(paneOf(parseRoute('#profile=machines/profiles'))).toEqual({ list: 'profiles', selected: true });
   });
 });
 

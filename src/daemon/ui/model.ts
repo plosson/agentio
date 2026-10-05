@@ -103,6 +103,25 @@ export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'set
   }
 }
 
+/**
+ * Which list sits beside the details, and whether one of its rows is open there.
+ * On a narrow screen only one shows: the details when a row is open, else the list.
+ */
+export function paneOf(route: Route): { list: 'profiles' | 'machines' | null; selected: boolean } {
+  switch (route.view) {
+    case 'profiles':
+      return { list: 'profiles', selected: false };
+    case 'profile':
+      return { list: 'profiles', selected: true };
+    case 'machines':
+      return { list: 'machines', selected: false };
+    case 'machine':
+      return { list: 'machines', selected: true };
+    default:
+      return { list: null, selected: false };
+  }
+}
+
 // ---------- Times ----------
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
