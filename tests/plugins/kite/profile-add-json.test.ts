@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { withTempVault } from '../../helpers/vault';
+import { runCli } from '../../helpers/cli';
 import { FakeKite } from './fake-kite';
 import { readInputs } from '../../../src/plugins/setup-inputs';
-import { KITE_SETUP_NEEDS } from '../../../src/plugins/kite/commands';
+import { KITE_SETUP_NEEDS } from '../../../src/plugins/kite/setup-needs';
 
 const EMAIL = 'pa@example.com';
 const vault = withTempVault('agentio-kite-json-', () => ({ config: { profiles: {} } as never }));
@@ -10,17 +11,7 @@ let fake: FakeKite;
 beforeEach(() => { fake = new FakeKite(); });
 afterEach(() => fake.stop());
 
-/** Run the CLI with `lines` on stdin, then close it; it must exit by itself within 30 s. */
-async function cli(args: string[], lines: string[] = []) {
-  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env: vault.env() });
-  for (const line of lines) proc.stdin.write(`${line}\n`);
-  proc.stdin.end();
-  const timer = setTimeout(() => proc.kill(), 30_000);
-  const exitCode = await proc.exited;
-  clearTimeout(timer);
-  const stdout = await new Response(proc.stdout).text();
-  return { exitCode, stdout, events: stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)), stderr: await new Response(proc.stderr).text() };
-}
+const cli = (args: string[], lines: string[] = []) => runCli(args, vault.env(), lines);
 
 test('--describe --json: a server URL, then a device-code sign-in; nothing is contacted', async () => {
   const res = await cli(['kite', 'profile', 'add', '--describe', '--json']);

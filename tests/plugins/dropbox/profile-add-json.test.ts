@@ -1,16 +1,10 @@
 import { expect, test } from 'bun:test';
 import { withTempVault } from '../../helpers/vault';
+import { runCli } from '../../helpers/cli';
 
 const vault = withTempVault('agentio-dropbox-json-', () => ({ config: { profiles: {} } as never }));
 
-async function run(args: string[], lines: string[]) {
-  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'dropbox', 'profile', 'add', ...args], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env: vault.env() });
-  for (const line of lines) proc.stdin.write(`${line}\n`);
-  proc.stdin.end();
-  const exitCode = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-  return { exitCode, events: stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)) };
-}
+const run = (args: string[], lines: string[]) => runCli(['dropbox', 'profile', 'add', ...args], vault.env(), lines);
 
 test('--describe --json: an app key, then a code from the browser', async () => {
   const { exitCode, events } = await run(['--describe', '--json'], []);
