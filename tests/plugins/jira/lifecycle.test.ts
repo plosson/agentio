@@ -36,7 +36,7 @@ describe('Jira credential lifecycle', () => {
   });
 
   test('reauthentication returns replacement credentials without persisting them', async () => {
-    const performOAuth = mock(async () => ({
+    const performOAuth = mock(async (_context: unknown) => ({
       accessToken: 'access-new',
       refreshToken: 'refresh-new',
       expiryDate: 20_000,

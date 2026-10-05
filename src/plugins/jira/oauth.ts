@@ -1,6 +1,7 @@
 import { URL } from 'url';
 import { JIRA_OAUTH_CONFIG } from '../../config/credentials';
-import { awaitOAuthCode } from '../../auth/oauth-server';
+import type { SetupContext } from '../../plugin-sdk';
+import { selectJiraSite } from './lifecycle';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
@@ -110,48 +111,31 @@ export async function refreshJiraToken(
   };
 }
 
-export async function performJiraOAuthFlow(
-  selectSite?: (sites: AtlassianSite[]) => Promise<AtlassianSite>
-): Promise<JiraOAuthResult> {
-  const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
+export async function performJiraOAuthFlow(context: SetupContext): Promise<JiraOAuthResult> {
   const state = Math.random().toString(36).substring(2);
-
-  const authUrl = new URL(ATLASSIAN_AUTH_URL);
-  authUrl.searchParams.set('audience', 'api.atlassian.com');
-  authUrl.searchParams.set('client_id', JIRA_OAUTH_CONFIG.clientId);
-  authUrl.searchParams.set('scope', JIRA_SCOPES.join(' '));
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('state', state);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('prompt', 'consent');
-
-  const { code } = await awaitOAuthCode({
-    port: OAUTH_PORT,
+  const { code, redirectUri } = await context.oauth({
     serviceName: 'Atlassian',
     expectedState: state,
-    authUrl: authUrl.toString(),
+    // Atlassian's app has this one callback registered.
+    port: OAUTH_PORT,
+    authorizationUrl(redirect) {
+      const authUrl = new URL(ATLASSIAN_AUTH_URL);
+      authUrl.searchParams.set('audience', 'api.atlassian.com');
+      authUrl.searchParams.set('client_id', JIRA_OAUTH_CONFIG.clientId);
+      authUrl.searchParams.set('scope', JIRA_SCOPES.join(' '));
+      authUrl.searchParams.set('redirect_uri', redirect);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('prompt', 'consent');
+      return authUrl.toString();
+    },
   });
-
-  // Exchange code for tokens
   const tokens = await exchangeCodeForTokens(code, JIRA_OAUTH_CONFIG.clientId, JIRA_OAUTH_CONFIG.clientSecret, redirectUri);
-
-  // Get accessible resources to find cloud ID
   const sites = await getAccessibleResources(tokens.accessToken);
-
   if (sites.length === 0) {
     throw new Error('No accessible Jira sites found. Make sure your app has the correct permissions.');
   }
-
-  // Let user select site if multiple, otherwise use the first one
-  let selectedSite: AtlassianSite;
-  if (sites.length === 1) {
-    selectedSite = sites[0];
-  } else if (selectSite) {
-    selectedSite = await selectSite(sites);
-  } else {
-    selectedSite = sites[0];
-  }
-
+  const selectedSite = await selectJiraSite(sites, context);
   return {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,

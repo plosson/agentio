@@ -1,17 +1,19 @@
-import { interactiveSelect } from '../../utils/interactive';
+import type { SetupContext } from '../../plugin-sdk';
+import { createSetupContext } from '../host-context';
 import type { CredentialLifecycle } from '../types';
 import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from './oauth';
 import type { JiraCredentials } from './types';
 
-export async function selectJiraSite(sites: AtlassianSite[]): Promise<AtlassianSite> {
-  return interactiveSelect({
-    message: 'Select a JIRA site:',
-    choices: sites.map((site) => ({
-      name: site.name,
-      value: site,
-      description: site.url,
-    })),
+/** The Jira site to use: asked only when the account reaches several. */
+export async function selectJiraSite(sites: AtlassianSite[], context: SetupContext): Promise<AtlassianSite> {
+  if (sites.length === 1) return sites[0];
+  const id = await context.ask({
+    id: 'site',
+    label: 'Jira site',
+    kind: 'choice',
+    choices: sites.map((site) => ({ value: site.id, label: `${site.name} (${site.url})` })),
   });
+  return sites.find((site) => site.id === id)!;
 }
 
 export const jiraCredentialLifecycle: CredentialLifecycle<JiraCredentials> = {
@@ -43,7 +45,7 @@ export async function reauthenticateJira(
 ): Promise<JiraCredentials> {
   console.error(`\nRe-authenticating jira / ${profileName}...`);
 
-  const result = await performOAuth(selectJiraSite);
+  const result = await performOAuth(createSetupContext());
   const replacement: JiraCredentials = {
     ...credentials,
     accessToken: result.accessToken,

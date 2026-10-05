@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { performJiraOAuthFlow } from './oauth';
 import { JiraClient } from './client';
@@ -16,9 +16,8 @@ import {
   printJiraCommentResult,
   printJiraTransitionResult,
 } from './output';
-import { selectJiraSite } from './lifecycle';
 import type { JiraCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
 
 const getJiraClient = createClientGetter<JiraCredentials, JiraClient>({
   service: 'jira',
@@ -218,26 +217,30 @@ Combine with AND / OR / NOT. Quote multi-word values.`,
     getExtraInfo: (credentials) => credentials?.siteUrl ? ` - ${credentials.siteUrl}` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new JIRA profile with OAuth authentication')
-    .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    .action(async (options) => {
-      try {
-        await addProfileWithSetup('jira', jiraProfileAdd, options);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new JIRA profile with OAuth authentication')
+      .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
+  ).action(async (options) => {
+    try {
+      await addProfileWithSetup('jira', jiraProfileAdd, options, JIRA_SETUP_NEEDS);
+    } catch (error) {
+      handleError(error);
+    }
+  });
 }
 
-export async function jiraProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<JiraCredentials>> {
-  console.error('\nJIRA OAuth Setup\n');
+/** What JIRA setup needs: only an Atlassian sign-in in the browser. */
+export const JIRA_SETUP_NEEDS: SetupNeeds = { inputs: [], auth: 'browser' };
 
-  const result = await performJiraOAuthFlow(selectJiraSite);
+export async function jiraProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<JiraCredentials>> {
+  context.log('\nJIRA OAuth Setup\n');
 
-  console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
+  const result = await performJiraOAuthFlow(context);
+
+  context.log(`\nAuthorized for site: ${result.siteUrl}\n`);
 
   const siteHostname = new URL(result.siteUrl).hostname;
   const credentials: JiraCredentials = {
