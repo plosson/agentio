@@ -74,6 +74,8 @@ interface PendingRequest {
   replaces: TokenProof | null;
   nameIsDefault: boolean;
   outcome: DevicePollResult;
+  /** An approval is in flight: nobody else may answer the request, and a poll still sees it pending. */
+  deciding: boolean;
 }
 
 /** Keyed by device code, the one looked up every few seconds; owner lookups scan at most MAX_PENDING entries. */
@@ -100,7 +102,7 @@ const unknownCode = () =>
 function liveRequest(userCode: string, now: number): PendingRequest {
   const code = normalizeUserCode(userCode);
   for (const req of requests.values()) {
-    if (req.userCode === code && !expired(req, now) && req.outcome.status === 'pending') return req;
+    if (req.userCode === code && !expired(req, now) && req.outcome.status === 'pending' && !req.deciding) return req;
   }
   throw unknownCode();
 }
@@ -125,6 +127,7 @@ export function startDeviceAuth(name: unknown, now = Date.now(), access: DeviceA
     replaces: tokenProof(access.replaces),
     nameIsDefault,
     outcome: { status: 'pending' },
+    deciding: false,
   };
   requests.set(req.deviceCode, req);
   return { userCode, deviceCode: req.deviceCode, expiresIn: DEVICE_AUTH_TTL_MS / 1000, interval: DEVICE_POLL_INTERVAL_S, ...(scopes && { scopes }) };
@@ -167,7 +170,7 @@ export async function describeDeviceAuth(userCode: string, now = Date.now()): Pr
 export function listDeviceAuth(now = Date.now()): Promise<DeviceRequestView[]> {
   return Promise.all(
     [...requests.values()]
-      .filter((req) => req.outcome.status === 'pending' && !expired(req, now))
+      .filter((req) => req.outcome.status === 'pending' && !req.deciding && !expired(req, now))
       .sort((a, b) => a.createdAt - b.createdAt)
       .map(viewOf),
   );
@@ -186,10 +189,17 @@ export async function approveDeviceAuth(
   now = Date.now(),
 ): Promise<{ key: ApiKeyView; replaced: ApiKeyView | null }> {
   const req = liveRequest(userCode, now);
-  const access = req.scopes ? { name: keyName(req, await replacedKey(req)), ...scopeAccess(req.scopes) } : input;
-  const { replaced, ...issued } = await createApiKey(access, hubUrl, req.replaces);
-  req.outcome = { status: 'approved', ...issued };
-  return { key: issued.key, replaced };
+  // Claimed before the first await, so a deny or a second approval cannot slip in meanwhile.
+  req.deciding = true;
+  try {
+    const access = req.scopes ? { name: keyName(req, await replacedKey(req)), ...scopeAccess(req.scopes) } : input;
+    const { replaced, ...issued } = await createApiKey(access, hubUrl, req.replaces);
+    req.outcome = { status: 'approved', ...issued };
+    return { key: issued.key, replaced };
+  } catch (err) {
+    req.deciding = false;
+    throw err;
+  }
 }
 
 export function denyDeviceAuth(userCode: string, now = Date.now()): void {

@@ -158,8 +158,38 @@ describe('device auth', () => {
     const t0 = Date.now();
     const a = startDeviceAuth('box', t0, { replaces: old.token });
     denyDeviceAuth(a.userCode);
-    startDeviceAuth('box', t0 - DEVICE_AUTH_TTL_MS - 1, { replaces: old.token });
+    const expired = startDeviceAuth('box', t0 - DEVICE_AUTH_TTL_MS - 1, { replaces: old.token });
+    await expect(approveDeviceAuth(expired.userCode, {}, HUB)).rejects.toThrow('expired');
     expect(await authenticateToken(old.token)).toEqual(old.key);
+  });
+
+  test('a deny that lands while an approval is in flight is refused, never silently lost', async () => {
+    const old = await machineKey();
+    const { userCode, deviceCode } = startDeviceAuth('box', Date.now(), { scopes: ['profiles:write'], replaces: old.token });
+    const approval = approveDeviceAuth(userCode, {}, HUB);
+    expect(() => denyDeviceAuth(userCode)).toThrow('expired');
+    await expect(describeDeviceAuth(userCode)).rejects.toThrow('expired');
+    expect(await listDeviceAuth()).toEqual([]);
+    expect(pollDeviceAuth(deviceCode)).toEqual({ status: 'pending' });
+    const { key } = await approval;
+    expect(await authenticateToken(old.token)).toBeNull();
+    expect(pollDeviceAuth(deviceCode)).toMatchObject({ status: 'approved', key: { id: key.id } });
+  });
+
+  test('an approval that arrives after a deny is refused and the old key keeps working', async () => {
+    const old = await machineKey();
+    const { userCode, deviceCode } = startDeviceAuth('box', Date.now(), { scopes: ['profiles:write'], replaces: old.token });
+    denyDeviceAuth(userCode);
+    await expect(approveDeviceAuth(userCode, {}, HUB)).rejects.toThrow('expired');
+    expect(await authenticateToken(old.token)).toEqual(old.key);
+    expect(pollDeviceAuth(deviceCode)).toEqual({ status: 'denied' });
+  });
+
+  test('two concurrent approvals create exactly one key', async () => {
+    const { userCode } = startDeviceAuth('box', Date.now(), { scopes: ['profiles:read'] });
+    const results = await Promise.allSettled([approveDeviceAuth(userCode, {}, HUB), approveDeviceAuth(userCode, {}, HUB)]);
+    expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(await listApiKeys()).toHaveLength(1);
   });
 
   test('a garbage or unknown token is a new machine, without an error', async () => {
