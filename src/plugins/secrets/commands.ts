@@ -19,8 +19,15 @@ import type { SecretsCredentials } from './types';
 const PROFILE_OPTION = 'Profile name (optional if only one profile exists)';
 
 /** A new profile holds nothing; values come from `set` and `import`. */
-export async function secretsProfileAdd(_options: ProfileAddOptions): Promise<SetupResult<SecretsCredentials>> {
+export async function secretsProfileAdd(): Promise<SetupResult<SecretsCredentials>> {
   return { credentials: { values: {} }, suggestedProfileName: 'default', info: 'Add secrets with: agentio secrets set <KEY>' };
+}
+
+/** The profile a write command runs against, refused when it is read-only. */
+async function writableProfile(name: string | undefined, operation: string): Promise<string> {
+  const profile = await requireProfile(SERVICE, name);
+  await enforceWriteAccess(SERVICE, profile, operation);
+  return profile;
 }
 
 /** A value from stdin (one trailing newline dropped), or typed without echo in a terminal. */
@@ -47,8 +54,7 @@ export function registerSecretsCommands(program: Command): Command {
       .action(async (key: string, value: string | undefined, options: { profile?: string }) => {
         try {
           validateKey(key);
-          const profile = await requireProfile(SERVICE, options.profile);
-          await enforceWriteAccess(SERVICE, profile, 'set a secret');
+          const profile = await writableProfile(options.profile, 'set a secret');
           const secret = value ?? (await readValue(key));
           const replaced = await updateSecrets(profile, (values) => {
             const had = values.has(key);
@@ -120,8 +126,7 @@ export function registerSecretsCommands(program: Command): Command {
       .option('--profile <name>', PROFILE_OPTION)
       .action(async (key: string, options: { profile?: string }) => {
         try {
-          const profile = await requireProfile(SERVICE, options.profile);
-          await enforceWriteAccess(SERVICE, profile, 'remove a secret');
+          const profile = await writableProfile(options.profile, 'remove a secret');
           await updateSecrets(profile, (values) => {
             if (!values.delete(key)) throw missingKeyError(profile, key, values);
           });
@@ -143,8 +148,7 @@ export function registerSecretsCommands(program: Command): Command {
       .option('--profile <name>', PROFILE_OPTION)
       .action(async (file: string, options: { profile?: string }) => {
         try {
-          const profile = await requireProfile(SERVICE, options.profile);
-          await enforceWriteAccess(SERVICE, profile, 'import secrets');
+          const profile = await writableProfile(options.profile, 'import secrets');
           const info = await stat(file).catch(() => null);
           if (!info?.isFile()) throw new CliError('NOT_FOUND', `No file at ${file}`, 'Give the path to a dotenv file');
           const entries = parseDotenv(await Bun.file(file).text());

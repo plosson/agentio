@@ -1,7 +1,7 @@
 import { defineServicePlugin } from '../types';
-import { secretCount, SecretsClient } from './client';
+import { SecretsClient } from './client';
 import { registerSecretsCommands, secretsProfileAdd } from './commands';
-import { valuesOf } from './store';
+import { secretCount } from './store';
 import type { SecretsCredentials } from './types';
 
 export default defineServicePlugin<SecretsCredentials>()({
@@ -14,6 +14,6 @@ export default defineServicePlugin<SecretsCredentials>()({
     setup: secretsProfileAdd,
     createClient: (credentials) => new SecretsClient(credentials),
     // A count only: the names can say too much about what the profile unlocks.
-    describe: (credentials) => ({ account: secretCount(valuesOf(credentials).size) }),
+    describe: (credentials) => ({ account: secretCount(credentials) }),
   },
 });

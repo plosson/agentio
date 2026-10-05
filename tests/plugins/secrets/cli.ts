@@ -29,8 +29,8 @@ export async function cli(args: string[], input?: string, env: Record<string, st
     stderr: 'pipe',
     env: { ...vault.env(), NO_COLOR: '1', ...env },
   });
-  const code = await proc.exited;
-  return { code, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };
+  const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  return { code, stdout, stderr };
 }
 
 /** The encrypted vault file, to prove a refused write changed nothing. */

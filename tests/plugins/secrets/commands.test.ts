@@ -91,8 +91,9 @@ describe('one profile', () => {
     await cli(['secrets', 'set', 'A', 'alpha']);
     const plain = await cli(['secrets', 'list']);
     expect(plain.stdout).toBe('A\nHOST\n');
-    expect((await cli(['secrets', 'list', '--json'])).stdout).not.toContain('alpha');
-    expect(JSON.parse((await cli(['secrets', 'list', '--json'])).stdout)).toEqual({ keys: ['A', 'HOST'] });
+    const json = (await cli(['secrets', 'list', '--json'])).stdout;
+    expect(json).not.toContain('alpha');
+    expect(JSON.parse(json)).toEqual({ keys: ['A', 'HOST'] });
     expect((await cli(['secrets', 'list', '--reveal'])).stdout).toBe('A=alpha\nHOST=mail.example.com\n');
   });
 

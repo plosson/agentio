@@ -34,6 +34,12 @@ export function toCredentials(values: Map<string, string>): SecretsCredentials {
   return { values: Object.fromEntries(values) };
 }
 
+/** How many secrets a profile holds, for status and the admin: a count, never a name. */
+export function secretCount(credentials: unknown): string {
+  const count = valuesOf(credentials).size;
+  return `${count} secret${count === 1 ? '' : 's'}`;
+}
+
 export function missingKeyError(profile: string, key: string, values: Map<string, string>): CliError {
   const names = [...values.keys()].sort();
   return new CliError(

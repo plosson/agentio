@@ -1,20 +1,45 @@
 import { createInterface } from 'readline';
 
 /**
- * Prompt the user for input with a question.
+ * Ask one question on stderr. Ctrl-D closes the input with no answer and gives
+ * back '', so the caller reports a missing answer instead of hanging; Ctrl-C
+ * stops, as the shell would. `muted` hides what is typed after the question.
  */
-export function prompt(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
+function ask(question: string, muted: boolean): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr, ...(muted ? { terminal: true } : {}) });
+  let hidden = false;
+  if (muted) {
+    (rl as unknown as { _writeToOutput: (text: string) => void })._writeToOutput = (text) => {
+      if (!hidden) process.stderr.write(text);
+    };
+  }
 
   return new Promise((resolve) => {
+    let answered = false;
     rl.question(question, (answer) => {
+      answered = true;
       rl.close();
-      resolve(answer.trim());
+      if (muted) process.stderr.write('\n');
+      resolve(answer);
     });
+    rl.on('close', () => {
+      if (answered) return;
+      process.stderr.write('\n');
+      resolve('');
+    });
+    rl.on('SIGINT', () => {
+      rl.close();
+      process.exit(130);
+    });
+    hidden = muted;
   });
+}
+
+/**
+ * Prompt the user for input with a question.
+ */
+export async function prompt(question: string): Promise<string> {
+  return (await ask(question, false)).trim();
 }
 
 /**
@@ -55,32 +80,5 @@ export async function readStdin(): Promise<string | null> {
  * is written; every keystroke after it is not.
  */
 export function promptHidden(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
-  const writer = rl as unknown as { _writeToOutput: (text: string) => void };
-  let muted = false;
-  writer._writeToOutput = (text) => {
-    if (!muted) process.stderr.write(text);
-  };
-
-  return new Promise((resolve) => {
-    let answered = false;
-    rl.question(question, (answer) => {
-      answered = true;
-      rl.close();
-      process.stderr.write('\n');
-      resolve(answer);
-    });
-    // Ctrl-D closes the input with no answer: give back '' so the caller reports "no value".
-    rl.on('close', () => {
-      if (answered) return;
-      process.stderr.write('\n');
-      resolve('');
-    });
-    // Ctrl-C is not an answer: stop, as the shell would.
-    rl.on('SIGINT', () => {
-      rl.close();
-      process.exit(130);
-    });
-    muted = true;
-  });
+  return ask(question, true);
 }
