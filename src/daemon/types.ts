@@ -10,6 +10,8 @@ export interface DaemonAddress {
 
 export interface HealthResponse {
   status: 'ok';
+  /** The agentio version this daemon runs. */
+  version: string;
   timestamp: number;
   uptime: number;
   locked: boolean;

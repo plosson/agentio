@@ -63,6 +63,10 @@ describe('daemon HTTP surface', () => {
     expect(await res.json()).toMatchObject({ status: 'ok', locked: true });
   });
 
+  test('/health reports the running version, locked or not', async () => {
+    expect(await (await call('/health')).json()).toMatchObject({ version: 'test' });
+  });
+
   test('the root redirects to the admin UI', async () => {
     const res = await call('/');
     expect(res.status).toBe(302);
