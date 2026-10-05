@@ -4,6 +4,8 @@ import {
   accountShown,
   accessLevel,
   problemsFirst,
+  replacementLine,
+  scopeLines,
   matchesService,
   addCommand,
   canWrite,
@@ -595,5 +597,23 @@ describe('accountShown', () => {
   });
   test('an empty profile name never hides a real account', () => {
     expect(accountShown('', 'someone')).toBe('someone');
+  });
+});
+
+describe('access requests', () => {
+  test('scopes read as plain lines: what it can use, then what it can change', () => {
+    expect(scopeLines(['profiles:write', 'profiles:manage'])).toEqual([
+      'Use all your profiles, now and future, to read and write',
+      'Add, reauth and delete profiles',
+    ]);
+    expect(scopeLines(['profiles:read'])).toEqual(['Use all your profiles, now and future, read-only']);
+    // Manage alone still reads every profile, read-only.
+    expect(scopeLines(['profiles:manage'])).toEqual(['Use all your profiles, now and future, read-only', 'Add, reauth and delete profiles']);
+  });
+
+  test('the replaced machine is named with its creation date, the year only when it differs', () => {
+    const now = Date.parse('2026-10-05T12:00:00Z');
+    expect(replacementLine({ name: "Pierre's Mac", createdAt: '2026-10-03T09:00:00Z' }, now)).toBe('This replaces “Pierre\'s Mac” (created Oct 3)');
+    expect(replacementLine({ name: 'old', createdAt: '2025-12-31T12:00:00Z' }, now)).toBe('This replaces “old” (created Dec 31, 2025)');
   });
 });

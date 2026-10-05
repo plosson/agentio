@@ -346,6 +346,24 @@ export function presetInput(preset: Preset, name: string): KeyInput {
   }
 }
 
+// ---------- Access requests (sign-in with --scope) ----------
+
+/** What a sign-in's scopes allow, as the owner reads it before approving. */
+export function scopeLines(scopes: string[]): string[] {
+  const lines = [
+    scopes.includes('profiles:write')
+      ? 'Use all your profiles, now and future, to read and write'
+      : 'Use all your profiles, now and future, read-only',
+  ];
+  if (scopes.includes('profiles:manage')) lines.push('Add, reauth and delete profiles');
+  return lines;
+}
+
+/** The machine key a sign-in revokes on approval. */
+export function replacementLine(replaces: { name: string; createdAt: string }, now: number): string {
+  return `This replaces “${replaces.name}” (created ${shortDate(Date.parse(replaces.createdAt), now)})`;
+}
+
 // ---------- Statuses ----------
 
 /** A test the owner ran in this browser session. */

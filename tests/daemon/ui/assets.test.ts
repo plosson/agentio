@@ -146,7 +146,7 @@ describe('the assembled admin page', () => {
     for (const name of ["ACTIONS['auth-deny']", "SUBMITS['auth-approve']"]) expect(script).toContain(name);
     expect(script).toContain('Approve this sign-in?');
     expect(script).toContain("displayPanel('Code', req.userCode)");
-    expect(script).toContain('Is this the code in your terminal? If not, deny it.');
+    expect(script).toContain('Is this the code on the machine signing in? If not, deny it.');
     expect(script).toContain('data-countdown="${req.expiresAt}"');
     expect(script).toMatch(/name="\$\{prefix\}-preset" value="read-all" checked/);
     expect(script).toContain('This sign-in request has ended or was already answered. Run agentio login again on the machine.');
@@ -436,7 +436,7 @@ describe('final review fixes', () => {
     const approve = block("SUBMITS['auth-approve']");
     expect(approve).not.toMatch(/if \(res\.lost\) return;\s*if \(auth\.step !== 'ask'\) return;/);
     expect(approve).toMatch(/if \(!res\.ok\) \{\s*if \(auth\.step !== 'ask'\) return;/);
-    expect(approve).toMatch(/auth\.step = 'done';\s*state\.keys = /);
+    expect(approve).toMatch(/auth\.step = 'done';[\s\S]*?state\.keys = /);
   });
 
   test('Lock reports what happened: nothing on a lost session, an error on failure', () => {
