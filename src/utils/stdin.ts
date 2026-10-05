@@ -63,10 +63,23 @@ export function promptHidden(question: string): Promise<string> {
   };
 
   return new Promise((resolve) => {
+    let answered = false;
     rl.question(question, (answer) => {
+      answered = true;
       rl.close();
       process.stderr.write('\n');
       resolve(answer);
+    });
+    // Ctrl-D closes the input with no answer: give back '' so the caller reports "no value".
+    rl.on('close', () => {
+      if (answered) return;
+      process.stderr.write('\n');
+      resolve('');
+    });
+    // Ctrl-C is not an answer: stop, as the shell would.
+    rl.on('SIGINT', () => {
+      rl.close();
+      process.exit(130);
     });
     muted = true;
   });
