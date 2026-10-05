@@ -1,6 +1,8 @@
+import { randomBytes } from 'crypto';
 import { URL } from 'url';
 import { GITHUB_OAUTH_CONFIG } from '../../config/credentials';
-import { findAvailablePort, awaitOAuthCode } from '../../auth/oauth-server';
+import { CliError } from '../../utils/errors';
+import type { SetupContext } from '../../plugin-sdk';
 
 const GITHUB_SCOPES = ['repo'];
 
@@ -8,26 +10,24 @@ export interface GitHubOAuthResult {
   accessToken: string;
 }
 
-export async function performGitHubOAuthFlow(): Promise<GitHubOAuthResult> {
-  const port = await findAvailablePort();
-  const redirectUri = `http://localhost:${port}/callback`;
-  const state = Math.random().toString(36).substring(7);
+export async function performGitHubOAuthFlow(context: SetupContext): Promise<GitHubOAuthResult> {
+  const state = randomBytes(16).toString('hex');
 
-  const authUrl = new URL('https://github.com/login/oauth/authorize');
-  authUrl.searchParams.set('client_id', GITHUB_OAUTH_CONFIG.clientId);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('scope', GITHUB_SCOPES.join(' '));
-  authUrl.searchParams.set('state', state);
-
-  const { code } = await awaitOAuthCode({
-    port,
+  const { code, redirectUri } = await context.oauth({
     serviceName: 'GitHub',
     expectedState: state,
-    authUrl: authUrl.toString(),
+    authorizationUrl: (redirect) => {
+      const authUrl = new URL('https://github.com/login/oauth/authorize');
+      authUrl.searchParams.set('client_id', GITHUB_OAUTH_CONFIG.clientId);
+      authUrl.searchParams.set('redirect_uri', redirect);
+      authUrl.searchParams.set('scope', GITHUB_SCOPES.join(' '));
+      authUrl.searchParams.set('state', state);
+      return authUrl.toString();
+    },
   });
 
   // Exchange code for access token
-  const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+  const tokenResponse = await context.fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -48,7 +48,11 @@ export async function performGitHubOAuthFlow(): Promise<GitHubOAuthResult> {
   };
 
   if (tokenData.error || !tokenData.access_token) {
-    throw new Error(tokenData.error_description || tokenData.error || 'Failed to get access token');
+    throw new CliError(
+      'AUTH_FAILED',
+      tokenData.error_description || tokenData.error || 'Failed to get access token',
+      'Try again: agentio github profile add',
+    );
   }
 
   return {

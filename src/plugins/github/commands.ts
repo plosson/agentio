@@ -5,7 +5,7 @@ import { GitHubClient } from './client';
 import { performGitHubOAuthFlow } from './oauth';
 import { handleError } from '../../utils/errors';
 import type { GitHubCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
 
 export function registerGitHubCommands(program: Command): void {
   const github = program
@@ -35,13 +35,9 @@ export function registerGitHubCommands(program: Command): void {
     });
 }
 
-export async function githubProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<GitHubCredentials>> {
-  console.error('\nGitHub Setup\n');
-  console.error('This will open your browser to authorize agentio with GitHub.');
-  console.error('You will need to grant access to repositories where you want to set secrets.\n');
-
-  // Perform OAuth flow
-  const oauthResult = await performGitHubOAuthFlow();
+/** The browser sign-in, then who signed in: the steps setup and sign-in-again share. */
+export async function signInToGitHub(context: SetupContext): Promise<{ credentials: GitHubCredentials; login: string }> {
+  const oauthResult = await performGitHubOAuthFlow(context);
 
   // Create client to fetch user info
   const credentials: GitHubCredentials = {
@@ -50,13 +46,24 @@ export async function githubProfileAdd(options: { profile?: string; readOnly?: b
     email: null,
   };
 
-  const client = new GitHubClient(credentials);
-  const user = await client.getUser();
+  const user = await new GitHubClient(credentials).getUser();
 
   // Update credentials with user info
   credentials.username = user.login;
   credentials.email = user.email;
+  return { credentials, login: user.login };
+}
 
-  console.error(`\nAuthenticated as: ${user.login}${user.email ? ` (${user.email})` : ''}`);
-  return { credentials, suggestedProfileName: user.login, info: 'Install secrets: agentio github install owner/repo' };
+export async function githubProfileAdd(
+  _options: { profile?: string; readOnly?: boolean },
+  context: SetupContext,
+): Promise<SetupResult<GitHubCredentials>> {
+  context.log('\nGitHub Setup\n');
+  context.log('This will open your browser to authorize agentio with GitHub.');
+  context.log('You will need to grant access to repositories where you want to set secrets.\n');
+
+  const { credentials, login } = await signInToGitHub(context);
+
+  context.log(`\nAuthenticated as: ${login}${credentials.email ? ` (${credentials.email})` : ''}`);
+  return { credentials, suggestedProfileName: login, info: 'Install secrets: agentio github install owner/repo' };
 }
