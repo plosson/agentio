@@ -17,6 +17,9 @@ function code(f: () => unknown): string {
 describe('checkAnswer', () => {
   test('trims, and keeps an answer of the right kind', () => {
     expect(checkAnswer(url, '  https://mac.example.ts.net ')).toBe('https://mac.example.ts.net');
+    expect(checkAnswer(url, 'kite.example.com')).toBe('https://kite.example.com');
+    expect(checkAnswer(url, ' localhost:8080 ')).toBe('https://localhost:8080');
+    expect(checkAnswer(url, 'http://x.test')).toBe('http://x.test');
     expect(checkAnswer(key, ' k ')).toBe('k');
     expect(checkAnswer(site, 'b2')).toBe('b2');
     expect(checkAnswer({ id: 'e', label: 'Email', kind: 'email' }, 'a@b.co')).toBe('a@b.co');
@@ -26,7 +29,9 @@ describe('checkAnswer', () => {
     expect(code(() => checkAnswer(key, null))).toBe('INVALID_PARAMS: API key must be text');
     expect(code(() => checkAnswer(key, '   '))).toBe('INVALID_PARAMS: API key is required');
     expect(code(() => checkAnswer(url, 'ftp://mac'))).toBe('INVALID_PARAMS: Server URL must be an http or https address');
-    expect(code(() => checkAnswer(url, 'mac-mini'))).toBe('INVALID_PARAMS: Server URL must be an http or https address');
+    for (const bad of ['https://', 'http:// spaces in host', 'mailto:a@b.c']) {
+      expect(code(() => checkAnswer(url, bad))).toBe('INVALID_PARAMS: Server URL must be an http or https address');
+    }
     expect(code(() => checkAnswer({ id: 'e', label: 'Email', kind: 'email' }, 'nope'))).toBe('INVALID_PARAMS: Email must be an email address');
     expect(code(() => checkAnswer(site, 'Acme'))).toBe('INVALID_PARAMS: Jira site must be one of: a1, b2');
   });
@@ -37,6 +42,7 @@ describe('checkAnswer', () => {
 
 describe('readInputs: the --input line', () => {
   test('keeps known values, checked', () => {
+    expect(readInputs('{"url":"m.example"}', { inputs: [url], auth: 'none' })).toEqual({ url: 'https://m.example' });
     expect(readInputs('{"url":"https://m.example","apiKey":" k "}', needs)).toEqual({ url: 'https://m.example', apiKey: 'k' });
     expect(readInputs('{}', needs)).toEqual({});
   });

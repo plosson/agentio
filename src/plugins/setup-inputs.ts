@@ -12,9 +12,14 @@ export function checkAnswer(spec: InputSpec, value: unknown): string {
     throw invalid(`${spec.label} is required`);
   }
   if (spec.kind === 'url') {
+    // No scheme means https (as the terminal always did); `host:port` is a host, `mailto:x` is not.
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+    const otherScheme = !hasScheme && /^[a-z][a-z0-9+.-]*:(?!\d+(\/|$))/i.test(text);
+    const completed = hasScheme ? text : `https://${text}`;
     let protocol = '';
-    try { protocol = new URL(text).protocol; } catch { /* not a URL */ }
-    if (protocol !== 'http:' && protocol !== 'https:') throw invalid(`${spec.label} must be an http or https address`);
+    try { protocol = new URL(completed).protocol; } catch { /* not a URL */ }
+    if (otherScheme || (protocol !== 'http:' && protocol !== 'https:')) throw invalid(`${spec.label} must be an http or https address`);
+    return completed;
   }
   if (spec.kind === 'email' && !/^[^\s@]+@[^\s@]+$/.test(text)) throw invalid(`${spec.label} must be an email address`);
   if (spec.kind === 'choice') {

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { withTempVault } from '../../helpers/vault';
 import { FakeKite } from './fake-kite';
+import { readInputs } from '../../../src/plugins/setup-inputs';
+import { KITE_SETUP_NEEDS } from '../../../src/plugins/kite/commands';
 
 const EMAIL = 'pa@example.com';
 const vault = withTempVault('agentio-kite-json-', () => ({ config: { profiles: {} } as never }));
@@ -101,4 +103,8 @@ test('a plugin without declared needs refuses --json', async () => {
   const res = await cli(['slack', 'profile', 'add', '--json', '--profile', 'x']);
   expect(res.exitCode).not.toBe(0);
   expect(res.events.at(-1)).toMatchObject({ event: 'error', message: 'slack cannot be set up with --json yet', suggestion: 'Run: agentio slack profile add' });
+});
+
+test('--input accepts a host without a scheme and completes it with https', () => {
+  expect(readInputs('{"url":"kite.example.com"}', KITE_SETUP_NEEDS)).toEqual({ url: 'https://kite.example.com' });
 });
