@@ -560,7 +560,11 @@ describe('the assembled admin page', () => {
   test('components: every control is as tall as --tap (44 px on touch screens), and the focus ring is visible', () => {
     expect(style).toMatch(/\.button \{[^}]*min-height: var\(--tap\)/);
     expect(style).toMatch(/\.input \{[^}]*min-height: var\(--tap\)/);
-    expect(style).toMatch(/:focus-visible \{ outline: 3px solid var\(--link\); outline-offset: 2px; \}/);
+    // The Mac focus ring: translucent accent, hugging the control. Never removed, never the old 2 px gap.
+    expect(adminCss).toMatch(/--focus-ring: color-mix\(in srgb, var\(--link\) \d+%, transparent\);/);
+    expect(style).toMatch(/\n:focus-visible \{ outline: 3px solid var\(--focus-ring\); outline-offset: 0; \}/);
+    expect(style).toMatch(/\.switch input:focus-visible \+ span \{ outline: 3px solid var\(--focus-ring\); outline-offset: 0; \}/);
+    expect(adminCss).not.toContain('outline-offset: 2px');
     // No control sets a fixed height of its own: it would ignore the touch size.
     expect(adminCss).not.toMatch(/\.(button|input)[^{]*\{[^}]*\bheight: \d/);
   });
