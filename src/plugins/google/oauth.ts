@@ -1,6 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GOOGLE_OAUTH_CONFIG } from '../../config/credentials';
-import { findAvailablePort, awaitOAuthCode } from '../../auth/oauth-server';
+import { createSetupContext } from '../host-context';
+import type { SetupContext } from '../../plugin-sdk';
 import type { OAuthTokens } from './tokens';
 
 const SCOPES = {
@@ -63,26 +64,17 @@ const SCOPES = {
 
 export type OAuthService = keyof typeof SCOPES;
 
-export async function performOAuthFlow(service: OAuthService): Promise<OAuthTokens> {
-  const port = await findAvailablePort();
-  const redirectUri = `http://localhost:${port}/callback`;
-  const oauth2Client = new OAuth2Client(
-    GOOGLE_OAUTH_CONFIG.clientId,
-    GOOGLE_OAUTH_CONFIG.clientSecret,
-    redirectUri,
-  );
-
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: [...SCOPES[service]],
-    prompt: 'consent',
-  });
-  const { code } = await awaitOAuthCode({
-    port,
+export async function performOAuthFlow(service: OAuthService, context: SetupContext = createSetupContext()): Promise<OAuthTokens> {
+  let client: OAuth2Client | undefined;
+  const { code } = await context.oauth({
     serviceName: 'Google',
-    authUrl,
+    authorizationUrl(redirectUri) {
+      client = new OAuth2Client(GOOGLE_OAUTH_CONFIG.clientId, GOOGLE_OAUTH_CONFIG.clientSecret, redirectUri);
+      return client.generateAuthUrl({ access_type: 'offline', scope: [...SCOPES[service]], prompt: 'consent' });
+    },
   });
-  const { tokens } = await oauth2Client.getToken(code);
+  // The client was built with the redirect the provider saw; the code is only valid with it.
+  const { tokens } = await client!.getToken(code);
 
   return {
     access_token: tokens.access_token!,

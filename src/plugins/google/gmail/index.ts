@@ -1,4 +1,4 @@
-import { gmailProfileAdd, registerGmailCommands } from './commands';
+import { GMAIL_SETUP_NEEDS, gmailProfileAdd, registerGmailCommands } from './commands';
 import { GmailClient } from './client';
 import type { OAuthTokens } from '../tokens';
 import { defineServicePlugin } from '../../types';
@@ -13,6 +13,7 @@ export default defineServicePlugin<GoogleSnakeCredentials, OAuthTokens>()({
   registerCommands: registerGmailCommands,
   profile: {
     setup: gmailProfileAdd,
+    needs: GMAIL_SETUP_NEEDS,
     createClient: (credentials) => new GmailClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gmail'),
