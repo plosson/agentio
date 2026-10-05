@@ -70,6 +70,16 @@ document.addEventListener('submit', (ev) => {
   SUBMITS[form.dataset.submit](form, ev);
 });
 
+// AgentIO Companion added a profile: show it. The detail comes from the app, not from a person.
+window.addEventListener('agentio:profiles-changed', async (ev) => {
+  const { service, profile } = ev.detail ?? {};
+  if (!(await loadAll())) return;
+  location.hash = typeof service === 'string' && typeof profile === 'string'
+    ? routeHash({ view: 'profile', ref: `${service}/${profile}` })
+    : '#profiles';
+  render();
+});
+
 let lastHash = location.hash;
 let leavePrompt = false;
 
