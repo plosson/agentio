@@ -14,6 +14,20 @@ function fail(code: Parameters<SetupContext['fail']>[0], message: string, sugges
   throw new CliError(code, message, suggestion);
 }
 
+/** A failed sign-in as an error with a code, so a program reading --json events can tell what happened. */
+async function signIn<T>(port: number, attempt: Promise<T>): Promise<T> {
+  try {
+    return await attempt;
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    if ((error as NodeJS.ErrnoException)?.code === 'EADDRINUSE' || message.includes('EADDRINUSE')) {
+      throw new CliError('CONFIG_ERROR', `Port ${port} is in use, so the sign-in cannot receive its answer`, 'Close the program using it, then try again');
+    }
+    throw new CliError('AUTH_FAILED', message, 'Run the command again and approve access in the browser');
+  }
+}
+
 /** Setup in a terminal: questions on stderr, the browser opened here, a pasted address accepted. */
 export function createSetupContext(): SetupContext {
   return {
@@ -44,12 +58,15 @@ export function createSetupContext(): SetupContext {
     async oauth(options) {
       const port = options.port ?? (await findAvailablePort());
       const redirectUri = `http://localhost:${port}/callback`;
-      const result = await awaitOAuthCode({
+      const result = await signIn(
         port,
-        serviceName: options.serviceName,
-        expectedState: options.expectedState,
-        authUrl: options.authorizationUrl(redirectUri),
-      });
+        awaitOAuthCode({
+          port,
+          serviceName: options.serviceName,
+          expectedState: options.expectedState,
+          authUrl: options.authorizationUrl(redirectUri),
+        }),
+      );
       return { ...result, redirectUri };
     },
     fail,
@@ -83,7 +100,7 @@ export function createJsonSetupContext(given: Record<string, string>, lines: Lin
       // Listen first: the program opens the address as soon as it reads it.
       const callback = startOAuthCallbackServer({ port, serviceName: options.serviceName, expectedState: options.expectedState });
       printJson({ event: 'open', url: options.authorizationUrl(redirectUri) });
-      return { ...(await callback), redirectUri };
+      return { ...(await signIn(port, callback)), redirectUri };
     },
     fail,
     fetch,

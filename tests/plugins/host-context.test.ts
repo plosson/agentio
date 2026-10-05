@@ -94,3 +94,45 @@ test('oauth: a fixed port is used as given', async () => {
   await fetch(`${redirectUri}?code=c`);
   expect((await result).code).toBe('c');
 });
+
+const authUrl = (r: string) => `https://p.example/?r=${encodeURIComponent(r)}`;
+
+test('oauth: a state mismatch rejects with an AUTH_FAILED CliError', async () => {
+  const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+  const result = ctx.oauth({ serviceName: 'Test', expectedState: 'st8', authorizationUrl: authUrl });
+  const rejected = result.then(() => null, (e) => e);
+  const redirectUri = new URL((await openEvent()).url).searchParams.get('r')!;
+  await fetch(`${redirectUri}?code=abc&state=forged`);
+  const error = await rejected;
+  expect(error).toBeInstanceOf(CliError);
+  expect(error.code).toBe('AUTH_FAILED');
+  expect(error.message).toContain('state mismatch');
+  expect(error.suggestion).toBeTruthy();
+});
+
+test('oauth: a refused access (access_denied) rejects with an AUTH_FAILED CliError', async () => {
+  const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+  const result = ctx.oauth({ serviceName: 'Test', authorizationUrl: authUrl });
+  const rejected = result.then(() => null, (e) => e);
+  const redirectUri = new URL((await openEvent()).url).searchParams.get('r')!;
+  await fetch(`${redirectUri}?error=access_denied`);
+  const error = await rejected;
+  expect(error).toBeInstanceOf(CliError);
+  expect(error.code).toBe('AUTH_FAILED');
+  expect(error.message).toContain('access_denied');
+});
+
+test('oauth: a busy fixed port rejects with a CONFIG_ERROR CliError naming the port', async () => {
+  const port = 38417;
+  const blocker = Bun.serve({ port, fetch: () => new Response('busy') });
+  try {
+    const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+    const error = await ctx.oauth({ serviceName: 'Test', port, authorizationUrl: authUrl }).then(() => null, (e) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('CONFIG_ERROR');
+    expect(error.message).toContain(String(port));
+    expect(error.suggestion).toBeTruthy();
+  } finally {
+    blocker.stop(true);
+  }
+});

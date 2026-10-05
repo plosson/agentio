@@ -34,6 +34,12 @@ test('--json prints the Google address to open, opens no browser, and listens fo
   // The callback server is already listening.
   const res = await fetch(`${redirect}?error=access_denied`);
   expect(res.status).toBe(200);
-  expect(await proc.exited).not.toBe(0);
+  expect(await proc.exited).toBe(2);
+  let rest = '';
+  for (let r = await reader.read(); !r.done; r = await reader.read()) rest += new TextDecoder().decode(r.value);
+  const error = rest.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === 'error');
+  expect(error.code).toBe('AUTH_FAILED');
+  expect(error.message).toContain('access_denied');
+  expect(error.suggestion).toBeTruthy();
   expect(existsSync(mark)).toBe(false);
 }, 20_000);
