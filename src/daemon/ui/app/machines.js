@@ -1,21 +1,10 @@
 // Machines: every key, presented as the machine that holds it.
 
-const machineViews = (current) => segmented([
-  { id: 'list', href: '#machines', label: 'List' },
-  { id: 'access', href: '#access', label: 'Access' },
-], current);
-
-/** The top of both Machines views: H1 and count, the view switch, Connect a machine. */
-const machinesHead = (current) => pageHead({
-  title: 'Machines',
-  count: state.keys.length,
-  actions: html`<div class="actions m-0">${machineViews(current)}<a class="button primary" href="#connect">Connect a machine</a></div>`,
-});
-
-/** One machine as a list row: name, what it can use, when it was last seen. Also used by the Overview. */
-function machineItem(k, now) {
+/** One machine as a list row: name, what it can use, when it was last seen. Also used by the Overview and Access. */
+function machineItem(k, now, current = false) {
   return listItem({
     href: routeHash({ view: 'machine', id: k.id }),
+    current,
     dot: seenToday(k, now),
     title: k.name,
     message: `Can use ${machineCanUse(k, allRefs())}${k.readOnly ? ' · read-only' : ''}`,
@@ -23,14 +12,25 @@ function machineItem(k, now) {
   });
 }
 
-VIEWS.machines = () => {
+/** The list pane: every machine by name, with Access and Connect in its toolbar. */
+LISTS.machines = (route) => {
   const now = Date.now();
   const keys = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
-  return html`${machinesHead('list')}
+  const current = route.view === 'machine' ? route.id : '';
+  const actions = html`<div class="tools">
+    <a class="icon-button" href="#access" title="Who can use what" aria-label="Access">${glyph('grid')}</a>
+    <a class="icon-button" href="#connect" title="Connect a machine" aria-label="Connect a machine">${glyph('add')}</a></div>`;
+  return html`${pageHead({ title: 'Machines', actions })}
     ${keys.length === 0
       ? html`<div class="empty-state"><p>No machines yet. On the machine, after installing agentio, run this and approve the code it shows:</p>${command(loginCommand(location.origin))}</div>`
-      : html`<ul class="list">${keys.map((k) => machineItem(k, now))}</ul>`}`;
+      : html`<ul class="rows">${keys.map((k) => machineItem(k, now, k.id === current))}</ul>`}`;
 };
+
+/** Nothing chosen yet: the list is beside this (or, on a narrow window, instead of it). */
+VIEWS.machines = () => html`
+  ${pageHead({ title: 'Machines', count: state.keys.length })}
+  ${emptyState(state.keys.length ? 'Choose a machine in the list to see it here.' : 'Connect a machine so an agent can use the vault.',
+    html`<a class="button primary" href="#connect">Connect a machine</a>`)}`;
 
 VIEWS.machine = (route) => {
   const revoked = state.ui.revoked && state.ui.revoked.id === route.id ? state.ui.revoked : null;

@@ -189,10 +189,6 @@ input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--link); fle
 .setting + .setting { border-top: 1px solid var(--line); }
 .setting .text { flex: 1; min-width: 0; }
 
-.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-small); background: var(--card); }
-.segmented a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 var(--s2); border-radius: 8px; color: var(--muted); font-weight: 600; text-decoration: none; }
-.segmented a[aria-current="page"] { background: var(--strong-bg); color: var(--strong-fg); }
-
 .table-box { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 table.grid { width: 100%; border-collapse: collapse; }
 table.grid th, table.grid td { height: calc(var(--tap) + 12px); padding: 0 10px; border: 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }

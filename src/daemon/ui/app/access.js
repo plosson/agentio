@@ -5,7 +5,7 @@ VIEWS.access = () => {
   const now = Date.now();
   const keys = [...state.keys].sort((a, b) => a.name.localeCompare(b.name));
   const rows = groupProfiles(filteredRows(state.rows), displayName).flatMap((g) => g.rows);
-  const head = machinesHead('access');
+  const head = pageHead({ path: [{ href: '#machines', label: 'Machines' }], title: 'Access' });
   if (keys.length === 0) return html`${head}${emptyState('No machines yet. Connect one first.', html`<a class="button" href="#connect">Connect a machine</a>`)}`;
   if (state.rows.length === 0) return html`${head}${emptyState('No profiles yet. Profiles are added from a terminal on the hub.', html`<a class="button" href="#add">See how to add one</a>`)}`;
 

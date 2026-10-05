@@ -257,10 +257,17 @@ describe('the assembled admin page', () => {
     expect(script).toContain('reachableRefs(');
   });
 
-  test('machines: List and Access are two views of one section; Access is no longer a tab', () => {
+  test('machines: a list pane with Access and Connect in its toolbar; Access opens with a way back', () => {
     expect(INDEX_HTML).not.toContain('data-tab="access"');
-    expect(script).toContain("{ id: 'access', href: '#access', label: 'Access' }");
+    const list = script.slice(script.indexOf('LISTS.machines ='), script.indexOf('VIEWS.machine ='));
+    expect(list).toContain('href="#access"');
+    expect(list).toContain('href="#connect"');
+    expect(list).toContain('machineItem(k, now, k.id === current)');
+    expect(list).toContain('loginCommand(location.origin)');
+    expect(script).toMatch(/function machineItem\(k, now, current = false\)/);
+    expect(script).toContain("pageHead({ path: [{ href: '#machines', label: 'Machines' }], title: 'Access' })");
     expect(script).toContain('Change access from each machine’s page.');
+    expect(script).toContain('Choose a machine in the list to see it here.');
   });
 
   test('key created: shown once, never in the address, and leaving before copying asks first', () => {
@@ -475,9 +482,12 @@ describe('the assembled admin page', () => {
 
   test('components: each exists once, as a helper the screens share', () => {
     for (const helper of ['function statusMarkup(', 'function statusText(', 'function displayPanel(', 'function pageHead(', 'function listItem(',
-      'function banner(', 'function emptyState(', 'function command(', 'function segmented(', 'function systemPage(', 'function syncCountdowns(']) {
+      'function banner(', 'function emptyState(', 'function command(', 'function systemPage(', 'function syncCountdowns(']) {
       expect(script.split(helper)).toHaveLength(2);
     }
+    expect(script).not.toContain('function segmented(');
+    expect(script).not.toContain('machineViews');
+    expect(style).not.toContain('.segmented');
     expect(script).not.toContain('function pill(');
     expect(script).not.toContain('statusPill(');
   });

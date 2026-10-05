@@ -171,11 +171,6 @@ function emptyState(text, actions = '') {
   return html`<div class="empty-state"><p>${text}</p>${actions ? html`<div class="actions">${actions}</div>` : ''}</div>`;
 }
 
-/** Two to four views of the same data. `items` are { id, href, label }. */
-function segmented(items, current) {
-  return html`<nav class="segmented" aria-label="View">${items.map((i) => html`<a href="${i.href}" ${i.id === current ? raw('aria-current="page"') : ''}>${i.label}</a>`)}</nav>`;
-}
-
 /** Not found, ended, unreachable: what happened, why in one sentence, the one way out. */
 function systemPage({ title, why, action, details = '' }) {
   return html`<div class="narrow system"><h1>${title}</h1><p class="lede mt-8">${why}</p><div class="actions">${action}</div>${details}</div>`;
