@@ -35,7 +35,10 @@ export interface SetupResult<Credentials extends object> {
   info?: string;
 }
 
-/** How a setup value is asked for and checked. */
+/**
+ * How a setup value is asked for and checked. A `url` value without a scheme is completed with
+ * `https://`, and the completed value is what setup receives.
+ */
 export type InputKind = 'text' | 'secret' | 'url' | 'email' | 'file' | 'choice';
 
 export interface InputChoice {
