@@ -237,6 +237,30 @@ describe('the assembled admin page', () => {
     expect(script).not.toContain('agentioCompanion?.present === true && !PLUGIN_METADATA');
   });
 
+  test('inside the app, a failed profile is signed in again by the app, then tested again', () => {
+    const fn = (script.match(/function canReauthInApp\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '') + (script.match(/function reauthInApp\(service, profile\) \{[\s\S]*?\n\}/)?.[0] ?? '');
+    expect(fn).toContain('window.agentioCompanion?.canManageProfiles !== true');
+    expect(fn).toContain('!PLUGIN_METADATA[service]?.json');
+    expect(fn).toContain('!PLUGIN_METADATA[service]?.reauth');
+    expect(fn).toContain("typeof window.agentioCompanion.reauth === 'function'");
+    expect(fn).toContain('window.agentioCompanion.reauth(service, profile, displayName(service))');
+    const view = script.slice(script.indexOf('VIEWS.profile ='), script.indexOf('VIEWS.add ='));
+    expect(view).toContain('canReauthInApp(r.service)');
+    expect(view).toContain('<button class="button primary" data-action="reauth-in-app" data-ref="${ref}">Sign in again</button>');
+    // Both failing states offer it; the command block remains the fallback.
+    expect(view.match(/\$\{signInAgain\}/g)).toHaveLength(2);
+    expect(view).toContain('command(fix)');
+    expect(script).toMatch(/ACTIONS\['reauth-in-app'\] = \(el\) => \{[\s\S]*?indexOf\('\/'\)[\s\S]*?reauthInApp\(/);
+    const listener = script.match(/window\.addEventListener\('agentio:profiles-changed', [\s\S]*?\n\}\);/)?.[0] ?? '';
+    expect(listener.match(/testProfiles\(\[/g)).toHaveLength(1);
+    expect(listener.indexOf('testProfiles(')).toBeGreaterThan(listener.indexOf('await loadAll()'));
+    expect(listener).toContain('`${service}/${profile}`');
+  });
+
+  test('"Signed in as" never shows the service address', () => {
+    expect(script).toContain("displayPanel('Signed in as', r.account || (r.url && !r.serviceUrl ? linkLabel(r.url) : r.profile)");
+  });
+
   test('after the app adds a profile, the page reloads and opens it', () => {
     const listener = script.match(/window\.addEventListener\('agentio:profiles-changed', [\s\S]*?\n\}\);/)?.[0] ?? '';
     expect(listener).toContain('await loadAll()');

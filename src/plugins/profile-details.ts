@@ -42,8 +42,10 @@ export function profileDetails(plugin: RegisteredServicePlugin | undefined, cred
   const own = (typeof described === 'object' && described !== null ? described : {}) as Record<string, unknown>;
   const details: ProfileDetails = {};
   const account = text(own.account, MAX_ACCOUNT);
-  const url = link(own.url) ?? link(plugin.brand && 'url' in plugin.brand ? plugin.brand.url : undefined);
+  const ownUrl = link(own.url);
+  const url = ownUrl ?? link(plugin.brand && 'url' in plugin.brand ? plugin.brand.url : undefined);
   if (account) details.account = account;
   if (url) details.url = url;
+  if (url && !ownUrl) details.serviceUrl = true;
   return details;
 }

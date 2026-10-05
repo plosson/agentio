@@ -187,7 +187,7 @@ const inDaemon = async (service: ServiceName, name: string) => sessionStatus(ser
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
   const statuses = await getProfileStatuses({ test, sessionStatus: inDaemon });
-  const services: Record<string, Array<Omit<ProfileStatus, 'service'> & { account?: string; url?: string }>> = {};
+  const services: Record<string, Array<Omit<ProfileStatus, 'service'> & { account?: string; url?: string; serviceUrl?: true }>> = {};
   for (const { service, ...rest } of statuses) {
     // Public facts only, read from the vault: no call to the service, no secret.
     const details = profileDetails(findServicePlugin(service), await getCredentials(service, rest.profile));

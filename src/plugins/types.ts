@@ -32,6 +32,8 @@ export interface ProfilePlugin<TCredentials extends object> {
 export interface ProfileDetails {
   account?: string;
   url?: string;
+  /** True when `url` is the service's own web app, not an address the profile signs in to. */
+  serviceUrl?: true;
 }
 
 export interface CredentialLifecycle<TCredentials extends object> {
