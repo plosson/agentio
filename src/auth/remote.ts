@@ -4,8 +4,8 @@ import { join } from 'path';
 import { cannotManageProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
-import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
-import type { WriteOutcome } from '../config/profile-store';
+import type { ProfileRef } from '../config/config-manager';
+import type { SaveProfileOptions, WriteOutcome } from '../config/profile-store';
 import { decodeToken, type TokenParts } from './token';
 
 /**
@@ -250,14 +250,18 @@ export function remoteCanManageProfiles(): Promise<boolean | undefined> {
 }
 
 /** The body of `PUT /v1/profiles/:service/:name`; the hub parses this same type. */
-export type RemoteAddBody = SetProfileOptions & { credentials: object };
+export type RemoteAddBody = SaveProfileOptions & { credentials: object };
 
 /** The body of `PATCH /v1/profiles/:service/:name`; the hub parses this same type. */
 export type RemoteRenameBody = { name: string };
 
 /** A `profile add` finished on this machine, handed to the hub to store. Replaces what the key already reaches. */
-export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
-  const body: RemoteAddBody = { ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }), credentials };
+export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SaveProfileOptions): Promise<void> {
+  const body: RemoteAddBody = {
+    ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }),
+    ...(options.replaceOnly ? { replaceOnly: true } : {}),
+    credentials,
+  };
   await hubRequest(profileRoute(service, name), 'PUT', body);
 }
 

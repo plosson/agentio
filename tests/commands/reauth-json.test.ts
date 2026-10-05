@@ -6,6 +6,7 @@ import { withTempVault } from '../helpers/vault';
 import { runCli } from '../helpers/cli';
 import { FakeKite } from '../plugins/kite/fake-kite';
 import { getCredentials } from '../../src/auth/token-store';
+import { deleteProfile } from '../../src/config/profile-store';
 import { createApiKey } from '../../src/auth/api-keys';
 import { createRequestHandler } from '../../src/daemon/api';
 import { clearVaultCache, loadVault, lockVault, unlockVault } from '../../src/vault/vault';
@@ -43,6 +44,30 @@ afterEach(() => fake.stop());
 
 const cli = (args: string[], lines: string[] = [], env: Record<string, string> = {}) =>
   runCli(args, { ...vault.env(), ...env }, lines);
+
+/** Start a reauth, delete the profile once the code is out and before approval, then approve. */
+async function deletedDuringSignIn(run: () => Promise<Awaited<ReturnType<typeof runCli>>>) {
+  fake.nextDeviceApproval = undefined;
+  const pending = run();
+  for (let i = 0; i < 400 && fake.devices.size === 0; i++) await Bun.sleep(25);
+  const device = [...fake.devices.values()][0];
+  expect(await deleteProfile('kite', OLD_EMAIL)).toBe(true);
+  fake.approve(device.userCode, OLD_EMAIL);
+  return pending;
+}
+
+const GONE = {
+  v: 1, event: 'error', code: 'PROFILE_NOT_FOUND',
+  message: `Profile "${OLD_EMAIL}" no longer exists for kite`,
+  suggestion: 'Add it again with: agentio kite profile add',
+};
+
+async function expectKiteGone(): Promise<void> {
+  clearVaultCache();
+  const after = await loadVault();
+  expect(after.config.profiles.kite ?? []).toEqual([]);
+  expect(after.credentials.kite?.[OLD_EMAIL]).toBeUndefined();
+}
 
 async function storedKite(profile = OLD_EMAIL): Promise<KiteCredentials | null> {
   clearVaultCache();
@@ -106,6 +131,14 @@ describe('profile reauth --json, local vault', () => {
     expect(res.events).toEqual([expect.objectContaining({ event: 'error', code: 'PROFILE_NOT_FOUND' })]);
     expect(fake.requests()).toEqual([]);
     expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
+  }, 30_000);
+
+  test('a profile deleted while the sign-in runs is not brought back: PROFILE_NOT_FOUND, nothing created', async () => {
+    const res = await deletedDuringSignIn(() => cli(['profile', 'reauth', 'kite', OLD_EMAIL, '--json']));
+    expect(res.exitCode).not.toBe(0);
+    expect(res.events.map((e) => e.event)).toEqual(['code', 'open', 'error']);
+    expect(res.events.at(-1)).toEqual(GONE);
+    await expectKiteGone();
   }, 30_000);
 
   test('a refused sign-in saves nothing and ends with an error event', async () => {
@@ -198,6 +231,57 @@ describe('profile reauth --json against a hub', () => {
     expect(res.stdout).not.toContain(saved!.token);
     expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
   }, 30_000);
+
+  test('a profile the owner deletes while a managing key signs in again is not brought back', async () => {
+    const token = (await createApiKey({ name: 'manager', allowedProfiles: [`kite/${OLD_EMAIL}`], canManageProfiles: true }, hubUrl)).token;
+    const res = await deletedDuringSignIn(() => remote(['profile', 'reauth', 'kite', OLD_EMAIL, '--json'], token));
+    expect(res.exitCode).not.toBe(0);
+    expect(res.events.map((e) => e.event)).toEqual(['code', 'open', 'error']);
+    expect(res.events.at(-1)).toEqual(GONE);
+    await expectKiteGone();
+  }, 30_000);
+
+  test('the hub refuses a replace-only PUT for a missing profile, even for a key that may create it', async () => {
+    const token = (await createApiKey({ name: 'wide', allowedProfiles: '*', canManageProfiles: true }, hubUrl)).token;
+    const res = await fetch(`${hubUrl}/v1/profiles/kite/ghost`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials: { token: 't' }, replaceOnly: true }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: 'PROFILE_NOT_FOUND', error: 'Profile "ghost" no longer exists for kite' });
+    clearVaultCache();
+    expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
+    const bad = await fetch(`${hubUrl}/v1/profiles/kite/ghost`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials: { token: 't' }, replaceOnly: 'yes' }),
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ code: 'INVALID_PARAMS', error: 'replaceOnly must be true or false' });
+  }, 30_000);
+
+  for (const json of [true, false]) {
+    test(`a plugin whose sign-in does not re-issue every secret is refused from a remote machine${json ? ' (--json)' : ''}`, async () => {
+      const token = (await createApiKey({ name: 'manager', allowedProfiles: ['gcal/cal@example.com'], canManageProfiles: true }, hubUrl)).token;
+      const res = await remote(['profile', 'reauth', 'gcal', 'cal@example.com', ...(json ? ['--json'] : [])], token);
+      expect(res.exitCode).not.toBe(0);
+      const refusal = {
+        code: 'INVALID_PARAMS',
+        message: 'gcal cannot be signed in again from this machine yet',
+        suggestion: 'Run on the hub: agentio profile reauth gcal cal@example.com',
+      };
+      if (json) {
+        expect(res.events).toEqual([{ v: 1, event: 'error', ...refusal }]);
+      } else {
+        expect(res.events).toEqual([]);
+        expect(res.stderr).toContain(refusal.message);
+        expect(res.stderr).toContain(refusal.suggestion);
+      }
+      clearVaultCache();
+      expect((await loadVault()).credentials.gcal?.['cal@example.com']).toMatchObject({ access_token: 'a', refresh_token: 'r' });
+    }, 30_000);
+  }
 
   test('a managing key cannot sign in again a profile outside its allow-list', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };

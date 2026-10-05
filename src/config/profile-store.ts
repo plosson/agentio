@@ -47,19 +47,45 @@ export async function chooseProfileName(
   }
 }
 
+/**
+ * How a save treats a name nobody holds. `replaceOnly` refuses it instead of
+ * creating the profile: a re-sign-in that ends after the owner deleted the
+ * profile must not bring it back.
+ */
+export interface SaveProfileOptions extends SetProfileOptions {
+  replaceOnly?: boolean;
+}
+
 /** Add or replace a profile and its credentials in one vault write, or one PUT to the hub. */
-export function saveProfile(
+export async function saveProfile(
   service: ServiceName,
   profileName: string,
   credentials: object,
-  options: SetProfileOptions = {},
+  options: SaveProfileOptions = {},
 ): Promise<void> {
-  if (isRemoteMode()) return remoteSaveProfile(service, profileName, credentials, options)
-    .then(() => { console.error(`Stored on the vault hub at ${hub().url}`); });
-  return updateVault((vault) => {
-    const index = findProfileIndex(vault.config, service, profileName);
-    putProfile(vault, service, profileName, credentials, keptOptions(vault, service, index, options));
-  });
+  if (isRemoteMode()) {
+    // A hub that predates replaceOnly ignores it and creates the missing profile.
+    await remoteSaveProfile(service, profileName, credentials, options);
+    console.error(`Stored on the vault hub at ${hub().url}`);
+    return;
+  }
+  const outcome = await updateVault((vault) => saveInVault(vault, service, profileName, credentials, options));
+  const failure = writeFailure(outcome, service, profileName);
+  if (failure) throw failure;
+}
+
+/** The save itself, in place: refused as 'gone' when a replace-only save finds no profile. */
+function saveInVault(
+  vault: VaultContents,
+  service: ServiceName,
+  profileName: string,
+  credentials: object,
+  { replaceOnly, ...options }: SaveProfileOptions,
+): WriteOutcome {
+  const index = findProfileIndex(vault.config, service, profileName);
+  if (index === -1 && replaceOnly) return 'gone';
+  putProfile(vault, service, profileName, credentials, keptOptions(vault, service, index, options));
+  return 'ok';
 }
 
 /**
@@ -96,7 +122,7 @@ function putProfile(vault: VaultContents, service: ServiceName, profileName: str
  * error; the store never words one, because the same outcome reads
  * differently to a hub client and to the owner at the CLI.
  */
-export type WriteOutcome = 'ok' | 'denied' | 'absent' | 'taken';
+export type WriteOutcome = 'ok' | 'denied' | 'absent' | 'taken' | 'gone';
 
 /**
  * The error for a write that did nothing, or undefined for one that did. Every
@@ -107,6 +133,8 @@ export function writeFailure(outcome: WriteOutcome, service: ServiceName, name: 
   switch (outcome) {
     case 'ok': return undefined;
     case 'absent': return profileNotFoundError(service, name);
+    case 'gone': return new CliError('PROFILE_NOT_FOUND', `Profile "${name}" no longer exists for ${service}`,
+      `Add it again with: agentio ${service} profile add`);
     case 'denied': return new CliError('PERMISSION_DENIED', `This token is not allowed to use ${profileRef(service, name)}`,
       'Ask the hub owner to widen this key, or choose a name it already covers');
     case 'taken': return new CliError('INVALID_PARAMS', `Profile ${profileRef(service, to ?? name)} already exists`,
@@ -126,20 +154,19 @@ function reaches(config: Config, keyId: string, service: ServiceName, profileNam
   return !!key && keyAllows(key, service, profileName);
 }
 
-/** Add a profile for a remote key, or replace one it already reaches. */
+/** Add a profile for a remote key, or replace one it already reaches; `replaceOnly` never adds. */
 export function saveProfileForKey(
   keyId: string,
   service: ServiceName,
   profileName: string,
   credentials: object,
-  options: SetProfileOptions,
+  options: SaveProfileOptions,
 ): Promise<WriteOutcome> {
   return updateVault((vault) => {
-    const index = findProfileIndex(vault.config, service, profileName);
-    if (index !== -1 && !reaches(vault.config, keyId, service, profileName)) return 'denied';
-    putProfile(vault, service, profileName, credentials, keptOptions(vault, service, index, options));
-    grantProfileToKey(vault.config, keyId, service, profileName);
-    return 'ok';
+    if (hasProfile(vault.config, service, profileName) && !reaches(vault.config, keyId, service, profileName)) return 'denied';
+    const outcome = saveInVault(vault, service, profileName, credentials, options);
+    if (outcome === 'ok') grantProfileToKey(vault.config, keyId, service, profileName);
+    return outcome;
   });
 }
 

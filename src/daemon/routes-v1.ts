@@ -201,11 +201,13 @@ async function handleSave(request: Request, key: ApiKeyView, service: ServiceNam
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
   // Undefined means "not stated", which a replace answers by keeping the owner's flag.
   const stated = body.readOnly === undefined ? undefined : validateFlag('readOnly', body.readOnly);
+  // A re-sign-in replaces; a profile deleted meanwhile is refused rather than created again.
+  const replaceOnly = body.replaceOnly === undefined ? false : validateFlag('replaceOnly', body.replaceOnly);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
     throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
   }
-  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated }));
+  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated, replaceOnly }));
   // Report what the profile ends up with, which for a replace may be the flag already stored.
   return json({ service, name, readOnly: await isProfileReadOnly(service, name) }, 201);
 }

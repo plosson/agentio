@@ -1,5 +1,9 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { reauthProfile } from '../../src/commands/reauth';
+import { withTempVault } from '../helpers/vault';
+
+// Local mode, whatever login this machine holds: a remote one refuses these plugins outright.
+withTempVault('agentio-reauth-fallback-', () => ({}));
 
 describe('reauthProfile fallback', () => {
   test('uses one generic profile-setup instruction without a service-name list', async () => {
