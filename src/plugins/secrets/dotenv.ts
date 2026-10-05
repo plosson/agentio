@@ -6,7 +6,7 @@ const ESCAPES: Record<string, string> = { n: '\n', '"': '"', '\\': '\\' };
 /**
  * Read a dotenv file into a map, the last of duplicate keys winning. Any line
  * it cannot read fails the whole file, so an import writes all or nothing.
- * Errors name the line, never its value.
+ * Errors name the line, never its name or value.
  */
 export function parseDotenv(text: string): Map<string, string> {
   const values = new Map<string, string>();
@@ -22,18 +22,20 @@ export function parseDotenv(text: string): Map<string, string> {
     try {
       validateKey(key);
     } catch {
-      throw fail(`invalid name "${key}"`);
+      throw fail('invalid name');
     }
-    values.set(key, readValue(assignment.slice(equals + 1).trimStart(), fail));
+    values.set(key, readValue(assignment.slice(equals + 1), fail));
   });
   return values;
 }
 
-function readValue(rest: string, fail: (reason: string) => CliError): string {
+/** `afterEquals` is everything after the `=`, so whitespace before a `#` still marks a comment. */
+function readValue(afterEquals: string, fail: (reason: string) => CliError): string {
+  const rest = afterEquals.trimStart();
   const quote = rest[0];
   if (quote !== '"' && quote !== "'") {
-    const comment = rest.search(/\s#/);
-    return (comment === -1 ? rest : rest.slice(0, comment)).trim();
+    const comment = afterEquals.search(/\s#/);
+    return (comment === -1 ? afterEquals : afterEquals.slice(0, comment)).trim();
   }
 
   let value = '';

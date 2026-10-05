@@ -28,6 +28,14 @@ describe('parseDotenv', () => {
     expect(values.get('B')).toBe('abc#def');
   });
 
+  test('a # after whitespace right behind = is a comment, not the value', () => {
+    const values = parseDotenv('A=  # comment\nB= #c\nC=#x\nD=\t#t');
+    expect(values.get('A')).toBe('');
+    expect(values.get('B')).toBe('');
+    expect(values.get('C')).toBe('#x');
+    expect(values.get('D')).toBe('');
+  });
+
   test('double quotes keep spaces and #, and read \\n \\" \\\\', () => {
     const values = parseDotenv('A="  x # y  "\nB="l1\\nl2"\nC="say \\"hi\\""\nD="back\\\\slash"\nE="keep \\t"');
     expect(values.get('A')).toBe('  x # y  ');
@@ -64,7 +72,7 @@ describe('parseDotenv', () => {
     const error = failure('A=1\nMY-KEY=2');
     expect(error.code).toBe('INVALID_PARAMS');
     expect(error.message).toContain('line 2');
-    expect(error.message).toContain('MY-KEY');
+    expect(error.message).not.toContain('MY-KEY');
   });
 
   test('an unterminated quote fails', () => {
