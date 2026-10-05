@@ -4,7 +4,7 @@ import { dirname, resolve } from 'path';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
-import { addJsonOption, printJson } from '../../utils/output';
+import { addJsonOption, isJsonMode, printJson } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
@@ -161,15 +161,17 @@ export async function kiteProfileAdd(
 export async function reauthenticateKite(
   credentials: KiteCredentials | null,
   profileName: string,
+  context: SetupContext = createSetupContext(),
   deps: KiteSetupDeps = {},
 ): Promise<KiteCredentials> {
   if (!credentials?.baseUrl) {
     throw new CliError('CONFIG_ERROR', `Kite profile "${profileName}" has no URL`,
       `Run: agentio kite profile add --profile ${profileName} --url <url>`);
   }
-  console.error(`\nRe-authenticating kite / ${profileName}...`);
-  const replacement = await signIn(credentials.baseUrl, {}, createSetupContext(), deps);
-  console.error(`  Done (${replacement.email})`);
+  context.log(`\nRe-authenticating kite / ${profileName}...`);
+  // A program reading `--json` gets the code as an event, as `profile add --json` gives it.
+  const replacement = await signIn(credentials.baseUrl, { json: isJsonMode() }, context, deps);
+  context.log(`  Done (${replacement.email})`);
   return replacement;
 }
 

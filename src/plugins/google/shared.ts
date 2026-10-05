@@ -60,11 +60,11 @@ export function reauthenticateGoogleSnake<TCredentials extends GoogleSnakeCreden
   performOAuth: typeof performOAuthFlow = performOAuthFlow,
   fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
 ): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
-  return async (credentials, profileName) => {
-    console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service);
+  return async (credentials, profileName, context) => {
+    context.log(`\nRe-authenticating ${service} / ${profileName}...`);
+    const tokens = await performOAuth(service, context);
     const email = await fetchEmail(tokens.access_token);
-    console.error(`  Done (${email})`);
+    context.log(`  Done (${email})`);
     return { ...(credentials ?? {}), ...tokens, email } as TCredentials;
   };
 }
@@ -74,11 +74,11 @@ export function reauthenticateGoogleCamel<TCredentials extends GoogleCamelCreden
   performOAuth: typeof performOAuthFlow = performOAuthFlow,
   fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
 ): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
-  return async (credentials, profileName) => {
-    console.error(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service);
+  return async (credentials, profileName, context) => {
+    context.log(`\nRe-authenticating ${service} / ${profileName}...`);
+    const tokens = await performOAuth(service, context);
     const email = await fetchEmail(tokens.access_token);
-    console.error(`  Done (${email})`);
+    context.log(`  Done (${email})`);
     return {
       ...(credentials ?? {}),
       accessToken: tokens.access_token,

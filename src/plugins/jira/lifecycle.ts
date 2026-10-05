@@ -1,5 +1,6 @@
 import { createSetupContext } from '../host-context';
 import type { CredentialLifecycle } from '../types';
+import type { SetupContext } from '../../plugin-sdk';
 import { performJiraOAuthFlow, refreshJiraToken } from './oauth';
 import type { JiraCredentials } from './types';
 
@@ -28,11 +29,12 @@ export const jiraCredentialLifecycle: CredentialLifecycle<JiraCredentials> = {
 export async function reauthenticateJira(
   credentials: JiraCredentials | null,
   profileName: string,
-  performOAuth: typeof performJiraOAuthFlow = performJiraOAuthFlow
+  context: SetupContext = createSetupContext(),
+  performOAuth: typeof performJiraOAuthFlow = performJiraOAuthFlow,
 ): Promise<JiraCredentials> {
-  console.error(`\nRe-authenticating jira / ${profileName}...`);
+  context.log(`\nRe-authenticating jira / ${profileName}...`);
 
-  const result = await performOAuth(createSetupContext());
+  const result = await performOAuth(context);
   const replacement: JiraCredentials = {
     ...credentials,
     accessToken: result.accessToken,
@@ -42,6 +44,6 @@ export async function reauthenticateJira(
     siteUrl: result.siteUrl,
   };
 
-  console.error(`  Done (${result.siteUrl})`);
+  context.log(`  Done (${result.siteUrl})`);
   return replacement;
 }

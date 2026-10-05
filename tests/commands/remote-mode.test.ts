@@ -92,7 +92,8 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'export'], ['profile', 'reauth', 'discourse'], ['discourse', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
+    // `profile reauth` is a managed command now (reauth-json.test.ts); the bulk `reauth` stays the owner's.
+    for (const args of [['vault', 'export'], ['reauth', '--all'], ['discourse', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');

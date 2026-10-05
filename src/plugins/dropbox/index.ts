@@ -1,6 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { DropboxClient } from './client';
-import { DROPBOX_SETUP_NEEDS, dropboxProfileAdd, registerDropboxCommands } from './commands';
+import { dropboxProfileAdd, registerDropboxCommands } from './commands';
+import { DROPBOX_SETUP_NEEDS } from './setup-needs';
 import { dropboxCredentialLifecycle, reauthenticateDropbox } from './lifecycle';
 import type { DropboxCredentials } from './types';
 
