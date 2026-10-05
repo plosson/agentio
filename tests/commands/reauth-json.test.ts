@@ -11,6 +11,7 @@ import { createApiKey } from '../../src/auth/api-keys';
 import { createRequestHandler } from '../../src/daemon/api';
 import { clearVaultCache, loadVault, lockVault, unlockVault } from '../../src/vault/vault';
 import type { KiteCredentials } from '../../src/plugins/kite/types';
+import type { RevolutCredentials } from '../../src/plugins/revolut/types';
 
 /**
  * `profile reauth --json`: the CLI in its own process, against a fake Kite. The seeded Kite profile
@@ -21,6 +22,11 @@ const PASSPHRASE = 'reauth-pw-12345';
 const OLD_EMAIL = 'old@example.com';
 const OLD_TOKEN = 'old-token';
 let fake: FakeKite;
+// Revolut is the plugin that is not migrated: a private key file plus a pasted redirect.
+const REVOLUT: RevolutCredentials = {
+  environment: 'sandbox', clientId: 'cid', privateKey: 'pem', redirectUri: 'https://example.com/cb',
+  accessToken: 'a', refreshToken: 'r', expiryDate: 0,
+};
 
 const vault = withTempVault('agentio-reauth-json-', () => {
   fake = new FakeKite();
@@ -30,12 +36,14 @@ const vault = withTempVault('agentio-reauth-json-', () => {
       profiles: {
         kite: [{ name: OLD_EMAIL, readOnly: true }],
         gcal: [{ name: 'cal@example.com' }],
+        revolut: [{ name: 'biz' }],
         dropbox: [{ name: 'box' }],
       },
     } as never,
     credentials: {
       kite: { [OLD_EMAIL]: { baseUrl: fake.url, token: OLD_TOKEN, email: OLD_EMAIL, expiresAt: '2026-01-01T00:00:00Z' } },
       gcal: { 'cal@example.com': { access_token: 'a', refresh_token: 'r', token_type: 'Bearer', email: 'cal@example.com' } },
+      revolut: { biz: REVOLUT },
       dropbox: { box: { appKey: 'my-app-key', accessToken: 'a', refreshToken: 'r', expiryDate: 0 } },
     } as never,
   };
@@ -113,15 +121,15 @@ describe('profile reauth --json, local vault', () => {
   }, 30_000);
 
   test('a service without declared needs is refused, and its credentials are left alone', async () => {
-    const res = await cli(['profile', 'reauth', 'gcal', 'cal@example.com', '--json']);
+    const res = await cli(['profile', 'reauth', 'revolut', 'biz', '--json']);
     expect(res.exitCode).not.toBe(0);
     expect(res.events).toEqual([{
       v: 1, event: 'error', code: 'INVALID_PARAMS',
-      message: 'gcal cannot be signed in again with --json yet',
-      suggestion: 'Run: agentio profile reauth gcal cal@example.com',
+      message: 'revolut cannot be signed in again with --json yet',
+      suggestion: 'Run: agentio profile reauth revolut biz',
     }]);
     clearVaultCache();
-    expect(await getCredentials('gcal', 'cal@example.com')).toMatchObject({ access_token: 'a', refresh_token: 'r' });
+    expect(await getCredentials('revolut', 'biz')).toMatchObject({ accessToken: 'a', refreshToken: 'r' });
   }, 30_000);
 
   test('a profile that does not exist is PROFILE_NOT_FOUND, before anything is opened or requested', async () => {
@@ -263,13 +271,13 @@ describe('profile reauth --json against a hub', () => {
 
   for (const json of [true, false]) {
     test(`a plugin whose sign-in does not re-issue every secret is refused from a remote machine${json ? ' (--json)' : ''}`, async () => {
-      const token = (await createApiKey({ name: 'manager', allowedProfiles: ['gcal/cal@example.com'], canManageProfiles: true }, hubUrl)).token;
-      const res = await remote(['profile', 'reauth', 'gcal', 'cal@example.com', ...(json ? ['--json'] : [])], token);
+      const token = (await createApiKey({ name: 'manager', allowedProfiles: ['revolut/biz'], canManageProfiles: true }, hubUrl)).token;
+      const res = await remote(['profile', 'reauth', 'revolut', 'biz', ...(json ? ['--json'] : [])], token);
       expect(res.exitCode).not.toBe(0);
       const refusal = {
         code: 'INVALID_PARAMS',
-        message: 'gcal cannot be signed in again from this machine yet',
-        suggestion: 'Run on the hub: agentio profile reauth gcal cal@example.com',
+        message: 'revolut cannot be signed in again from this machine yet',
+        suggestion: 'Run on the hub: agentio profile reauth revolut biz',
       };
       if (json) {
         expect(res.events).toEqual([{ v: 1, event: 'error', ...refusal }]);
@@ -279,9 +287,34 @@ describe('profile reauth --json against a hub', () => {
         expect(res.stderr).toContain(refusal.suggestion);
       }
       clearVaultCache();
-      expect((await loadVault()).credentials.gcal?.['cal@example.com']).toMatchObject({ access_token: 'a', refresh_token: 'r' });
+      expect((await loadVault()).credentials.revolut?.biz).toMatchObject({ accessToken: 'a', refreshToken: 'r' });
     }, 30_000);
   }
+
+  test('Calendar, a plugin that declares needs, is accepted from a remote machine and stops at the Google callback', async () => {
+    const token = (await createApiKey({ name: 'manager', allowedProfiles: ['gcal/cal@example.com'], canManageProfiles: true }, hubUrl)).token;
+    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'profile', 'reauth', 'gcal', 'cal@example.com', '--json'], {
+      stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+      env: { PATH: process.env.PATH ?? '', HOME: clientHome, AGENTIO_HOME: join(clientHome, '.config', 'agentio'), AGENTIO_TOKEN: token, NO_COLOR: '1' },
+    });
+    const timer = setTimeout(() => proc.kill(), 25_000);
+    const reader = proc.stdout.getReader();
+    const { value } = await reader.read();
+    const open = JSON.parse(new TextDecoder().decode(value).split('\n')[0]);
+    expect(open.event).toBe('open');
+    const url = new URL(open.url);
+    expect(url.host).toBe('accounts.google.com');
+    expect((await fetch(`${url.searchParams.get('redirect_uri')}?error=access_denied`)).status).toBe(200);
+    expect(await proc.exited).not.toBe(0);
+    clearTimeout(timer);
+    let rest = '';
+    for (let r = await reader.read(); !r.done; r = await reader.read()) rest += new TextDecoder().decode(r.value);
+    const error = rest.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === 'error');
+    expect(error).toMatchObject({ v: 1, event: 'error', code: 'AUTH_FAILED' });
+    expect(error.message).toContain('access_denied');
+    clearVaultCache();
+    expect((await loadVault()).credentials.gcal?.['cal@example.com']).toMatchObject({ access_token: 'a', refresh_token: 'r' });
+  }, 30_000);
 
   test('a managing key cannot sign in again a profile outside its allow-list', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };

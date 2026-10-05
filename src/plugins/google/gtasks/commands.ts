@@ -1,9 +1,9 @@
 import { Command } from 'commander';
 import { getValidTokens } from '../profile-tokens';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
-import { performOAuthFlow } from '../oauth';
+import { googleSnakeSetup } from '../shared';
 import { GTasksClient } from './client';
 import {
   printGTasksList,
@@ -440,18 +440,4 @@ At least one of --parent or --previous is required.`,
     });
 }
 
-export async function gtasksProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Tasks...\n');
-
-  const tokens = await performOAuthFlow('gtasks');
-
-  // Fetch user email
-  let email: string;
-  try {
-    email = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    throw new CliError('AUTH_FAILED', 'Could not fetch email', 'Try again or specify --profile manually');
-  }
-
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
-}
+export const gtasksProfileAdd = googleSnakeSetup('gtasks', 'agentio gtasks --help');

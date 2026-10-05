@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import { calendar } from '@googleapis/calendar';
 import { getValidTokens } from '../profile-tokens';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
-import { performOAuthFlow } from '../oauth';
+import { googleSnakeSetup } from '../shared';
 import { GCalClient } from './client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -493,18 +493,4 @@ export function registerGCalCommands(program: Command): void {
     });
 }
 
-export async function gcalProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Calendar...\n');
-
-  const tokens = await performOAuthFlow('gcal');
-
-  // Fetch the user's email
-  let email: string;
-  try {
-    email = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    throw new CliError('AUTH_FAILED', 'Could not fetch email from Calendar', 'Try again or specify --profile manually');
-  }
-
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
-}
+export const gcalProfileAdd = googleSnakeSetup('gcal', 'agentio gcal --help');

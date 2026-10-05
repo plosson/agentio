@@ -1,10 +1,9 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
-import { fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
-import { performOAuthFlow } from '../oauth';
+import { googleCamelSetup } from '../shared';
 import { GSlidesClient } from './client';
 import {
   printGSlidesList,
@@ -282,31 +281,4 @@ https://developers.google.com/slides/api/reference/rest/v1/presentations/batchUp
     });
 }
 
-export async function gslidesProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Slides...\n');
-
-  const tokens = await performOAuthFlow('gslides');
-
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to fetch user email: ${errorMessage}`,
-      'Ensure the account has an email address'
-    );
-  }
-
-  const credentials: GSlidesCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
-
-  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gslides list` };
-}
+export const gslidesProfileAdd = googleCamelSetup('gslides', 'agentio gslides list');

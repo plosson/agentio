@@ -1,7 +1,9 @@
 import { performOAuthFlow, type OAuthService } from './oauth';
 import { createGoogleAuth, fetchGoogleUserEmail, refreshGoogleAccessToken } from './token-manager';
 import type { GoogleCamelTokens, OAuthTokens } from './tokens';
-import type { CredentialLifecycle, ProfilePlugin } from '../types';
+import type { CredentialLifecycle, ProfileAddOptions, ProfilePlugin } from '../types';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { CliError } from '../../utils/errors';
 
 export type GoogleSnakeCredentials = OAuthTokens & { email?: string };
 export type GoogleCamelCredentials = GoogleCamelTokens & { email?: string };
@@ -81,12 +83,63 @@ export function reauthenticateGoogleCamel<TCredentials extends GoogleCamelCreden
     context.log(`  Done (${email})`);
     return {
       ...(credentials ?? {}),
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date,
-      tokenType: tokens.token_type,
-      scope: tokens.scope,
+      ...toCamelTokens(tokens),
       email,
     } as TCredentials;
+  };
+}
+
+/** Sign in to Google for `service` in the browser; the tokens and the account's email. */
+export async function signInToGoogle(
+  service: OAuthService,
+  context: SetupContext,
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+): Promise<{ tokens: OAuthTokens; email: string }> {
+  const tokens = await performOAuth(service, context);
+  try {
+    return { tokens, email: await fetchEmail(tokens.access_token) };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new CliError('AUTH_FAILED', `Could not read the Google account's email: ${reason}`, 'Try again, or pass --profile');
+  }
+}
+
+/** Google's tokens in the camelCase shape gdocs, gsheets, gslides, gscript, gdrive and gchat store. */
+export function toCamelTokens(tokens: OAuthTokens): GoogleCamelTokens {
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiryDate: tokens.expiry_date,
+    tokenType: tokens.token_type,
+    scope: tokens.scope,
+  };
+}
+
+/** `profile.setup` for a service that stores Google's tokens as they come (gmail, gcal, gtasks). */
+export function googleSnakeSetup(
+  service: OAuthService,
+  testCommand: string,
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+) {
+  return async (_options: ProfileAddOptions, context: SetupContext): Promise<SetupResult<OAuthTokens & { email: string }>> => {
+    context.log(`Signing in to Google for ${service}...\n`);
+    const { tokens, email } = await signInToGoogle(service, context, performOAuth, fetchEmail);
+    return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}\nTest with: ${testCommand}` };
+  };
+}
+
+/** `profile.setup` for a service that stores them camelCase (gdocs, gsheets, gslides, gscript). */
+export function googleCamelSetup(
+  service: OAuthService,
+  testCommand: string,
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+) {
+  return async (_options: ProfileAddOptions, context: SetupContext): Promise<SetupResult<GoogleCamelTokens & { email: string }>> => {
+    context.log(`Signing in to Google for ${service}...\n`);
+    const { tokens, email } = await signInToGoogle(service, context, performOAuth, fetchEmail);
+    return { credentials: { ...toCamelTokens(tokens), email }, suggestedProfileName: email, info: `Email: ${email}\nTest with: ${testCommand}` };
   };
 }

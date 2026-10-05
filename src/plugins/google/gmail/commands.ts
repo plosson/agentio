@@ -2,11 +2,10 @@ import { Command } from 'commander';
 import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { getValidTokens } from '../profile-tokens';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
-import type { SetupContext } from '../../../plugin-sdk';
-import { performOAuthFlow } from '../oauth';
+import { googleSnakeSetup } from '../shared';
 import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -1156,18 +1155,4 @@ Requires Chrome, Chromium, or Microsoft Edge installed locally.`,
   });
 }
 
-export async function gmailProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext) {
-  context.log('Starting OAuth flow for Gmail...\n');
-
-  const tokens = await performOAuthFlow('gmail', context);
-
-  // Fetch the user's email to store with the profile
-  let email: string;
-  try {
-    email = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    throw new CliError('AUTH_FAILED', 'Could not fetch email from Gmail', 'Try again or specify --profile manually');
-  }
-
-  return { credentials: { ...tokens, email }, suggestedProfileName: email, info: `Email: ${email}` };
-}
+export const gmailProfileAdd = googleSnakeSetup('gmail', 'agentio gmail --help');
