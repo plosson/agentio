@@ -35,11 +35,43 @@ export interface SetupResult<Credentials extends object> {
   info?: string;
 }
 
+/** How a setup value is asked for and checked. */
+export type InputKind = 'text' | 'secret' | 'url' | 'email' | 'file' | 'choice';
+
+export interface InputChoice {
+  value: string;
+  label: string;
+}
+
+/** One value setup needs. `id` keys it in `--input` and in answers. */
+export interface InputSpec {
+  id: string;
+  label: string;
+  kind: InputKind;
+  /** Default true. An optional value may be answered with ''. */
+  required?: boolean;
+  default?: string;
+  help?: string;
+  /** For `choice` only. */
+  choices?: readonly InputChoice[];
+}
+
+/** How setup signs in, beyond its inputs. */
+export type AuthKind = 'none' | 'browser' | 'browser-code' | 'device-code' | 'pairing';
+
+/** What setup needs, known before it starts: printed by `profile add --describe --json`. */
+export interface SetupNeeds {
+  inputs: readonly InputSpec[];
+  auth: AuthKind;
+}
+
 export interface OAuthSetupOptions {
   serviceName: string;
   expectedState?: string;
   /** Build the provider URL after the host has reserved a localhost callback URI. */
   authorizationUrl(redirectUri: string): string;
+  /** A fixed callback port, for providers that registered one. */
+  port?: number;
 }
 
 export interface OAuthSetupResult {
@@ -49,6 +81,8 @@ export interface OAuthSetupResult {
 }
 
 export interface SetupContext {
+  /** Ask for one value; checked against its spec. */
+  ask(spec: InputSpec): Promise<string>;
   prompt(question: string, options?: { secret?: boolean }): Promise<string>;
   confirm(question: string): Promise<boolean>;
   log(...parts: unknown[]): void;
@@ -112,6 +146,7 @@ export interface ProfileSpec<Credentials extends object> {
   validate(context: RunContext<Credentials>): Promise<ValidationResult>;
   reauthenticate?(credentials: Credentials | null, profileName: string, context: SetupContext): Promise<Credentials>;
   refresh?: RefreshSpec<Credentials>;
+  needs?: SetupNeeds;
 }
 
 export interface AgentioPlugin<Credentials extends object = Record<string, unknown>> {

@@ -6,6 +6,7 @@ import type { RunContext, SetupContext } from '../plugin-sdk';
 
 export function createSetupContext(): SetupContext {
   return {
+    async ask() { throw new Error('ask: added in the next task'); },
     async prompt(question, options) {
       return options?.secret
         ? password({ message: question, mask: true })
