@@ -372,6 +372,47 @@ describe('daemon HTTP surface', () => {
     expect((await call('/v1/device/token', { method: 'POST', body: '{}', ip: '203.0.113.22' })).status).toBe(429);
   });
 
+
+  test('device login with scopes and a replacement starts while locked', async () => {
+    // beforeEach leaves the vault locked, as a freshly started daemon is.
+    const start = await call('/v1/device', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'mac', scopes: ['profiles:manage', 'profiles:write'], replaces: 'agio1.not-a-real.token', nameIsDefault: true }),
+      ip: '203.0.113.40',
+    });
+    expect(start.status).toBe(201);
+    expect((await start.json()).scopes).toEqual(['profiles:write', 'profiles:manage']);
+
+    const bad = await call('/v1/device', { method: 'POST', body: JSON.stringify({ name: 'mac', scopes: ['profiles:everything'] }), ip: '203.0.113.40' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toContain('Unknown scope');
+  });
+
+  test('device login: the owner sees the scopes and the approve answer names the replaced key', async () => {
+    const cookie = await cookieFrom(await unlock());
+    const old = await (await call('/ui/api/keys', {
+      method: 'POST', headers: { cookie },
+      body: JSON.stringify({ name: 'mac', allowedProfiles: '*', readOnly: true, url: 'https://hub.example.com' }),
+    })).json();
+    expect(Object.keys(old).sort()).toEqual(['key', 'token']);
+
+    const start = await (await call('/v1/device', {
+      method: 'POST', body: JSON.stringify({ name: 'host', scopes: ['profiles:write', 'profiles:manage'], replaces: old.token, nameIsDefault: true }), ip: '203.0.113.41',
+    })).json();
+    const shown = await (await call(`/ui/api/authorize/${start.userCode}`, { headers: { cookie } })).json();
+    expect(shown).toMatchObject({ name: 'mac', scopes: ['profiles:write', 'profiles:manage'], replaces: { id: old.key.id, name: 'mac' } });
+    const listed = await (await call('/ui/api/authorize', { headers: { cookie } })).json();
+    expect(listed.requests.find((r: { userCode: string }) => r.userCode === start.userCode)).toMatchObject({ replaces: { id: old.key.id } });
+
+    const approved = await call(`/ui/api/authorize/${start.userCode}`, {
+      method: 'POST', headers: { cookie }, body: JSON.stringify({ approve: true, url: 'https://hub.example.com' }),
+    });
+    expect(approved.status).toBe(201);
+    const body = await approved.json();
+    expect(body).toMatchObject({ replaced: old.key.id, key: { name: 'mac', allowedProfiles: '*', readOnly: false, canManageProfiles: true } });
+    const keys = (await (await call('/ui/api/keys', { headers: { cookie } })).json()).keys;
+    expect(keys.map((k: { id: string }) => k.id)).toEqual([body.key.id]);
+  });
   test('key routes need a session', async () => {
     expect((await call('/ui/api/keys')).status).toBe(401);
     expect((await call('/ui/api/keys', { method: 'POST', body: '{}' })).status).toBe(401);
