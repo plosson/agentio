@@ -1,3 +1,4 @@
+import { stat } from 'fs/promises';
 import { Command } from 'commander';
 import { requireProfile } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
@@ -9,6 +10,7 @@ import { promptHidden, readStdinRaw } from '../../utils/stdin';
 import { addProfileWithSetup } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
+import { parseDotenv } from './dotenv';
 import { printSecrets } from './output';
 import { loadSecrets, missingKeyError, SERVICE, updateSecrets, validateKey } from './store';
 import type { SecretsCredentials } from './types';
@@ -130,6 +132,39 @@ export function registerSecretsCommands(program: Command): Command {
     `Examples:
 
   agentio secrets unset SMTP_PASSWORD --profile smtp`,
+  );
+
+  addExamples(
+    secrets
+      .command('import')
+      .description('Load secrets from a dotenv file; existing names are replaced')
+      .argument('<file>', 'A dotenv file: KEY=value lines')
+      .option('--profile <name>', PROFILE_OPTION)
+      .action(async (file: string, options: { profile?: string }) => {
+        try {
+          const profile = await requireProfile(SERVICE, options.profile);
+          await enforceWriteAccess(SERVICE, profile, 'import secrets');
+          const info = await stat(file).catch(() => null);
+          if (!info?.isFile()) throw new CliError('NOT_FOUND', `No file at ${file}`, 'Give the path to a dotenv file');
+          const entries = parseDotenv(await Bun.file(file).text());
+          const { added, replaced } = await updateSecrets(profile, (values) => {
+            let added = 0;
+            let replaced = 0;
+            for (const [key, value] of entries) {
+              if (values.has(key)) replaced++;
+              else added++;
+              values.set(key, value);
+            }
+            return { added, replaced };
+          });
+          console.error(`Imported into profile "${profile}": ${added} added, ${replaced} replaced`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  agentio secrets import .env --profile app`,
   );
 
   const profile = createProfileCommands<SecretsCredentials>(secrets, {
