@@ -1,4 +1,5 @@
 import { CliError } from '../../utils/errors';
+import type { SetupContext } from '../../plugin-sdk';
 import type { CredentialLifecycle } from '../types';
 import { authorizeSpotify } from './oauth';
 import type { SpotifyCredentials } from './types';
@@ -47,8 +48,9 @@ async function refreshWithRotation(credentials: SpotifyCredentials): Promise<Spo
 export async function reauthenticateSpotify(
   credentials: SpotifyCredentials | null,
   profileName: string,
-  options: { noBrowser?: boolean } = {},
+  context: SetupContext,
 ): Promise<SpotifyCredentials> {
+  // clientId is not a secret field, so a remote reauth still has it; refreshToken may be missing.
   if (!credentials?.clientId) {
     throw new CliError(
       'AUTH_FAILED',
@@ -57,12 +59,11 @@ export async function reauthenticateSpotify(
     );
   }
 
-  console.error(`\nRe-authenticating spotify / ${profileName}...`);
+  context.log(`\nRe-authenticating spotify / ${profileName}...`);
   const tokens = await authorizeSpotify({
     clientId: credentials.clientId,
     readOnly: credentials.readOnly,
-    noBrowser: options.noBrowser,
-  });
+  }, context);
 
   const { SpotifyClient } = await import('./client');
   const replacement: SpotifyCredentials = {
@@ -75,7 +76,7 @@ export async function reauthenticateSpotify(
   };
 
   const me = await new SpotifyClient(replacement).me();
-  console.error(`  Done (${me.displayName || me.id})`);
+  context.log(`  Done (${me.displayName || me.id})`);
   return {
     ...replacement,
     userId: me.id,

@@ -88,6 +88,9 @@ export interface OAuthServerConfig {
   signal?: AbortSignal;
 }
 
+/** The code to come, and `listening`, settled once the server listens or fails to. */
+export type OAuthCallbackServer = Promise<OAuthCallbackResult> & { listening: Promise<void> };
+
 /**
  * Start an OAuth callback server that listens for the authorization code.
  *
@@ -96,10 +99,16 @@ export interface OAuthServerConfig {
  */
 export function startOAuthCallbackServer(
   config: OAuthServerConfig
-): Promise<OAuthCallbackResult> {
+): OAuthCallbackServer {
   const { port, serviceName, expectedState, host } = config;
+  let listened!: () => void;
+  let notListening!: (error: unknown) => void;
+  const listening = new Promise<void>((resolve, reject) => {
+    listened = resolve;
+    notListening = reject;
+  });
 
-  return new Promise((resolve, reject) => {
+  const result = new Promise<OAuthCallbackResult>((resolve, reject) => {
     let server: Server;
 
     const timeout = setTimeout(() => {
@@ -168,18 +177,22 @@ export function startOAuthCallbackServer(
       });
     });
 
-    const onReady = () => {
-      // Server is ready for callback
-    };
-    if (host) server.listen(port, host, onReady);
-    else server.listen(port, onReady);
+    if (host) server.listen(port, host, listened);
+    else server.listen(port, listened);
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       clearTimeout(timeout);
       server?.close();
-      reject(err.code === 'EADDRINUSE'
-        ? new CliError('CONFIG_ERROR', `Port ${port} is in use, so the sign-in cannot receive its answer`, 'Close the program using it, then try again')
-        : err);
+      const shownHost = host ?? 'localhost';
+      const error = err.code === 'EADDRINUSE'
+        ? new CliError(
+          'CONFIG_ERROR',
+          `${serviceName} sign-in needs port ${port} on ${shownHost}, and another program is using it`,
+          `Stop the program using ${shownHost}:${port}, then try again`,
+        )
+        : err;
+      notListening(error);
+      reject(error);
     });
 
     // The code can also arrive by hand. Shut the server down so the process can
@@ -193,6 +206,11 @@ export function startOAuthCallbackServer(
       { once: true },
     );
   });
+
+  // A server that never listened fails both promises with the same error: the caller that awaited
+  // `listening` has it, so the code's rejection must not also be reported as unhandled.
+  listening.catch(() => { result.catch(() => {}); });
+  return Object.assign(result, { listening });
 }
 
 /**
@@ -293,6 +311,8 @@ export async function awaitOAuthCode(config: AwaitOAuthCodeConfig): Promise<OAut
 
   const controller = new AbortController();
   const callbackPromise = startOAuthCallbackServer({ ...config, signal: controller.signal });
+  // A busy port fails here, before a browser opens or stdin is read.
+  await callbackPromise.listening;
 
   console.error(`\nOpening browser for ${serviceName} authorization...`);
   console.error(`If the browser doesn't open, visit:\n${authUrl}\n`);
