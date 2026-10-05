@@ -84,8 +84,6 @@ jobs:
             artifact: agentio-darwin-arm64
           - target: linux-x64
             artifact: agentio-linux-x64
-          - target: linux-arm64
-            artifact: agentio-linux-arm64
 
     steps:
       - name: Checkout
