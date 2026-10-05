@@ -52,7 +52,6 @@ src/plugins/
 │   ├── client.ts
 │   ├── output.ts
 │   └── types.ts
-├── secrets/          # named secrets per profile; no remote service
 ├── confluence/          # OAuth lifecycle owned by the service folder
 ├── discourse/
 ├── dropbox/
@@ -63,6 +62,7 @@ src/plugins/
 ├── pagerio/          # pages to your iPhone and Mac; secret URL, send only
 ├── pocketalert/      # push notifications; API key, send only
 ├── revolut/
+├── secrets/          # named secrets per profile; no remote service
 ├── spotify/
 ├── sql/
 ├── slack/
