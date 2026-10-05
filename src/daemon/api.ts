@@ -18,10 +18,11 @@ let startTime: number = 0;
  * Liveness. Unauthenticated, and 200 whether or not the vault is unlocked so
  * a locked container is not killed before anyone can unlock it.
  */
-function handleHealth(): Response {
+function handleHealth(version: string): Response {
   const now = Date.now();
   const response: HealthResponse = {
     status: 'ok',
+    version,
     timestamp: now,
     uptime: now - startTime,
     locked: !isVaultUnlocked(),
@@ -33,7 +34,7 @@ export function createRequestHandler(ctx: UiContext) {
   return async (request: Request, peer: PeerSource): Promise<Response> => {
     const path = new URL(request.url).pathname;
 
-    if (path === '/health' && request.method === 'GET') return handleHealth();
+    if (path === '/health' && request.method === 'GET') return handleHealth(ctx.version);
     // The domain alone lands on the admin UI; the API lives under /v1 and /health.
     // Relative on purpose: behind the TLS proxy the daemon sees plain http, and an absolute
     // Location would send the browser to http://… for the proxy to bounce back to https.
