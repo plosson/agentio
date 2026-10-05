@@ -30,6 +30,10 @@ const INPUTS = {};
 
 const displayName = (service) => PLUGIN_METADATA[service]?.displayName || ICONS[service]?.[0] || service;
 const isSession = (service) => Boolean(PLUGIN_METADATA[service]?.session);
+/** The services `agentio <service> profile add` exists for on this hub. */
+function addableServices() {
+  return Object.entries(PLUGIN_METADATA).filter(([, m]) => m.addable).map(([id]) => id);
+}
 const allRefs = () => state.rows.map(refOf).sort();
 const rowByRef = (ref) => state.rows.find((r) => refOf(r) === ref);
 const keyById = (id) => state.keys.find((k) => k.id === id);

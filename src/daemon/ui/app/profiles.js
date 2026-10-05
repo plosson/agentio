@@ -87,9 +87,7 @@ VIEWS.profile = (route) => {
 };
 
 VIEWS.add = () => {
-  const services = Object.entries(PLUGIN_METADATA)
-    .filter(([, m]) => m.addable)
-    .map(([id]) => id)
+  const services = addableServices()
     .sort((a, b) => displayName(a).localeCompare(displayName(b)));
   const query = state.ui.serviceFilter || '';
   const shown = services.filter((id) => matchesService(id, query, displayName));

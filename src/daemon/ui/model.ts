@@ -186,6 +186,18 @@ export function serviceNames(rows: Array<Pick<ProfileRow, 'service'>>, displayNa
 }
 
 /** A word a POSIX shell reads back unchanged. */
+/**
+ * The services an empty vault's welcome page offers: the featured ones this hub can add, in their
+ * order, with how many more there are; or every addable one, by display name. When none of the
+ * featured ones is addable, every addable one shows, so the page is never empty while services exist.
+ */
+export function welcomeServices(addable: string[], featured: readonly string[], all: boolean, displayName: (service: string) => string): { shown: string[]; more: number } {
+  const byName = [...addable].sort((a, b) => displayName(a).localeCompare(displayName(b), undefined, { sensitivity: 'base' }));
+  const picked = all ? [] : [...new Set(featured)].filter((s) => addable.includes(s));
+  if (picked.length === 0) return { shown: byName, more: 0 };
+  return { shown: picked, more: addable.length - picked.length };
+}
+
 export function shellQuote(word: string): string {
   return /^[A-Za-z0-9@%+=:,./_-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
 }

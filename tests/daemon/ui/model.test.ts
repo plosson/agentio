@@ -24,6 +24,7 @@ import {
   listSummary,
   machineSeen,
   serviceNames,
+  welcomeServices,
   loginCommand,
   machineCanUse,
   machinesUsing,
@@ -513,6 +514,23 @@ describe('summaries', () => {
     expect(listSummary(['A', 'B', 'C', 'D', 'E'])).toBe('A · B · C · 2 more');
     expect(listSummary(Array.from({ length: 40 }, (_, i) => `S${i}`))).toBe('S0 · S1 · S2 · 37 more');
     expect(listSummary(['A', 'B', 'C'], 1)).toBe('A · 2 more');
+  });
+
+  test('welcomeServices: the featured ones this hub can add, in their order; or every addable one, by name', () => {
+    const names: Record<string, string> = { gmail: 'Gmail', gdrive: 'Google Drive', slack: 'Slack', zeta: 'aardvark', sql: 'SQL' };
+    const name = (s: string) => names[s] ?? s;
+    const addable = ['sql', 'slack', 'gmail', 'gdrive', 'zeta'];
+    // A featured service this hub cannot add (or does not know) is left out; the order is the featured order.
+    expect(welcomeServices(addable, ['slack', 'notes', 'gmail', 'nope'], false, name)).toEqual({ shown: ['slack', 'gmail'], more: 3 });
+    // A service featured twice shows once.
+    expect(welcomeServices(addable, ['gmail', 'gmail'], false, name)).toEqual({ shown: ['gmail'], more: 4 });
+    // All: by display name, not by id, ignoring case; nothing more to show.
+    expect(welcomeServices(addable, ['slack'], true, name)).toEqual({ shown: ['zeta', 'gmail', 'gdrive', 'slack', 'sql'], more: 0 });
+    // Nothing featured is addable: every addable one shows, so the page is never empty while services exist.
+    expect(welcomeServices(addable, ['notes'], false, name)).toEqual({ shown: ['zeta', 'gmail', 'gdrive', 'slack', 'sql'], more: 0 });
+    // A hub with no addable service shows none.
+    expect(welcomeServices([], ['gmail'], false, name)).toEqual({ shown: [], more: 0 });
+    expect(welcomeServices([], ['gmail'], true, name)).toEqual({ shown: [], more: 0 });
   });
 
   test('serviceNames: display names, once each, sorted; unknown services fall back to their id', () => {
