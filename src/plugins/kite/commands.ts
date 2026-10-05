@@ -9,7 +9,8 @@ import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createSetupContext } from '../host-context';
-import type { InputSpec, SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { KITE_SETUP_NEEDS, URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
@@ -102,11 +103,6 @@ function withDescriptionOptions(command: Command): Command {
     .option('--summary <text>', 'At most 10 lines and 1200 characters on what the document says')
     .option('--summary-file <file>', 'Read the summary from this file instead');
 }
-
-const URL_INPUT: InputSpec = { id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' };
-
-/** What Kite setup needs: the server's address, then a sign-in in the browser with a code. */
-export const KITE_SETUP_NEEDS: SetupNeeds = { inputs: [URL_INPUT], auth: 'device-code' };
 
 export interface KiteProfileAddOptions extends ProfileAddOptions {
   url?: string;

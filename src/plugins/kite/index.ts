@@ -1,6 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { KiteClient } from './client';
-import { KITE_SETUP_NEEDS, kiteProfileAdd, reauthenticateKite, registerKiteCommands } from './commands';
+import { kiteProfileAdd, reauthenticateKite, registerKiteCommands } from './commands';
+import { KITE_SETUP_NEEDS } from './setup-needs';
 import type { KiteCredentials } from './types';
 
 export default defineServicePlugin<KiteCredentials>()({
