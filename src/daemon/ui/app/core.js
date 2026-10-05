@@ -357,7 +357,7 @@ function render() {
   list.dataset.list = lister ? panes.list : '';
   list.scrollTop = state.ui.listScroll[panes.list] || 0;
   main.innerHTML = view(route).__html;
-  const pending = route.view === 'authorize' ? '' : signInBanner().__html;
+  const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + signInBanner().__html;
   const head = main.querySelector(':scope > .pane-head');
   if (head) head.insertAdjacentHTML('afterend', pending);
   else main.insertAdjacentHTML('afterbegin', pending);
@@ -368,6 +368,18 @@ function render() {
   again.focus();
   if (caret && typeof again.setSelectionRange === 'function') again.setSelectionRange(caret[0], caret[1]);
 }
+
+// ---------- AgentIO Companion's key ----------
+
+/** The app's key cannot add or change profiles: signing in again asks for that right. */
+function appKeyBanner() {
+  if (window.agentioCompanion?.canManageProfiles !== false) return html``;
+  return banner(
+    "This app can't add or change profiles. Sign in again to ask for that right.",
+    html`<button class="button" data-action="app-sign-in-again">Sign in again</button>`);
+}
+
+ACTIONS['app-sign-in-again'] = () => window.agentioCompanion?.signInAgain?.();
 
 // ---------- Waiting sign-ins ----------
 
