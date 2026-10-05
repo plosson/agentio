@@ -11,6 +11,7 @@ import { addProfileWithSetup } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { parseDotenv } from './dotenv';
+import { runWithSecrets } from './exec';
 import { printSecrets } from './output';
 import { loadSecrets, missingKeyError, SERVICE, updateSecrets, validateKey } from './store';
 import type { SecretsCredentials } from './types';
@@ -165,6 +166,31 @@ export function registerSecretsCommands(program: Command): Command {
     `Examples:
 
   agentio secrets import .env --profile app`,
+  );
+
+  addExamples(
+    secrets
+      .command('exec')
+      .description('Run a command with the profile\'s secrets as environment variables')
+      .argument('[command...]', 'The command and its arguments, after --')
+      .option('--profile <name>', PROFILE_OPTION)
+      .action(async (command: string[], options: { profile?: string }) => {
+        try {
+          if (command.length === 0) {
+            throw new CliError('INVALID_PARAMS', 'No command to run', 'Usage: agentio secrets exec --profile <name> -- <command> [args...]');
+          }
+          const profile = await requireProfile(SERVICE, options.profile);
+          process.exit(await runWithSecrets(command, await loadSecrets(profile)));
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # the script reads SMTP_HOST and SMTP_PASSWORD; the agent never sees them
+  agentio secrets exec --profile smtp -- ./send-mail.sh
+
+  agentio secrets exec --profile app -- bun run migrate`,
   );
 
   const profile = createProfileCommands<SecretsCredentials>(secrets, {
