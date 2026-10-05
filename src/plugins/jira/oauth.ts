@@ -1,10 +1,10 @@
 import { URL } from 'url';
 import { JIRA_OAUTH_CONFIG } from '../../config/credentials';
 import type { SetupContext } from '../../plugin-sdk';
+import { getAccessibleResources, selectAtlassianSite } from '../atlassian/sites';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
-const ATLASSIAN_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 
 const JIRA_SCOPES = [
   'read:jira-work',   // Read projects, issues
@@ -22,27 +22,6 @@ export interface JiraOAuthResult {
   cloudId: string;
   siteUrl: string;
 }
-
-export interface AtlassianSite {
-  id: string;
-  url: string;
-  name: string;
-  scopes: string[];
-  avatarUrl?: string;
-}
-
-/** The Jira site to use: asked only when the account reaches several. */
-export async function selectJiraSite(sites: AtlassianSite[], context: SetupContext): Promise<AtlassianSite> {
-  if (sites.length === 1) return sites[0];
-  const id = await context.ask({
-    id: 'site',
-    label: 'Jira site',
-    kind: 'choice',
-    choices: sites.map((site) => ({ value: site.id, label: `${site.name} (${site.url})` })),
-  });
-  return sites.find((site) => site.id === id)!;
-}
-
 
 async function exchangeCodeForTokens(
   code: string,
@@ -75,22 +54,6 @@ async function exchangeCodeForTokens(
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
   };
-}
-
-async function getAccessibleResources(accessToken: string): Promise<AtlassianSite[]> {
-  const response = await fetch(ATLASSIAN_RESOURCES_URL, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get accessible resources: ${error}`);
-  }
-
-  return response.json();
 }
 
 export async function refreshJiraToken(
@@ -146,7 +109,7 @@ export async function performJiraOAuthFlow(context: SetupContext): Promise<JiraO
   if (sites.length === 0) {
     throw new Error('No accessible Jira sites found. Make sure your app has the correct permissions.');
   }
-  const selectedSite = await selectJiraSite(sites, context);
+  const selectedSite = await selectAtlassianSite(sites, context, 'Jira');
   return {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
