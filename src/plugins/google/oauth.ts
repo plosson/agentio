@@ -65,16 +65,13 @@ const SCOPES = {
 export type OAuthService = keyof typeof SCOPES;
 
 export async function performOAuthFlow(service: OAuthService, context: SetupContext = createSetupContext()): Promise<OAuthTokens> {
-  let client: OAuth2Client | undefined;
-  const { code } = await context.oauth({
+  const client = (redirectUri: string) => new OAuth2Client(GOOGLE_OAUTH_CONFIG.clientId, GOOGLE_OAUTH_CONFIG.clientSecret, redirectUri);
+  const { code, redirectUri } = await context.oauth({
     serviceName: 'Google',
-    authorizationUrl(redirectUri) {
-      client = new OAuth2Client(GOOGLE_OAUTH_CONFIG.clientId, GOOGLE_OAUTH_CONFIG.clientSecret, redirectUri);
-      return client.generateAuthUrl({ access_type: 'offline', scope: [...SCOPES[service]], prompt: 'consent' });
-    },
+    authorizationUrl: (redirect) => client(redirect).generateAuthUrl({ access_type: 'offline', scope: [...SCOPES[service]], prompt: 'consent' }),
   });
-  // The client was built with the redirect the provider saw; the code is only valid with it.
-  const { tokens } = await client!.getToken(code);
+  // The code is only valid with the redirect the provider saw.
+  const { tokens } = await client(redirectUri).getToken(code);
 
   return {
     access_token: tokens.access_token!,
