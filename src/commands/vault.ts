@@ -6,7 +6,7 @@ import { password } from '@inquirer/prompts';
 import { CliError, handleError } from '../utils/errors';
 import { addExamples } from '../utils/command-tree';
 import { addJsonOption, printJson } from '../utils/output';
-import { hub, isRemoteMode, tokenFilePath, tokenSource } from '../auth/remote';
+import { hub, isRemoteMode, remoteCanManageProfiles, tokenFilePath, tokenSource } from '../auth/remote';
 import { readPointer, writePointer } from '../vault/pointer';
 import { decryptVault } from '../vault/crypto';
 import { setPassphrase, clearPassphraseCache } from '../vault/passphrase';
@@ -24,7 +24,7 @@ function countProfiles(contents: VaultContents): number {
 }
 
 export type VaultStatus =
-  | { mode: 'remote'; hub: string; tokenSource: 'env' | 'file' }
+  | { mode: 'remote'; hub: string; tokenSource: 'env' | 'file'; canManageProfiles?: boolean }
   | { mode: 'local'; configured: false }
   | {
       mode: 'local';
@@ -36,9 +36,21 @@ export type VaultStatus =
       error?: { code: string; message: string };
     };
 
+/** Whether the key may manage profiles, as the hub says; undefined when it cannot say (down, refusing, or older). */
+async function canManageProfilesIfKnown(): Promise<boolean | undefined> {
+  try {
+    return await remoteCanManageProfiles();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Which vault this machine uses and whether it can be read. Never prompts. */
 export async function getVaultStatus(): Promise<VaultStatus> {
-  if (isRemoteMode()) return { mode: 'remote', hub: hub().url, tokenSource: tokenSource()! };
+  if (isRemoteMode()) {
+    const canManageProfiles = await canManageProfilesIfKnown();
+    return { mode: 'remote', hub: hub().url, tokenSource: tokenSource()!, ...(canManageProfiles === undefined ? {} : { canManageProfiles }) };
+  }
 
   const path = await readPointer();
   if (!path) return { mode: 'local', configured: false };
@@ -79,6 +91,7 @@ export function registerVaultCommands(program: Command): void {
         if (status.mode === 'remote') {
           console.log(`Hub: ${status.hub}`);
           console.log(`Token: ${status.tokenSource === 'env' ? 'AGENTIO_TOKEN' : tokenFilePath()}`);
+          if (status.canManageProfiles !== undefined) console.log(`Can manage profiles: ${status.canManageProfiles ? 'yes' : 'no'}`);
           return;
         }
         if (!status.configured) {
