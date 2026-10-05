@@ -6,7 +6,7 @@ import { CliError, handleError } from '../utils/errors';
 import { enforceWriteAccess } from '../utils/read-only';
 import { readStdin } from '../utils/stdin';
 import { createProfileCommands } from '../utils/profile-commands';
-import { addProfileFromPlugin } from './profile-host';
+import { addProfileFromPlugin, addSetupOptions } from './profile-host';
 import { createRunContext } from './host-context';
 import type {
   AgentioPlugin,
@@ -127,12 +127,13 @@ export function registerDeclarativePlugin(program: Command, plugin: AgentioPlugi
 
   if (plugin.profile) {
     const profile = createProfileCommands(root, { service: plugin.id, displayName: plugin.displayName });
-    profile
-      .command('add')
-      .description(`Add a new ${plugin.displayName} profile`)
-      .option('--profile <name>', 'Profile name')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-      .action(async (options) => {
+    addSetupOptions(
+      profile
+        .command('add')
+        .description(`Add a new ${plugin.displayName} profile`)
+        .option('--profile <name>', 'Profile name')
+        .option('--read-only', 'Create as read-only profile (blocks write operations)'),
+    ).action(async (options) => {
         try {
           await addProfileFromPlugin(plugin, options);
         } catch (error) {
