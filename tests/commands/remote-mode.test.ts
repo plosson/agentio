@@ -109,14 +109,44 @@ describe('remote mode end to end', () => {
     }
   });
 
-  test('vault status names the hub instead of refusing', async () => {
+  test('vault status names the hub and whether the key may manage profiles', async () => {
     const json = await cli(['vault', 'status', '--json']);
     expect(json.exitCode).toBe(0);
-    expect(JSON.parse(json.stdout)).toEqual({ v: 1, event: 'vault', mode: 'remote', hub: url, tokenSource: 'env' });
+    expect(JSON.parse(json.stdout)).toEqual({ v: 1, event: 'vault', mode: 'remote', hub: url, tokenSource: 'env', canManageProfiles: false });
 
     const text = await cli(['vault', 'status']);
     expect(text.exitCode).toBe(0);
-    expect(text.stdout).toBe(`Hub: ${url}\nToken: AGENTIO_TOKEN\n`);
+    expect(text.stdout).toBe(`Hub: ${url}\nToken: AGENTIO_TOKEN\nCan manage profiles: no\n`);
+
+    const manager = (await createApiKey({ name: 'manager', allowedProfiles: ['discourse/alerts'], canManageProfiles: true }, url)).token;
+    const managing = await cli(['vault', 'status', '--json'], { AGENTIO_TOKEN: manager });
+    expect(JSON.parse(managing.stdout).canManageProfiles).toBe(true);
+    expect((await cli(['vault', 'status'], { AGENTIO_TOKEN: manager })).stdout).toContain('Can manage profiles: yes\n');
+  });
+
+  test('vault status still answers when the hub cannot say: the right is left out, never guessed', async () => {
+    // An older hub answers the listing without the field.
+    const old = Bun.serve({ port: 0, fetch: () => Response.json({ profiles: [] }) });
+    // A hub that refuses the key (revoked, or locked) answers with an error.
+    const refusing = Bun.serve({ port: 0, fetch: () => Response.json({ error: { code: 'AUTH_FAILED', message: 'Invalid token' } }, { status: 401 }) });
+    // And a hub that is not running at all.
+    const gone = Bun.serve({ port: 0, fetch: () => new Response('') });
+    const goneUrl = `http://127.0.0.1:${gone.port}`;
+    gone.stop(true);
+    try {
+      for (const hubUrl of [`http://127.0.0.1:${old.port}`, `http://127.0.0.1:${refusing.port}`, goneUrl]) {
+        const key = (await createApiKey({ name: 'k', allowedProfiles: '*', canManageProfiles: true }, hubUrl)).token;
+        const json = await cli(['vault', 'status', '--json'], { AGENTIO_TOKEN: key });
+        expect(json.exitCode).toBe(0);
+        expect(JSON.parse(json.stdout)).toEqual({ v: 1, event: 'vault', mode: 'remote', hub: hubUrl, tokenSource: 'env' });
+        const text = await cli(['vault', 'status'], { AGENTIO_TOKEN: key });
+        expect(text.exitCode).toBe(0);
+        expect(text.stdout).toBe(`Hub: ${hubUrl}\nToken: AGENTIO_TOKEN\n`);
+      }
+    } finally {
+      old.stop(true);
+      refusing.stop(true);
+    }
   });
 
   test('vault status --json with a malformed token is a JSON error', async () => {

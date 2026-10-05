@@ -173,6 +173,18 @@ describe('the assembled admin page', () => {
     expect(drag).not.toMatch(/closest\('[^']*(\.list-pane|#main|\.rows)/);
   });
 
+  test('inside AgentIO Companion: a key that cannot manage profiles gets a "Sign in again" banner', () => {
+    const fn = script.match(/function appKeyBanner\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    // Only when the app says so, exactly false: no bridge, an older app, or an unknown right shows nothing.
+    expect(fn).toContain('window.agentioCompanion?.canManageProfiles !== false');
+    expect(fn).toContain('Sign in again');
+    expect(fn).toContain('data-action="app-sign-in-again"');
+    // The button asks the app; an older app without the call does nothing rather than throw.
+    expect(script).toMatch(/ACTIONS\['app-sign-in-again'\] = \(\) => window\.agentioCompanion\?\.signInAgain\?\.\(\);/);
+    // It joins the waiting sign-ins under the header, and stays off the approval page.
+    expect(script).toContain("const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + signInBanner().__html;");
+  });
+
   test('the browser title follows the H1: "<H1> · agentio"', () => {
     expect(script).toContain('function setTitle(');
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");
