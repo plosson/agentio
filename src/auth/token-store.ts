@@ -3,6 +3,7 @@ import { isRemoteMode, remoteCredentials, type CredentialReadOptions } from './r
 import type { StoredCredentials } from '../types/tokens';
 import type { ServiceName } from '../types/config';
 
+/** A profile's credentials. Locally they are read as stored; a hub refreshes them unless `refresh: false`. */
 export async function getCredentials<T = Record<string, unknown>>(
   service: ServiceName,
   profile: string,

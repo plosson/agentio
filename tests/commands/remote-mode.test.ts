@@ -92,7 +92,8 @@ describe('remote mode end to end', () => {
   });
 
   test('owner-only commands are refused with a pointer to the hub', async () => {
-    for (const args of [['vault', 'export'], ['profile', 'reauth', 'discourse'], ['discourse', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
+    // `profile reauth` is a managed command now (reauth-json.test.ts); the bulk `reauth` stays the owner's.
+    for (const args of [['vault', 'export'], ['reauth', '--all'], ['discourse', 'profile', 'update', '--profile', 'bare', '--read-only']]) {
       const res = await cli(args);
       expect(res.exitCode).toBe(3);
       expect(res.stderr).toContain('not available in remote mode');
@@ -101,7 +102,7 @@ describe('remote mode end to end', () => {
   });
 
   test('a malformed token refuses an owner-only command with the token error, not a crash', async () => {
-    for (const args of [['daemon', 'status'], ['vault', 'status'], ['profile', 'reauth', 'discourse']]) {
+    for (const args of [['daemon', 'status'], ['vault', 'status'], ['reauth', '--all']]) {
       const res = await cli(args, { AGENTIO_TOKEN: 'agio1.xx' });
       expect(res.exitCode).toBe(3);
       expect(res.stdout).toBe('');

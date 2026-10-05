@@ -14,8 +14,11 @@ export interface ProfilePlugin<TCredentials extends object> {
   /** Authenticate and return credentials, asking only through `context`; the host names and persists them. */
   setup(options: ProfileAddOptions, context: SetupContext): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
-  /** Return replacement credentials; the host remains responsible for persistence. */
-  reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;
+  /**
+   * Sign in again and return replacement credentials, asking only through `context`; the host
+   * persists them. `profile reauth --json` runs it only for a plugin that declares `needs`.
+   */
+  reauthenticate?(credentials: TCredentials | null, profileName: string, context: SetupContext): Promise<TCredentials>;
   /**
    * What the admin may show about a profile without calling the service: the
    * account it signs in as and a link to it. Pick public fields only (an
@@ -29,6 +32,8 @@ export interface ProfilePlugin<TCredentials extends object> {
 export interface ProfileDetails {
   account?: string;
   url?: string;
+  /** True when `url` is the service's own web app, not an address the profile signs in to. */
+  serviceUrl?: true;
 }
 
 export interface CredentialLifecycle<TCredentials extends object> {

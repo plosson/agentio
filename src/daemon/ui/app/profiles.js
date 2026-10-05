@@ -47,21 +47,26 @@ VIEWS.profile = (route) => {
   const fix = fixCommand(r.service, r.profile, Boolean(PLUGIN_METADATA[r.service]?.reauth));
   const sw = statusWord(st.status, isSession(r.service));
   const second = `${sw.symbol} ${sw.word}${st.status === 'ok' && st.at ? ` · tested ${relativeTime(st.at, now)}` : ''}`;
+  const inApp = canReauthInApp(r.service);
+  const signInAgain = html`<button class="button primary" data-action="reauth-in-app" data-ref="${ref}">Sign in again</button>`;
   const testing = st.status === 'testing';
   const testButton = (label) => html`<button class="button" data-action="test-one" data-ref="${ref}" ${testing ? raw('disabled') : ''}>${label}</button>`;
 
   const next = st.status === 'invalid'
     ? html`<p class="status bad mt-16"><span aria-hidden="true">✗</span> The last test failed: <span class="mono">${st.detail || 'no details were given'}</span></p>
-        <p>To fix it, run this on the hub, then test again.</p>${command(fix)}<div class="actions">${testButton('Test again')}</div>`
+        ${inApp ? html`<div class="actions">${signInAgain}${testButton('Test again')}</div>`
+          : html`<p>To fix it, run this on the hub, then test again.</p>${command(fix)}<div class="actions">${testButton('Test again')}</div>`}`
     : st.status === 'no-creds'
-      ? html`<p class="mt-16">This profile has no credentials yet. Run this on the hub, then test it.</p>${command(fix)}<div class="actions">${testButton('Test')}</div>`
+      ? (inApp
+        ? html`<p class="mt-16">This profile has no credentials yet.</p><div class="actions">${signInAgain}${testButton('Test')}</div>`
+        : html`<p class="mt-16">This profile has no credentials yet. Run this on the hub, then test it.</p>${command(fix)}<div class="actions">${testButton('Test')}</div>`)
       : html`<div class="actions">${testButton(testing ? 'Testing…' : 'Test')}</div>`;
 
   return html`
     ${pageHead({ path: [{ href: '#profiles', label: 'Profiles' }, { label: displayName(r.service) }], title: r.profile, rename: { key: `profile:${ref}`, submit: 'rename-profile' } })}
     <div class="columns">
       <section>
-        <div class="lead-panel">${tile(r.service, 'lg')}${displayPanel('Signed in as', r.account || (r.url ? linkLabel(r.url) : ref), second)}</div>
+        <div class="lead-panel">${tile(r.service, 'lg')}${displayPanel('Signed in as', r.account || (r.url && !r.serviceUrl ? linkLabel(r.url) : r.profile), second)}</div>
         ${r.url && /^https?:\/\//i.test(r.url) ? html`<p class="note">${linkOut(r)}</p>` : ''}
         ${r.info && r.info !== r.account ? html`<p class="note">${r.info}</p>` : ''}
         ${next}

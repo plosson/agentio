@@ -78,6 +78,8 @@ window.addEventListener('agentio:profiles-changed', async (ev) => {
     ? routeHash({ view: 'profile', ref: `${service}/${profile}` })
     : '#profiles';
   render();
+  // The profile was signed in again: find out whether it works now.
+  if (typeof service === 'string' && typeof profile === 'string') testProfiles([`${service}/${profile}`]);
 });
 
 let lastHash = location.hash;

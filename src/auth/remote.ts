@@ -4,8 +4,8 @@ import { join } from 'path';
 import { cannotManageProfilesError, CliError, httpStatusToErrorCode, type ErrorCode } from '../utils/errors';
 import { assertTestWritable, configDir } from '../vault/pointer';
 import type { ServiceName } from '../types/config';
-import type { ProfileRef, SetProfileOptions } from '../config/config-manager';
-import type { WriteOutcome } from '../config/profile-store';
+import type { ProfileRef } from '../config/config-manager';
+import type { SaveProfileOptions, WriteOutcome } from '../config/profile-store';
 import { decodeToken, type TokenParts } from './token';
 
 /**
@@ -250,14 +250,18 @@ export function remoteCanManageProfiles(): Promise<boolean | undefined> {
 }
 
 /** The body of `PUT /v1/profiles/:service/:name`; the hub parses this same type. */
-export type RemoteAddBody = SetProfileOptions & { credentials: object };
+export type RemoteAddBody = SaveProfileOptions & { credentials: object };
 
 /** The body of `PATCH /v1/profiles/:service/:name`; the hub parses this same type. */
 export type RemoteRenameBody = { name: string };
 
 /** A `profile add` finished on this machine, handed to the hub to store. Replaces what the key already reaches. */
-export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SetProfileOptions): Promise<void> {
-  const body: RemoteAddBody = { ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }), credentials };
+export async function remoteSaveProfile(service: ServiceName, name: string, credentials: object, options: SaveProfileOptions): Promise<void> {
+  const body: RemoteAddBody = {
+    ...(options.readOnly === undefined ? {} : { readOnly: options.readOnly }),
+    ...(options.replaceOnly ? { replaceOnly: true } : {}),
+    credentials,
+  };
   await hubRequest(profileRoute(service, name), 'PUT', body);
 }
 
@@ -301,6 +305,11 @@ export interface CredentialReadOptions {
    * than answering null as if none were stored. For a caller about to use them.
    */
   strict?: boolean;
+  /**
+   * false: the credentials as stored, without the hub refreshing them first. For a re-sign-in,
+   * which replaces them anyway and must not stop at a refresh that can no longer succeed.
+   */
+  refresh?: boolean;
 }
 
 /** Fresh credentials from the hub, in the shape the local code expects, or null when none are stored. */
@@ -310,7 +319,8 @@ export async function remoteCredentials<T = Record<string, unknown>>(
   options: CredentialReadOptions = {},
 ): Promise<T | null> {
   try {
-    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials`, 'POST')).credentials;
+    const query = options.refresh === false ? '?refresh=false' : '';
+    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials${query}`, 'POST')).credentials;
   } catch (err) {
     // NOT_FOUND is "nothing to hand out"; an unknown profile stays PROFILE_NOT_FOUND.
     if (!(err instanceof CliError) || err.code !== 'NOT_FOUND') throw err;

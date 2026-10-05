@@ -151,7 +151,8 @@ function refuseSessionCredentials(service: ServiceName): void {
   }
 }
 
-async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string): Promise<Response> {
+/** `refresh: false` hands out the stored credentials as they are, for a re-sign-in that replaces them. */
+async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string, refresh: boolean): Promise<Response> {
   const readOnly = await allowedProfile(key, service, name);
   refuseSessionCredentials(service);
   await requireStoredCredentials(service, name);
@@ -162,7 +163,10 @@ async function handleCredentials(key: ApiKeyView, service: ServiceName, name: st
       'Update the hub to an agentio version that includes this plugin',
     );
   }
-  const { credentials, refreshed } = await audited(key, 'credentials', service, name, () => hubCredentials(service, name), (r) => r.refreshed);
+  const read = refresh
+    ? () => hubCredentials(service, name)
+    : async () => ({ credentials: (await getCredentials<Record<string, unknown>>(service, name))!, refreshed: false });
+  const { credentials, refreshed } = await audited(key, 'credentials', service, name, read, (r) => r.refreshed);
   return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
 }
 
@@ -197,11 +201,13 @@ async function handleSave(request: Request, key: ApiKeyView, service: ServiceNam
   const body = await readJson<Partial<Record<keyof RemoteAddBody, unknown>>>(request);
   // Undefined means "not stated", which a replace answers by keeping the owner's flag.
   const stated = body.readOnly === undefined ? undefined : validateFlag('readOnly', body.readOnly);
+  // A re-sign-in replaces; a profile deleted meanwhile is refused rather than created again.
+  const replaceOnly = body.replaceOnly === undefined ? false : validateFlag('replaceOnly', body.replaceOnly);
   const { credentials } = body;
   if (typeof credentials !== 'object' || credentials === null || Array.isArray(credentials) || Object.keys(credentials).length === 0) {
     throw new CliError('INVALID_PARAMS', 'credentials must be a non-empty object');
   }
-  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated }));
+  await applyWrite(key, 'save', service, name, () => saveProfileForKey(key.id, service, name, credentials, { readOnly: stated, replaceOnly }));
   // Report what the profile ends up with, which for a replace may be the flag already stored.
   return json({ service, name, readOnly: await isProfileReadOnly(service, name) }, 201);
 }
@@ -328,7 +334,9 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
 
     const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
-    if (ref && ref.action === 'credentials' && method === 'POST') return await handleCredentials(key, ref.service, ref.name);
+    if (ref && ref.action === 'credentials' && method === 'POST') {
+      return await handleCredentials(key, ref.service, ref.name, new URL(request.url).searchParams.get('refresh') !== 'false');
+    }
     if (ref && ref.action === null && method === 'PUT') return await handleSave(request, key, ref.service, ref.name);
     if (ref && ref.action === null && method === 'PATCH') return await handleRename(request, key, ref.service, ref.name);
     if (ref && ref.action === null && method === 'DELETE') return await handleDelete(key, ref.service, ref.name);

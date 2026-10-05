@@ -16,7 +16,7 @@ export default defineServicePlugin<SpotifyCredentials>()({
     setup: spotifyProfileAdd,
     createClient: (credentials) => new SpotifyClient(credentials),
     describe: (credentials) => ({ account: credentials.displayName ?? credentials.userId }),
-    reauthenticate: reauthenticateSpotify,
+    reauthenticate: (credentials, profileName) => reauthenticateSpotify(credentials, profileName),
   },
   credentialLifecycle: spotifyCredentialLifecycle,
 });

@@ -1,9 +1,10 @@
-import { launchBrowser } from '../../auth/oauth-server';
 import { CliError } from '../../utils/errors';
-import { prompt } from '../../utils/stdin';
+import type { SetupContext } from '../../plugin-sdk';
+import { createSetupContext } from '../host-context';
 import type { CredentialLifecycle } from '../types';
 import { DropboxClient } from './client';
 import { buildAuthorizeUrl, createPkcePair, exchangeCodeForTokens, refreshDropboxToken } from './oauth';
+import { CODE_INPUT } from './setup-needs';
 import type { DropboxCredentials } from './types';
 
 export const dropboxCredentialLifecycle: CredentialLifecycle<DropboxCredentials> = {
@@ -24,14 +25,15 @@ export const dropboxCredentialLifecycle: CredentialLifecycle<DropboxCredentials>
 export async function reauthenticateDropbox(
   credentials: DropboxCredentials | null,
   profileName: string,
+  context: SetupContext = createSetupContext(),
 ): Promise<DropboxCredentials> {
   if (!credentials?.appKey) throw new CliError('AUTH_FAILED', 'Dropbox app key is missing');
-  console.error(`\nRe-authenticating dropbox / ${profileName}...`);
+  context.log(`\nRe-authenticating dropbox / ${profileName}...`);
   const { verifier, challenge } = createPkcePair();
   const authUrl = buildAuthorizeUrl(credentials.appKey, challenge);
-  console.error(`  ${authUrl}\n`);
-  launchBrowser(authUrl);
-  const code = (await prompt('? Paste the authorisation code: ')).trim();
+  context.log(`  ${authUrl}\n`);
+  context.openUrl(authUrl);
+  const code = (await context.ask(CODE_INPUT)).trim();
   if (!code) throw new CliError('INVALID_PARAMS', 'Authorisation code is required');
   const tokens = await exchangeCodeForTokens(code, credentials.appKey, verifier);
   const replacement: DropboxCredentials = {
@@ -42,6 +44,6 @@ export async function reauthenticateDropbox(
     accountId: tokens.accountId ?? credentials.accountId,
   };
   const account = await new DropboxClient(replacement).account();
-  console.error(`  Done (${account.email})`);
+  context.log(`  Done (${account.email})`);
   return { ...replacement, accountId: account.accountId, email: account.email, name: account.name };
 }

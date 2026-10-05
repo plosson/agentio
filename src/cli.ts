@@ -83,8 +83,8 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
 
   const BYPASS_COMMANDS = new Set(['docs', 'update', 'doctor', 'vault', 'login', 'logout', 'plugin']);
   // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
-  const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove']);
-  // Owner-only on the hub host: they touch the vault or the daemon.
+  const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove', 'reauth']);
+  // Owner-only on the hub host: they touch the vault or the daemon. The top-level `reauth` is the bulk one.
   const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {

@@ -21,7 +21,8 @@ import {
   printDropboxUploaded,
 } from './output';
 import type { DropboxCredentials } from './types';
-import type { InputSpec, SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { APP_KEY_INPUT, CODE_INPUT, DROPBOX_SETUP_NEEDS } from './setup-needs';
 
 const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
   service: 'dropbox',
@@ -408,12 +409,6 @@ Deleted items go to the Dropbox trash and stay recoverable for 30 days
     }
   });
 }
-
-const APP_KEY_INPUT: InputSpec = { id: 'appKey', label: 'App key', kind: 'text', help: 'From your app at https://www.dropbox.com/developers/apps (Settings tab)' };
-const CODE_INPUT: InputSpec = { id: 'code', label: 'Code Dropbox shows after you allow access', kind: 'secret' };
-
-/** What Dropbox setup needs: your app's key, then the code Dropbox shows in the browser. */
-export const DROPBOX_SETUP_NEEDS: SetupNeeds = { inputs: [APP_KEY_INPUT], auth: 'browser-code' };
 
 export interface DropboxProfileAddOptions {
   profile?: string;

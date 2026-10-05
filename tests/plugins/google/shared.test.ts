@@ -8,6 +8,7 @@ import {
   type GoogleCamelCredentials,
   type GoogleSnakeCredentials,
 } from '../../../src/plugins/google/shared';
+import { fakeSetupContext } from '../../helpers/setup-context';
 
 const tokens = {
   access_token: 'access-new',
@@ -35,20 +36,24 @@ describe('shared Google plugin lifecycle', () => {
   });
 
   test('reauthenticates snake and camel credential shapes through shared code', async () => {
-    const performOAuth = mock(async () => tokens);
+    const performOAuth = mock(async (_service: unknown, _context: unknown) => tokens);
     const fetchEmail = mock(async () => 'user@example.test');
+    // The sign-in goes through the host's context, never a terminal of its own.
+    const context = fakeSetupContext({});
 
     const snake = await reauthenticateGoogleSnake<GoogleSnakeCredentials & { custom: boolean }>('gslides', performOAuth, fetchEmail)(
       { access_token: 'old', refresh_token: 'old-refresh', token_type: 'Bearer', custom: true },
       'work',
+      context,
     );
     const camel = await reauthenticateGoogleCamel<GoogleCamelCredentials & { custom: boolean }>('gscript', performOAuth, fetchEmail)(
       { accessToken: 'old', refreshToken: 'old-refresh', tokenType: 'Bearer', custom: true },
       'work',
+      context,
     );
 
     expect(snake).toMatchObject({ access_token: 'access-new', refresh_token: 'refresh-new', email: 'user@example.test', custom: true });
     expect(camel).toMatchObject({ accessToken: 'access-new', refreshToken: 'refresh-new', email: 'user@example.test', custom: true });
-    expect(performOAuth).toHaveBeenCalledTimes(2);
+    expect(performOAuth.mock.calls).toEqual([['gslides', context], ['gscript', context]]);
   });
 });

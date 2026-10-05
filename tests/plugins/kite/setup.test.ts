@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, statSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { existsSync, readdirSync, statSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { kiteProfileAdd, reauthenticateKite, type KiteSetupDeps } from '../../../src/plugins/kite/commands';
@@ -155,17 +155,14 @@ test('a successful add lands in the temp vault only', async () => {
 });
 
 describe('reauthenticate', () => {
-  // It builds a terminal context; with nothing on PATH, launching a browser cannot open anything.
-  const originalPath = process.env.PATH;
-  beforeEach(() => { process.env.PATH = mkdtempSync(join(tmpdir(), 'agentio-empty-path-')); });
-  afterEach(() => { process.env.PATH = originalPath; });
-
   test('keeps the URL, replaces the token and refreshes the email', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: 'new@example.com' };
-    const next = await reauthenticateKite({ ...OLD, baseUrl: fake.url }, 'existing', deps());
+    const next = await reauthenticateKite({ ...OLD, baseUrl: fake.url }, 'existing', fakeSetupContext({}, opened), deps());
     expect(next.baseUrl).toBe(fake.url);
     expect(next.token).not.toBe(OLD.token);
     expect(next.email).toBe('new@example.com');
+    // The address to approve went through the host's context, not a browser of its own.
+    expect(opened).toEqual([`${fake.url}/auth/device?code=${[...fake.devices.values()][0].userCode}`]);
     expect(fetched.every((u) => u.startsWith(fake.url))).toBe(true);
   });
 
@@ -175,13 +172,13 @@ describe('reauthenticate', () => {
       for (const d of fake.devices.values()) fake.deny(d.userCode);
     });
     // The host writes only what the hook returns, so a throw must leave the vault alone.
-    const e = await caught(reauthenticateKite({ ...existing!, baseUrl: fake.url }, 'existing', deps()));
+    const e = await caught(reauthenticateKite({ ...existing!, baseUrl: fake.url }, 'existing', fakeSetupContext({}, opened), deps()));
     expect(e.code).toBe('AUTH_FAILED');
     expect(await getCredentials<KiteCredentials>('kite', 'existing')).toEqual(OLD);
   });
 
   test('credentials without a URL are a CONFIG_ERROR, with no request', async () => {
-    expect((await caught(reauthenticateKite(null, 'x', deps()))).code).toBe('CONFIG_ERROR');
+    expect((await caught(reauthenticateKite(null, 'x', fakeSetupContext({}, opened), deps()))).code).toBe('CONFIG_ERROR');
     expect(fetched).toEqual([]);
   });
 });

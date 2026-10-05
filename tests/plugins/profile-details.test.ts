@@ -28,8 +28,8 @@ describe('profileDetails', () => {
 
   test('falls back to the service web app when the profile has no link of its own', () => {
     expect(profileDetails(plugin(() => ({ account: 'me' }), 'https://mail.google.com'), {}))
-      .toEqual({ account: 'me', url: 'https://mail.google.com' });
-    expect(profileDetails(plugin(undefined, 'https://mail.google.com'), {})).toEqual({ url: 'https://mail.google.com' });
+      .toEqual({ account: 'me', url: 'https://mail.google.com', serviceUrl: true });
+    expect(profileDetails(plugin(undefined, 'https://mail.google.com'), {})).toEqual({ url: 'https://mail.google.com', serviceUrl: true });
   });
 
   test('a profile link wins over the service web app', () => {
@@ -42,7 +42,7 @@ describe('profileDetails', () => {
       expect(profileDetails(plugin(() => ({ url })), {})).toEqual({});
     }
     expect(profileDetails(plugin(() => ({ url: 'javascript:alert(1)' }), 'https://mail.google.com'), {}))
-      .toEqual({ url: 'https://mail.google.com' });
+      .toEqual({ url: 'https://mail.google.com', serviceUrl: true });
   });
 
   test('a link carrying credentials is refused', () => {
@@ -64,40 +64,40 @@ describe('profileDetails', () => {
 
   test('no plugin or no credentials: no details, beyond the service web app', () => {
     expect(profileDetails(undefined, {})).toEqual({});
-    expect(profileDetails(plugin(() => ({ account: 'me' }), 'https://mail.google.com'), null)).toEqual({ url: 'https://mail.google.com' });
+    expect(profileDetails(plugin(() => ({ account: 'me' }), 'https://mail.google.com'), null)).toEqual({ url: 'https://mail.google.com', serviceUrl: true });
   });
 });
 
 describe('what each service shows about a profile', () => {
   // Realistic credential shapes; every secret holds a SECRET… value that must never come out.
-  const cases: Array<[string, Record<string, unknown>, { account?: string; url?: string }]> = [
-    ['gmail', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://mail.google.com' }],
-    ['gcal', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://calendar.google.com' }],
-    ['gtasks', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://tasks.google.com' }],
-    ['gdocs', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://docs.google.com' }],
-    ['gdrive', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://drive.google.com' }],
-    ['gsheets', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://sheets.google.com' }],
-    ['gslides', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://slides.google.com' }],
-    ['gscript', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://script.google.com' }],
-    ['gchat', { accessToken: 'SECRETa', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://chat.google.com' }],
-    ['gchat', { webhookUrl: 'https://chat.googleapis.com/v1/spaces/SECRETw' }, { url: 'https://chat.google.com' }],
+  const cases: Array<[string, Record<string, unknown>, { account?: string; url?: string; serviceUrl?: true }]> = [
+    ['gmail', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://mail.google.com', serviceUrl: true }],
+    ['gcal', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://calendar.google.com', serviceUrl: true }],
+    ['gtasks', { access_token: 'SECRETa', refresh_token: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://tasks.google.com', serviceUrl: true }],
+    ['gdocs', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://docs.google.com', serviceUrl: true }],
+    ['gdrive', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://drive.google.com', serviceUrl: true }],
+    ['gsheets', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://sheets.google.com', serviceUrl: true }],
+    ['gslides', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://slides.google.com', serviceUrl: true }],
+    ['gscript', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://script.google.com', serviceUrl: true }],
+    ['gchat', { accessToken: 'SECRETa', email: 'me@gmail.com' }, { account: 'me@gmail.com', url: 'https://chat.google.com', serviceUrl: true }],
+    ['gchat', { webhookUrl: 'https://chat.googleapis.com/v1/spaces/SECRETw' }, { url: 'https://chat.google.com', serviceUrl: true }],
     ['github', { accessToken: 'SECRETa', username: 'plosson', email: null }, { account: 'plosson', url: 'https://github.com/plosson' }],
-    ['dropbox', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@x.com', name: 'Me' }, { account: 'me@x.com', url: 'https://www.dropbox.com' }],
-    ['spotify', { accessToken: 'SECRETa', refreshToken: 'SECRETr', userId: '1160970855', displayName: 'Pierre' }, { account: 'Pierre', url: 'https://open.spotify.com' }],
+    ['dropbox', { accessToken: 'SECRETa', refreshToken: 'SECRETr', email: 'me@x.com', name: 'Me' }, { account: 'me@x.com', url: 'https://www.dropbox.com', serviceUrl: true }],
+    ['spotify', { accessToken: 'SECRETa', refreshToken: 'SECRETr', userId: '1160970855', displayName: 'Pierre' }, { account: 'Pierre', url: 'https://open.spotify.com', serviceUrl: true }],
     ['falco', { refreshToken: 'SECRETr', userEmail: 'me@x.com', organizationName: 'Docunit' }, { account: 'me@x.com · Docunit' }],
     ['discourse', { apiKey: 'SECRETk', baseUrl: 'https://forum.example.com', username: 'pal' }, { account: 'pal', url: 'https://forum.example.com' }],
     ['kite', { token: 'SECRETt', baseUrl: 'https://kite.example.com', email: 'me@x.com' }, { account: 'me@x.com', url: 'https://kite.example.com' }],
     ['notes', { apiKey: 'SECRETk', baseUrl: 'https://mac.example.ts.net' }, { url: 'https://mac.example.ts.net' }],
     ['jira', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
     ['confluence', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
-    ['revolut', { privateKey: 'SECRETp', refreshToken: 'SECRETr', accessToken: 'SECRETa', clientId: 'id' }, { url: 'https://business.revolut.com' }],
-    ['slack', { webhookUrl: 'https://hooks.slack.com/services/SECRETw', channelName: '#ops' }, { account: '#ops', url: 'https://app.slack.com' }],
+    ['revolut', { privateKey: 'SECRETp', refreshToken: 'SECRETr', accessToken: 'SECRETa', clientId: 'id' }, { url: 'https://business.revolut.com', serviceUrl: true }],
+    ['slack', { webhookUrl: 'https://hooks.slack.com/services/SECRETw', channelName: '#ops' }, { account: '#ops', url: 'https://app.slack.com', serviceUrl: true }],
     ['sql', { url: 'postgres://u:SECRETp@db.example.com/x', displayName: 'analytics' }, { account: 'analytics' }],
     ['secrets', { values: { A: 'SECRETa', B: 'SECRETb' } }, { account: '2 secrets' }],
     ['secrets', { values: { ONLY: 'SECRETo' } }, { account: '1 secret' }],
-    ['pagerio', { url: 'https://pagerio.chuut.com/p/SECRETtoken12345' }, { url: 'https://pagerio.chuut.com' }],
-    ['pocketalert', { apiKey: 'SECRETk' }, { url: 'https://pocketalert.app' }],
-    ['whatsapp', {}, { url: 'https://web.whatsapp.com' }],
+    ['pagerio', { url: 'https://pagerio.chuut.com/p/SECRETtoken12345' }, { url: 'https://pagerio.chuut.com', serviceUrl: true }],
+    ['pocketalert', { apiKey: 'SECRETk' }, { url: 'https://pocketalert.app', serviceUrl: true }],
+    ['whatsapp', {}, { url: 'https://web.whatsapp.com', serviceUrl: true }],
   ];
 
   for (const [service, credentials, expected] of cases) {

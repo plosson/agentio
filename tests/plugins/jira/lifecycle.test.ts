@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import { redactForRemote } from '../../../src/auth/refresh';
 import { jiraCredentialLifecycle, reauthenticateJira } from '../../../src/plugins/jira/lifecycle';
 import type { JiraCredentials } from '../../../src/plugins/jira/types';
+import { fakeSetupContext } from '../../helpers/setup-context';
 
 const credentials: JiraCredentials = {
   accessToken: 'access-old',
@@ -44,9 +45,11 @@ describe('Jira credential lifecycle', () => {
       siteUrl: 'https://new.atlassian.net',
     }));
 
-    const replacement = await reauthenticateJira(credentials, 'work', performOAuth);
+    const context = fakeSetupContext({});
+    const replacement = await reauthenticateJira(credentials, 'work', context, performOAuth);
 
-    expect(performOAuth).toHaveBeenCalledTimes(1);
+    // The sign-in goes through the host's context, never a terminal of its own.
+    expect(performOAuth.mock.calls).toEqual([[context]]);
     expect(replacement).toEqual({
       accessToken: 'access-new',
       refreshToken: 'refresh-new',

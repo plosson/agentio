@@ -8,6 +8,7 @@ import { getPluginRegistry } from '../plugins/registry';
 import { addProfileFromPlugin } from '../plugins/profile-host';
 import type { PluginRegistry } from '../plugins/plugin-registry';
 import { isLegacyServicePlugin } from '../plugins/types';
+import { addJsonOption } from '../utils/output';
 
 export type ProfileSummary = ProfileRef;
 
@@ -118,12 +119,14 @@ export function registerProfileCommands(program: Command, registry: PluginRegist
       }
     });
 
-  profile
-    .command('reauth')
-    .argument('<service>', `Service name (${knownServices.join(', ')})`)
-    .argument('[name]', 'Profile name (auto-resolves if exactly one exists)')
-    .description('Re-authenticate an expired or invalid profile')
-    .action(async (service: string, name: string | undefined) => {
+  addJsonOption(
+    profile
+      .command('reauth')
+      .argument('<service>', `Service name (${knownServices.join(', ')})`)
+      .argument('[name]', 'Profile name (auto-resolves if exactly one exists)')
+      .description('Re-authenticate an expired or invalid profile'),
+    'Print the sign-in as JSON events (code, open, ask, reauthed); answer questions on stdin',
+  ).action(async (service: string, name: string | undefined) => {
       try {
         assertKnownService(service);
         const resolved = await resolveProfile(service, name);
