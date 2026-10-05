@@ -3,6 +3,17 @@
 // Inside AgentIO Companion the app's bridge exists before this script runs: the page leaves room for the window's buttons.
 if (window.agentioCompanion?.present === true) document.documentElement.classList.add('app');
 
+// The app's web view ignores app-region: pressing an empty part of the sidebar, a header, or
+// the gate's background asks the app to move its window. Controls keep their clicks.
+const WINDOW_CONTROLS = 'a, button, input, select, textarea, label, summary, [data-action], [role="button"]';
+document.addEventListener('mousedown', (ev) => {
+  if (!document.documentElement.classList.contains('app') || ev.button !== 0 || ev.detail > 1) return;
+  const target = ev.target;
+  if (target.closest(WINDOW_CONTROLS)) return;
+  if (!target.closest('.sidebar, .pane-head') && !target.matches('.shell.bare > #main')) return;
+  window.agentioCompanion.dragWindow?.();
+});
+
 // The gate dialog is the only way back in: Esc must not close it over a dead session.
 $('gate-dialog').addEventListener('cancel', (ev) => ev.preventDefault());
 
