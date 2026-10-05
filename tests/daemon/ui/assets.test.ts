@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ICON_SVG, INDEX_HTML } from '../../../src/daemon/ui/assets';
+import { escapeHtml, raw } from '../../../src/daemon/ui/model';
 
 const FAMILY_CSS = `/* family.css: the same file in every product. */
 :root {
@@ -118,9 +119,11 @@ describe('the assembled admin page', () => {
     expect(r).toContain('LISTS[panes.list]');
     expect(r).toMatch(/classList\.toggle\('no-list', !lister\)/);
     expect(r).toMatch(/classList\.toggle\('selected', panes\.selected\)/);
-    // The same list keeps its scroll; another list starts at the top.
-    expect(r).toMatch(/const keep = list\.dataset\.list === \(panes\.list \|\| ''\) \? list\.scrollTop : 0;/);
-    expect(r).toMatch(/list\.scrollTop = keep;/);
+    // The same list keeps its scroll (kept in state, since a hidden pane loses it); another list starts at the top.
+    expect(r).toContain('if (list.dataset.list !== (panes.list || \'\')) delete state.ui.listScroll[panes.list];');
+    expect(r).toContain('list.scrollTop = state.ui.listScroll[panes.list] || 0;');
+    expect(r).not.toMatch(/=\s*list\.scrollTop/);
+    expect(r.indexOf('list.scrollTop =')).toBeGreaterThan(r.indexOf('list.innerHTML ='));
     // Focus is restored after both panes are drawn, so the filter box in the list keeps its caret.
     expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('list.innerHTML ='));
     expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('main.innerHTML ='));
@@ -395,6 +398,31 @@ describe('the assembled admin page', () => {
     expect(script.split('function glyph(')).toHaveLength(2);
   });
 
+  test('a multi-colour icon keeps its own colours, full size, outside the white group; corners clipped in CSS', () => {
+    const t = script.slice(script.indexOf('function tile('), script.indexOf('const GLYPHS'));
+    expect(t).toContain('fill="${escapeHtml(fill)}"');
+    expect(t).not.toContain('clipPath');
+    const ICONS = {
+      multi: ['Multi', null, [['#123456', 'M0 0h24v24H0z'], ['"><script>', 'M1 1h2']]],
+      single: ['Single', '#abcdef', 'M2 2h4'],
+    };
+    const tile = new Function('escapeHtml', 'raw', 'ICONS', 'PLUGIN_METADATA', 'displayName', `${t}; return tile;`)(
+      escapeHtml, raw, ICONS, {}, (s: string) => (ICONS as any)[s]?.[0] || s);
+    const multi: string = tile('multi').__html;
+    expect(multi).toContain('<rect width="24" height="24" rx="5.5"/>');
+    expect(multi).not.toContain('<g fill="white"');
+    expect(multi).toContain('<path fill="#123456" d="M0 0h24v24H0z"/>');
+    expect(multi).toContain('<path fill="&quot;&gt;&lt;script&gt;" d="M1 1h2"/>');
+    expect(multi).not.toContain('<script>');
+    // The paths come after the tile's rect, so they sit on it.
+    expect(multi.indexOf('<path')).toBeGreaterThan(multi.indexOf('<rect'));
+    const single: string = tile('single').__html;
+    expect(single).toContain('<g fill="white" transform="translate(5 5) scale(0.5833)"><path d="M2 2h4"/></g>');
+    const letter: string = tile('nothing').__html;
+    expect(letter).toMatch(/<g fill="white" transform="translate\(5 5\) scale\(0\.5833\)"><text [^>]*>N<\/text><\/g>/);
+    expect(style).toMatch(/\.svc-tile \{[^}]*clip-path: inset\(0 round 23%\)/);
+  });
+
   test('a tile with no brand colour is grey, and the logo stays white in both modes', () => {
     expect(style).toMatch(/\.svc-tile rect:not\(\[fill\]\) \{ fill: var\(--muted\); \}/);
     expect(adminCss).not.toMatch(/\.svc-tile g \{/);
@@ -407,6 +435,36 @@ describe('the assembled admin page', () => {
   test("a profile's page leads with its service tile", () => {
     const view = script.slice(script.indexOf('VIEWS.profile ='), script.indexOf('VIEWS.add ='));
     expect(view).toContain("<div class=\"lead-panel\">${tile(r.service, 'lg')}${displayPanel('Signed in as'");
+  });
+
+  test('the status in a selected row takes the row\'s text colour, not its tone', () => {
+    expect(style).toContain('.list-pane .item[aria-current="page"] .status { color: inherit; }');
+    // Placed after the tone rules, so it still wins should its selector ever lose specificity.
+    expect(style.indexOf('.list-pane .item[aria-current="page"] .status')).toBeGreaterThan(style.indexOf('.status.ok {'));
+  });
+
+  test('the list keeps its scroll in state, from a listener registered once', () => {
+    expect(script).toMatch(/ui: \{[^}]*listScroll: \{\}/);
+    const listeners = script.match(/\$\('list'\)\.addEventListener\('scroll'/g) || [];
+    expect(listeners).toHaveLength(1);
+    const boot = script.slice(script.indexOf("$('list').addEventListener('scroll'"));
+    const handler = boot.slice(0, boot.indexOf('});'));
+    // Nothing is stored for a pane with no list.
+    expect(handler).toMatch(/if \(!list\.dataset\.list\) return;/);
+    expect(handler).toContain('state.ui.listScroll[list.dataset.list] = list.scrollTop;');
+    // Not inside render(): a redraw must not register another listener.
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).not.toContain("addEventListener('scroll'");
+  });
+
+  test('the back link keeps a space between its chevron and its label on a narrow window', () => {
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.pane-head \.back \{[^}]*display: inline-flex[^}]*gap: 4px/);
+  });
+
+  test('"/" does nothing when the filter box is hidden', () => {
+    const keys = script.slice(script.indexOf("document.addEventListener('keydown'"), script.indexOf("document.addEventListener('submit'"));
+    expect(keys).toContain('if (!box || !box.offsetParent) return;');
+    expect(keys.indexOf('!box.offsetParent')).toBeLessThan(keys.indexOf('ev.preventDefault();\n  box.focus()'));
   });
 
   test('the list pane: search box with a magnifier, selected row in the accent colour, old grouped list gone', () => {

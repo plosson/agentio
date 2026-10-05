@@ -60,7 +60,7 @@ code, pre, .mono { font: var(--size-mono)/1.5 var(--mono); overflow-wrap: anywhe
   .list-pane { border-right: 0; }
   .shell.selected > .list-pane { display: none; }
   .shell:not(.selected):not(.no-list):not(.bare) > #main { display: none; }
-  .pane-head .back { display: inline-flex; align-items: center; min-height: var(--tap); }
+  .pane-head .back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--tap); }
 }
 
 /* ---------- Inside AgentIO Companion: the window's buttons sit over the top of the sidebar ---------- */
@@ -134,13 +134,14 @@ button.item { width: 100%; border: 0; background: none; font: inherit; text-alig
 .list-pane .item-message { font-size: var(--size-small); }
 .list-pane .item[aria-current="page"] { background: var(--link); color: var(--primary-fg); }
 .list-pane .item[aria-current="page"] .item-message, .list-pane .item[aria-current="page"] .item-meta { color: inherit; opacity: 0.85; }
+.list-pane .item[aria-current="page"] .status { color: inherit; }
 .list-pane .empty-state { padding: var(--s4) var(--s2); }
 .search { position: relative; margin: 8px 10px 4px; }
 .search .glyph { position: absolute; left: 9px; top: calc(var(--tap) / 2); transform: translateY(-50%); color: var(--muted); }
 .search .input { padding-left: 28px; background: var(--hover); border-color: transparent; }
 .search .muted { display: block; margin: 4px 2px 0; }
 
-.svc-tile { display: block; width: 30px; height: 30px; flex: none; }
+.svc-tile { display: block; width: 30px; height: 30px; flex: none; clip-path: inset(0 round 23%); }
 .svc-tile.sm { width: 20px; height: 20px; }
 .svc-tile.lg { width: 48px; height: 48px; }
 .svc-tile rect:not([fill]) { fill: var(--muted); }

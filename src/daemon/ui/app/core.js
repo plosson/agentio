@@ -11,7 +11,7 @@ const state = {
   pending: [],
   results: new Map(),
   loaded: false,
-  ui: {},
+  ui: { listScroll: {} },
 };
 
 /** route view -> (route) => Raw markup. Each screen file registers its views. */
@@ -54,13 +54,17 @@ function icon(service, cls = '') {
 function tile(service, cls = '') {
   const entry = ICONS[service];
   const colour = PLUGIN_METADATA[service]?.color || entry?.[1] || '';
-  const shapes = !entry
-    ? `<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="700">${escapeHtml((displayName(service)[0] || '?').toUpperCase())}</text>`
-    : Array.isArray(entry[2])
-      ? entry[2].map(([, d]) => `<path d="${escapeHtml(d)}"/>`).join('')
-      : `<path d="${escapeHtml(entry[2])}"/>`;
+  const rect = `<rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/>`;
+  // A multi-colour entry is full-colour art at 24 units: each path keeps its own fill, full size, on the tile.
+  // Its corners are clipped in admin.css (an SVG clip path would repeat its id on every tile).
+  if (entry && Array.isArray(entry[2])) {
+    return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${rect}${entry[2].map(([fill, d]) => `<path fill="${escapeHtml(fill)}" d="${escapeHtml(d)}"/>`).join('')}</svg>`);
+  }
+  const shapes = entry
+    ? `<path d="${escapeHtml(entry[2])}"/>`
+    : `<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="700">${escapeHtml((displayName(service)[0] || '?').toUpperCase())}</text>`;
   // Shapes are drawn at 24 units and shrunk to leave a margin; without a colour, the tile is grey (admin.css).
-  return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/><g fill="white" transform="translate(5 5) scale(0.5833)">${shapes}</g></svg>`);
+  return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${rect}<g fill="white" transform="translate(5 5) scale(0.5833)">${shapes}</g></svg>`);
 }
 
 /** Toolbar symbols, drawn in the text colour. */
@@ -345,12 +349,13 @@ function render() {
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
-  // The same list keeps its scroll when a row is chosen; another list starts at the top.
+  // The same list keeps its scroll when a row is chosen; another list starts at the top. The scroll is
+  // kept in state (main.js stores it): a narrow window hides the list once a row is chosen, and a hidden pane loses it.
   const list = $('list');
-  const keep = list.dataset.list === (panes.list || '') ? list.scrollTop : 0;
+  if (list.dataset.list !== (panes.list || '')) delete state.ui.listScroll[panes.list];
   list.innerHTML = lister ? lister(route).__html : '';
   list.dataset.list = lister ? panes.list : '';
-  list.scrollTop = keep;
+  list.scrollTop = state.ui.listScroll[panes.list] || 0;
   main.innerHTML = view(route).__html;
   const pending = route.view === 'authorize' ? '' : signInBanner().__html;
   const head = main.querySelector(':scope > .pane-head');

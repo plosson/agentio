@@ -38,10 +38,18 @@ document.addEventListener('keydown', (ev) => {
   const target = ev.target;
   if (target.closest('input, textarea, select, [contenteditable]')) return;
   const box = $('profile-filter');
-  if (!box) return;
+  // The box is in the list pane, which a narrow window hides once a row is open.
+  if (!box || !box.offsetParent) return;
   ev.preventDefault();
   box.focus();
   box.select();
+});
+
+// The list pane's scroll lives in state, so render() can put it back even after a narrow window hid the pane.
+$('list').addEventListener('scroll', () => {
+  const list = $('list');
+  if (!list.dataset.list) return;
+  state.ui.listScroll[list.dataset.list] = list.scrollTop;
 });
 
 document.addEventListener('submit', (ev) => {
