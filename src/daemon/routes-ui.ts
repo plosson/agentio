@@ -143,7 +143,8 @@ type KeyBody = ApiKeyInput & { url?: unknown };
 
 async function handleCreateKey(request: Request): Promise<Response> {
   const body = await readJson<KeyBody>(request);
-  return json(await createApiKey(body, body.url), 201);
+  const { key, token } = await createApiKey(body, body.url);
+  return json({ key, token }, 201);
 }
 
 async function handleUpdateKey(request: Request, id: string): Promise<Response> {

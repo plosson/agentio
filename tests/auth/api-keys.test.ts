@@ -3,7 +3,7 @@ import { withTempVault } from '../helpers/vault';
 import { loadVault } from '../../src/vault/vault';
 import { updateConfig } from '../../src/config/config-manager';
 import { deleteProfile } from '../../src/config/profile-store';
-import { authenticateToken, createApiKey, describeScope, grantProfileToKey, keyAllows, listApiKeys, revokeApiKey, rotateApiKey, touchApiKey, updateApiKey, newKeyId } from '../../src/auth/api-keys';
+import { authenticateToken, createApiKey, describeScope, grantProfileToKey, keyAllows, keyProvenBy, listApiKeys, revokeApiKey, rotateApiKey, tokenProof, touchApiKey, updateApiKey, newKeyId } from '../../src/auth/api-keys';
 import { decodeToken, encodeToken } from '../../src/auth/token';
 
 const HUB = 'https://vault.example.com';
@@ -146,5 +146,52 @@ describe('api keys', () => {
     const [scoped, all] = await listApiKeys();
     expect(scoped.allowedProfiles).toEqual(['gdrive/docs']);
     expect(all.allowedProfiles).toBe('*');
+  });
+
+  test('a token proof keeps the key id and a hash, never the secret', async () => {
+    const { key, token } = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB);
+    const proof = tokenProof(token)!;
+    expect(proof.kid).toBe(key.id);
+    expect(proof.secretHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(proof)).not.toContain(decodeToken(token).secret);
+    for (const bad of [undefined, 42, '', 'garbage', 'agio1.e30.x']) expect(tokenProof(bad)).toBeNull();
+  });
+
+  test('a proof stands for its key until the key is rotated or revoked', async () => {
+    const { key, token } = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB);
+    expect(await keyProvenBy(tokenProof(token)!)).toEqual(key);
+    expect(await keyProvenBy({ kid: key.id, secretHash: '0'.repeat(64) })).toBeNull();
+    expect(await keyProvenBy({ kid: 'nope', secretHash: tokenProof(token)!.secretHash })).toBeNull();
+    // A hash of the wrong length is a mismatch, not a crash.
+    expect(await keyProvenBy({ kid: key.id, secretHash: 'ab' })).toBeNull();
+    await rotateApiKey(key.id, HUB);
+    expect(await keyProvenBy(tokenProof(token)!)).toBeNull();
+  });
+
+  test('creating with a proof revokes the proven key in the same write', async () => {
+    const other = await createApiKey({ name: 'desktop', allowedProfiles: '*', readOnly: true }, HUB);
+    const old = await createApiKey({ name: 'laptop', allowedProfiles: ['gmail/work'], readOnly: true }, HUB);
+    const fresh = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB, tokenProof(old.token));
+    expect(fresh.replaced).toEqual(old.key);
+    expect(fresh.key.id).not.toBe(old.key.id);
+    expect(await authenticateToken(old.token)).toBeNull();
+    expect(await authenticateToken(fresh.token)).toEqual(fresh.key);
+    expect((await listApiKeys()).map((k) => k.id).sort()).toEqual([other.key.id, fresh.key.id].sort());
+  });
+
+  test('a proof that no longer stands, or none, replaces nothing', async () => {
+    const old = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB);
+    const proof = tokenProof(old.token)!;
+    await rotateApiKey(old.key.id, HUB);
+    const fresh = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB, proof);
+    expect(fresh.replaced).toBeNull();
+    expect((await listApiKeys()).map((k) => k.id)).toContain(old.key.id);
+    expect((await createApiKey({ name: 'x', allowedProfiles: '*', readOnly: false }, HUB)).replaced).toBeNull();
+  });
+
+  test('a bad input with a proof leaves the old key alone', async () => {
+    const old = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB);
+    await expect(createApiKey({ name: 'laptop', allowedProfiles: ['nope/x'], readOnly: false }, HUB, tokenProof(old.token))).rejects.toThrow('Unknown profile');
+    expect(await authenticateToken(old.token)).toEqual(old.key);
   });
 });
