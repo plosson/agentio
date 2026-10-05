@@ -22,7 +22,7 @@ import {
 } from './output';
 import type { DropboxCredentials } from './types';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { APP_KEY_INPUT, CODE_INPUT, DROPBOX_SETUP_NEEDS } from './setup-needs';
+import { APP_KEY_INPUT, CODE_INPUT } from './setup-needs';
 
 const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
   service: 'dropbox',
@@ -403,7 +403,7 @@ Deleted items go to the Dropbox trash and stay recoverable for 30 days
       .option('--read-only', 'Create as read-only profile (blocks write operations)'),
   ).action(async (options) => {
     try {
-      await addProfileWithSetup('dropbox', (o, context) => dropboxProfileAdd(o as DropboxProfileAddOptions, context), options, DROPBOX_SETUP_NEEDS);
+      await addProfileWithSetup('dropbox', (o, context) => dropboxProfileAdd(o as DropboxProfileAddOptions, context), options);
     } catch (error) {
       handleError(error);
     }

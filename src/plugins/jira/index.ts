@@ -1,6 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { JiraClient } from './client';
-import { JIRA_SETUP_NEEDS, jiraProfileAdd, registerJiraCommands } from './commands';
+import { jiraProfileAdd, registerJiraCommands } from './commands';
+import { JIRA_SETUP_NEEDS } from './setup-needs';
 import { jiraCredentialLifecycle, reauthenticateJira } from './lifecycle';
 import type { JiraCredentials } from './types';
 

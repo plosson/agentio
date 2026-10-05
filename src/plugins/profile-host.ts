@@ -4,6 +4,7 @@ import type { ProfileAddOptions } from './types';
 import { createJsonSetupContext, createSetupContext } from './host-context';
 import type { RegisteredServicePlugin } from './types';
 import { readInputs } from './setup-inputs';
+import { findServicePlugin } from './registry';
 import type { SetupContext, SetupNeeds, SetupResult } from '../plugin-sdk';
 import { addJsonOption, isJsonMode, printJson } from '../utils/output';
 import { createLineReader } from '../utils/line-reader';
@@ -52,7 +53,7 @@ function cannotRunAsJson(service: string): CliError {
  * Run a plugin's setup in the mode its options ask for: `--describe` prints its needs; `--json` runs it
  * for a program (events on stdout, values and answers on stdin); otherwise it runs in the terminal.
  */
-export async function addProfileWithSetup<TCredentials extends object>(
+async function runProfileSetup<TCredentials extends object>(
   service: string,
   setup: (options: ProfileAddOptions, context: SetupContext) => Promise<SetupResult<TCredentials>>,
   options: SetupCommandOptions,
@@ -83,6 +84,20 @@ export async function addProfileWithSetup<TCredentials extends object>(
   }
 }
 
+/**
+ * Run `<service> profile add` in the mode its options ask for, with the needs the plugin declares:
+ * the hub page, AgentIO Companion and this command read the same declaration.
+ */
+export function addProfileWithSetup<TCredentials extends object>(
+  service: string,
+  setup: (options: ProfileAddOptions, context: SetupContext) => Promise<SetupResult<TCredentials>>,
+  options: SetupCommandOptions,
+): Promise<void> {
+  // Read when the command runs, not when this module loads: the registry imports every plugin, and
+  // every plugin's commands import this module.
+  return runProfileSetup(service, setup, options, findServicePlugin(service)?.profile?.needs);
+}
+
 /** Run plugin-owned authentication, then let the host name and persist it. */
 export async function addProfileFromPlugin(
   plugin: RegisteredServicePlugin,
@@ -91,7 +106,7 @@ export async function addProfileFromPlugin(
   if (!plugin.profile) throw new Error(`No profile setup registered for ${plugin.id}`);
   const profile = plugin.profile;
   // The spread gives declarative plugins the open-ended options their setup takes.
-  await addProfileWithSetup(plugin.id, (o, context) => profile.setup({ ...o }, context), options, profile.needs);
+  await runProfileSetup(plugin.id, (o, context) => profile.setup({ ...o }, context), options, profile.needs);
 }
 
 /**

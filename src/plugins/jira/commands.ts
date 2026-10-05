@@ -17,7 +17,7 @@ import {
   printJiraTransitionResult,
 } from './output';
 import type { JiraCredentials } from './types';
-import type { SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
 
 const getJiraClient = createClientGetter<JiraCredentials, JiraClient>({
   service: 'jira',
@@ -225,15 +225,12 @@ Combine with AND / OR / NOT. Quote multi-word values.`,
       .option('--read-only', 'Create as read-only profile (blocks write operations)'),
   ).action(async (options) => {
     try {
-      await addProfileWithSetup('jira', jiraProfileAdd, options, JIRA_SETUP_NEEDS);
+      await addProfileWithSetup('jira', jiraProfileAdd, options);
     } catch (error) {
       handleError(error);
     }
   });
 }
-
-/** What JIRA setup needs: only an Atlassian sign-in in the browser. */
-export const JIRA_SETUP_NEEDS: SetupNeeds = { inputs: [], auth: 'browser' };
 
 export async function jiraProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<JiraCredentials>> {
   context.log('\nJIRA OAuth Setup\n');

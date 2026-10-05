@@ -5,7 +5,7 @@ import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
-import type { SetupContext, SetupNeeds } from '../../../plugin-sdk';
+import type { SetupContext } from '../../../plugin-sdk';
 import { performOAuthFlow } from '../oauth';
 import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
@@ -1149,15 +1149,12 @@ Requires Chrome, Chromium, or Microsoft Edge installed locally.`,
       .option('--read-only', 'Create as read-only profile (blocks write operations)'),
   ).action(async (options) => {
     try {
-      await addProfileWithSetup('gmail', gmailProfileAdd, options, GMAIL_SETUP_NEEDS);
+      await addProfileWithSetup('gmail', gmailProfileAdd, options);
     } catch (error) {
       handleError(error);
     }
   });
 }
-
-/** What Gmail setup needs: only a Google sign-in in the browser. */
-export const GMAIL_SETUP_NEEDS: SetupNeeds = { inputs: [], auth: 'browser' };
 
 export async function gmailProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext) {
   context.log('Starting OAuth flow for Gmail...\n');
