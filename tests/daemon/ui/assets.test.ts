@@ -258,6 +258,8 @@ describe('the assembled admin page', () => {
   });
 
   test('"Signed in as" never shows the service address', () => {
+    // loadAll's row mapping must carry serviceUrl, or the page never sees it.
+    expect(script).toMatch(/account: p\.account, url: p\.url, serviceUrl: p\.serviceUrl \}/);
     expect(script).toContain("displayPanel('Signed in as', r.account || (r.url && !r.serviceUrl ? linkLabel(r.url) : r.profile)");
   });
 

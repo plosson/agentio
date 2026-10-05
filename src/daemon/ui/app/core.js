@@ -262,7 +262,7 @@ async function loadAll() {
   if (status.ok) {
     state.version = status.body.version || '';
     state.rows = Object.entries(status.body.services).flatMap(([service, list]) =>
-      list.map((p) => ({ service, profile: p.profile, readOnly: Boolean(p.readOnly), status: p.status, info: p.info, error: p.error, account: p.account, url: p.url })));
+      list.map((p) => ({ service, profile: p.profile, readOnly: Boolean(p.readOnly), status: p.status, info: p.info, error: p.error, account: p.account, url: p.url, serviceUrl: p.serviceUrl })));
   }
   if (keys.ok) state.keys = keys.body.keys;
   if (pending.ok) state.pending = pending.body.requests;
