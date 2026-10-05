@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { selectJiraSite } from '../../../src/plugins/jira/lifecycle';
+import { selectJiraSite } from '../../../src/plugins/jira/oauth';
 import { fakeSetupContext } from '../../helpers/setup-context';
 
 const sites = [

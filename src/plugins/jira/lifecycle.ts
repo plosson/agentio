@@ -1,20 +1,7 @@
-import type { SetupContext } from '../../plugin-sdk';
 import { createSetupContext } from '../host-context';
 import type { CredentialLifecycle } from '../types';
-import { performJiraOAuthFlow, refreshJiraToken, type AtlassianSite } from './oauth';
+import { performJiraOAuthFlow, refreshJiraToken } from './oauth';
 import type { JiraCredentials } from './types';
-
-/** The Jira site to use: asked only when the account reaches several. */
-export async function selectJiraSite(sites: AtlassianSite[], context: SetupContext): Promise<AtlassianSite> {
-  if (sites.length === 1) return sites[0];
-  const id = await context.ask({
-    id: 'site',
-    label: 'Jira site',
-    kind: 'choice',
-    choices: sites.map((site) => ({ value: site.id, label: `${site.name} (${site.url})` })),
-  });
-  return sites.find((site) => site.id === id)!;
-}
 
 export const jiraCredentialLifecycle: CredentialLifecycle<JiraCredentials> = {
   secretFields: ['refreshToken'],

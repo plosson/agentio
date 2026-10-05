@@ -1,7 +1,6 @@
 import { URL } from 'url';
 import { JIRA_OAUTH_CONFIG } from '../../config/credentials';
 import type { SetupContext } from '../../plugin-sdk';
-import { selectJiraSite } from './lifecycle';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
@@ -30,6 +29,18 @@ export interface AtlassianSite {
   name: string;
   scopes: string[];
   avatarUrl?: string;
+}
+
+/** The Jira site to use: asked only when the account reaches several. */
+export async function selectJiraSite(sites: AtlassianSite[], context: SetupContext): Promise<AtlassianSite> {
+  if (sites.length === 1) return sites[0];
+  const id = await context.ask({
+    id: 'site',
+    label: 'Jira site',
+    kind: 'choice',
+    choices: sites.map((site) => ({ value: site.id, label: `${site.name} (${site.url})` })),
+  });
+  return sites.find((site) => site.id === id)!;
 }
 
 
