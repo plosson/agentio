@@ -4,6 +4,15 @@ const script = Bun.which('script');
 const SRC = new URL('../../src/utils/stdin.ts', import.meta.url).pathname;
 
 /**
+ * `script` running "$BUN" -e "$PROGRAM" in a pseudo-terminal. BSD `script`
+ * (macOS) takes the command as arguments; util-linux `script` (Linux CI) takes
+ * it as one string after -c, and -e to return the command's exit code.
+ */
+const IN_TERMINAL = process.platform === 'darwin'
+  ? '"$SCRIPT" -q /dev/null "$BUN" -e "$PROGRAM"'
+  : '"$SCRIPT" -qec \'"$BUN" -e "$PROGRAM"\' /dev/null';
+
+/**
  * Run promptHidden in a pseudo-terminal (via `script`), type `typed` after the
  * prompt is up, and report how it ended. `script` needs a real stdin, so a
  * shell feeds it.
@@ -11,7 +20,7 @@ const SRC = new URL('../../src/utils/stdin.ts', import.meta.url).pathname;
 async function runPrompt(typed: string): Promise<{ exited: boolean; code: number | null; out: string }> {
   const program = `import { promptHidden } from ${JSON.stringify(SRC)}; const v = await promptHidden('ASK> '); console.log('GOT[' + v + ']');`;
   const proc = Bun.spawn(
-    ['sh', '-c', `(sleep 1; printf "$TYPED") | "$SCRIPT" -q /dev/null "$BUN" -e "$PROGRAM"`],
+    ['sh', '-c', `(sleep 1; printf "$TYPED") | ${IN_TERMINAL}`],
     { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, TYPED: typed, SCRIPT: script!, BUN: process.execPath, PROGRAM: program } },
   );
   let out = '';
