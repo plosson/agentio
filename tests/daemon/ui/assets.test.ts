@@ -455,10 +455,33 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/\.pane-head \.title \{[^}]*min-width: 0/);
   });
 
-  test('components: every control is at least 44 px tall, and the focus ring is visible', () => {
+  test('components: every control is as tall as --tap (44 px on touch screens), and the focus ring is visible', () => {
     expect(style).toMatch(/\.button \{[^}]*min-height: var\(--tap\)/);
     expect(style).toMatch(/\.input \{[^}]*min-height: var\(--tap\)/);
     expect(style).toMatch(/:focus-visible \{ outline: 3px solid var\(--link\); outline-offset: 2px; \}/);
+    // No control sets a fixed height of its own: it would ignore the touch size.
+    expect(adminCss).not.toMatch(/\.(button|input)[^{]*\{[^}]*\bheight: \d/);
+  });
+
+  test('Mac components: raised buttons, light panels, small grey captions over grouped lists', () => {
+    expect(style).toMatch(/\.button \{[^}]*box-shadow: var\(--shadow\)/);
+    expect(style).toMatch(/\.display \{[^}]*background: var\(--card\)/);
+    expect(style).not.toMatch(/\.display \.label \{[^}]*text-transform: uppercase/);
+    expect(style).toMatch(/\nh2 \{[^}]*color: var\(--muted\)/);
+    expect(style).toMatch(/dialog\.dialog h2 \{[^}]*color: var\(--fg\)/);
+    expect(style).not.toMatch(/\.empty-state \{[^}]*dashed/);
+  });
+
+  test('status dots use the system colours, one per tone', () => {
+    for (const tone of ['ok', 'bad', 'warn']) expect(style).toContain(`.dot.${tone} { background: var(--dot-${tone}); }`);
+    expect(style).toContain('.dot.neutral { background: var(--old-dot); }');
+  });
+
+  test('switches are Mac-sized with a mouse and 51 by 31 on a touch screen', () => {
+    expect(style).toMatch(/:root \{[^}]*--switch-w: 32px; --switch-h: 19px;/);
+    expect(style).toMatch(/@media \(pointer: coarse\) \{ :root \{ --switch-w: 51px; --switch-h: 31px; \} \}/);
+    expect(style).toMatch(/\.switch \{[^}]*width: var\(--switch-w\); height: var\(--switch-h\)/);
+    expect(style).toMatch(/\.switch input:checked \+ span::after \{ transform: translateX\(calc\(var\(--switch-w\) - var\(--switch-h\)\)\); \}/);
   });
 
   test('motion: everything stops for reduced motion', () => {
