@@ -6,15 +6,16 @@ import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { signInToGoogle, toCamelTokens } from '../shared';
+import { GCHAT_TYPE_INPUT, GCHAT_WEBHOOK_INPUT } from '../setup-needs';
 import { GChatClient } from './client';
 import { CliError, handleError } from '../../../utils/errors';
-import { readStdin, prompt } from '../../../utils/stdin';
-import { interactiveSelect } from '../../../utils/interactive';
+import { readStdin } from '../../../utils/stdin';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from './output';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from './types';
-import type { SetupResult } from '../../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../../plugin-sdk';
 
 const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
   service: 'gchat',
@@ -381,38 +382,35 @@ export function registerGChatCommands(program: Command): void {
     });
 }
 
-export async function gchatProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<GChatCredentials>> {
-  console.error('\nGoogle Chat Setup\n');
+export async function gchatProfileAdd(
+  options: { profile?: string; readOnly?: boolean },
+  context: SetupContext,
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+): Promise<SetupResult<GChatCredentials>> {
+  context.log('\nGoogle Chat Setup\n');
 
-  const profileType = await interactiveSelect({
-    message: 'Choose profile type:',
-    choices: [
-      { name: 'Webhook', value: 'webhook', description: 'Simple incoming webhook URL' },
-      { name: 'OAuth', value: 'oauth', description: 'Full API access with Google Workspace account' },
-    ],
-  });
-
+  const profileType = await context.ask(GCHAT_TYPE_INPUT);
   if (profileType === 'webhook') {
-    return setupWebhookProfile(options.profile);
+    return setupWebhookProfile(options.profile, context);
   }
-  return setupOAuthProfile();
+  return setupOAuthProfile(context, performOAuth, fetchEmail);
 }
 
-async function setupWebhookProfile(suggestedName?: string): Promise<SetupResult<GChatWebhookCredentials>> {
-  console.error('Webhook Setup\n');
-  console.error('1. In Google Chat, find or create a space');
-  console.error('2. Go to Space Settings → Webhooks');
-  console.error('3. Create a new webhook and copy the URL\n');
+/** The address of a webhook, asked during the run: only a webhook profile has one. */
+async function askWebhookUrl(context: SetupContext): Promise<string> {
+  const webhookUrl = await context.ask(GCHAT_WEBHOOK_INPUT);
+  await checkWebhook(webhookUrl, context);
+  return webhookUrl;
+}
 
-  const webhookUrl = await prompt('? Paste your webhook URL: ');
-
-  if (!webhookUrl) {
-    throw new CliError('INVALID_PARAMS', 'Webhook URL is required');
+/** Refuses an address that is not Google Chat's, then proves the webhook works with a test message. */
+async function checkWebhook(webhookUrl: string, context: SetupContext): Promise<void> {
+  if (!webhookUrl.startsWith('https://chat.googleapis.com/')) {
+    throw new CliError('INVALID_PARAMS', 'Not a Google Chat webhook URL', 'It starts with https://chat.googleapis.com/');
   }
-
-  // Validate webhook with a test request
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await context.fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -435,6 +433,12 @@ async function setupWebhookProfile(suggestedName?: string): Promise<SetupResult<
       'Check that the URL is correct and accessible'
     );
   }
+}
+
+async function setupWebhookProfile(suggestedName: string | undefined, context: SetupContext): Promise<SetupResult<GChatWebhookCredentials>> {
+  context.log('Webhook Setup\n');
+
+  const webhookUrl = await askWebhookUrl(context);
 
   const credentials: GChatWebhookCredentials = {
     type: 'webhook',
@@ -448,25 +452,16 @@ async function setupWebhookProfile(suggestedName?: string): Promise<SetupResult<
   };
 }
 
-async function setupOAuthProfile(): Promise<SetupResult<GChatOAuthCredentials>> {
-  console.error('OAuth Setup\n');
-  console.error('Starting OAuth flow for Google Chat profile...\n');
+async function setupOAuthProfile(
+  context: SetupContext,
+  performOAuth: typeof performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail,
+): Promise<SetupResult<GChatOAuthCredentials>> {
+  context.log('OAuth Setup\n');
+  context.log('Starting OAuth flow for Google Chat profile...\n');
 
-  const tokens = await performOAuthFlow('gchat');
+  const { tokens, email: userEmail } = await signInToGoogle('gchat', context, performOAuth, fetchEmail);
   const auth = createGoogleAuth(tokens);
-
-  // Fetch user email for profile naming
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to fetch user email: ${errorMessage}`,
-      'Ensure the account has an email address'
-    );
-  }
 
   // Validate the token works with Chat API
   try {
@@ -483,11 +478,7 @@ async function setupOAuthProfile(): Promise<SetupResult<GChatOAuthCredentials>> 
 
   const credentials: GChatOAuthCredentials = {
     type: 'oauth',
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
+    ...toCamelTokens(tokens),
     email: userEmail,
   };
 
@@ -495,5 +486,23 @@ async function setupOAuthProfile(): Promise<SetupResult<GChatOAuthCredentials>> 
     credentials,
     suggestedProfileName: userEmail,
     info: `OAuth profile (${userEmail})\nTest with: agentio gchat send "Hello from agentio"`,
+  };
+}
+
+/** `profile.reauthenticate`: a webhook is replaced by a new address; an OAuth profile signs in again. */
+export function gchatReauthenticate(
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+) {
+  return async (existing: GChatCredentials | null | undefined, profileName: string, context: SetupContext): Promise<GChatCredentials> => {
+    if (existing?.type === 'webhook') {
+      context.log(`\nRenewing gchat / ${profileName}: a webhook is replaced by a new URL.`);
+      return { type: 'webhook', webhookUrl: await askWebhookUrl(context) };
+    }
+
+    context.log(`\nRe-authenticating gchat / ${profileName}...`);
+    const { tokens, email } = await signInToGoogle('gchat', context, performOAuth, fetchEmail);
+    context.log(`  Done (${email})`);
+    return { ...existing, type: 'oauth', ...toCamelTokens(tokens), email };
   };
 }
