@@ -62,6 +62,7 @@ src/plugins/
 ├── pagerio/          # pages to your iPhone and Mac; secret URL, send only
 ├── pocketalert/      # push notifications; API key, send only
 ├── revolut/
+├── secrets/          # named secrets per profile; no remote service
 ├── spotify/
 ├── sql/
 ├── slack/

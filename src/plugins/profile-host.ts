@@ -46,3 +46,13 @@ export async function addProfileFromPlugin(
     : await plugin.profile.setup(options);
   await persistSetupResult(plugin.id, result, options);
 }
+
+/**
+ * Replace an existing profile's credentials, locally or on the hub, for a
+ * plugin whose credentials are edited by its own commands, such as `secrets
+ * set`. Plugins cannot reach `saveProfile` directly; it keeps the profile's
+ * read-only flag because no options are passed.
+ */
+export function saveProfileCredentials(service: string, profile: string, credentials: object): Promise<void> {
+  return saveProfile(service, profile, credentials);
+}

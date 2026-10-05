@@ -181,6 +181,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **Kite** | Browser sign-in | `publish`, `get`, `list`, `delete`, `share show/add/remove/public/private/expiry`, `comments list/add/reply/resolve/reopen` |
 | **Apple Notes** | API Key | `folders`, `list`, `search`, `get`, `create`, `update`, `delete` |
 | **Pocket Alert** | API Key | `send` |
+| **Secrets** | None | `set`, `get`, `list`, `unset`, `import`, `exec` |
 | **Falco** | Password + 2FA | `peppol list`, `peppol get`, `peppol sync`, `peppol mark-paid`, `invoices sync` |
 | **RSS** | None | `articles`, `get`, `info` |
 

@@ -35,6 +35,7 @@ const SERVICE_ORDER = [
   'pocketalert',
   'revolut',
   'rss',
+  'secrets',
   'slack',
   'spotify',
   'sql',
