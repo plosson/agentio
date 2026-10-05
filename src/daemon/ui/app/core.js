@@ -16,6 +16,9 @@ const state = {
 
 /** route view -> (route) => Raw markup. Each screen file registers its views. */
 const VIEWS = {};
+
+/** list name ('profiles' | 'machines') -> (route) => Raw markup for the list pane. See paneOf. */
+const LISTS = {};
 /** data-action -> handler(element, event), for clicks. */
 const ACTIONS = {};
 /** data-change -> handler(input, event), for checkboxes, radios and selects. */
@@ -75,13 +78,13 @@ function displayPanel(label, value, second) {
 }
 
 /**
- * The top of a screen: the path to it (detail pages only), the H1 with its count after it,
- * and the screen's actions. With `rename`, the H1 can be edited in place: Enter saves, Esc cancels.
+ * The head of a pane: a back link (shown on a narrow window only, where the sidebar and the list are
+ * out of sight), the H1 with its count after it, and the pane's actions. It stays at the top while the
+ * pane scrolls. With `rename`, the H1 can be edited in place: Enter saves, Esc cancels.
  */
 function pageHead({ path = [], title, count, actions = '', rename = null }) {
-  const trail = path.length
-    ? html`<p class="path">${path.map((p, i) => html`${i ? ' / ' : ''}${p.href ? html`<a href="${p.href}">${p.label}</a>` : p.label}`)}</p>`
-    : '';
+  const up = [...path].reverse().find((p) => p.href);
+  const back = up ? html`<a class="back" href="${up.href}"><span aria-hidden="true">‹</span> ${up.label}</a>` : '';
   const editing = rename && state.ui.renaming === rename.key;
   const heading = editing
     ? html`<form class="inline-edit" data-submit="${rename.submit}" data-key="${rename.key}" novalidate>
@@ -94,7 +97,7 @@ function pageHead({ path = [], title, count, actions = '', rename = null }) {
       </form>`
     : html`<div class="title"><h1>${title}</h1>${count === undefined ? '' : html`<span class="count">${count}</span>`}
         ${rename ? html`<button type="button" class="button link" data-action="start-rename" data-key="${rename.key}">Rename</button>` : ''}</div>`;
-  return html`${trail}<div class="page-head">${heading}${actions}</div>`;
+  return html`<div class="pane-head">${back}${heading}${actions}</div>`;
 }
 
 ACTIONS['start-rename'] = (el) => {
@@ -205,8 +208,7 @@ async function loadPending() {
 
 /** No answer from the hub before anything loaded: a system page, not a blank screen. */
 function showUnreachable() {
-  $('bar').hidden = true;
-  $('version').hidden = true;
+  showChrome(false);
   main.innerHTML = systemPage({
     title: 'The hub did not answer',
     why: 'Check that it is running and that this computer can reach it.',
@@ -285,21 +287,46 @@ function setTitle() {
   if (h1) document.title = `${h1.textContent.trim()} · agentio`;
 }
 
-/** Draws the current route into #main. Views read `state`; nothing else writes to the page. */
+/** The sidebar and the list show once the hub is open; the gate and system pages fill the window alone. */
+function showChrome(on) {
+  $('shell').classList.toggle('bare', !on);
+  $('bar').hidden = !on;
+  if (on) return;
+  $('shell').classList.remove('no-list', 'selected');
+  $('list').textContent = '';
+  $('list').dataset.list = '';
+}
+
+/** Draws the current route: its list (if any) into #list, its details into #main. Views read `state`; nothing else writes to the page. */
 function render() {
   if (!state.loaded) return;
   const route = currentRoute();
   const view = VIEWS[route.view] || VIEWS.overview;
+  const panes = paneOf(route);
+  const lister = panes.list && LISTS[panes.list];
   setTabs(route);
-  $('bar').hidden = false;
-  $('version').hidden = !state.version;
+  showChrome(true);
+  $('shell').classList.toggle('no-list', !lister);
+  $('shell').classList.toggle('selected', panes.selected);
+  $('profiles-count').textContent = state.rows.length ? String(state.rows.length) : '';
+  $('machines-count').textContent = state.keys.length ? String(state.keys.length) : '';
   $('version').textContent = state.version ? `v${state.version}` : '';
   $('hub-host').textContent = location.host;
   // Redrawing replaces every element: put focus, and the caret of a text field, back where they were.
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
-  main.innerHTML = (route.view === 'authorize' ? '' : signInBanner().__html) + view(route).__html;
+  // The same list keeps its scroll when a row is chosen; another list starts at the top.
+  const list = $('list');
+  const keep = list.dataset.list === (panes.list || '') ? list.scrollTop : 0;
+  list.innerHTML = lister ? lister(route).__html : '';
+  list.dataset.list = lister ? panes.list : '';
+  list.scrollTop = keep;
+  main.innerHTML = view(route).__html;
+  const pending = route.view === 'authorize' ? '' : signInBanner().__html;
+  const head = main.querySelector(':scope > .pane-head');
+  if (head) head.insertAdjacentHTML('afterend', pending);
+  else main.insertAdjacentHTML('afterbegin', pending);
   setTitle();
   syncCountdowns();
   const again = focused && $(focused);

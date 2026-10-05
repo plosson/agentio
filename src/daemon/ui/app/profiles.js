@@ -119,7 +119,7 @@ ACTIONS['test-one'] = (el) => testProfiles([el.dataset.ref]);
 ACTIONS['pick-service'] = (el) => {
   state.ui.addService = el.dataset.service || null;
   render();
-  window.scrollTo(0, 0);
+  main.scrollTo(0, 0);
 };
 
 INPUTS['service-filter'] = (input) => { state.ui.serviceFilter = input.value; render(); };

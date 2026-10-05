@@ -94,16 +94,62 @@ describe('the assembled admin page', () => {
     expect(script).toContain('${');
   });
 
-  test('the header: lockup, text tabs, where you are, Sign out; no bottom tab bar, no gear', () => {
-    expect(INDEX_HTML).toContain('<a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>');
+  test('the window: a sidebar with the lockup, the sections and where you are; a list pane; the details', () => {
+    expect(INDEX_HTML).toContain('<div class="shell bare" id="shell">');
+    expect(INDEX_HTML).toMatch(/<aside class="sidebar" id="bar" hidden>\s*<a class="lockup" href="#overview"><img src="\/ui\/icon.svg\?v=__VERSION__" alt="" width="26" height="26">agentio<\/a>/);
     expect(INDEX_HTML).toContain('<nav class="tabs" id="tabs" aria-label="Main">');
-    expect(INDEX_HTML).not.toContain('id="tabbar"');
-    expect(INDEX_HTML).not.toContain('class="gear"');
-    expect(INDEX_HTML).not.toContain('agentio hub');
-    expect(INDEX_HTML).toMatch(/<button[^>]*class="button link sign-out"[^>]*data-action="sign-out"/);
-    expect(INDEX_HTML).toMatch(/<button[^>]*id="menu-button"[^>]*aria-expanded="false"[^>]*aria-controls="tabs"/);
-    expect(INDEX_HTML).toContain('<footer class="version" id="version" hidden></footer>');
-    expect(script).toContain("ACTIONS['toggle-menu']");
+    expect(INDEX_HTML).toContain('<span class="count" id="profiles-count"></span>');
+    expect(INDEX_HTML).toContain('<span class="count" id="machines-count"></span>');
+    expect(INDEX_HTML).toMatch(/<div class="where"><span id="hub-host"><\/span><span id="version"><\/span><button[^>]*class="button link sign-out"[^>]*data-action="sign-out"/);
+    expect(INDEX_HTML).toContain('<section class="list-pane" id="list" aria-label="List"></section>');
+    expect(INDEX_HTML).toContain('<main id="main" tabindex="-1"></main>');
+    // Gone with the header: the phone menu, its button and the footer.
+    expect(INDEX_HTML).not.toContain('menu-button');
+    expect(INDEX_HTML).not.toContain('menu-only');
+    expect(INDEX_HTML).not.toContain('<footer');
+    expect(INDEX_HTML).not.toContain('<header');
+    expect(script).not.toContain("ACTIONS['toggle-menu']");
+    expect(script).not.toContain('closeMenu');
+  });
+
+  test('render draws the list beside the details, keeps the list where it was, and puts focus back', () => {
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).toContain('const panes = paneOf(route);');
+    expect(r).toContain('LISTS[panes.list]');
+    expect(r).toMatch(/classList\.toggle\('no-list', !lister\)/);
+    expect(r).toMatch(/classList\.toggle\('selected', panes\.selected\)/);
+    // The same list keeps its scroll; another list starts at the top.
+    expect(r).toMatch(/const keep = list\.dataset\.list === \(panes\.list \|\| ''\) \? list\.scrollTop : 0;/);
+    expect(r).toMatch(/list\.scrollTop = keep;/);
+    // Focus is restored after both panes are drawn, so the filter box in the list keeps its caret.
+    expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('list.innerHTML ='));
+    expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('main.innerHTML ='));
+  });
+
+  test('a waiting sign-in shows under the head of the details, never above it, and never on the approval page', () => {
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).toContain("main.querySelector(':scope > .pane-head')");
+    expect(r).toContain("insertAdjacentHTML('afterend', pending)");
+    expect(r).toContain("route.view === 'authorize' ? ''");
+    const overview = script.slice(script.indexOf('VIEWS.overview ='), script.indexOf('function firstRun('));
+    expect(overview.indexOf("pageHead({ title: 'Overview' })")).toBeGreaterThan(-1);
+    expect(overview.indexOf("pageHead({ title: 'Overview' })")).toBeLessThan(overview.indexOf('${parts.length ? banner('));
+  });
+
+  test('the gate and the unreachable page fill the window: the chrome goes through showChrome only', () => {
+    expect(script.split('function showChrome(')).toHaveLength(2);
+    expect(script).toMatch(/function showUnlock\(locked\) \{[\s\S]*?showChrome\(false\);/);
+    expect(script).toMatch(/function showUnreachable\(\) \{\s*showChrome\(false\);/);
+    expect(script).not.toContain("$('bar').hidden = true;");
+    expect(script).not.toContain("$('version').hidden");
+  });
+
+  test('inside AgentIO Companion: the app class, room for the window buttons, no text selected on click', () => {
+    expect(script).toContain("if (window.agentioCompanion?.present === true) document.documentElement.classList.add('app');");
+    expect(style).toMatch(/:root\.app body \{[^}]*user-select: none/);
+    expect(style).toMatch(/:root\.app :is\(input, textarea, select, code, \.mono, \.display \.value\) \{[^}]*user-select: text/);
+    expect(style).toMatch(/:root\.app \.sidebar \{[^}]*padding-top: 44px/);
+    expect(style).not.toContain('app-region');
   });
 
   test('the browser title follows the H1: "<H1> · agentio"', () => {
@@ -111,11 +157,19 @@ describe('the assembled admin page', () => {
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");
   });
 
-  test('layout: one column under 600 px with the menu, 720 px up to 959 px, 1120 px and two columns from 960 px', () => {
-    expect(style).toMatch(/@media \(max-width: 599px\)[\s\S]*\.tabs \{[^}]*display: none/);
-    expect(style).toMatch(/@media \(min-width: 600px\) and \(max-width: 959px\) \{ \.page \{ max-width: 720px; \} \}/);
-    expect(style).toMatch(/\.page \{[^}]*max-width: 1120px/);
-    expect(style).toMatch(/@media \(min-width: 960px\) \{[^@]*\.columns \{[^}]*grid-template-columns/);
+  test('layout: sidebar, list and details from 900 px; one pane at a time below', () => {
+    expect(style).toMatch(/\.shell \{[^}]*grid-template-columns: 220px 300px minmax\(0, 1fr\)/);
+    expect(style).toMatch(/\.shell\.no-list \{[^}]*grid-template-columns: 220px minmax\(0, 1fr\)/);
+    expect(style).toMatch(/\.shell\.bare \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.shell\.selected > \.list-pane \{ display: none; \}/);
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.pane-head \.back \{[^}]*display: inline-flex/);
+    expect(style).not.toMatch(/\.columns \{[^}]*grid/);
+    expect(style).not.toMatch(/\.page \{/);
+  });
+
+  test('the gate and system pages are never hidden on a narrow window', () => {
+    const narrow = style.slice(style.indexOf('@media (max-width: 899px)'));
+    expect(narrow).toContain('.shell:not(.selected):not(.no-list):not(.bare) > #main { display: none; }');
   });
 
   test('the model and every screen are in the script', () => {
@@ -281,7 +335,7 @@ describe('the assembled admin page', () => {
 
   test('overview: first tab, the vault in the display panel, recently seen machines, no activity log', () => {
     expect(script).toMatch(/VIEWS\.overview = /);
-    expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">Overview<\/a>/);
+    expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">/);
     expect(script).toContain("displayPanel('In the vault'");
     expect(script).toContain('<h2>Recently seen</h2>');
     expect(script).toContain('recentlySeen(');
@@ -398,7 +452,7 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/\.display \.value \{[^}]*overflow-wrap: anywhere/);
     expect(style).toMatch(/\.item-title \{[^}]*overflow-wrap: anywhere/);
     expect(style).toMatch(/\.command code \{[^}]*overflow-wrap: anywhere/);
-    expect(style).toMatch(/\.page-head \.title \{[^}]*min-width: 0/);
+    expect(style).toMatch(/\.pane-head \.title \{[^}]*min-width: 0/);
   });
 
   test('components: every control is at least 44 px tall, and the focus ring is visible', () => {
@@ -490,10 +544,11 @@ describe('final review fixes', () => {
     expect(h).toContain('state.ui.editScope = null;');
   });
 
-  test('a new page opens at the top with the header in view; focus never scrolls it away', () => {
+  test('a new page opens at the top of the details; focus never scrolls it away', () => {
     const h = block("window.addEventListener('hashchange'");
     expect(h).toContain('main.focus({ preventScroll: true });');
     expect(h).not.toMatch(/main\.focus\(\);/);
-    expect(h).toContain('window.scrollTo(0, 0);');
+    expect(h).toContain('main.scrollTo(0, 0);');
+    expect(script).not.toContain('window.scrollTo(');
   });
 });

@@ -40,7 +40,6 @@ function gateMarkup(locked) {
 }
 
 function showUnlock(locked) {
-  closeMenu();
   // An authorize request mid-`loadRequest` can lose its session before the request
   // loads; clear a still-loading one here so it is fetched again once signed back in.
   if (state.ui.auth && state.ui.auth.step === 'loading') state.ui.auth = null;
@@ -56,8 +55,7 @@ function showUnlock(locked) {
     $('passphrase').focus();
     return;
   }
-  $('bar').hidden = true;
-  $('version').hidden = true;
+  showChrome(false);
   main.innerHTML = gateMarkup(locked).__html;
   setTitle();
   $('passphrase').focus();

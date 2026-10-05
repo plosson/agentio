@@ -11,21 +11,20 @@
 </style>
 </head>
 <body>
-<header class="top" id="bar" hidden>
-  <a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>
-  <nav class="tabs" id="tabs" aria-label="Main">
-    <a href="#overview" data-tab="overview">Overview</a>
-    <a href="#profiles" data-tab="profiles">Profiles</a>
-    <a href="#machines" data-tab="machines">Machines</a>
-    <a href="#settings" data-tab="settings">Settings</a>
-    <a href="#settings" class="menu-only" data-action="sign-out">Sign out</a>
-  </nav>
-  <span class="where"><span id="hub-host"></span><button type="button" class="button link sign-out" data-action="sign-out">Sign out</button></span>
-  <button type="button" class="button menu-button" id="menu-button" data-action="toggle-menu" aria-expanded="false" aria-controls="tabs" aria-label="Menu">☰</button>
-</header>
-
-<main id="main" class="page" tabindex="-1"></main>
-<footer class="version" id="version" hidden></footer>
+<div class="shell bare" id="shell">
+  <aside class="sidebar" id="bar" hidden>
+    <a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="26" height="26">agentio</a>
+    <nav class="tabs" id="tabs" aria-label="Main">
+      <a href="#overview" data-tab="overview"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg>Overview</a>
+      <a href="#profiles" data-tab="profiles"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-5 6-5s6 1.7 6 5z"/></svg>Profiles<span class="count" id="profiles-count"></span></a>
+      <a href="#machines" data-tab="machines"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 3h12v8H2zM5 13h6v1H5z"/></svg>Machines<span class="count" id="machines-count"></span></a>
+      <a href="#settings" data-tab="settings"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="2.4"/><path opacity=".55" d="M7 1h2l.4 2 1.6.7 1.7-1.2 1.4 1.4-1.2 1.7.7 1.6 2 .4v2l-2 .4-.7 1.6 1.2 1.7-1.4 1.4-1.7-1.2-1.6.7L9 15H7l-.4-2-1.6-.7-1.7 1.2-1.4-1.4 1.2-1.7L2.4 9 1 9V7l2-.4.7-1.6-1.2-1.7 1.4-1.4 1.7 1.2L7 3z"/></svg>Settings</a>
+    </nav>
+    <div class="where"><span id="hub-host"></span><span id="version"></span><button type="button" class="button link sign-out" data-action="sign-out">Sign out</button></div>
+  </aside>
+  <section class="list-pane" id="list" aria-label="List"></section>
+  <main id="main" tabindex="-1"></main>
+</div>
 
 <dialog id="confirm-dialog" class="dialog">
   <h2 id="confirm-title"></h2>
