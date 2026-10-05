@@ -1,4 +1,6 @@
+import { getFreshCredentials } from '../../auth/refresh';
 import { CliError } from '../../utils/errors';
+import { saveProfileCredentials } from '../profile-host';
 import type { SecretsCredentials } from './types';
 
 export const SERVICE = 'secrets';
@@ -39,4 +41,21 @@ export function missingKeyError(profile: string, key: string, values: Map<string
     `No secret "${key}" in secrets profile "${profile}"`,
     names.length ? `Secrets in this profile: ${names.join(', ')}` : 'This profile holds no secrets yet',
   );
+}
+
+/** A profile's secrets. The caller has already resolved the profile with `requireProfile`. */
+export async function loadSecrets(profile: string): Promise<Map<string, string>> {
+  return valuesOf((await getFreshCredentials(SERVICE, profile)).credentials);
+}
+
+/**
+ * Read a profile's secrets, let `change` edit them, and write the whole map
+ * back: to the vault, or to the hub in remote mode. When `change` throws,
+ * nothing is written. Two machines writing at once: the last write wins.
+ */
+export async function updateSecrets<T>(profile: string, change: (values: Map<string, string>) => T): Promise<T> {
+  const values = await loadSecrets(profile);
+  const result = change(values);
+  await saveProfileCredentials(SERVICE, profile, toCredentials(values));
+  return result;
 }

@@ -25,7 +25,8 @@ export async function confirm(question: string): Promise<boolean> {
   return answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
 }
 
-export async function readStdin(): Promise<string | null> {
+/** Everything piped on stdin, unchanged, or null from a terminal or an empty pipe. */
+export async function readStdinRaw(): Promise<string | null> {
   // Check if stdin is a TTY (interactive terminal)
   if (process.stdin.isTTY) {
     return null;
@@ -41,5 +42,32 @@ export async function readStdin(): Promise<string | null> {
     return null;
   }
 
-  return Buffer.concat(chunks).toString('utf-8').trim();
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+export async function readStdin(): Promise<string | null> {
+  const raw = await readStdinRaw();
+  return raw === null ? null : raw.trim();
+}
+
+/**
+ * Prompt for a value without echoing what is typed, for secrets. The question
+ * is written; every keystroke after it is not.
+ */
+export function promptHidden(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+  const writer = rl as unknown as { _writeToOutput: (text: string) => void };
+  let muted = false;
+  writer._writeToOutput = (text) => {
+    if (!muted) process.stderr.write(text);
+  };
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      process.stderr.write('\n');
+      resolve(answer);
+    });
+    muted = true;
+  });
 }

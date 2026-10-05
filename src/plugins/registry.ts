@@ -20,6 +20,7 @@ import pagerio from './pagerio';
 import pocketalert from './pocketalert';
 import revolut from './revolut';
 import rss from './rss';
+import secrets from './secrets';
 import slack from './slack';
 import spotify from './spotify';
 import sql from './sql';
@@ -51,6 +52,7 @@ export const SERVICE_PLUGINS = [
   pocketalert,
   revolut,
   rss,
+  secrets,
   slack,
   spotify,
   sql,
