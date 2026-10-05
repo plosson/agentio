@@ -1,16 +1,15 @@
 import { Command } from 'commander';
 import { readFile, stat, writeFile } from 'fs/promises';
 import { dirname, resolve } from 'path';
-import { launchBrowser } from '../../auth/oauth-server';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
 import { addJsonOption, printJson } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt } from '../../utils/stdin';
-import { addProfileWithSetup } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { createSetupContext } from '../host-context';
+import type { InputSpec, SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
@@ -104,6 +103,11 @@ function withDescriptionOptions(command: Command): Command {
     .option('--summary-file <file>', 'Read the summary from this file instead');
 }
 
+const URL_INPUT: InputSpec = { id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' };
+
+/** What Kite setup needs: the server's address, then a sign-in in the browser with a code. */
+export const KITE_SETUP_NEEDS: SetupNeeds = { inputs: [URL_INPUT], auth: 'device-code' };
+
 export interface KiteProfileAddOptions extends ProfileAddOptions {
   url?: string;
   /** `--no-browser` sets this to false. */
@@ -113,15 +117,17 @@ export interface KiteProfileAddOptions extends ProfileAddOptions {
 
 /** What setup reaches outside the process through; tests replace all of it. */
 export interface KiteSetupDeps {
-  openBrowser?: (url: string) => boolean;
-  prompt?: (question: string) => Promise<string>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
 
 /** Browser sign-in against `baseUrl`, then who the token belongs to. Nothing is stored here. */
-async function signIn(baseUrl: string, options: KiteProfileAddOptions, deps: KiteSetupDeps): Promise<KiteCredentials> {
-  const openBrowser = deps.openBrowser ?? launchBrowser;
+async function signIn(
+  baseUrl: string,
+  options: KiteProfileAddOptions,
+  context: SetupContext,
+  deps: KiteSetupDeps,
+): Promise<KiteCredentials> {
   const { token, expiresAt } = await kiteDeviceLogin({
     baseUrl,
     label: deviceLabel(),
@@ -131,10 +137,10 @@ async function signIn(baseUrl: string, options: KiteProfileAddOptions, deps: Kit
       if (options.json) {
         printJson({ event: 'code', userCode, verificationUrl, expiresIn: expiresInSeconds });
       } else {
-        console.error(`\nTo sign in to Kite, open:\n  ${verificationUrl}\nand check that it shows the code ${userCode}.\n`);
+        context.log(`\nTo sign in to Kite, open:\n  ${verificationUrl}\nand check that it shows the code ${userCode}.\n`);
       }
-      if (options.browser !== false) openBrowser(verificationUrl);
-      console.error('Waiting for approval…');
+      if (options.browser !== false) context.openUrl(verificationUrl);
+      context.log('Waiting for approval…');
     },
   });
   const me = await new KiteClient({ baseUrl, token }).me();
@@ -143,11 +149,11 @@ async function signIn(baseUrl: string, options: KiteProfileAddOptions, deps: Kit
 
 export async function kiteProfileAdd(
   options: KiteProfileAddOptions,
+  context: SetupContext,
   deps: KiteSetupDeps = {},
 ): Promise<SetupResult<KiteCredentials>> {
-  const input = options.url ?? (await (deps.prompt ?? prompt)('? Kite URL (for example https://kite.example.com): '));
-  const baseUrl = normaliseBaseUrl(input);
-  const credentials = await signIn(baseUrl, options, deps);
+  const baseUrl = normaliseBaseUrl(options.url ?? (await context.ask(URL_INPUT)));
+  const credentials = await signIn(baseUrl, options, context, deps);
   return {
     credentials,
     suggestedProfileName: credentials.email,
@@ -166,7 +172,7 @@ export async function reauthenticateKite(
       `Run: agentio kite profile add --profile ${profileName} --url <url>`);
   }
   console.error(`\nRe-authenticating kite / ${profileName}...`);
-  const replacement = await signIn(credentials.baseUrl, {}, deps);
+  const replacement = await signIn(credentials.baseUrl, {}, createSetupContext(), deps);
   console.error(`  Done (${replacement.email})`);
   return replacement;
 }
@@ -324,7 +330,7 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
   });
 
   addExamples(
-    addJsonOption(
+    addSetupOptions(
       profile
         .command('add')
         .description('Sign in to a Kite server in the browser and store the profile')
@@ -333,7 +339,7 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
         .option('--read-only', 'Create as read-only profile (blocks write operations)')
         .option('--no-browser', 'Print the sign-in link without opening a browser'),
     ).action(run(async (options: KiteProfileAddOptions) => {
-      await addProfileWithSetup('kite', (o) => kiteProfileAdd(o as KiteProfileAddOptions), options);
+      await addProfileWithSetup('kite', (o, context) => kiteProfileAdd(o as KiteProfileAddOptions, context), options, KITE_SETUP_NEEDS);
     })),
     `Examples:
 
@@ -344,7 +350,11 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
   agentio kite profile add --url https://kite.example.com --no-browser
 
   # a second, read-only account under a chosen name
-  agentio kite profile add --url https://kite.example.com --profile team --read-only`,
+  agentio kite profile add --url https://kite.example.com --profile team --read-only
+
+  # for a program: what it needs, then the URL as JSON on stdin
+  agentio kite profile add --describe --json
+  echo '{"url":"https://kite.example.com"}' | agentio kite profile add --json --input -`,
   );
 }
 

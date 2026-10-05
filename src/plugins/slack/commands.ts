@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { addExamples } from '../../utils/command-tree';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
@@ -115,12 +115,13 @@ export function registerSlackCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook',
   });
 
-  profile
-    .command('add')
-    .description('Add a new Slack profile (webhook)')
-    .requiredOption('--profile <name>', 'Profile name (required)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    .action(async (options) => {
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Slack profile (webhook)')
+      .requiredOption('--profile <name>', 'Profile name (required)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
+  ).action(async (options) => {
       try {
         await addProfileWithSetup('slack', slackProfileAdd, options);
       } catch (error) {
