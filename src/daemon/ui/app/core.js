@@ -11,11 +11,14 @@ const state = {
   pending: [],
   results: new Map(),
   loaded: false,
-  ui: {},
+  ui: { listScroll: {} },
 };
 
 /** route view -> (route) => Raw markup. Each screen file registers its views. */
 const VIEWS = {};
+
+/** list name ('profiles' | 'machines') -> (route) => Raw markup for the list pane. See paneOf. */
+const LISTS = {};
 /** data-action -> handler(element, event), for clicks. */
 const ACTIONS = {};
 /** data-change -> handler(input, event), for checkboxes, radios and selects. */
@@ -47,6 +50,34 @@ function icon(service, cls = '') {
   return raw(`<svg class="ico ${escapeHtml(cls)}" viewBox="0 0 24 24" fill="${escapeHtml(colour)}" aria-hidden="true">${shapes}</svg>`);
 }
 
+/** A service's logo in white on its colour, as a rounded square: the lead of a profile row, and the top of its page. */
+function tile(service, cls = '') {
+  const entry = ICONS[service];
+  const colour = PLUGIN_METADATA[service]?.color || entry?.[1] || '';
+  const rect = `<rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/>`;
+  // A multi-colour entry is full-colour art at 24 units: each path keeps its own fill, full size, on the tile.
+  // Its corners are clipped in admin.css (an SVG clip path would repeat its id on every tile).
+  if (entry && Array.isArray(entry[2])) {
+    return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${rect}${entry[2].map(([fill, d]) => `<path fill="${escapeHtml(fill)}" d="${escapeHtml(d)}"/>`).join('')}</svg>`);
+  }
+  const shapes = entry
+    ? `<path d="${escapeHtml(entry[2])}"/>`
+    : `<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="700">${escapeHtml((displayName(service)[0] || '?').toUpperCase())}</text>`;
+  // Shapes are drawn at 24 units and shrunk to leave a margin; without a colour, the tile is grey (admin.css).
+  return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${rect}<g fill="white" transform="translate(5 5) scale(0.5833)">${shapes}</g></svg>`);
+}
+
+/** Toolbar symbols, drawn in the text colour. */
+const GLYPHS = {
+  reload: '<path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  add: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7"/>',
+  grid: '<path d="M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z" fill="none" stroke="currentColor" stroke-width="1.3"/>',
+  search: '<circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 11l4 4" stroke="currentColor" stroke-width="2"/>',
+};
+function glyph(name) {
+  return raw(`<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">${GLYPHS[name]}</svg>`);
+}
+
 const profileLabel = (row) => html`<span class="svc">${icon(row.service)}${row.service} / ${row.profile}</span>`;
 
 /** A status as symbol and word, coloured by tone. The symbol is decoration; the word carries the meaning. */
@@ -75,13 +106,13 @@ function displayPanel(label, value, second) {
 }
 
 /**
- * The top of a screen: the path to it (detail pages only), the H1 with its count after it,
- * and the screen's actions. With `rename`, the H1 can be edited in place: Enter saves, Esc cancels.
+ * The head of a pane: a back link (shown on a narrow window only, where the sidebar and the list are
+ * out of sight), the H1 with its count after it, and the pane's actions. It stays at the top while the
+ * pane scrolls. With `rename`, the H1 can be edited in place: Enter saves, Esc cancels.
  */
 function pageHead({ path = [], title, count, actions = '', rename = null }) {
-  const trail = path.length
-    ? html`<p class="path">${path.map((p, i) => html`${i ? ' / ' : ''}${p.href ? html`<a href="${p.href}">${p.label}</a>` : p.label}`)}</p>`
-    : '';
+  const up = [...path].reverse().find((p) => p.href);
+  const back = up ? html`<a class="back" href="${up.href}"><span aria-hidden="true">‹</span> ${up.label}</a>` : '';
   const editing = rename && state.ui.renaming === rename.key;
   const heading = editing
     ? html`<form class="inline-edit" data-submit="${rename.submit}" data-key="${rename.key}" novalidate>
@@ -94,7 +125,7 @@ function pageHead({ path = [], title, count, actions = '', rename = null }) {
       </form>`
     : html`<div class="title"><h1>${title}</h1>${count === undefined ? '' : html`<span class="count">${count}</span>`}
         ${rename ? html`<button type="button" class="button link" data-action="start-rename" data-key="${rename.key}">Rename</button>` : ''}</div>`;
-  return html`${trail}<div class="page-head">${heading}${actions}</div>`;
+  return html`<div class="pane-head">${back}${heading}${actions}</div>`;
 }
 
 ACTIONS['start-rename'] = (el) => {
@@ -116,12 +147,22 @@ ACTIONS['cancel-rename'] = () => {
   render();
 };
 
-/** One list row: an optional dot (true = new or active), a bold title, a muted message, small meta. A link with `href`. */
-function listItem({ href, dot, title, message = '', meta = '', dense = false }) {
-  const cls = `${dot === undefined ? 'item no-dot' : 'item'}${dense ? ' dense' : ''}`;
-  const body = html`${dot === undefined ? '' : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`}<span>
+/**
+ * One list row: an optional lead (a service tile), a bold title, a muted message, small meta, and a dot.
+ * `dot` is true or false (new or active, or not), or a status word, whose word screen readers read.
+ * A link with `href`; `current` marks the row whose details are open.
+ */
+function listItem({ href, dot, lead = '', title, message = '', meta = '', current = false }) {
+  const cls = `item${dot === undefined ? ' no-dot' : ''}${lead ? ' lead' : ''}`;
+  const mark = dot === undefined ? ''
+    : typeof dot === 'object'
+      ? html`<span class="dot ${dot.tone}" title="${dot.word}" aria-hidden="true"></span><span class="sr-only">${dot.word}</span>`
+      : html`<span class="dot ${dot ? 'new' : ''}" aria-hidden="true"></span>`;
+  const body = html`${lead}${mark}<span>
     <span class="item-title">${title}</span>${message ? html`<span class="item-message">${message}</span>` : ''}${meta ? html`<span class="item-meta">${meta}</span>` : ''}</span>`;
-  return href ? html`<li><a class="${cls}" href="${href}">${body}</a></li>` : html`<li><div class="${cls}">${body}</div></li>`;
+  return href
+    ? html`<li><a class="${cls}" href="${href}"${current ? raw(' aria-current="page"') : ''}>${body}</a></li>`
+    : html`<li><div class="${cls}">${body}</div></li>`;
 }
 
 /** One sentence at the top of the page, then the next action. `problem` uses the warning background. */
@@ -132,11 +173,6 @@ function banner(text, actions = '', problem = false) {
 /** What will appear here, and how to get it. */
 function emptyState(text, actions = '') {
   return html`<div class="empty-state"><p>${text}</p>${actions ? html`<div class="actions">${actions}</div>` : ''}</div>`;
-}
-
-/** Two to four views of the same data. `items` are { id, href, label }. */
-function segmented(items, current) {
-  return html`<nav class="segmented" aria-label="View">${items.map((i) => html`<a href="${i.href}" ${i.id === current ? raw('aria-current="page"') : ''}>${i.label}</a>`)}</nav>`;
 }
 
 /** Not found, ended, unreachable: what happened, why in one sentence, the one way out. */
@@ -205,8 +241,7 @@ async function loadPending() {
 
 /** No answer from the hub before anything loaded: a system page, not a blank screen. */
 function showUnreachable() {
-  $('bar').hidden = true;
-  $('version').hidden = true;
+  showChrome(false);
   main.innerHTML = systemPage({
     title: 'The hub did not answer',
     why: 'Check that it is running and that this computer can reach it.',
@@ -285,21 +320,47 @@ function setTitle() {
   if (h1) document.title = `${h1.textContent.trim()} · agentio`;
 }
 
-/** Draws the current route into #main. Views read `state`; nothing else writes to the page. */
+/** The sidebar and the list show once the hub is open; the gate and system pages fill the window alone. */
+function showChrome(on) {
+  $('shell').classList.toggle('bare', !on);
+  $('bar').hidden = !on;
+  if (on) return;
+  $('shell').classList.remove('no-list', 'selected');
+  $('list').textContent = '';
+  $('list').dataset.list = '';
+}
+
+/** Draws the current route: its list (if any) into #list, its details into #main. Views read `state`; nothing else writes to the page. */
 function render() {
   if (!state.loaded) return;
   const route = currentRoute();
   const view = VIEWS[route.view] || VIEWS.overview;
+  const panes = paneOf(route);
+  const lister = panes.list && LISTS[panes.list];
   setTabs(route);
-  $('bar').hidden = false;
-  $('version').hidden = !state.version;
+  showChrome(true);
+  $('shell').classList.toggle('no-list', !lister);
+  $('shell').classList.toggle('selected', panes.selected);
+  $('profiles-count').textContent = state.rows.length ? String(state.rows.length) : '';
+  $('machines-count').textContent = state.keys.length ? String(state.keys.length) : '';
   $('version').textContent = state.version ? `v${state.version}` : '';
   $('hub-host').textContent = location.host;
   // Redrawing replaces every element: put focus, and the caret of a text field, back where they were.
   const active = document.activeElement;
   const focused = active && active.id;
   const caret = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
-  main.innerHTML = (route.view === 'authorize' ? '' : signInBanner().__html) + view(route).__html;
+  // The same list keeps its scroll when a row is chosen; another list starts at the top. The scroll is
+  // kept in state (main.js stores it): a narrow window hides the list once a row is chosen, and a hidden pane loses it.
+  const list = $('list');
+  if (list.dataset.list !== (panes.list || '')) delete state.ui.listScroll[panes.list];
+  list.innerHTML = lister ? lister(route).__html : '';
+  list.dataset.list = lister ? panes.list : '';
+  list.scrollTop = state.ui.listScroll[panes.list] || 0;
+  main.innerHTML = view(route).__html;
+  const pending = route.view === 'authorize' ? '' : signInBanner().__html;
+  const head = main.querySelector(':scope > .pane-head');
+  if (head) head.insertAdjacentHTML('afterend', pending);
+  else main.insertAdjacentHTML('afterbegin', pending);
   setTitle();
   syncCountdowns();
   const again = focused && $(focused);
@@ -369,10 +430,10 @@ const filteredRows = (rows) => rows.filter((r) => matchesFilter(r, state.ui.filt
 
 function filterBox(shown, total) {
   const query = state.ui.filter || '';
-  return html`<div class="actions">
-    <input type="search" id="profile-filter" class="input grow" data-input="filter" value="${query}"
-      placeholder="Filter profiles (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
-    ${query.trim() ? html`<span class="muted">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
+  return html`<div class="search">${glyph('search')}
+    <input type="search" id="profile-filter" class="input" data-input="filter" value="${query}"
+      placeholder="Search (press /)" aria-label="Filter profiles" autocomplete="off" spellcheck="false">
+    ${query.trim() ? html`<span class="muted small">Showing ${shown} of ${plural(total, 'profile')}</span>` : ''}
   </div>`;
 }
 

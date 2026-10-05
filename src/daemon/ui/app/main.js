@@ -1,5 +1,8 @@
 // Boot: delegated listeners, routing, and the first session probe.
 
+// Inside AgentIO Companion the app's bridge exists before this script runs: the page leaves room for the window's buttons.
+if (window.agentioCompanion?.present === true) document.documentElement.classList.add('app');
+
 // The gate dialog is the only way back in: Esc must not close it over a dead session.
 $('gate-dialog').addEventListener('cancel', (ev) => ev.preventDefault());
 
@@ -35,10 +38,18 @@ document.addEventListener('keydown', (ev) => {
   const target = ev.target;
   if (target.closest('input, textarea, select, [contenteditable]')) return;
   const box = $('profile-filter');
-  if (!box) return;
+  // The box is in the list pane, which a narrow window hides once a row is open.
+  if (!box || !box.offsetParent) return;
   ev.preventDefault();
   box.focus();
   box.select();
+});
+
+// The list pane's scroll lives in state, so render() can put it back even after a narrow window hid the pane.
+$('list').addEventListener('scroll', () => {
+  const list = $('list');
+  if (!list.dataset.list) return;
+  state.ui.listScroll[list.dataset.list] = list.scrollTop;
 });
 
 document.addEventListener('submit', (ev) => {
@@ -46,21 +57,6 @@ document.addEventListener('submit', (ev) => {
   if (!form || !SUBMITS[form.dataset.submit]) return;
   ev.preventDefault();
   SUBMITS[form.dataset.submit](form, ev);
-});
-
-ACTIONS['toggle-menu'] = () => {
-  const open = $('tabs').classList.toggle('open');
-  $('menu-button').setAttribute('aria-expanded', String(open));
-};
-
-function closeMenu() {
-  $('tabs').classList.remove('open');
-  $('menu-button').setAttribute('aria-expanded', 'false');
-}
-
-// A same-tab tap on a menu link does not fire hashchange: close the menu on the tap.
-document.addEventListener('click', (ev) => {
-  if (ev.target.closest('#tabs a')) closeMenu();
 });
 
 let lastHash = location.hash;
@@ -89,7 +85,6 @@ window.addEventListener('hashchange', async () => {
     state.ui.shownKey = null;
   }
   lastHash = location.hash;
-  closeMenu();
   state.ui.renaming = null;
   state.ui.renameError = '';
   state.ui.renameDraft = undefined;
@@ -97,9 +92,8 @@ window.addEventListener('hashchange', async () => {
   state.ui.editScope = null;
   clearToasts();
   render();
-  // A new page starts at the top. Focus moves to it for screen readers,
-  // without the browser scrolling the header out of view.
-  window.scrollTo(0, 0);
+  // A new page starts at the top of the details. Focus moves to it for screen readers, without scrolling.
+  main.scrollTo(0, 0);
   main.focus({ preventScroll: true });
   // Tests stay on demand, but a sign-in started elsewhere should show up
   // in the banner without a reload: refresh the waiting list on every move.

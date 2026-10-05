@@ -1,42 +1,40 @@
 // Profiles: the list grouped by service, one profile with its fix, and adding one.
 
-// Account and link, shown in full until space runs out, then cut with an ellipsis; the title holds the rest.
-const accountText = (r) => (r.account ? html`<span class="clip" title="${r.account}">${r.account}</span>` : '');
+// The link, shown in full until space runs out, then cut with an ellipsis; the title holds the rest.
 const linkOut = (r) => (r.url && /^https?:\/\//i.test(r.url)
   ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer" title="${r.url}"><span class="clip">${linkLabel(r.url)}</span><span aria-hidden="true">↗</span></a>`
   : '');
 
-/** A profile's status, with when it was tested or why it failed. */
-function profileStatusLine(r, now) {
-  const st = effectiveStatus(r, state.results);
-  const extra = st.status === 'invalid' ? (st.detail || 'no details were given')
-    : st.status === 'ok' && st.at ? `tested ${relativeTime(st.at, now)}` : '';
-  return html`${statusText(st.status, r.service)}${extra ? html` · ${extra}` : ''}`;
-}
+/** Nothing chosen yet: the list is beside this (or, on a narrow window, instead of it). */
+VIEWS.profiles = () => html`
+  ${pageHead({ title: 'Profiles', count: state.rows.length })}
+  ${state.rows.length
+    ? emptyState('Choose a profile in the list to see it here.')
+    : emptyState('No profiles yet. Profiles are added from a terminal on the hub.', html`<a class="button" href="#add">See how to add one</a>`)}`;
 
-VIEWS.profiles = () => {
-  const now = Date.now();
+/** The list pane: profiles grouped by service, problems first in each group. */
+LISTS.profiles = (route) => {
   const visible = filteredRows(state.rows);
-  const groups = groupProfiles(visible, displayName);
-  const actions = html`<div class="actions m-0">
-    <button class="button" data-action="test-all" ${state.rows.length ? '' : raw('disabled')}>Test all</button>
-    <a class="button primary" href="#add">Add a profile</a></div>`;
-  if (state.rows.length === 0) {
-    return html`${pageHead({ title: 'Profiles', count: 0, actions })}
-      ${emptyState('No profiles yet. Profiles are added from a terminal on the hub.', html`<a class="button" href="#add">See how to add one</a>`)}`;
-  }
-  return html`
-    ${pageHead({ title: 'Profiles', count: state.rows.length, actions })}
-    ${filterBox(visible.length, state.rows.length)}
-    ${visible.length === 0 ? noMatch() : html`<ul class="list">${groups.map((g) => html`
-      <li class="group"><span class="group-name">${icon(g.service)}<span>${g.name}</span></span>
-      <ul class="group-rows" aria-label="${g.name}">${problemsFirst(g.rows, state.results).map((r) => listItem({
-        href: routeHash({ view: 'profile', ref: refOf(r) }),
-        title: r.profile,
-        dense: true,
-        message: html`<span class="details">${accountShown(r.profile, r.account) ? accountText(r) : ''}${r.url ? html`<span class="clip">${linkLabel(r.url)}</span>` : ''}</span>`,
-        meta: html`<span class="clip">${profileStatusLine(r, now)}</span>${r.readOnly ? html`<span>Read-only</span>` : ''}<span>${plural(machinesUsing(state.keys, r).length, 'machine')}</span>`,
-      }))}</ul></li>`)}</ul>`}`;
+  const current = route.view === 'profile' ? route.ref : '';
+  const actions = html`<div class="tools">
+    <button class="icon-button" type="button" data-action="test-all" title="Test all" aria-label="Test all" ${state.rows.length ? '' : raw('disabled')}>${glyph('reload')}</button>
+    <a class="icon-button" href="#add" title="Add a profile" aria-label="Add a profile">${glyph('add')}</a></div>`;
+  const head = pageHead({ title: 'Profiles', actions });
+  if (state.rows.length === 0) return html`${head}${emptyState('No profiles yet.', html`<a class="button" href="#add">See how to add one</a>`)}`;
+  return html`${head}${filterBox(visible.length, state.rows.length)}
+    ${visible.length === 0 ? noMatch() : groupProfiles(visible, displayName).map((g) => html`
+      <h2 class="group-name">${g.name}</h2>
+      <ul class="rows" aria-label="${g.name}">${problemsFirst(g.rows, state.results).map((r) => {
+        const ref = refOf(r);
+        return listItem({
+          href: routeHash({ view: 'profile', ref }),
+          current: ref === current,
+          lead: tile(r.service),
+          dot: statusWord(effectiveStatus(r, state.results).status, isSession(r.service)),
+          title: r.profile,
+          message: html`${accountShown(r.profile, r.account) ? r.account : displayName(r.service)}${r.readOnly ? ' · Read-only' : ''}`,
+        });
+      })}</ul>`)}`;
 };
 
 VIEWS.profile = (route) => {
@@ -63,7 +61,7 @@ VIEWS.profile = (route) => {
     ${pageHead({ path: [{ href: '#profiles', label: 'Profiles' }, { label: displayName(r.service) }], title: r.profile, rename: { key: `profile:${ref}`, submit: 'rename-profile' } })}
     <div class="columns">
       <section>
-        ${displayPanel('Signed in as', r.account || (r.url ? linkLabel(r.url) : ref), second)}
+        <div class="lead-panel">${tile(r.service, 'lg')}${displayPanel('Signed in as', r.account || (r.url ? linkLabel(r.url) : ref), second)}</div>
         ${r.url && /^https?:\/\//i.test(r.url) ? html`<p class="note">${linkOut(r)}</p>` : ''}
         ${r.info && r.info !== r.account ? html`<p class="note">${r.info}</p>` : ''}
         ${next}
@@ -119,7 +117,7 @@ ACTIONS['test-one'] = (el) => testProfiles([el.dataset.ref]);
 ACTIONS['pick-service'] = (el) => {
   state.ui.addService = el.dataset.service || null;
   render();
-  window.scrollTo(0, 0);
+  main.scrollTo(0, 0);
 };
 
 INPUTS['service-filter'] = (input) => { state.ui.serviceFilter = input.value; render(); };

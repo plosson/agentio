@@ -2,10 +2,67 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ICON_SVG, INDEX_HTML } from '../../../src/daemon/ui/assets';
+import { escapeHtml, raw } from '../../../src/daemon/ui/model';
+
+const FAMILY_CSS = `/* family.css: the same file in every product. */
+:root {
+  color-scheme: light dark;
+  --bg: #F8F0E0;
+  --fg: #283030;
+  --muted: #6B6459;
+  --card: #FFFDF8;
+  --line: #E4DAC6;
+  --code-bg: #F1E9D8;
+  --badge-bg: #EFE6D4;
+  --strong-bg: #283030;
+  --strong-fg: #F8F0E0;
+  --display-bg: #283030;
+  --ok: #1E7A34;
+  --bad: #B42318;
+  --warn-bg: #F6DFB2;
+  --old-dot: #E4DAC6;
+  --link: var(--brand-deep);
+  --primary-bg: var(--brand);
+  --new-dot: var(--brand);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --size-title: 1.75rem; --size-section: 1.25rem; --size-body: 1rem;
+  --size-small: 0.875rem; --size-mono: 0.9375rem;
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
+  --radius: 14px; --radius-small: 10px; --tap: 44px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181820;
+    --fg: #F1EADB;
+    --muted: #A39E94;
+    --card: #22232B;
+    --line: #34363F;
+    --code-bg: #2C2D36;
+    --badge-bg: #34363F;
+    --strong-bg: #F1EADB;
+    --strong-fg: #181820;
+    --display-bg: #101615;
+    --ok: #5BD07A;
+    --bad: #FF6B5E;
+    --warn-bg: #4A3A1C;
+    --old-dot: #3A3C46;
+    --link: var(--link-dark);
+  }
+}
+`;
 
 const UI = join(import.meta.dir, '../../../src/daemon/ui');
 const familyCss = readFileSync(join(UI, 'family.css'), 'utf8');
 const adminCss = readFileSync(join(UI, 'admin.css'), 'utf8');
+const brandCss = readFileSync(join(UI, 'brand.css'), 'utf8');
+
+/** `--role: value` pairs of one CSS block. */
+const roles = (block: string) => new Map([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
+const brandLight = roles(brandCss.slice(0, brandCss.indexOf('@media')));
+const brandDark = roles(brandCss.slice(brandCss.indexOf('@media (prefers-color-scheme: dark)'), brandCss.indexOf('@media (pointer: coarse)')));
+const brandTouch = roles(brandCss.slice(brandCss.indexOf('@media (pointer: coarse)')));
+const familyLight = roles(FAMILY_CSS.slice(0, FAMILY_CSS.indexOf('@media')));
 
 const script = INDEX_HTML.slice(INDEX_HTML.indexOf('<script nonce="__CSP_NONCE__">') + '<script nonce="__CSP_NONCE__">'.length, INDEX_HTML.lastIndexOf('</script>'));
 const style = INDEX_HTML.slice(INDEX_HTML.indexOf('<style nonce="__CSP_NONCE__">'), INDEX_HTML.indexOf('</style>'));
@@ -38,16 +95,64 @@ describe('the assembled admin page', () => {
     expect(script).toContain('${');
   });
 
-  test('the header: lockup, text tabs, where you are, Sign out; no bottom tab bar, no gear', () => {
-    expect(INDEX_HTML).toContain('<a class="lockup" href="#overview"><img src="/ui/icon.svg?v=__VERSION__" alt="" width="36" height="36">agentio</a>');
+  test('the window: a sidebar with the lockup, the sections and where you are; a list pane; the details', () => {
+    expect(INDEX_HTML).toContain('<div class="shell bare" id="shell">');
+    expect(INDEX_HTML).toMatch(/<aside class="sidebar" id="bar" hidden>\s*<a class="lockup" href="#overview"><img src="\/ui\/icon.svg\?v=__VERSION__" alt="" width="26" height="26">agentio<\/a>/);
     expect(INDEX_HTML).toContain('<nav class="tabs" id="tabs" aria-label="Main">');
-    expect(INDEX_HTML).not.toContain('id="tabbar"');
-    expect(INDEX_HTML).not.toContain('class="gear"');
-    expect(INDEX_HTML).not.toContain('agentio hub');
-    expect(INDEX_HTML).toMatch(/<button[^>]*class="button link sign-out"[^>]*data-action="sign-out"/);
-    expect(INDEX_HTML).toMatch(/<button[^>]*id="menu-button"[^>]*aria-expanded="false"[^>]*aria-controls="tabs"/);
-    expect(INDEX_HTML).toContain('<footer class="version" id="version" hidden></footer>');
-    expect(script).toContain("ACTIONS['toggle-menu']");
+    expect(INDEX_HTML).toContain('<span class="count" id="profiles-count"></span>');
+    expect(INDEX_HTML).toContain('<span class="count" id="machines-count"></span>');
+    expect(INDEX_HTML).toMatch(/<div class="where"><span id="hub-host"><\/span><span id="version"><\/span><button[^>]*class="button link sign-out"[^>]*data-action="sign-out"/);
+    expect(INDEX_HTML).toContain('<section class="list-pane" id="list" aria-label="List"></section>');
+    expect(INDEX_HTML).toContain('<main id="main" tabindex="-1"></main>');
+    // Gone with the header: the phone menu, its button and the footer.
+    expect(INDEX_HTML).not.toContain('menu-button');
+    expect(INDEX_HTML).not.toContain('menu-only');
+    expect(INDEX_HTML).not.toContain('<footer');
+    expect(INDEX_HTML).not.toContain('<header');
+    expect(script).not.toContain("ACTIONS['toggle-menu']");
+    expect(script).not.toContain('closeMenu');
+  });
+
+  test('render draws the list beside the details, keeps the list where it was, and puts focus back', () => {
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).toContain('const panes = paneOf(route);');
+    expect(r).toContain('LISTS[panes.list]');
+    expect(r).toMatch(/classList\.toggle\('no-list', !lister\)/);
+    expect(r).toMatch(/classList\.toggle\('selected', panes\.selected\)/);
+    // The same list keeps its scroll (kept in state, since a hidden pane loses it); another list starts at the top.
+    expect(r).toContain('if (list.dataset.list !== (panes.list || \'\')) delete state.ui.listScroll[panes.list];');
+    expect(r).toContain('list.scrollTop = state.ui.listScroll[panes.list] || 0;');
+    expect(r).not.toMatch(/=\s*list\.scrollTop/);
+    expect(r.indexOf('list.scrollTop =')).toBeGreaterThan(r.indexOf('list.innerHTML ='));
+    // Focus is restored after both panes are drawn, so the filter box in the list keeps its caret.
+    expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('list.innerHTML ='));
+    expect(r.indexOf('again.focus()')).toBeGreaterThan(r.indexOf('main.innerHTML ='));
+  });
+
+  test('a waiting sign-in shows under the head of the details, never above it, and never on the approval page', () => {
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).toContain("main.querySelector(':scope > .pane-head')");
+    expect(r).toContain("insertAdjacentHTML('afterend', pending)");
+    expect(r).toContain("route.view === 'authorize' ? ''");
+    const overview = script.slice(script.indexOf('VIEWS.overview ='), script.indexOf('function firstRun('));
+    expect(overview.indexOf("pageHead({ title: 'Overview' })")).toBeGreaterThan(-1);
+    expect(overview.indexOf("pageHead({ title: 'Overview' })")).toBeLessThan(overview.indexOf('${parts.length ? banner('));
+  });
+
+  test('the gate and the unreachable page fill the window: the chrome goes through showChrome only', () => {
+    expect(script.split('function showChrome(')).toHaveLength(2);
+    expect(script).toMatch(/function showUnlock\(locked\) \{[\s\S]*?showChrome\(false\);/);
+    expect(script).toMatch(/function showUnreachable\(\) \{\s*showChrome\(false\);/);
+    expect(script).not.toContain("$('bar').hidden = true;");
+    expect(script).not.toContain("$('version').hidden");
+  });
+
+  test('inside AgentIO Companion: the app class, room for the window buttons, no text selected on click', () => {
+    expect(script).toContain("if (window.agentioCompanion?.present === true) document.documentElement.classList.add('app');");
+    expect(style).toMatch(/:root\.app body \{[^}]*user-select: none/);
+    expect(style).toMatch(/:root\.app :is\(input, textarea, select, code, \.mono, \.display \.value\) \{[^}]*user-select: text/);
+    expect(style).toMatch(/:root\.app \.sidebar \{[^}]*padding-top: 44px/);
+    expect(style).not.toContain('app-region');
   });
 
   test('the browser title follows the H1: "<H1> · agentio"', () => {
@@ -55,11 +160,19 @@ describe('the assembled admin page', () => {
     expect(script).toContain("`${h1.textContent.trim()} · agentio`");
   });
 
-  test('layout: one column under 600 px with the menu, 720 px up to 959 px, 1120 px and two columns from 960 px', () => {
-    expect(style).toMatch(/@media \(max-width: 599px\)[\s\S]*\.tabs \{[^}]*display: none/);
-    expect(style).toMatch(/@media \(min-width: 600px\) and \(max-width: 959px\) \{ \.page \{ max-width: 720px; \} \}/);
-    expect(style).toMatch(/\.page \{[^}]*max-width: 1120px/);
-    expect(style).toMatch(/@media \(min-width: 960px\) \{[^@]*\.columns \{[^}]*grid-template-columns/);
+  test('layout: sidebar, list and details from 900 px; one pane at a time below', () => {
+    expect(style).toMatch(/\.shell \{[^}]*grid-template-columns: 220px 300px minmax\(0, 1fr\)/);
+    expect(style).toMatch(/\.shell\.no-list \{[^}]*grid-template-columns: 220px minmax\(0, 1fr\)/);
+    expect(style).toMatch(/\.shell\.bare \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.shell\.selected > \.list-pane \{ display: none; \}/);
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.pane-head \.back \{[^}]*display: inline-flex/);
+    expect(style).not.toMatch(/\.columns \{[^}]*grid/);
+    expect(style).not.toMatch(/\.page \{/);
+  });
+
+  test('the gate and system pages are never hidden on a narrow window', () => {
+    const narrow = style.slice(style.indexOf('@media (max-width: 899px)'));
+    expect(narrow).toContain('.shell:not(.selected):not(.no-list):not(.bare) > #main { display: none; }');
   });
 
   test('the model and every screen are in the script', () => {
@@ -77,11 +190,40 @@ describe('the assembled admin page', () => {
     expect(style).not.toMatch(/@font-face|url\(/);
     expect(style).not.toContain('Balsamiq');
     const family = style.indexOf('--bg: #F8F0E0;');
-    const brand = style.indexOf('--brand: #2F5FD8;');
+    const brand = style.indexOf('--brand: #007AFF;');
     expect(family).toBeGreaterThan(-1);
     expect(brand).toBeGreaterThan(family);
-    expect(style).toContain('--primary-fg: #F8F0E0;');
-    expect(style).toContain('--display-fg: #F2C14E;');
+    expect(style.indexOf('/* admin.css')).toBeGreaterThan(brand);
+  });
+
+  test('brand.css gives every family colour a macOS value, so no paper colour shows', () => {
+    for (const [role, value] of familyLight) {
+      if (value.startsWith('#') || value.startsWith('var(')) expect(brandLight.has(role)).toBe(true);
+    }
+  });
+
+  test('every colour role brand.css sets for light, it sets for dark', () => {
+    const sameInBoth = new Set(['--brand', '--brand-top', '--brand-deep', '--link-dark', '--primary-fg']);
+    for (const [role, value] of brandLight) {
+      if (sameInBoth.has(role)) continue;
+      if (value.startsWith('#') || value.startsWith('var(') || value.includes('#')) expect(brandDark.has(role)).toBe(true);
+    }
+  });
+
+  test('sizes: compact with a mouse, 44 px controls and larger text on a touch screen', () => {
+    expect(brandLight.get('--tap')).toBe('24px');
+    expect(brandLight.get('--size-body')).toBe('0.8125rem');
+    expect(brandTouch.get('--tap')).toBe('44px');
+    expect(brandTouch.get('--size-body')).toBe('1rem');
+    // The touch block comes last, so it wins over the light and dark blocks.
+    expect(brandCss.lastIndexOf('@media (pointer: coarse)')).toBeGreaterThan(brandCss.indexOf('@media (prefers-color-scheme: dark)'));
+  });
+
+  test('the Mac palette: system blue for links and the primary button, white on it', () => {
+    expect(brandLight.get('--link')).toBe('var(--brand)');
+    expect(brandDark.get('--link')).toBe('var(--link-dark)');
+    expect(brandDark.get('--primary-bg')).toBe('var(--link-dark)');
+    expect(brandLight.get('--primary-fg')).toBe('#FFFFFF');
   });
 
   test('admin.css uses roles, never a hex colour', () => {
@@ -118,10 +260,17 @@ describe('the assembled admin page', () => {
     expect(script).toContain('reachableRefs(');
   });
 
-  test('machines: List and Access are two views of one section; Access is no longer a tab', () => {
+  test('machines: a list pane with Access and Connect in its toolbar; Access opens with a way back', () => {
     expect(INDEX_HTML).not.toContain('data-tab="access"');
-    expect(script).toContain("{ id: 'access', href: '#access', label: 'Access' }");
+    const list = script.slice(script.indexOf('LISTS.machines ='), script.indexOf('VIEWS.machine ='));
+    expect(list).toContain('href="#access"');
+    expect(list).toContain('href="#connect"');
+    expect(list).toContain('machineItem(k, now, k.id === current)');
+    expect(list).toContain('loginCommand(location.origin)');
+    expect(script).toMatch(/function machineItem\(k, now, current = false\)/);
+    expect(script).toContain("pageHead({ path: [{ href: '#machines', label: 'Machines' }], title: 'Access' })");
     expect(script).toContain('Change access from each machine’s page.');
+    expect(script).toContain('Choose a machine in the list to see it here.');
   });
 
   test('key created: shown once, never in the address, and leaving before copying asks first', () => {
@@ -196,7 +345,7 @@ describe('the assembled admin page', () => {
 
   test('overview: first tab, the vault in the display panel, recently seen machines, no activity log', () => {
     expect(script).toMatch(/VIEWS\.overview = /);
-    expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">Overview<\/a>/);
+    expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">/);
     expect(script).toContain("displayPanel('In the vault'");
     expect(script).toContain('<h2>Recently seen</h2>');
     expect(script).toContain('recentlySeen(');
@@ -207,35 +356,124 @@ describe('the assembled admin page', () => {
   test('read-only is shown on a profile, never switched from the page', () => {
     expect(script).not.toContain("CHANGES['profile-ro']");
     expect(script).not.toContain('data-change="profile-ro"');
-    expect(script).toContain('<span>Read-only</span>');
     expect(script).toContain('profile update --profile');
   });
 
-  test('profiles: a grouped list, problems first in each group, no table', () => {
-    expect(script).not.toContain('<table class="stack compact">');
-    expect(script).not.toContain('group-heading');
-    expect(script).toContain('<li class="group">');
-    expect(script).toMatch(/<span class="group-name">\$\{icon\(g\.service\)\}/);
-    expect(script).toContain('<ul class="group-rows" aria-label="${g.name}">');
-    expect(script).toContain('problemsFirst(');
+  test('profiles: the list pane groups profiles under a plain service heading, problems first', () => {
+    const list = script.slice(script.indexOf('LISTS.profiles ='), script.indexOf('VIEWS.profile ='));
+    expect(list).toContain('groupProfiles(visible, displayName)');
+    expect(list).toContain('problemsFirst(g.rows, state.results)');
+    expect(list).toContain('<h2 class="group-name">${g.name}</h2>');
+    expect(list).toContain('<ul class="rows" aria-label="${g.name}">');
+    expect(list).not.toMatch(/group-name">\$\{icon\(/);
+    expect(list).toContain('lead: tile(r.service)');
+    expect(list).toContain('current: ref === current');
+    expect(list).toContain('accountShown(r.profile, r.account) ? r.account : displayName(r.service)');
+    expect(list).toContain('href="#add"');
+    expect(list).toContain('data-action="test-all"');
   });
 
-  test('profiles: the service is a column from 600 px and a heading on a phone; lines only between services', () => {
-    expect(style).toMatch(/\.list > \.group \{[^}]*\}/);
-    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.list > \.group \{[^}]*display: grid; grid-template-columns: [^;]+ minmax\(0, 1fr\)/);
-    expect(style).toMatch(/\.group-rows \{[^}]*list-style: none/);
-    expect(style).not.toMatch(/\.group-rows > li \+ li \{[^}]*border/);
+  test('profiles: the details pane no longer lists the profiles; it asks to choose one', () => {
+    const view = script.slice(script.indexOf('VIEWS.profiles ='), script.indexOf('LISTS.profiles ='));
+    expect(view).not.toContain('listItem(');
+    expect(view).toContain('Choose a profile in the list to see it here.');
   });
 
-  test('profiles: one line per profile on a wide screen, two on a phone; a long value is cut, never wrapped', () => {
-    const view = script.slice(script.indexOf('VIEWS.profiles ='), script.indexOf('VIEWS.profile ='));
-    expect(view).toContain('dense: true');
-    expect(view).toContain('accountShown(r.profile, r.account)');
-    expect(view).not.toContain('used by');
-    expect(script).toMatch(/function listItem\(\{[^}]*dense[^}]*\}\)/);
-    expect(style).toMatch(/\.item\.dense \.item-meta \{[^}]*flex: 1 0 100%/);
-    expect(style).toMatch(/@media \(min-width: 600px\) \{[^@]*\.item\.dense > span \{[^}]*flex-wrap: nowrap/);
-    expect(style).toMatch(/\.item\.dense \.item-title \{[^}]*text-overflow: ellipsis/);
+  test("a row's status dot carries its word, for screen readers and as a tooltip", () => {
+    const item = script.slice(script.indexOf('function listItem('), script.indexOf('function banner('));
+    expect(item).toContain('<span class="dot ${dot.tone}" title="${dot.word}" aria-hidden="true"></span><span class="sr-only">${dot.word}</span>');
+    expect(item).toContain('aria-current="page"');
+    expect(item).not.toContain('dense');
+    const list = script.slice(script.indexOf('LISTS.profiles ='), script.indexOf('VIEWS.profile ='));
+    expect(list).toContain('dot: statusWord(effectiveStatus(r, state.results).status, isSession(r.service))');
+  });
+
+  test('tile() escapes the colour and the letter, and never uses a style attribute', () => {
+    const t = script.slice(script.indexOf('function tile('), script.indexOf('const GLYPHS'));
+    expect(t).toContain('fill="${escapeHtml(colour)}"');
+    expect(t).toContain('escapeHtml((displayName(service)[0] || ');
+    expect(t).toContain('<g fill="white" transform="translate(5 5) scale(0.5833)">');
+    expect(t).not.toMatch(/style=/);
+    expect(script.split('function tile(')).toHaveLength(2);
+    expect(script.split('function glyph(')).toHaveLength(2);
+  });
+
+  test('a multi-colour icon keeps its own colours, full size, outside the white group; corners clipped in CSS', () => {
+    const t = script.slice(script.indexOf('function tile('), script.indexOf('const GLYPHS'));
+    expect(t).toContain('fill="${escapeHtml(fill)}"');
+    expect(t).not.toContain('clipPath');
+    const ICONS = {
+      multi: ['Multi', null, [['#123456', 'M0 0h24v24H0z'], ['"><script>', 'M1 1h2']]],
+      single: ['Single', '#abcdef', 'M2 2h4'],
+    };
+    const tile = new Function('escapeHtml', 'raw', 'ICONS', 'PLUGIN_METADATA', 'displayName', `${t}; return tile;`)(
+      escapeHtml, raw, ICONS, {}, (s: string) => (ICONS as any)[s]?.[0] || s);
+    const multi: string = tile('multi').__html;
+    expect(multi).toContain('<rect width="24" height="24" rx="5.5"/>');
+    expect(multi).not.toContain('<g fill="white"');
+    expect(multi).toContain('<path fill="#123456" d="M0 0h24v24H0z"/>');
+    expect(multi).toContain('<path fill="&quot;&gt;&lt;script&gt;" d="M1 1h2"/>');
+    expect(multi).not.toContain('<script>');
+    // The paths come after the tile's rect, so they sit on it.
+    expect(multi.indexOf('<path')).toBeGreaterThan(multi.indexOf('<rect'));
+    const single: string = tile('single').__html;
+    expect(single).toContain('<g fill="white" transform="translate(5 5) scale(0.5833)"><path d="M2 2h4"/></g>');
+    const letter: string = tile('nothing').__html;
+    expect(letter).toMatch(/<g fill="white" transform="translate\(5 5\) scale\(0\.5833\)"><text [^>]*>N<\/text><\/g>/);
+    expect(style).toMatch(/\.svc-tile \{[^}]*clip-path: inset\(0 round 23%\)/);
+  });
+
+  test('a tile with no brand colour is grey, and the logo stays white in both modes', () => {
+    expect(style).toMatch(/\.svc-tile rect:not\(\[fill\]\) \{ fill: var\(--muted\); \}/);
+    expect(adminCss).not.toMatch(/\.svc-tile g \{/);
+  });
+
+  test('read-only shows in the profile row', () => {
+    expect(script).toContain("r.readOnly ? ' · Read-only' : ''");
+  });
+
+  test("a profile's page leads with its service tile", () => {
+    const view = script.slice(script.indexOf('VIEWS.profile ='), script.indexOf('VIEWS.add ='));
+    expect(view).toContain("<div class=\"lead-panel\">${tile(r.service, 'lg')}${displayPanel('Signed in as'");
+  });
+
+  test('the status in a selected row takes the row\'s text colour, not its tone', () => {
+    expect(style).toContain('.list-pane .item[aria-current="page"] .status { color: inherit; }');
+    // Placed after the tone rules, so it still wins should its selector ever lose specificity.
+    expect(style.indexOf('.list-pane .item[aria-current="page"] .status')).toBeGreaterThan(style.indexOf('.status.ok {'));
+  });
+
+  test('the list keeps its scroll in state, from a listener registered once', () => {
+    expect(script).toMatch(/ui: \{[^}]*listScroll: \{\}/);
+    const listeners = script.match(/\$\('list'\)\.addEventListener\('scroll'/g) || [];
+    expect(listeners).toHaveLength(1);
+    const boot = script.slice(script.indexOf("$('list').addEventListener('scroll'"));
+    const handler = boot.slice(0, boot.indexOf('});'));
+    // Nothing is stored for a pane with no list.
+    expect(handler).toMatch(/if \(!list\.dataset\.list\) return;/);
+    expect(handler).toContain('state.ui.listScroll[list.dataset.list] = list.scrollTop;');
+    // Not inside render(): a redraw must not register another listener.
+    const r = script.slice(script.indexOf('function render()'), script.indexOf('// ---------- Waiting sign-ins'));
+    expect(r).not.toContain("addEventListener('scroll'");
+  });
+
+  test('the back link keeps a space between its chevron and its label on a narrow window', () => {
+    expect(style).toMatch(/@media \(max-width: 899px\) \{[\s\S]*?\.pane-head \.back \{[^}]*display: inline-flex[^}]*gap: 4px/);
+  });
+
+  test('"/" does nothing when the filter box is hidden', () => {
+    const keys = script.slice(script.indexOf("document.addEventListener('keydown'"), script.indexOf("document.addEventListener('submit'"));
+    expect(keys).toContain('if (!box || !box.offsetParent) return;');
+    expect(keys.indexOf('!box.offsetParent')).toBeLessThan(keys.indexOf('ev.preventDefault();\n  box.focus()'));
+  });
+
+  test('the list pane: search box with a magnifier, selected row in the accent colour, old grouped list gone', () => {
+    expect(script).toMatch(/function filterBox\(shown, total\) \{[\s\S]*?<div class="search">\$\{glyph\('search'\)\}/);
+    expect(script).toContain('placeholder="Search (press /)"');
+    expect(style).toMatch(/\.list-pane \.item\[aria-current="page"\] \{[^}]*background: var\(--link\)/);
+    expect(style).not.toMatch(/\.list > \.group/);
+    expect(style).not.toMatch(/\.group-rows/);
+    expect(style).not.toMatch(/\.item\.dense/);
   });
 
   test('a profile: Signed in as in the display panel, renamed in place, the reason it is read only', () => {
@@ -302,9 +540,12 @@ describe('the assembled admin page', () => {
 
   test('components: each exists once, as a helper the screens share', () => {
     for (const helper of ['function statusMarkup(', 'function statusText(', 'function displayPanel(', 'function pageHead(', 'function listItem(',
-      'function banner(', 'function emptyState(', 'function command(', 'function segmented(', 'function systemPage(', 'function syncCountdowns(']) {
+      'function banner(', 'function emptyState(', 'function command(', 'function systemPage(', 'function syncCountdowns(']) {
       expect(script.split(helper)).toHaveLength(2);
     }
+    expect(script).not.toContain('function segmented(');
+    expect(script).not.toContain('machineViews');
+    expect(style).not.toContain('.segmented');
     expect(script).not.toContain('function pill(');
     expect(script).not.toContain('statusPill(');
   });
@@ -313,13 +554,40 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/\.display \.value \{[^}]*overflow-wrap: anywhere/);
     expect(style).toMatch(/\.item-title \{[^}]*overflow-wrap: anywhere/);
     expect(style).toMatch(/\.command code \{[^}]*overflow-wrap: anywhere/);
-    expect(style).toMatch(/\.page-head \.title \{[^}]*min-width: 0/);
+    expect(style).toMatch(/\.pane-head \.title \{[^}]*min-width: 0/);
   });
 
-  test('components: every control is at least 44 px tall, and the focus ring is visible', () => {
+  test('components: every control is as tall as --tap (44 px on touch screens), and the focus ring is visible', () => {
     expect(style).toMatch(/\.button \{[^}]*min-height: var\(--tap\)/);
     expect(style).toMatch(/\.input \{[^}]*min-height: var\(--tap\)/);
-    expect(style).toMatch(/:focus-visible \{ outline: 3px solid var\(--link\); outline-offset: 2px; \}/);
+    // The Mac focus ring: translucent accent, hugging the control. Never removed, never the old 2 px gap.
+    expect(adminCss).toMatch(/--focus-ring: color-mix\(in srgb, var\(--link\) \d+%, transparent\);/);
+    expect(style).toMatch(/\n:focus-visible \{ outline: 3px solid var\(--focus-ring\); outline-offset: 0; \}/);
+    expect(style).toMatch(/\.switch input:focus-visible \+ span \{ outline: 3px solid var\(--focus-ring\); outline-offset: 0; \}/);
+    expect(adminCss).not.toContain('outline-offset: 2px');
+    // No control sets a fixed height of its own: it would ignore the touch size.
+    expect(adminCss).not.toMatch(/\.(button|input)[^{]*\{[^}]*\bheight: \d/);
+  });
+
+  test('Mac components: raised buttons, light panels, small grey captions over grouped lists', () => {
+    expect(style).toMatch(/\.button \{[^}]*box-shadow: var\(--shadow\)/);
+    expect(style).toMatch(/\.display \{[^}]*background: var\(--card\)/);
+    expect(style).not.toMatch(/\.display \.label \{[^}]*text-transform: uppercase/);
+    expect(style).toMatch(/\nh2 \{[^}]*color: var\(--muted\)/);
+    expect(style).toMatch(/dialog\.dialog h2 \{[^}]*color: var\(--fg\)/);
+    expect(style).not.toMatch(/\.empty-state \{[^}]*dashed/);
+  });
+
+  test('status dots use the system colours, one per tone', () => {
+    for (const tone of ['ok', 'bad', 'warn']) expect(style).toContain(`.dot.${tone} { background: var(--dot-${tone}); }`);
+    expect(style).toContain('.dot.neutral { background: var(--old-dot); }');
+  });
+
+  test('switches are Mac-sized with a mouse and 51 by 31 on a touch screen', () => {
+    expect(style).toMatch(/:root \{[^}]*--switch-w: 32px; --switch-h: 19px;/);
+    expect(style).toMatch(/@media \(pointer: coarse\) \{ :root \{ --switch-w: 51px; --switch-h: 31px; \} \}/);
+    expect(style).toMatch(/\.switch \{[^}]*width: var\(--switch-w\); height: var\(--switch-h\)/);
+    expect(style).toMatch(/\.switch input:checked \+ span::after \{ transform: translateX\(calc\(var\(--switch-w\) - var\(--switch-h\)\)\); \}/);
   });
 
   test('motion: everything stops for reduced motion', () => {
@@ -348,54 +616,6 @@ describe('the assembled admin page', () => {
     expect(script).not.toMatch(/toast\('[^']*!'/);
   });
 });
-
-const FAMILY_CSS = `/* family.css: the same file in every product. */
-:root {
-  color-scheme: light dark;
-  --bg: #F8F0E0;
-  --fg: #283030;
-  --muted: #6B6459;
-  --card: #FFFDF8;
-  --line: #E4DAC6;
-  --code-bg: #F1E9D8;
-  --badge-bg: #EFE6D4;
-  --strong-bg: #283030;
-  --strong-fg: #F8F0E0;
-  --display-bg: #283030;
-  --ok: #1E7A34;
-  --bad: #B42318;
-  --warn-bg: #F6DFB2;
-  --old-dot: #E4DAC6;
-  --link: var(--brand-deep);
-  --primary-bg: var(--brand);
-  --new-dot: var(--brand);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --size-title: 1.75rem; --size-section: 1.25rem; --size-body: 1rem;
-  --size-small: 0.875rem; --size-mono: 0.9375rem;
-  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
-  --radius: 14px; --radius-small: 10px; --tap: 44px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #181820;
-    --fg: #F1EADB;
-    --muted: #A39E94;
-    --card: #22232B;
-    --line: #34363F;
-    --code-bg: #2C2D36;
-    --badge-bg: #34363F;
-    --strong-bg: #F1EADB;
-    --strong-fg: #181820;
-    --display-bg: #101615;
-    --ok: #5BD07A;
-    --bad: #FF6B5E;
-    --warn-bg: #4A3A1C;
-    --old-dot: #3A3C46;
-    --link: var(--link-dark);
-  }
-}
-`;
 
 describe('final review fixes', () => {
   const block = (start: string) => {
@@ -453,10 +673,11 @@ describe('final review fixes', () => {
     expect(h).toContain('state.ui.editScope = null;');
   });
 
-  test('a new page opens at the top with the header in view; focus never scrolls it away', () => {
+  test('a new page opens at the top of the details; focus never scrolls it away', () => {
     const h = block("window.addEventListener('hashchange'");
     expect(h).toContain('main.focus({ preventScroll: true });');
     expect(h).not.toMatch(/main\.focus\(\);/);
-    expect(h).toContain('window.scrollTo(0, 0);');
+    expect(h).toContain('main.scrollTo(0, 0);');
+    expect(script).not.toContain('window.scrollTo(');
   });
 });

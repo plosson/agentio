@@ -10,8 +10,8 @@ VIEWS.overview = () => {
   const recent = recentlySeen(state.keys, RECENT);
   const machines = state.keys.length;
   return html`
-    ${parts.length ? banner(html`<span aria-hidden="true">!</span> ${parts.map((p, i) => html`${i ? ' · ' : ''}<a href="${p.href}">${p.text}</a>`)}`, '', true) : ''}
     ${pageHead({ title: 'Overview' })}
+    ${parts.length ? banner(html`<span aria-hidden="true">!</span> ${parts.map((p, i) => html`${i ? ' · ' : ''}<a href="${p.href}">${p.text}</a>`)}`, '', true) : ''}
     <div class="columns">
       <section>
         ${displayPanel('In the vault', listSummary(serviceNames(state.rows, displayName)))}
