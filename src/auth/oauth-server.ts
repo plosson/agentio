@@ -7,6 +7,9 @@ const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
 const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+/** A sign-in that did not complete, with a code a program can act on. */
+const signInFailed = (message: string) => new CliError('AUTH_FAILED', message, 'Run the command again and approve access in the browser');
+
 /**
  * Find an available port in the range 3000-3010.
  */
@@ -101,7 +104,7 @@ export function startOAuthCallbackServer(
 
     const timeout = setTimeout(() => {
       server?.close();
-      reject(new Error('OAuth flow timed out after 5 minutes'));
+      reject(signInFailed('OAuth flow timed out after 5 minutes'));
     }, TIMEOUT_MS);
 
     const handleCallback = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -124,7 +127,7 @@ export function startOAuthCallbackServer(
         clearTimeout(timeout);
         server.close();
         const errorMsg = errorDescription ? `${error} - ${errorDescription}` : error;
-        reject(new Error(`${serviceName} OAuth error: ${errorMsg}`));
+        reject(signInFailed(`${serviceName} OAuth error: ${errorMsg}`));
         return;
       }
 
@@ -133,7 +136,7 @@ export function startOAuthCallbackServer(
         res.end(OAuthHtml.stateMismatch);
         clearTimeout(timeout);
         server.close();
-        reject(new Error('OAuth state mismatch - possible CSRF attack'));
+        reject(signInFailed('OAuth state mismatch - possible CSRF attack'));
         return;
       }
 
@@ -142,7 +145,7 @@ export function startOAuthCallbackServer(
         res.end(OAuthHtml.missingCode);
         clearTimeout(timeout);
         server.close();
-        reject(new Error('Missing authorization code in OAuth callback'));
+        reject(signInFailed('Missing authorization code in OAuth callback'));
         return;
       }
 
@@ -171,10 +174,12 @@ export function startOAuthCallbackServer(
     if (host) server.listen(port, host, onReady);
     else server.listen(port, onReady);
 
-    server.on('error', (err) => {
+    server.on('error', (err: NodeJS.ErrnoException) => {
       clearTimeout(timeout);
       server?.close();
-      reject(err);
+      reject(err.code === 'EADDRINUSE'
+        ? new CliError('CONFIG_ERROR', `Port ${port} is in use, so the sign-in cannot receive its answer`, 'Close the program using it, then try again')
+        : err);
     });
 
     // The code can also arrive by hand. Shut the server down so the process can

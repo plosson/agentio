@@ -3,7 +3,7 @@ import { calendar } from '@googleapis/calendar';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup } from '../../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { performOAuthFlow } from '../oauth';
 import { GCalClient } from './client';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from './output';
@@ -477,11 +477,13 @@ export function registerGCalCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.email ? ` - ${credentials.email}` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new Google Calendar profile')
-    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Google Calendar profile')
+      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('gcal', gcalProfileAdd, options);

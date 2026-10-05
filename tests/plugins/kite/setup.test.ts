@@ -1,9 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readdirSync, statSync } from 'fs';
-import { homedir } from 'os';
+import { existsSync, mkdtempSync, readdirSync, statSync } from 'fs';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { kiteProfileAdd, reauthenticateKite, type KiteSetupDeps } from '../../../src/plugins/kite/commands';
+import { fakeSetupContext } from '../../helpers/setup-context';
 import { addProfileWithSetup } from '../../../src/plugins/profile-host';
 import { getCredentials } from '../../../src/auth/token-store';
 import { loadVault } from '../../../src/vault/vault';
@@ -41,10 +42,8 @@ const originalError = console.error;
 const originalWrite = process.stdout.write.bind(process.stdout);
 
 const deps = (): KiteSetupDeps => ({
-  openBrowser: (url) => { events.push('open'); opened.push(url); return true; },
   sleep: async () => {},
   now: () => 0,
-  prompt: async () => { throw new Error('prompt must not be used when --url is given'); },
 });
 
 beforeEach(() => {
@@ -77,7 +76,7 @@ afterAll(() => {
 
 test('setup returns normalised credentials, named after the email', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  const result = await kiteProfileAdd({ url: `${fake.url}/` }, deps());
+  const result = await kiteProfileAdd({ url: `${fake.url}/` }, fakeSetupContext({}, opened), deps());
   expect(result.suggestedProfileName).toBe(EMAIL);
   expect(result.credentials).toEqual({ baseUrl: fake.url, token: expect.stringMatching(/^cli_/), email: EMAIL, expiresAt: '2026-04-01T00:00:00Z' });
   expect(fake.tokens.get(result.credentials.token)).toBe(EMAIL);
@@ -85,47 +84,49 @@ test('setup returns normalised credentials, named after the email', async () => 
 });
 
 test('a URL without a scheme gets https', async () => {
-  const e = await caught(kiteProfileAdd({ url: 'kite.example' }, deps()));
+  const e = await caught(kiteProfileAdd({ url: 'kite.example' }, fakeSetupContext({}, opened), deps()));
   expect(e.code).toBe('NETWORK_ERROR');
   expect(fetched).toEqual(['https://kite.example/api/auth/device']);
 });
 
 test('ftp and garbage are refused before any request', async () => {
   for (const url of ['ftp://kite.example', '   ', 'http://', 'https://u:p@kite.example']) {
-    expect((await caught(kiteProfileAdd({ url }, deps()))).code).toBe('INVALID_PARAMS');
+    expect((await caught(kiteProfileAdd({ url }, fakeSetupContext({}, opened), deps()))).code).toBe('INVALID_PARAMS');
   }
   expect(fetched).toEqual([]);
 });
 
-test('without --url the URL is asked for', async () => {
+test('without --url the URL is asked for, as a url', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  const asked: string[] = [];
-  const result = await kiteProfileAdd({}, { ...deps(), prompt: async (q) => { asked.push(q); return fake.url; } });
-  expect(asked.length).toBe(1);
-  expect(result.credentials.baseUrl).toBe(fake.url);
+  const ctx = fakeSetupContext({ url: fake.url }, opened);
+  await kiteProfileAdd({}, ctx, deps());
+  expect(ctx.asked).toEqual([{ id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' }]);
 });
 
 test('the browser opens only after the code is printed', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  await kiteProfileAdd({ url: fake.url }, deps());
+  const ctx = fakeSetupContext({}, events);
+  ctx.log = (...parts) => { events.push(`err:${parts.join(' ')}`); };
+  await kiteProfileAdd({ url: fake.url }, ctx, deps());
   const printed = events.findIndex((e) => e.startsWith('err:') && e.includes('/auth/device?code='));
-  const open = events.indexOf('open');
+  const open = events.findIndex((e) => e.startsWith(`${fake.url}/auth/device?code=`));
   expect(printed).toBeGreaterThanOrEqual(0);
   expect(open).toBeGreaterThan(printed);
-  expect(opened[0]).toStartWith(`${fake.url}/auth/device?code=`);
   expect(stdout).toEqual([]);
 });
 
 test('--no-browser prints the link and never opens a browser', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  await kiteProfileAdd({ url: fake.url, browser: false }, deps());
+  const ctx = fakeSetupContext({}, opened);
+  ctx.log = (...parts) => { events.push(`err:${parts.join(' ')}`); };
+  await kiteProfileAdd({ url: fake.url, browser: false }, ctx, deps());
   expect(opened).toEqual([]);
   expect(events.some((e) => e.includes(`${fake.url}/auth/device?code=`))).toBe(true);
 });
 
 test('--json puts only the code event on stdout', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  await kiteProfileAdd({ url: fake.url, json: true }, deps());
+  await kiteProfileAdd({ url: fake.url, json: true }, fakeSetupContext({}, opened), deps());
   expect(stdout.length).toBe(1);
   const event = JSON.parse(stdout[0]);
   const device = [...fake.devices.values()][0];
@@ -136,7 +137,7 @@ test('a failing /api/auth/me after approval saves no profile', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
   fake.after((r) => r.path === '/api/auth/device/token', () => fake.failNext(500, { error: { code: 'internal_error', message: 'x' } }));
   const before = await loadVault();
-  const e = await caught(addProfileWithSetup('kite', (o) => kiteProfileAdd(o, deps()), { url: fake.url } as never));
+  const e = await caught(addProfileWithSetup('kite', (o) => kiteProfileAdd(o as never, fakeSetupContext({}, opened), deps()), { url: fake.url } as never));
   expect(e.code).toBe('API_ERROR');
   const after = await loadVault();
   expect(after.config.profiles.kite).toEqual(before.config.profiles.kite);
@@ -145,7 +146,7 @@ test('a failing /api/auth/me after approval saves no profile', async () => {
 
 test('a successful add lands in the temp vault only', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  await addProfileWithSetup('kite', (o) => kiteProfileAdd(o, deps()), { url: fake.url } as never);
+  await addProfileWithSetup('kite', (o) => kiteProfileAdd(o as never, fakeSetupContext({}, opened), deps()), { url: fake.url } as never);
   expect(configDir().startsWith(process.env.HOME!)).toBe(true);
   const saved = await getCredentials<KiteCredentials>('kite', EMAIL);
   expect(saved?.email).toBe(EMAIL);
@@ -154,6 +155,11 @@ test('a successful add lands in the temp vault only', async () => {
 });
 
 describe('reauthenticate', () => {
+  // It builds a terminal context; with nothing on PATH, launching a browser cannot open anything.
+  const originalPath = process.env.PATH;
+  beforeEach(() => { process.env.PATH = mkdtempSync(join(tmpdir(), 'agentio-empty-path-')); });
+  afterEach(() => { process.env.PATH = originalPath; });
+
   test('keeps the URL, replaces the token and refreshes the email', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: 'new@example.com' };
     const next = await reauthenticateKite({ ...OLD, baseUrl: fake.url }, 'existing', deps());

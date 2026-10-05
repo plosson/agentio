@@ -19,7 +19,8 @@ export type ErrorCode =
   | 'CONFIG_ERROR'
   | 'VAULT_NOT_CONFIGURED'
   | 'VAULT_LOCKED'
-  | 'VAULT_CORRUPT';
+  | 'VAULT_CORRUPT'
+  | 'UNKNOWN_ERROR';
 
 /**
  * Map HTTP status codes to standard error codes.
@@ -108,7 +109,11 @@ export function handleError(error: unknown): never {
       printJson({ event: 'error', code: error.code, message: error.message, suggestion: error.suggestion });
       process.exit(exitCodeForError(error.code));
     }
-    printJson({ event: 'error', message: error instanceof Error ? error.message : 'An unexpected error occurred' });
+    printJson({
+      event: 'error',
+      code: 'UNKNOWN_ERROR',
+      message: error instanceof Error ? error.message : 'An unexpected error occurred',
+    });
     process.exit(1);
   }
 

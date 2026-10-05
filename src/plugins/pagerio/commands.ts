@@ -6,7 +6,7 @@ import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { prompt } from '../../utils/stdin';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { PagerioClient, parsePagerUrl } from './client';
@@ -107,12 +107,14 @@ export function registerPagerioCommands(program: Command): void {
   });
 
   addExamples(
-    profile
-      .command('add')
-      .description('Add a pager with its URL')
-      .option('--url <url>', 'Pager URL, from the dashboard\'s Copy button (asked for when absent)')
-      .option('--profile <name>', 'Profile name (default: default)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    addSetupOptions(
+      profile
+        .command('add')
+        .description('Add a pager with its URL')
+        .option('--url <url>', 'Pager URL, from the dashboard\'s Copy button (asked for when absent)')
+        .option('--profile <name>', 'Profile name (default: default)')
+        .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    )
       .action(async (options: PagerioProfileAddOptions) => {
         try {
           await addProfileWithSetup('pagerio', (o) => pagerioProfileAdd(o as PagerioProfileAddOptions), options);

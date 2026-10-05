@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { ServiceClient } from '../types/service';
-import type { AgentioPlugin, SetupResult } from '../plugin-sdk';
+import type { AgentioPlugin, SetupContext, SetupNeeds, SetupResult } from '../plugin-sdk';
 import type { PluginStore } from '../daemon/plugin-store';
 
 export interface ProfileAddOptions {
@@ -9,8 +9,10 @@ export interface ProfileAddOptions {
 }
 
 export interface ProfilePlugin<TCredentials extends object> {
-  /** Authenticate and return credentials; the host chooses the name and persists them. */
-  setup(options: ProfileAddOptions): Promise<SetupResult<TCredentials>>;
+  /** What setup needs, for `profile add --describe --json`; without it, `--json` is refused. */
+  needs?: SetupNeeds;
+  /** Authenticate and return credentials, asking only through `context`; the host names and persists them. */
+  setup(options: ProfileAddOptions, context: SetupContext): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
   /** Return replacement credentials; the host remains responsible for persistence. */
   reauthenticate?(credentials: TCredentials | null, profileName: string): Promise<TCredentials>;

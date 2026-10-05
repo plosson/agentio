@@ -1,6 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { KiteClient } from './client';
 import { kiteProfileAdd, reauthenticateKite, registerKiteCommands } from './commands';
+import { KITE_SETUP_NEEDS } from './setup-needs';
 import type { KiteCredentials } from './types';
 
 export default defineServicePlugin<KiteCredentials>()({
@@ -11,6 +12,7 @@ export default defineServicePlugin<KiteCredentials>()({
   brand: { color: '#0EA5E9' },
   registerCommands: registerKiteCommands,
   profile: {
+    needs: KITE_SETUP_NEEDS,
     setup: kiteProfileAdd,
     createClient: (credentials) => new KiteClient(credentials),
     describe: (credentials) => ({ account: credentials.email, url: credentials.baseUrl }),

@@ -125,3 +125,49 @@ describe('declarative plugins', () => {
     }
   });
 });
+
+describe('declarative plugins: profile add --json', () => {
+  const vault = withTempVault('agentio-declarative-json-', () => ({ config: { profiles: {} } as never }));
+
+  async function cliWithPlugin(source: string, args: string[]) {
+    const directory = await mkdtemp(join(tmpdir(), 'agentio-external-plugin-'));
+    const path = join(directory, 'plugin.ts');
+    await writeFile(path, source);
+    try {
+      const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
+        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', env: { ...vault.env(), AGENTIO_PLUGIN_PATHS: path },
+      });
+      const timer = setTimeout(() => proc.kill(), 30_000);
+      const exit = await proc.exited;
+      clearTimeout(timer);
+      const stdout = await new Response(proc.stdout).text();
+      return { exit, events: stdout.split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)) };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  const plugin = (needs: string) => `export default {
+    apiVersion: 1, id: 'acme-json', displayName: 'Acme', description: 'Acme',
+    profile: { ${needs} async setup() { return { credentials: { token: 't' }, suggestedProfileName: 'x' }; }, async validate() { return { valid: true }; } },
+    commands: [],
+  };`;
+
+  test('--describe --json prints the needs a plugin declares', async () => {
+    const res = await cliWithPlugin(
+      plugin(`needs: { inputs: [{ id: 'token', label: 'API token', kind: 'secret' }], auth: 'none' },`),
+      ['acme-json', 'profile', 'add', '--describe', '--json'],
+    );
+    expect(res.exit).toBe(0);
+    expect(res.events).toEqual([{ v: 1, event: 'needs', service: 'acme-json', inputs: [{ id: 'token', label: 'API token', kind: 'secret' }], auth: 'none' }]);
+  }, 30_000);
+
+  test('a plugin without needs is refused with the INVALID_PARAMS event', async () => {
+    const res = await cliWithPlugin(plugin(''), ['acme-json', 'profile', 'add', '--describe', '--json']);
+    expect(res.exit).toBe(1);
+    expect(res.events).toEqual([{
+      v: 1, event: 'error', code: 'INVALID_PARAMS',
+      message: 'acme-json cannot be set up with --json yet', suggestion: 'Run: agentio acme-json profile add',
+    }]);
+  }, 30_000);
+});

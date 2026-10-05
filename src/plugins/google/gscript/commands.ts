@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
 import { fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup } from '../../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { GScriptClient } from './client';
@@ -440,11 +440,13 @@ file already exists in the project, its existing type is reused.`,
     getExtraInfo: (credentials) => (credentials?.email ? ` - ${credentials.email}` : ''),
   });
 
-  profile
-    .command('add')
-    .description('Add a new Google Apps Script profile')
-    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Google Apps Script profile')
+      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('gscript', gscriptProfileAdd, options);

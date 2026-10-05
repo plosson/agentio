@@ -105,7 +105,7 @@ describe('errors under --json', () => {
     expect(res.stderr).toBe('Error [VAULT_NOT_CONFIGURED]: No vault configured\nSuggestion: Run: agentio vault init\n');
   });
 
-  test('an error that is not a CliError has no code and exits 1', async () => {
+  test('an error that is not a CliError is coded UNKNOWN_ERROR and exits 1', async () => {
     await mkdir(join(tempHome, '.config', 'agentio', 'vault.path'));
     const res = await runCli(['status', '--json']);
     expect(res.exitCode).toBe(1);
@@ -113,6 +113,7 @@ describe('errors under --json', () => {
     expect(JSON.parse(res.stdout)).toEqual({
       v: 1,
       event: 'error',
+      code: 'UNKNOWN_ERROR',
       message: 'EISDIR: illegal operation on a directory, read',
     });
   });

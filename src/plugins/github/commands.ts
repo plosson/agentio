@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { GitHubClient } from './client';
 import { performGitHubOAuthFlow } from './oauth';
 import { handleError } from '../../utils/errors';
@@ -19,11 +19,13 @@ export function registerGitHubCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.username ? ` (${credentials.username})` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new GitHub profile')
-    .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new GitHub profile')
+      .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('github', githubProfileAdd, options);

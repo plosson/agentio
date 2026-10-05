@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup } from '../../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
@@ -365,11 +365,13 @@ export function registerGChatCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.type === 'webhook' ? ' - webhook' : ' - oauth',
   });
 
-  profile
-    .command('add')
-    .description('Add a new Google Chat profile (webhook or OAuth)')
-    .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Google Chat profile (webhook or OAuth)')
+      .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('gchat', gchatProfileAdd, options);

@@ -1,16 +1,15 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildAuthorizeUrl,
   createPkcePair,
   exchangeCodeForTokens,
   } from './oauth';
-import { launchBrowser } from '../../auth/oauth-server';
 import { DropboxClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
-import { prompt, confirm } from '../../utils/stdin';
+import { confirm } from '../../utils/stdin';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addExamples } from '../../utils/command-tree';
 import {
@@ -22,7 +21,7 @@ import {
   printDropboxUploaded,
 } from './output';
 import type { DropboxCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { InputSpec, SetupContext, SetupNeeds, SetupResult } from '../../plugin-sdk';
 
 const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
   service: 'dropbox',
@@ -394,20 +393,27 @@ Deleted items go to the Dropbox trash and stay recoverable for 30 days
     getExtraInfo: (credentials) => (credentials?.email ? ` - ${credentials.email}` : ''),
   });
 
-  profile
-    .command('add')
-    .description('Add a new Dropbox profile')
-    .option('--profile <name>', 'Profile name (defaults to the account email)')
-    .option('--app-key <key>', 'App key from the Dropbox App Console')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    .action(async (options) => {
-      try {
-        await addProfileWithSetup('dropbox', dropboxProfileAdd, options);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Dropbox profile')
+      .option('--profile <name>', 'Profile name (defaults to the account email)')
+      .option('--app-key <key>', 'App key from the Dropbox App Console')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
+  ).action(async (options) => {
+    try {
+      await addProfileWithSetup('dropbox', (o, context) => dropboxProfileAdd(o as DropboxProfileAddOptions, context), options, DROPBOX_SETUP_NEEDS);
+    } catch (error) {
+      handleError(error);
+    }
+  });
 }
+
+const APP_KEY_INPUT: InputSpec = { id: 'appKey', label: 'App key', kind: 'text', help: 'From your app at https://www.dropbox.com/developers/apps (Settings tab)' };
+const CODE_INPUT: InputSpec = { id: 'code', label: 'Code Dropbox shows after you allow access', kind: 'secret' };
+
+/** What Dropbox setup needs: your app's key, then the code Dropbox shows in the browser. */
+export const DROPBOX_SETUP_NEEDS: SetupNeeds = { inputs: [APP_KEY_INPUT], auth: 'browser-code' };
 
 export interface DropboxProfileAddOptions {
   profile?: string;
@@ -415,34 +421,27 @@ export interface DropboxProfileAddOptions {
   readOnly?: boolean;
 }
 
-export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Promise<SetupResult<DropboxCredentials>> {
-  console.error('\nDropbox Setup\n');
-  console.error('Prerequisite: create an app at https://www.dropbox.com/developers/apps');
-  console.error('  1. Choose "Scoped access" and "Full Dropbox"');
-  console.error('  2. On the Permissions tab enable: account_info.read, files.metadata.read,');
-  console.error('     files.content.read, files.content.write, sharing.read, sharing.write');
-  console.error('  3. Copy the App key from the Settings tab\n');
-  console.error('No redirect URI is needed - Dropbox shows the code in the browser.\n');
+export async function dropboxProfileAdd(options: DropboxProfileAddOptions, context: SetupContext): Promise<SetupResult<DropboxCredentials>> {
+  context.log('\nDropbox Setup\n');
+  context.log('Prerequisite: create an app at https://www.dropbox.com/developers/apps');
+  context.log('  1. Choose "Scoped access" and "Full Dropbox"');
+  context.log('  2. On the Permissions tab enable: account_info.read, files.metadata.read,');
+  context.log('     files.content.read, files.content.write, sharing.read, sharing.write');
+  context.log('  3. Copy the App key from the Settings tab\n');
+  context.log('No redirect URI is needed - Dropbox shows the code in the browser.\n');
 
-  const appKey = (options.appKey || (await prompt('? App key: '))).trim();
-  if (!appKey) {
-    throw new CliError('INVALID_PARAMS', 'App key is required');
-  }
+  const appKey = (options.appKey ?? (await context.ask(APP_KEY_INPUT))).trim();
+  if (!appKey) throw new CliError('INVALID_PARAMS', 'App key is required');
 
   const { verifier, challenge } = createPkcePair();
   const authUrl = buildAuthorizeUrl(appKey, challenge);
+  context.log('\nAuthorise the app in your browser:');
+  context.log(`  ${authUrl}\n`);
+  context.log('After approving, Dropbox displays an authorisation code to copy.\n');
+  context.openUrl(authUrl);
 
-  console.error('\nAuthorise the app in your browser:');
-  console.error(`  ${authUrl}\n`);
-  console.error('After approving, Dropbox displays an authorisation code to copy.\n');
-  launchBrowser(authUrl);
-
-  const code = (await prompt('? Paste the authorisation code: ')).trim();
-  if (!code) {
-    throw new CliError('INVALID_PARAMS', 'Authorisation code is required');
-  }
-
-  console.error('\nExchanging the authorisation code...');
+  const code = await context.ask(CODE_INPUT);
+  context.log('\nExchanging the authorisation code...');
   const tokens = await exchangeCodeForTokens(code, appKey, verifier);
 
   const credentials: DropboxCredentials = {
@@ -453,7 +452,7 @@ export async function dropboxProfileAdd(options: DropboxProfileAddOptions): Prom
     accountId: tokens.accountId,
   };
 
-  console.error('Validating access...');
+  context.log('Validating access...');
   const client = new DropboxClient(credentials);
   const account = await client.account();
 

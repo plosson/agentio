@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
@@ -1481,13 +1481,15 @@ function registerProfileCommands(spotify: Command): void {
       : ''),
   });
 
-  profile
-    .command('add')
-    .description('Add a new Spotify profile (PKCE; bring your own app)')
-    .option('--profile <name>', 'Profile name (defaults to Spotify user ID)')
-    .option('--client-id <id>', 'Client ID from the Spotify Developer Dashboard')
-    .option('--read-only', 'Request read scopes only; block writes and playback control')
-    .option('--no-browser', 'Print the authorisation URL and paste the redirect URL back')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Spotify profile (PKCE; bring your own app)')
+      .option('--profile <name>', 'Profile name (defaults to Spotify user ID)')
+      .option('--client-id <id>', 'Client ID from the Spotify Developer Dashboard')
+      .option('--read-only', 'Request read scopes only; block writes and playback control')
+      .option('--no-browser', 'Print the authorisation URL and paste the redirect URL back')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('spotify', spotifyProfileAdd, options);

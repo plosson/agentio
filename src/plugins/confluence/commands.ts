@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup } from '../profile-host';
+import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   performConfluenceOAuthFlow,
@@ -343,11 +343,13 @@ export function registerConfluenceCommands(program: Command): void {
       credentials?.siteUrl ? ` - ${credentials.siteUrl}` : '',
   });
 
-  profile
-    .command('add')
-    .description('Add a new Confluence profile with OAuth authentication')
-    .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  addSetupOptions(
+    profile
+      .command('add')
+      .description('Add a new Confluence profile with OAuth authentication')
+      .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+  )
     .action(async (options) => {
       try {
         await addProfileWithSetup('confluence', confluenceProfileAdd, options);
