@@ -3,7 +3,8 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
-import { notesProfileAdd, suggestedName, type NotesSetupDeps } from '../../../src/plugins/notes/commands';
+import { fakeSetupContext } from '../../helpers/setup-context';
+import { notesProfileAdd, suggestedName } from '../../../src/plugins/notes/commands';
 import { addProfileWithSetup } from '../../../src/plugins/profile-host';
 import { getCredentials } from '../../../src/auth/token-store';
 import type { NotesCredentials } from '../../../src/plugins/notes/types';
@@ -29,9 +30,8 @@ const originalFetch = globalThis.fetch;
 const originalError = console.error;
 const originalLog = console.log;
 
-const noPrompt: NotesSetupDeps = {
-  prompt: async () => { throw new Error('prompt must not be used when --url and --api-key are given'); },
-};
+// No answers: any question fails, so a value given as an option is never asked for.
+const noPrompt = () => fakeSetupContext({});
 
 beforeEach(() => {
   fake = new FakeNotes();
@@ -60,7 +60,7 @@ afterAll(() => {
 });
 
 test('setup checks the server and the key, and returns normalised credentials', async () => {
-  const result = await notesProfileAdd({ url: `${fake.url}//`, apiKey: ` ${KEY} ` }, noPrompt);
+  const result = await notesProfileAdd({ url: `${fake.url}//`, apiKey: ` ${KEY} ` }, noPrompt());
   expect(result.credentials).toEqual({ baseUrl: fake.url, apiKey: KEY });
   expect(result.info).toContain('2 folders');
   expect(fake.log.map((r) => r.rawPath)).toEqual(['/health', '/v1/folders']);
@@ -68,21 +68,24 @@ test('setup checks the server and the key, and returns normalised credentials', 
 });
 
 test('a wrong key stops setup and nothing is returned to save', async () => {
-  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: 'nope' }, noPrompt));
+  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: 'nope' }, noPrompt()));
   expect(err.code).toBe('AUTH_FAILED');
 });
 
 test('a key that works while Notes.app does not answer is kept, with a warning', async () => {
   fake.failNext = { status: 502, body: { error: 'NotesError', message: 'osascript timed out' } };
-  const result = await notesProfileAdd({ url: fake.url, apiKey: KEY }, noPrompt);
+  const logged: string[] = [];
+  const context = { ...noPrompt(), log: (...parts: unknown[]) => { logged.push(parts.join(' ')); } };
+  const result = await notesProfileAdd({ url: fake.url, apiKey: KEY }, context);
   expect(result.credentials.apiKey).toBe(KEY);
-  expect(errors.join('\n')).toContain('Notes.app did not answer');
+  expect(logged.join('\n')).toContain('Notes.app did not answer');
+  expect(errors).toEqual([]);
   expect(result.info).not.toContain('folders');
 });
 
 test('a server on another platform is refused', async () => {
   fake.platform = 'linux';
-  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: KEY }, noPrompt));
+  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: KEY }, noPrompt()));
   expect(err.code).toBe('CONFIG_ERROR');
 });
 
@@ -96,7 +99,7 @@ test('a URL that is not an apple-notes-api server is refused before the key is s
     return originalFetch(input, init);
   }) as typeof fetch;
   try {
-    const err = await caught(notesProfileAdd({ url: otherUrl, apiKey: KEY }, noPrompt));
+    const err = await caught(notesProfileAdd({ url: otherUrl, apiKey: KEY }, noPrompt()));
     expect(err.code).toBe('CONFIG_ERROR');
     expect(fetched).toEqual([`${otherUrl}/health`]);
   } finally {
@@ -106,22 +109,21 @@ test('a URL that is not an apple-notes-api server is refused before the key is s
 
 test('bad URLs and an empty key are refused before any request', async () => {
   for (const url of ['ftp://mac', '  ', 'https://u:p@mac']) {
-    expect((await caught(notesProfileAdd({ url, apiKey: KEY }, noPrompt))).code).toBe('INVALID_PARAMS');
+    expect((await caught(notesProfileAdd({ url, apiKey: KEY }, noPrompt()))).code).toBe('INVALID_PARAMS');
   }
-  expect((await caught(notesProfileAdd({ url: fake.url, apiKey: '   ' }, noPrompt))).code).toBe('INVALID_PARAMS');
+  expect((await caught(notesProfileAdd({ url: fake.url, apiKey: '   ' }, noPrompt()))).code).toBe('INVALID_PARAMS');
   expect(fetched).toEqual([]);
 });
 
 test('without --url and --api-key both are asked for', async () => {
-  const asked: string[] = [];
-  const answers = [fake.url, KEY];
-  const result = await notesProfileAdd({}, { prompt: async (q) => { asked.push(q); return answers.shift()!; } });
-  expect(asked).toHaveLength(2);
+  const context = fakeSetupContext({ url: fake.url, apiKey: KEY });
+  const result = await notesProfileAdd({}, context);
+  expect(context.asked.map((s) => s.id)).toEqual(['url', 'apiKey']);
   expect(result.credentials).toEqual({ baseUrl: fake.url, apiKey: KEY });
 });
 
 test('the profile is saved in the vault under the host name', async () => {
-  await addProfileWithSetup('notes', (o) => notesProfileAdd({ ...o, url: fake.url, apiKey: KEY }, noPrompt), {});
+  await addProfileWithSetup('notes', (o) => notesProfileAdd({ ...o, url: fake.url, apiKey: KEY }, noPrompt()), {});
   expect(await getCredentials<NotesCredentials>('notes', '127.0.0.1')).toEqual({ baseUrl: fake.url, apiKey: KEY });
 });
 

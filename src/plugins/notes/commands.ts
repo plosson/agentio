@@ -7,9 +7,11 @@ import { addExamples } from '../../utils/command-tree';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt, readStdin } from '../../utils/stdin';
+import { readStdin } from '../../utils/stdin';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { checkAnswer } from '../setup-inputs';
+import { NOTES_API_KEY_INPUT, NOTES_URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { bodyToHtml, NotesClient, normaliseNotesUrl, parseLimit } from './client';
 import { printDeleted, printFolders, printNote, printNoteList, printSavedNote } from './output';
@@ -118,11 +120,6 @@ export interface NotesProfileAddOptions extends ProfileAddOptions {
   apiKey?: string;
 }
 
-/** What setup reaches outside the process through; tests replace it. */
-export interface NotesSetupDeps {
-  prompt?: (question: string) => Promise<string>;
-}
-
 /** The profile name a server suggests: the host's first label, or the whole host for an IP address. */
 export function suggestedName(baseUrl: string): string {
   const host = new URL(baseUrl).hostname;
@@ -132,12 +129,10 @@ export function suggestedName(baseUrl: string): string {
 
 export async function notesProfileAdd(
   options: NotesProfileAddOptions,
-  deps: NotesSetupDeps = {},
+  context: SetupContext,
 ): Promise<SetupResult<NotesCredentials>> {
-  const ask = deps.prompt ?? prompt;
-  const baseUrl = normaliseNotesUrl(options.url ?? (await ask('? Notes server URL (for example https://mac-mini.example.ts.net): ')));
-  const apiKey = (options.apiKey ?? (await ask('? API key (NOTES_API_KEY on the Mac): '))).trim();
-  if (!apiKey) throw new CliError('INVALID_PARAMS', 'The API key is required', 'Pass --api-key, or type it when asked');
+  const baseUrl = normaliseNotesUrl(options.url !== undefined ? checkAnswer(NOTES_URL_INPUT, options.url) : await context.ask(NOTES_URL_INPUT));
+  const apiKey = options.apiKey !== undefined ? checkAnswer(NOTES_API_KEY_INPUT, options.apiKey) : await context.ask(NOTES_API_KEY_INPUT);
 
   const client = new NotesClient({ baseUrl, apiKey });
   const health = await client.health();
@@ -153,8 +148,8 @@ export async function notesProfileAdd(
     // The key is checked before Notes.app is asked; only a refused key stops setup.
     if (error instanceof CliError && error.code === 'AUTH_FAILED') throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    console.error(`Warning: the API key works, but Notes.app did not answer: ${reason}`);
-    console.error('Check the Mac (Automation permission for Notes, or a busy Notes.app), then run: agentio notes folders');
+    context.log(`Warning: the API key works, but Notes.app did not answer: ${reason}`);
+    context.log('Check the Mac (Automation permission for Notes, or a busy Notes.app), then run: agentio notes folders');
   }
   return { credentials: { baseUrl, apiKey }, suggestedProfileName: suggestedName(baseUrl), info };
 }
@@ -314,7 +309,7 @@ The note stays in Recently Deleted in Notes.app for 30 days.`,
         .option('--read-only', 'Create as read-only profile (blocks write operations)')
     )
       .action(run(async (options: NotesProfileAddOptions) => {
-        await addProfileWithSetup('notes', (o) => notesProfileAdd(o as NotesProfileAddOptions), options);
+        await addProfileWithSetup('notes', (o, context) => notesProfileAdd(o as NotesProfileAddOptions, context), options);
       })),
     `Examples:
 
