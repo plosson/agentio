@@ -65,13 +65,6 @@ test('--describe without --json is still refused for a plugin without needs', as
   expect(res.stderr).toContain('--describe needs --json');
 }, 30_000);
 
-test('slack without --profile is still refused in the terminal flow', async () => {
-  const res = await cli(['slack', 'profile', 'add']);
-  expect(res.exitCode).toBe(1);
-  expect(res.stderr).toContain('INVALID_PARAMS');
-  expect(res.stderr).toContain('--profile');
-}, 30_000);
-
 test('the terminal flow of notes profile add is unchanged', async () => {
   const res = await cli(['notes', 'profile', 'add', '--url', fake.url, '--api-key', KEY, '--profile', 'main']);
   expect(res.exitCode).toBe(0);

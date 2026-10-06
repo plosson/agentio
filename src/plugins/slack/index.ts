@@ -1,6 +1,7 @@
 import { defineServicePlugin } from '../types';
 import { SlackClient } from './client';
 import { registerSlackCommands, slackProfileAdd } from './commands';
+import { SLACK_SETUP_NEEDS } from './setup-needs';
 import type { SlackCredentials } from './types';
 
 const slack = defineServicePlugin<SlackCredentials>()({
@@ -12,6 +13,7 @@ const slack = defineServicePlugin<SlackCredentials>()({
   registerCommands: registerSlackCommands,
   profile: {
     setup: slackProfileAdd,
+    needs: SLACK_SETUP_NEEDS,
     createClient: (credentials) => new SlackClient(credentials),
     describe: (credentials) => ({ account: credentials.channelName }),
   },

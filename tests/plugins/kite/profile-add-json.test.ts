@@ -91,9 +91,9 @@ test('a sign-in refused in the browser saves nothing and says so', async () => {
 }, 30_000);
 
 test('a plugin without declared needs refuses --json', async () => {
-  const res = await cli(['slack', 'profile', 'add', '--json', '--profile', 'x']);
+  const res = await cli(['revolut', 'profile', 'add', '--json', '--profile', 'x']);
   expect(res.exitCode).not.toBe(0);
-  expect(res.events.at(-1)).toMatchObject({ event: 'error', message: 'slack cannot be set up with --json yet', suggestion: 'Run: agentio slack profile add' });
+  expect(res.events.at(-1)).toMatchObject({ event: 'error', message: 'revolut cannot be set up with --json yet', suggestion: 'Run: agentio revolut profile add' });
 }, 30_000);
 
 test('--input accepts a host without a scheme and completes it with https', () => {

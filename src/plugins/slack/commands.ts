@@ -6,11 +6,12 @@ import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt, readStdin } from '../../utils/stdin';
+import { readStdin } from '../../utils/stdin';
 import { SlackClient } from './client';
 import { printSlackSendResult } from './output';
 import type { SlackCredentials, SlackWebhookCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { SLACK_CHANNEL_INPUT, SLACK_WEBHOOK_INPUT } from './setup-needs';
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
   service: 'slack',
@@ -119,7 +120,7 @@ export function registerSlackCommands(program: Command): void {
     profile
       .command('add')
       .description('Add a new Slack profile (webhook)')
-      .option('--profile <name>', 'Profile name (required)')
+      .option('--profile <name>', 'Profile name (default: the channel name, else "webhook")')
       .option('--read-only', 'Create as read-only profile (blocks write operations)'),
   ).action(async (options) => {
       try {
@@ -130,21 +131,14 @@ export function registerSlackCommands(program: Command): void {
     });
 }
 
-export async function slackProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<SlackCredentials>> {
-  if (!options.profile) {
-    throw new CliError('INVALID_PARAMS', "required option '--profile <name>' not specified", 'Run: agentio slack profile add --profile <name>');
-  }
-  console.error('\nSlack Webhook Setup\n');
-  console.error('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
-  console.error('2. Enable "Incoming Webhooks" in Features');
-  console.error('3. Click "Add New Webhook to Workspace" and select a channel');
-  console.error('4. Copy the Webhook URL\n');
+export async function slackProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<SlackCredentials>> {
+  context.log('\nSlack Webhook Setup\n');
+  context.log('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
+  context.log('2. Enable "Incoming Webhooks" in Features');
+  context.log('3. Click "Add New Webhook to Workspace" and select a channel');
+  context.log('4. Copy the Webhook URL\n');
 
-  const webhookUrl = await prompt('? Paste your webhook URL: ');
-
-  if (!webhookUrl) {
-    throw new CliError('INVALID_PARAMS', 'Webhook URL is required');
-  }
+  const webhookUrl = await context.ask(SLACK_WEBHOOK_INPUT);
 
   if (!webhookUrl.startsWith('https://hooks.slack.com/')) {
     throw new CliError(
@@ -155,7 +149,7 @@ export async function slackProfileAdd(options: { profile?: string; readOnly?: bo
   }
 
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await context.fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -180,7 +174,7 @@ export async function slackProfileAdd(options: { profile?: string; readOnly?: bo
     );
   }
 
-  const channelName = await prompt('? Channel name (optional, for display): ');
+  const channelName = await context.ask(SLACK_CHANNEL_INPUT);
 
   const credentials: SlackWebhookCredentials = {
     type: 'webhook',
