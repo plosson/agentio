@@ -64,8 +64,7 @@ export function reauthenticateGoogleSnake<TCredentials extends GoogleSnakeCreden
 ): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
   return async (credentials, profileName, context) => {
     context.log(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service, context);
-    const email = await fetchEmail(tokens.access_token);
+    const { tokens, email } = await signInToGoogle(service, context, performOAuth, fetchEmail);
     context.log(`  Done (${email})`);
     return { ...(credentials ?? {}), ...tokens, email } as TCredentials;
   };
@@ -78,8 +77,7 @@ export function reauthenticateGoogleCamel<TCredentials extends GoogleCamelCreden
 ): NonNullable<ProfilePlugin<TCredentials>['reauthenticate']> {
   return async (credentials, profileName, context) => {
     context.log(`\nRe-authenticating ${service} / ${profileName}...`);
-    const tokens = await performOAuth(service, context);
-    const email = await fetchEmail(tokens.access_token);
+    const { tokens, email } = await signInToGoogle(service, context, performOAuth, fetchEmail);
     context.log(`  Done (${email})`);
     return {
       ...(credentials ?? {}),
@@ -101,7 +99,7 @@ export async function signInToGoogle(
     return { tokens, email: await fetchEmail(tokens.access_token) };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new CliError('AUTH_FAILED', `Could not read the Google account's email: ${reason}`, 'Try again, or pass --profile');
+    throw new CliError('AUTH_FAILED', `Could not read the Google account's email: ${reason}`, 'Try again');
   }
 }
 

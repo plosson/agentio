@@ -9,6 +9,7 @@ import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { signInToGoogle, toCamelTokens } from '../shared';
 import { GCHAT_TYPE_INPUT, GCHAT_WEBHOOK_INPUT } from '../setup-needs';
 import { GChatClient } from './client';
+import { checkWebhookUrl, type WebhookCheck } from '../../webhook-check';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from './output';
@@ -397,42 +398,18 @@ export async function gchatProfileAdd(
   return setupOAuthProfile(context, performOAuth, fetchEmail);
 }
 
+/** Refuses an address that is not Google Chat's, then proves the webhook works with a test message. */
+const GCHAT_WEBHOOK_CHECK: WebhookCheck = {
+  prefix: 'https://chat.googleapis.com/',
+  invalidMessage: 'Not a Google Chat webhook URL',
+  invalidSuggestion: 'It starts with https://chat.googleapis.com/',
+};
+
 /** The address of a webhook, asked during the run: only a webhook profile has one. */
 async function askWebhookUrl(context: SetupContext): Promise<string> {
   const webhookUrl = await context.ask(GCHAT_WEBHOOK_INPUT);
-  await checkWebhook(webhookUrl, context);
+  await checkWebhookUrl(webhookUrl, GCHAT_WEBHOOK_CHECK, context);
   return webhookUrl;
-}
-
-/** Refuses an address that is not Google Chat's, then proves the webhook works with a test message. */
-async function checkWebhook(webhookUrl: string, context: SetupContext): Promise<void> {
-  if (!webhookUrl.startsWith('https://chat.googleapis.com/')) {
-    throw new CliError('INVALID_PARAMS', 'Not a Google Chat webhook URL', 'It starts with https://chat.googleapis.com/');
-  }
-  try {
-    const response = await context.fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text: 'Test message from agentio' }),
-    });
-
-    if (!response.ok) {
-      throw new CliError(
-        'API_ERROR',
-        `Webhook validation failed: ${response.status}`,
-        'Check the webhook URL and try again'
-      );
-    }
-  } catch (err) {
-    if (err instanceof CliError) throw err;
-    throw new CliError(
-      'API_ERROR',
-      `Failed to validate webhook: ${err instanceof Error ? err.message : String(err)}`,
-      'Check that the URL is correct and accessible'
-    );
-  }
 }
 
 async function setupWebhookProfile(suggestedName: string | undefined, context: SetupContext): Promise<SetupResult<GChatWebhookCredentials>> {

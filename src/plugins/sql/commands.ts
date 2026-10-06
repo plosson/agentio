@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
-import { SqlClient } from './client';
+import { SqlClient, scrubConnectionSecrets } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { readStdin } from '../../utils/stdin';
 import { isProfileReadOnly } from '../../config/config-manager';
@@ -126,16 +126,22 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
   // Validate connection
   context.log('\nValidating connection...');
   const displayName = extractDisplayName(url);
+  let failure: string | undefined;
   try {
     const tempClient = new SqlClient({ url });
     try {
-      await tempClient.query({ query: 'SELECT 1' });
+      const result = await tempClient.validate();
+      if (!result.valid) failure = result.error ?? 'Unknown error';
     } finally {
       tempClient.close();
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    failure = error instanceof Error ? error.message : 'Unknown error';
+  }
+  if (failure !== undefined) {
     // The driver's own message can quote the connection URL, which holds the password.
-    throw new CliError('AUTH_FAILED', `Failed to connect to ${displayName}`);
+    throw new CliError('AUTH_FAILED', `Failed to connect to ${displayName}: ${scrubConnectionSecrets(failure, url)}`);
   }
 
   context.log(`\nConnected to: ${displayName}\n`);

@@ -47,6 +47,8 @@ describe('gdriveProfileAdd', () => {
     const { services, performOAuth, fetchEmail } = stubs();
     const error = await failure(() => gdriveProfileAdd({ readOnly: true, full: true }, fakeSetupContext({}), performOAuth, fetchEmail));
     expect(error.code).toBe('INVALID_PARAMS');
+    // The message names the flag that was given, not its other spelling.
+    expect(error.message).toBe('Choose one of --read-only and --full');
     expect(services).toEqual([]);
   });
 

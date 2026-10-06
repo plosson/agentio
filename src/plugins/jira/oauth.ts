@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { URL } from 'url';
 import { JIRA_OAUTH_CONFIG } from '../../config/credentials';
 import type { SetupContext } from '../../plugin-sdk';
@@ -86,7 +87,7 @@ export async function refreshJiraToken(
 }
 
 export async function performJiraOAuthFlow(context: SetupContext): Promise<JiraOAuthResult> {
-  const state = Math.random().toString(36).substring(2);
+  const state = randomBytes(16).toString('hex');
   const { code, redirectUri } = await context.oauth({
     serviceName: 'Atlassian',
     expectedState: state,
@@ -106,9 +107,6 @@ export async function performJiraOAuthFlow(context: SetupContext): Promise<JiraO
   });
   const tokens = await exchangeCodeForTokens(code, JIRA_OAUTH_CONFIG.clientId, JIRA_OAUTH_CONFIG.clientSecret, redirectUri);
   const sites = await getAccessibleResources(tokens.accessToken);
-  if (sites.length === 0) {
-    throw new Error('No accessible Jira sites found. Make sure your app has the correct permissions.');
-  }
   const selectedSite = await selectAtlassianSite(sites, context, 'Jira');
   return {
     accessToken: tokens.accessToken,

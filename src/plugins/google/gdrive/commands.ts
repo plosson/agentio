@@ -592,7 +592,8 @@ export async function gdriveProfileAdd(
 ) {
   const readonly = options.readonly || options.readOnly;
   if (readonly && options.full) {
-    throw new CliError('INVALID_PARAMS', 'Choose one of --readonly and --full', 'Pass only one of them');
+    const flag = options.readonly ? '--readonly' : '--read-only';
+    throw new CliError('INVALID_PARAMS', `Choose one of ${flag} and --full`, 'Pass only one of them');
   }
   context.log('Google Drive Setup\n');
 

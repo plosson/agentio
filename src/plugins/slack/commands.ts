@@ -8,6 +8,7 @@ import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
 import { SlackClient } from './client';
+import { checkWebhookUrl } from '../webhook-check';
 import { printSlackSendResult } from './output';
 import type { SlackCredentials, SlackWebhookCredentials } from './types';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
@@ -140,39 +141,12 @@ export async function slackProfileAdd(_options: { profile?: string; readOnly?: b
 
   const webhookUrl = await context.ask(SLACK_WEBHOOK_INPUT);
 
-  if (!webhookUrl.startsWith('https://hooks.slack.com/')) {
-    throw new CliError(
-      'INVALID_PARAMS',
-      'Invalid Slack webhook URL',
-      'URL should start with https://hooks.slack.com/',
-    );
-  }
-
-  try {
-    const response = await context.fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text: 'Test message from agentio' }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new CliError(
-        'API_ERROR',
-        `Webhook validation failed: ${response.status} ${error}`,
-        'Check the webhook URL and try again',
-      );
-    }
-  } catch (err) {
-    if (err instanceof CliError) throw err;
-    throw new CliError(
-      'API_ERROR',
-      `Failed to validate webhook: ${err instanceof Error ? err.message : String(err)}`,
-      'Check that the URL is correct and accessible',
-    );
-  }
+  await checkWebhookUrl(webhookUrl, {
+    prefix: 'https://hooks.slack.com/',
+    invalidMessage: 'Invalid Slack webhook URL',
+    invalidSuggestion: 'URL should start with https://hooks.slack.com/',
+    showResponseBody: true,
+  }, context);
 
   const channelName = await context.ask(SLACK_CHANNEL_INPUT);
 

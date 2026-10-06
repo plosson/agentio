@@ -521,6 +521,8 @@ Sends push notifications to the user's devices through the [Pocket Alert](https:
 
 **What the vault stores:** refresh token and its expiry, access token, organisation, user ID and email.
 
+**Sign in again from a remote machine:** the old refresh token isn't revoked. It stays valid until it expires.
+
 **Scopes:** `myhorus`, `billing`, `falco`, `oclaf` at sign-in. Refreshes return only 3 of the 4.
 
 **What's needed:** no app registration. **To check:** that Horus's terms allow a third-party tool to sign in on the user's behalf.

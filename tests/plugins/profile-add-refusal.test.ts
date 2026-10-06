@@ -59,7 +59,7 @@ test('every service with declared needs describes exactly the plugin\'s declarat
   }
 }, 120_000);
 
-test('--describe without --json is still refused for a plugin without needs', async () => {
+test('--describe without --json is refused, even for a plugin that declares needs', async () => {
   const res = await cli(['github', 'profile', 'add', '--describe']);
   expect(res.exitCode).not.toBe(0);
   expect(res.stderr).toContain('--describe needs --json');

@@ -63,12 +63,13 @@ describe('slackProfileAdd', () => {
     expect(context.asked.map((s) => s.id)).toEqual(['webhookUrl']);
   });
 
-  test('a network failure is an API_ERROR', async () => {
+  test('a network failure is an API_ERROR that does not quote the error text', async () => {
     const context = fakeSetupContext({ webhookUrl: HOOK });
-    context.fetch = (async () => { throw new Error('boom'); }) as never;
+    context.fetch = (async () => { throw new Error(`boom ${HOOK}`); }) as never;
     const error = await failure(() => slackProfileAdd({}, context));
     expect(error.code).toBe('API_ERROR');
-    expect(error.message).toContain('boom');
+    expect(error.message).toBe('Failed to validate webhook');
+    expect(error.message).not.toContain('SECRET-HOOK-TOKEN');
   });
 
   test('an empty channel gives the suggested name webhook', async () => {

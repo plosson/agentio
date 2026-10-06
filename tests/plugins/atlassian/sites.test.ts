@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { getAccessibleResources, selectAtlassianSite } from '../../../src/plugins/atlassian/sites';
 import { fakeSetupContext } from '../../helpers/setup-context';
+import { CliError } from '../../../src/utils/errors';
 
 const sites = [
   { id: 'c-1', url: 'https://acme.atlassian.net', name: 'Acme', scopes: [] },
@@ -19,6 +20,17 @@ test('the question names the product it is asked for', async () => {
   expect(await selectAtlassianSite(sites, ctx, 'Confluence')).toBe(sites[0]);
   expect(ctx.asked).toEqual([{ id: 'site', label: 'Confluence site', kind: 'choice', choices: CHOICES }]);
 });
+
+for (const product of ['Jira', 'Confluence'] as const) {
+  test(`no site at all (${product}): CONFIG_ERROR naming ${product}, with a suggestion, nothing asked`, async () => {
+    const ctx = fakeSetupContext({ site: 'c-1' });
+    const err = await selectAtlassianSite([], ctx, product).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err).toMatchObject({ code: 'CONFIG_ERROR', message: expect.stringContaining(`No accessible ${product} sites found`) });
+    expect((err as CliError).suggestion).toBeTruthy();
+    expect(ctx.asked).toEqual([]);
+  });
+}
 
 test('one site: nothing is asked', async () => {
   const ctx = fakeSetupContext({});

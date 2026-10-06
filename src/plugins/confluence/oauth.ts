@@ -1,7 +1,7 @@
+import { randomBytes } from 'crypto';
 import { URL } from 'url';
 import { ATLASSIAN_OAUTH_CONFIG } from '../../config/credentials';
 import type { SetupContext } from '../../plugin-sdk';
-import { CliError } from '../../utils/errors';
 import { getAccessibleResources, selectAtlassianSite } from '../atlassian/sites';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
@@ -94,7 +94,7 @@ export async function refreshConfluenceToken(
 }
 
 export async function performConfluenceOAuthFlow(context: SetupContext): Promise<ConfluenceOAuthResult> {
-  const state = Math.random().toString(36).substring(2);
+  const state = randomBytes(16).toString('hex');
   const { code, redirectUri } = await context.oauth({
     serviceName: 'Atlassian',
     expectedState: state,
@@ -122,12 +122,6 @@ export async function performConfluenceOAuthFlow(context: SetupContext): Promise
   );
 
   const sites = await getAccessibleResources(tokens.accessToken, context.fetch);
-  if (sites.length === 0) {
-    throw new CliError(
-      'CONFIG_ERROR',
-      'No accessible Confluence sites found. Make sure your app has the correct permissions.',
-    );
-  }
   const selectedSite = await selectAtlassianSite(sites, context, 'Confluence');
 
   return {

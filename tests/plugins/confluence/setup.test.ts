@@ -61,6 +61,8 @@ describe('performConfluenceOAuthFlow', () => {
     expect(url.host).toBe('auth.atlassian.com');
     expect(url.searchParams.get('redirect_uri')).toBe(REDIRECT);
     expect(url.searchParams.get('state')).toBe(seen[0].expectedState!);
+    // 128 random bits, as GitHub's flow uses; not Math.random.
+    expect(seen[0].expectedState).toMatch(/^[0-9a-f]{32}$/);
     expect(url.searchParams.get('scope')).toContain('read:page:confluence');
   });
 

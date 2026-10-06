@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { fakeSetupContext } from '../../helpers/setup-context';
-import { googleCamelSetup, googleSnakeSetup, signInToGoogle, toCamelTokens } from '../../../src/plugins/google/shared';
+import { googleCamelSetup, googleSnakeSetup, reauthenticateGoogleCamel, reauthenticateGoogleSnake, signInToGoogle, toCamelTokens } from '../../../src/plugins/google/shared';
 import { CliError } from '../../../src/utils/errors';
 import type { OAuthTokens } from '../../../src/plugins/google/tokens';
 
@@ -51,6 +51,7 @@ describe('signInToGoogle', () => {
     expect(error.code).toBe('AUTH_FAILED');
     expect(error.message).toContain('Google');
     expect(error.message).toContain('userinfo 403');
+    expect(error.suggestion).toBe('Try again');
   });
 
   test('a non-Error rejection is still reported', async () => {
@@ -118,5 +119,44 @@ describe('googleCamelSetup', () => {
     const denied = new CliError('AUTH_FAILED', 'access_denied');
     const error = await failure(() => googleCamelSetup('gsheets', 'x', (async () => { throw denied; }) as never, stubEmail())(OPTIONS, fakeSetupContext({})));
     expect(error).toBe(denied);
+  });
+});
+
+describe('reauthenticateGoogleSnake', () => {
+  // A remote "Sign in again" gets the credentials with the secret field removed.
+  const REDACTED = { access_token: 'old-at', expiry_date: 1, email: 'old@b.c', custom: true };
+
+  test('without refresh_token in the input: the result has the fresh tokens and keeps other fields', async () => {
+    const fresh = { ...TOKENS, access_token: 'new-at', refresh_token: 'new-rt' };
+    const result = await reauthenticateGoogleSnake('gmail', stubOAuth(fresh), stubEmail('new@b.c'))(REDACTED as never, 'p', fakeSetupContext({}));
+    expect(result).toEqual({ ...fresh, email: 'new@b.c', custom: true } as never);
+  });
+
+  test('a failing email lookup is AUTH_FAILED, as in setup', async () => {
+    const lookup = (async () => { throw new Error('userinfo 401'); }) as never;
+    const error = await failure(() => reauthenticateGoogleSnake('gmail', stubOAuth(), lookup)(REDACTED as never, 'p', fakeSetupContext({})));
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain('userinfo 401');
+  });
+});
+
+describe('reauthenticateGoogleCamel', () => {
+  const REDACTED = { accessToken: 'old-at', expiryDate: 1, email: 'old@b.c', custom: true };
+
+  test('without refreshToken in the input: the result has the fresh tokens and keeps other fields', async () => {
+    const fresh = { ...TOKENS, access_token: 'new-at', refresh_token: 'new-rt' };
+    const result = await reauthenticateGoogleCamel('gdocs', stubOAuth(fresh), stubEmail('new@b.c'))(REDACTED as never, 'p', fakeSetupContext({}));
+    expect(result).toEqual({
+      accessToken: 'new-at', refreshToken: 'new-rt', expiryDate: 1234, tokenType: 'Bearer', scope: 'a b', email: 'new@b.c', custom: true,
+    } as never);
+  });
+
+  test('a failing email lookup is AUTH_FAILED, as in setup', async () => {
+    const lookup = (async () => { throw 'boom'; }) as never;
+    const error = await failure(() => reauthenticateGoogleCamel('gdocs', stubOAuth(), lookup)(REDACTED as never, 'p', fakeSetupContext({})));
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain('boom');
   });
 });

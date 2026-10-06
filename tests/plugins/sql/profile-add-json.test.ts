@@ -43,12 +43,45 @@ test('--input without a url line: stdin closed gives No answer for "Connection U
   ]);
 }, 30_000);
 
-test('a failing server connection: error without the password anywhere', async () => {
-  const res = await cli(['--json', '--input', '-'], [JSON.stringify({ url: 'postgres://u:SECRET-PW@127.0.0.1:1/db' })]);
+test('a failing server connection: the reason is kept, the password is nowhere', async () => {
+  const password = 'SECRET-PW #1/@';
+  const encoded = encodeURIComponent(password);
+  const res = await cli(['--json', '--input', '-'], [JSON.stringify({ url: `postgres://u:${encoded}@127.0.0.1:1/db` })]);
   expect(res.exitCode).not.toBe(0);
-  expect(res.events.at(-1)).toMatchObject({ event: 'error', message: 'Failed to connect to u@127.0.0.1/db' });
-  expect(res.stdout).not.toContain('SECRET-PW');
-  expect(res.stderr).not.toContain('SECRET-PW');
+  const error = res.events.at(-1);
+  expect(error).toMatchObject({ event: 'error', code: 'AUTH_FAILED' });
+  expect(error.message).toMatch(/^Failed to connect to u@127\.0\.0\.1\/db: \S/);
+  for (const secret of ['SECRET-PW', password, encoded]) {
+    expect(res.stdout).not.toContain(secret);
+    expect(res.stderr).not.toContain(secret);
+  }
+}, 30_000);
+
+test('a sqlite file in a missing directory: the driver reason is kept', async () => {
+  const res = await cli(['--json', '--input', '-'], [JSON.stringify({ url: `sqlite://${dir}/no/such/dir/a.db` })]);
+  expect(res.exitCode).not.toBe(0);
+  const error = res.events.at(-1);
+  expect(error).toMatchObject({ event: 'error', code: 'AUTH_FAILED' });
+  expect(error.message).toMatch(/^Failed to connect to .+: \S/);
+  expect(error.message).toContain('unable to open database file');
+}, 30_000);
+
+test('--interactive --json: a failing connection never shows the typed password', async () => {
+  const password = 'SECRET-PW %2F/@:';
+  const res = await cli(['--json', '--interactive'], [
+    '{"id":"dbType","value":"postgres"}',
+    '{"id":"host","value":"127.0.0.1"}',
+    '{"id":"port","value":"1"}',
+    '{"id":"database","value":"db"}',
+    '{"id":"user","value":"u"}',
+    JSON.stringify({ id: 'password', value: password }),
+  ]);
+  expect(res.exitCode).not.toBe(0);
+  expect(res.events.at(-1).message).toMatch(/^Failed to connect to u@127\.0\.0\.1\/db: \S/);
+  for (const secret of ['SECRET-PW', password, encodeURIComponent(password)]) {
+    expect(res.stdout).not.toContain(secret);
+    expect(res.stderr).not.toContain(secret);
+  }
 }, 30_000);
 
 test('a malformed url does not echo the password', async () => {
