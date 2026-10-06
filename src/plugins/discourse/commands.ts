@@ -4,10 +4,10 @@ import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { DiscourseClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
-import { prompt } from '../../utils/stdin';
 import { addExamples } from '../../utils/command-tree';
 import type { DiscourseCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { DISCOURSE_URL_INPUT, DISCOURSE_API_KEY_INPUT, DISCOURSE_USERNAME_INPUT } from './setup-needs';
 import {
   printDiscourseTopicList,
   printDiscourseTopic,
@@ -131,58 +131,30 @@ export function registerDiscourseCommands(program: Command): void {
     });
 }
 
-export async function discourseProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<DiscourseCredentials>> {
-  console.error('\nDiscourse Setup\n');
+export async function discourseProfileAdd(
+  options: { profile?: string; readOnly?: boolean },
+  context: SetupContext,
+): Promise<SetupResult<DiscourseCredentials>> {
+  const baseUrl = await context.ask(DISCOURSE_URL_INPUT);
 
-  // Step 1: Get base URL
-  console.error('Step 1: Enter your Discourse forum URL');
-  console.error('  Example: https://meta.discourse.org or https://forum.example.com\n');
+  context.log('Create an API key');
+  context.log('  1. Go to your Discourse admin panel');
+  context.log(`     ${baseUrl}/admin/api/keys`);
+  context.log('  2. Click "New API Key"');
+  context.log('  3. Description: "agentio CLI"');
+  context.log('  4. User Level: Choose your user or "All Users" for admin access');
+  context.log('  5. Scope: "Read" (or "Read, Write" if you plan to create topics later)');
+  context.log('  6. Click "Save" and copy the API key');
 
-  const baseUrl = await prompt('? Forum URL: ');
+  const apiKey = await context.ask(DISCOURSE_API_KEY_INPUT);
+  const username = await context.ask(DISCOURSE_USERNAME_INPUT);
 
-  if (!baseUrl) {
-    throw new CliError('INVALID_PARAMS', 'Forum URL is required');
-  }
-
-  // Normalize URL
-  let normalizedUrl = baseUrl.trim();
-  if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
-    normalizedUrl = `https://${normalizedUrl}`;
-  }
-  normalizedUrl = normalizedUrl.replace(/\/$/, '');
-
-  // Step 2: Get API credentials
-  console.error('\nStep 2: Create an API key');
-  console.error('  1. Go to your Discourse admin panel');
-  console.error(`     ${normalizedUrl}/admin/api/keys`);
-  console.error('  2. Click "New API Key"');
-  console.error('  3. Description: "agentio CLI"');
-  console.error('  4. User Level: Choose your user or "All Users" for admin access');
-  console.error('  5. Scope: "Read" (or "Read, Write" if you plan to create topics later)');
-  console.error('  6. Click "Save" and copy the API key\n');
-
-  const apiKey = await prompt('? API Key: ');
-
-  if (!apiKey) {
-    throw new CliError('INVALID_PARAMS', 'API key is required');
-  }
-
-  console.error('\nStep 3: Enter your Discourse username');
-  console.error('  This should match the user associated with the API key\n');
-
-  const username = await prompt('? Username: ');
-
-  if (!username) {
-    throw new CliError('INVALID_PARAMS', 'Username is required');
-  }
-
-  // Validate credentials
-  console.error('\nValidating credentials...');
+  context.log('Validating credentials...');
 
   const credentials: DiscourseCredentials = {
-    baseUrl: normalizedUrl,
-    apiKey: apiKey.trim(),
-    username: username.trim(),
+    baseUrl,
+    apiKey,
+    username,
   };
 
   const client = new DiscourseClient(credentials);
@@ -200,7 +172,7 @@ export async function discourseProfileAdd(options: { profile?: string; readOnly?
       if (error.code === 'NETWORK_ERROR') {
         throw new CliError(
           'NETWORK_ERROR',
-          `Cannot connect to ${normalizedUrl}`,
+          `Cannot connect to ${baseUrl}`,
           'Check the URL and your network connection'
         );
       }
@@ -208,8 +180,8 @@ export async function discourseProfileAdd(options: { profile?: string; readOnly?
     throw error;
   }
 
-  console.error(`\nConnected to ${normalizedUrl}`);
-  console.error(`Authenticated as ${username}\n`);
+  context.log(`Connected to ${baseUrl}`);
+  context.log(`Authenticated as ${username}`);
 
-  return { credentials, suggestedProfileName: username.trim(), info: 'Test with: agentio discourse list' };
+  return { credentials, suggestedProfileName: username, info: 'Test with: agentio discourse list' };
 }
