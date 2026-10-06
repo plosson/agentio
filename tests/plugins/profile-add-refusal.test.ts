@@ -27,7 +27,7 @@ async function inBatches<T, R>(items: T[], run: (item: T) => Promise<R>): Promis
 
 test('the registry has plugins on both sides, so neither check below passes by being empty', () => {
   expect(withNeeds.map((p) => p.id)).toEqual(expect.arrayContaining(['kite', 'gmail', 'jira', 'dropbox']));
-  expect(withoutNeeds).toContain('revolut');
+  expect(withoutNeeds).toEqual(['revolut']);
 });
 
 test('every service without declared needs refuses --describe --json and --json as one error event', async () => {
