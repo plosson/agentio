@@ -1,11 +1,31 @@
 import type { Command } from 'commander';
 import { homedir } from 'os';
+import { format } from 'util';
 
 /** Replace $HOME prefix with `~` for display. */
 export function abbrHome(p: string, home: string = homedir()): string {
   if (p === home) return '~';
   if (p.startsWith(home + '/')) return '~' + p.slice(home.length);
   return p;
+}
+
+/**
+ * Make console.error and console.warn print in bold on a terminal, and as
+ * plain text elsewhere or with NO_COLOR. Bun prints them in red (or yellow),
+ * but agentio's stderr also carries progress and instructions ("Waiting for
+ * approval…"), which then look like errors.
+ */
+export function boldStderr(
+  stream: { write(text: string): unknown; isTTY?: boolean } = process.stderr,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const bold = stream.isTTY === true && !env.NO_COLOR;
+  const write = (...args: unknown[]): void => {
+    const text = format(...args);
+    stream.write((bold && text !== '' ? `\x1b[1m${text}\x1b[22m` : text) + '\n');
+  };
+  console.error = write;
+  console.warn = write;
 }
 
 /** Version of the `--json` output format; every printed object carries it as `v`. */

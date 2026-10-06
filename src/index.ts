@@ -3,8 +3,10 @@ import { createProgram } from './cli';
 import { loadExternalPlugins } from './plugins/external-loader';
 import { DEFAULT_PLUGIN_REGISTRY } from './plugins/registry';
 import { PluginRegistry } from './plugins/plugin-registry';
+import { boldStderr } from './utils/output';
 
 async function main(): Promise<void> {
+  boldStderr();
   const external = await loadExternalPlugins();
   const registry = external.length === 0
     ? DEFAULT_PLUGIN_REGISTRY
