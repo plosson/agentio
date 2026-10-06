@@ -187,9 +187,9 @@ ACTIONS['cancel-rename'] = () => {
 /**
  * One list row: an optional lead (a service tile), a bold title, a muted message, small meta, and a dot.
  * `dot` is true or false (new or active, or not), or a status word, whose word screen readers read.
- * A link with `href`; `current` marks the row whose details are open.
+ * A link with `href`; `current` marks the row whose details are open. `menuRef` gives a profile row its right-click menu.
  */
-function listItem({ href, dot, lead = '', title, message = '', meta = '', current = false }) {
+function listItem({ href, dot, lead = '', title, message = '', meta = '', current = false, menuRef = '' }) {
   const cls = `item${dot === undefined ? ' no-dot' : ''}${lead ? ' lead' : ''}`;
   const mark = dot === undefined ? ''
     : typeof dot === 'object'
@@ -198,7 +198,7 @@ function listItem({ href, dot, lead = '', title, message = '', meta = '', curren
   const body = html`${lead}${mark}<span>
     <span class="item-title">${title}</span>${message ? html`<span class="item-message">${message}</span>` : ''}${meta ? html`<span class="item-meta">${meta}</span>` : ''}</span>`;
   return href
-    ? html`<li><a class="${cls}" href="${href}"${current ? raw(' aria-current="page"') : ''}>${body}</a></li>`
+    ? html`<li><a class="${cls}" href="${href}"${current ? raw(' aria-current="page"') : ''}${menuRef ? html` data-menu-ref="${menuRef}"` : ''}>${body}</a></li>`
     : html`<li><div class="${cls}">${body}</div></li>`;
 }
 

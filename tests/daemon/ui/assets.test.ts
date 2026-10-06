@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { ICON_SVG, INDEX_HTML } from '../../../src/daemon/ui/assets';
-import { escapeHtml, raw } from '../../../src/daemon/ui/model';
+import { escapeHtml, html, raw } from '../../../src/daemon/ui/model';
 
 const FAMILY_CSS = `/* family.css: the same file in every product. */
 :root {
@@ -548,6 +548,52 @@ describe('the assembled admin page', () => {
   test('a tile with no brand colour is grey, and the logo stays white in both modes', () => {
     expect(style).toMatch(/\.svc-tile rect:not\(\[fill\]\) \{ fill: var\(--muted\); \}/);
     expect(adminCss).not.toMatch(/\.svc-tile g \{/);
+  });
+
+  test('inside the app, a profile row has a right-click menu with its actions', () => {
+    const fn = script.match(/function profileMenu\(ref\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    const menuFor = (app: unknown, rows: Record<string, unknown>, reauth = false) =>
+      new Function('rowByRef', 'canReauthInApp', 'window', `${fn}; return profileMenu;`)(
+        (ref: string) => rows[ref], () => reauth, { agentioCompanion: app });
+    const rows = { 'kite/a b': { service: 'kite', profile: 'a b' } };
+    const app = { present: true, contextMenu: () => null };
+    expect(menuFor(app, rows, true)('kite/a b')).toEqual([
+      { id: 'test', title: 'Test' },
+      { id: 'sign-in-again', title: 'Sign In Again' },
+      { id: 'rename', title: 'Rename…' },
+      { id: 'copy-name', title: 'Copy Profile Name' },
+      '-',
+      { id: 'delete', title: 'Delete Profile…' },
+    ]);
+    // Sign In Again only where the app can do it.
+    expect(menuFor(app, rows, false)('kite/a b').map((e: any) => e.id ?? e)).toEqual(['test', 'rename', 'copy-name', '-', 'delete']);
+    // In a browser, an older app without the call, or for a profile that is gone: no menu, the usual one shows.
+    expect(menuFor(undefined, rows)('kite/a b')).toBeNull();
+    expect(menuFor({ present: true }, rows)('kite/a b')).toBeNull();
+    expect(menuFor({ present: true, contextMenu: 'x' }, rows)('kite/a b')).toBeNull();
+    expect(menuFor(app, rows)('kite/gone')).toBeNull();
+    // Every id has its action, and each action is the page's own.
+    const actions = script.slice(script.indexOf('const PROFILE_MENU = {'), script.indexOf('};', script.indexOf('const PROFILE_MENU = {')));
+    for (const id of ["test:", "'sign-in-again':", 'rename:', "'copy-name':", 'delete:']) expect(actions).toContain(id);
+    expect(actions).toContain('testProfiles([ref])');
+    expect(actions).toContain("ACTIONS['reauth-in-app']({ dataset: { ref } })");
+    expect(actions).toContain("ACTIONS['start-rename']({ dataset: { key: `profile:${ref}` } })");
+    expect(actions).toContain('copyText(ref)');
+    expect(actions).toContain("ACTIONS['delete-profile']({ dataset: { ref } })");
+    // Rows carry their ref for the menu; the right-click asks the app, and only a known id acts.
+    expect(script).toContain('menuRef: ref,');
+    const handler = script.slice(script.indexOf("document.addEventListener('contextmenu'"), script.indexOf('});', script.indexOf("document.addEventListener('contextmenu'")));
+    expect(handler).toContain("ev.target.closest('[data-menu-ref]')");
+    // The app swaps its items into the menu it opens for this very click: cancelling it would open none.
+    expect(handler).not.toContain('preventDefault');
+    expect(handler).toContain('Object.hasOwn(PROFILE_MENU, picked)');
+  });
+
+  test('a list row carries its menu ref only when it has one, escaped', () => {
+    const fn = script.match(/function listItem\(\{[\s\S]*?\n\}/)?.[0] ?? '';
+    const listItem = new Function('html', 'raw', `${fn}; return listItem;`)(html, raw);
+    expect(listItem({ href: '#p', title: 't', menuRef: 'kite/"><b>x' }).__html).toContain('data-menu-ref="kite/&quot;&gt;&lt;b&gt;x"');
+    expect(listItem({ href: '#p', title: 't' }).__html).not.toContain('data-menu-ref');
   });
 
   test('read-only shows in the profile row', () => {

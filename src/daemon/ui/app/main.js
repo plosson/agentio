@@ -24,6 +24,16 @@ document.addEventListener('click', (ev) => {
   ACTIONS[el.dataset.action](el, ev);
 });
 
+// Inside the app, a profile row's right-click shows the profile's actions: the app puts them in
+// the menu it opens for this click, so the event must not be cancelled.
+document.addEventListener('contextmenu', async (ev) => {
+  const row = ev.target.closest('[data-menu-ref]');
+  const items = row && profileMenu(row.dataset.menuRef);
+  if (!items) return;
+  const picked = await window.agentioCompanion.contextMenu(items).catch(() => null);
+  if (typeof picked === 'string' && Object.hasOwn(PROFILE_MENU, picked)) PROFILE_MENU[picked](row.dataset.menuRef);
+});
+
 document.addEventListener('change', (ev) => {
   // A profile checkbox, the "Read-only" box, or the "Same as…" <select> lives inside its
   // own option's <label class="radio-card">, alongside the actual radio input. Changing one of
