@@ -29,6 +29,7 @@ LISTS.profiles = (route) => {
         return listItem({
           href: routeHash({ view: 'profile', ref }),
           current: ref === current,
+          menuRef: ref,
           lead: tile(r.service),
           dot: statusWord(effectiveStatus(r, state.results).status, isSession(r.service)),
           title: r.profile,
@@ -113,6 +114,40 @@ VIEWS.add = () => {
             data-action="pick-service" data-service="${id}" aria-pressed="${id === picked ? 'true' : 'false'}">
             <span class="svc">${icon(id)}<span class="item-title">${displayName(id)}</span></span></button></li>`)}</ul>`}
     </div>`;
+};
+
+/**
+ * Inside the app, the right-click menu of a profile row, which the app shows as a native menu:
+ * `{ id, title }` items and `'-'` separators. Null in a browser, in an app without the call,
+ * or for a profile that is gone: the usual menu shows then.
+ */
+function profileMenu(ref) {
+  const r = rowByRef(ref);
+  if (!r || typeof window.agentioCompanion?.contextMenu !== 'function') return null;
+  return [
+    { id: 'test', title: 'Test' },
+    ...(canReauthInApp(r.service) ? [{ id: 'sign-in-again', title: 'Sign In Again' }] : []),
+    { id: 'rename', title: 'Rename…' },
+    { id: 'copy-name', title: 'Copy Profile Name' },
+    '-',
+    { id: 'delete', title: 'Delete Profile…' },
+  ];
+}
+
+/** What each item of `profileMenu` does: the page's own actions, for the row's profile. */
+const PROFILE_MENU = {
+  test: (ref) => testProfiles([ref]),
+  'sign-in-again': (ref) => ACTIONS['reauth-in-app']({ dataset: { ref } }),
+  // Renaming happens on the profile's page: open it first, then start (a page change ends any rename).
+  rename: (ref) => {
+    const start = () => ACTIONS['start-rename']({ dataset: { key: `profile:${ref}` } });
+    const hash = routeHash({ view: 'profile', ref });
+    if (location.hash === hash) { start(); return; }
+    addEventListener('hashchange', start, { once: true });
+    location.hash = hash;
+  },
+  'copy-name': (ref) => copyText(ref),
+  delete: (ref) => ACTIONS['delete-profile']({ dataset: { ref } }),
 };
 
 ACTIONS['test-all'] = () => testProfiles(allRefs());
