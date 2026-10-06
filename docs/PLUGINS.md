@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-05. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-06. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -85,6 +85,7 @@ The Gmail, Drive and Chat classes are confirmed from Google's documentation. For
 **Known problems**
 - The client secret is in the public code, obfuscated. Google's API terms (4b) forbid embedding credentials in open-source projects. Anyone who copies it uses up the 100-user cap.
 - No option lets users bring their own Google app yet.
+- **gchat webhook profiles.** "Sign in again" asks for a new webhook URL, checks it, and replaces the old one. A failing webhook usually means it was deleted, and a new URL is the only fix.
 - **gchat** only works with a Business or Enterprise Google Workspace account. Google lists this as a prerequisite of the Chat API.
 
 ### Create your own Google app
@@ -337,6 +338,8 @@ Sources: [make your first API request](https://developer.revolut.com/docs/guides
 **Sign-in:** an incoming webhook URL. It can only **send** messages to one channel.
 
 **What the vault stores:** webhook URL, channel name.
+
+**Profile name:** `--profile` is optional. The name defaults to the channel name, else `webhook`, and is made unique like every other service.
 
 ### Create your Slack webhook (required)
 
