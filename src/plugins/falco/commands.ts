@@ -6,10 +6,10 @@ import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import type { ProfileAddOptions } from '../types';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
-import { loginToFalco } from './auth';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import type { ProfileAddOptions } from '../types';
+import { loginWithSecondFactor } from './auth';
 import { FalcoClient } from './client';
 import { loadManifest, saveManifest } from './manifest';
 import { buildBasename, buildBillingBasename, uniqueBasename } from './naming';
@@ -24,7 +24,7 @@ import {
   printSyncSummary,
   type SyncTally,
 } from './output';
-import { promptChoice, promptPassword, promptText } from './prompts';
+import { FALCO_EMAIL_INPUT, FALCO_PASSWORD_INPUT } from './setup-needs';
 import { extractEmbeddedPdf } from './ubl';
 import { renderUblXmlToPdf } from './ubl-render';
 import type { BillingDocument, FalcoCredentials, Invoice, InvoicePaymentStatus, PeppolDocument } from './types';
@@ -186,32 +186,18 @@ export function indexManifest(entries: Record<string, string>): Map<string, stri
  * is picked once and stored with the credentials, because every data endpoint
  * is org-scoped.
  */
-export async function falcoProfileAdd(_options: ProfileAddOptions): Promise<SetupResult<FalcoCredentials>> {
-  console.error('\nFalco Setup\n');
+export async function falcoProfileAdd(
+  _options: ProfileAddOptions,
+  context: SetupContext,
+): Promise<SetupResult<FalcoCredentials>> {
+  context.log('\nFalco Setup\n');
 
-  const email = await promptText('? Email:');
-  if (!email) throw new CliError('INVALID_PARAMS', 'An email address is required');
-  const password = await promptPassword('? Password:');
-  if (!password) throw new CliError('INVALID_PARAMS', 'A password is required');
+  const email = await context.ask(FALCO_EMAIL_INPUT);
+  const password = await context.ask(FALCO_PASSWORD_INPUT);
+  const tokens = await loginWithSecondFactor(email, password, context);
 
-  let result = await loginToFalco({ username: email, password });
-  if (result.type === 'two_factor_required') {
-    const code = await promptText('? Two-factor code:');
-    if (!code) throw new CliError('INVALID_PARAMS', 'A two-factor code is required');
-    result = await loginToFalco({ username: email, password, twoFaCode: code });
-  }
-  if (result.type !== 'success') {
-    // Reached only when Falco asks for a second factor again after one was
-    // entered, so do not claim the user supplied nothing.
-    throw new CliError(
-      'AUTH_FAILED',
-      'Falco is still asking for a two-factor code',
-      'Re-run the command and enter a fresh code.',
-    );
-  }
 
   const now = Date.now();
-  const tokens = result.tokens;
 
   // A client scoped to no organization can still read /user/me, which is what
   // supplies the organization list.
@@ -229,13 +215,20 @@ export async function falcoProfileAdd(_options: ProfileAddOptions): Promise<Setu
     throw new CliError('CONFIG_ERROR', 'This Falco account has no organizations');
   }
 
-  const organization = await promptChoice(
-    'Organization',
-    me.organizations.map((org) => ({
-      name: `${org.name}${org.vatNumber ? ` — ${org.vatNumber}` : ''}`,
-      value: org,
-    })),
-  );
+  // One organization is taken directly; several are asked at run time.
+  let organization = me.organizations[0]!;
+  if (me.organizations.length > 1) {
+    const id = await context.ask({
+      id: 'organization',
+      label: 'Organization',
+      kind: 'choice',
+      choices: me.organizations.map((org) => ({
+        value: org.id,
+        label: org.vatNumber ? `${org.name} — ${org.vatNumber}` : org.name,
+      })),
+    });
+    organization = me.organizations.find((org) => org.id === id)!;
+  }
 
   const credentials: FalcoCredentials = {
     refreshToken: tokens.refreshToken,
