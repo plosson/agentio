@@ -6,6 +6,7 @@ import { withTempVault } from '../helpers/vault';
 import { loadVault, lockVault, unlockVault } from '../../src/vault/vault';
 import { createApiKey, listApiKeys, revokeApiKey } from '../../src/auth/api-keys';
 import { createRequestHandler } from '../../src/daemon/api';
+import { encodeToken } from '../../src/auth/token';
 
 /**
  * End to end: the real hub runs in this process on a random port with a seeded
@@ -53,6 +54,15 @@ async function cli(args: string[], extraEnv: Record<string, string> = {}, stdin 
 }
 
 describe('remote mode end to end', () => {
+  test('doctor still prints its report when the hub cannot be reached', async () => {
+    const dead = encodeToken({ url: 'http://127.0.0.1:1', kid: 'kid', secret: 'secret' });
+    const res = await cli(['doctor'], { AGENTIO_TOKEN: dead });
+    expect(res.exitCode).toBe(1);
+    expect(res.stdout).toContain('✗ Hub');
+    expect(res.stdout).not.toContain('CLI');
+    expect(res.stderr).not.toContain('Error [');
+  });
+
   test('status lists the allowed profiles without a local vault', async () => {
     const res = await cli(['status', '--no-test']);
     expect(res.exitCode).toBe(0);
