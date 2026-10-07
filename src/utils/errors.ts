@@ -108,37 +108,28 @@ export function cannotManageProfilesError(hubUrl?: string): CliError {
  * command whose 1 already means an answer (`jev yesno`: 1 is "no").
  */
 export function handleError(error: unknown, generalExitCode = 1): never {
-  const exitFor = (code: ErrorCode) => {
-    const n = exitCodeForError(code);
-    return n === 1 ? generalExitCode : n;
-  };
+  const isCliError = error instanceof CliError;
+  let exitCode = generalExitCode;
+  if (isCliError) {
+    const n = exitCodeForError(error.code);
+    exitCode = n === 1 ? generalExitCode : n;
+  }
 
   if (isJsonMode()) {
-    if (error instanceof CliError) {
-      printJson({ event: 'error', code: error.code, message: error.message, suggestion: error.suggestion });
-      process.exit(exitFor(error.code));
-    }
-    printJson({
-      event: 'error',
-      code: 'UNKNOWN_ERROR',
-      message: error instanceof Error ? error.message : 'An unexpected error occurred',
-    });
-    process.exit(generalExitCode);
-  }
-
-  if (error instanceof CliError) {
+    printJson(
+      isCliError
+        ? { event: 'error', code: error.code, message: error.message, suggestion: error.suggestion }
+        : {
+            event: 'error',
+            code: 'UNKNOWN_ERROR',
+            message: error instanceof Error ? error.message : 'An unexpected error occurred',
+          },
+    );
+  } else if (isCliError) {
     console.error(`Error [${error.code}]: ${error.message}`);
-    if (error.suggestion) {
-      console.error(`Suggestion: ${error.suggestion}`);
-    }
-    process.exit(exitFor(error.code));
+    if (error.suggestion) console.error(`Suggestion: ${error.suggestion}`);
+  } else {
+    console.error(error instanceof Error ? `Error: ${error.message}` : 'An unexpected error occurred');
   }
-
-  if (error instanceof Error) {
-    console.error(`Error: ${error.message}`);
-    process.exit(generalExitCode);
-  }
-
-  console.error('An unexpected error occurred');
-  process.exit(generalExitCode);
+  process.exit(exitCode);
 }
