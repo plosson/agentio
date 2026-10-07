@@ -13,9 +13,14 @@ const QUESTION_ID = 'answer';
 export class JevClient implements ServiceClient {
   constructor(private readonly credentials: JevCredentials) {}
 
+  /** One short question that proves the key and the model; throws when either is refused. */
+  async checkKey(): Promise<void> {
+    await this.ask('Hello there', { type: 'noul', instructions: 'Is this a greeting?' });
+  }
+
   async validate(): Promise<ValidationResult> {
     try {
-      await this.ask('Hello there', { type: 'noul', instructions: 'Is this a greeting?' });
+      await this.checkKey();
       return { valid: true };
     } catch (error) {
       return { valid: false, error: error instanceof Error ? error.message : 'Unknown error' };

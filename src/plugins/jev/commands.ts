@@ -14,7 +14,7 @@ import { JevClient } from './client';
 import { printChoice, printScore, printYesNo } from './output';
 import { parseLevels, parseOptions, parseState, parseThreshold, requireQuestion } from './questions';
 import { JEV_API_KEY_INPUT, JEV_MODEL_INPUT } from './setup-needs';
-import type { JevChoiceAnswer, JevCredentials, JevNoulAnswer, JevScoreAnswer, JevState } from './types';
+import type { JevAnswer, JevChoiceAnswer, JevCredentials, JevNoulAnswer, JevQuestion, JevResult, JevScoreAnswer, JevState } from './types';
 
 /** Exit code of `yesno` for an error that would otherwise exit 1, which means "no" there. */
 export const YESNO_ERROR_EXIT = 6;
@@ -35,6 +35,20 @@ export async function readState(stateOption: string | undefined): Promise<JevSta
   return parseState(piped || stateOption || '');
 }
 
+interface AskJevOptions {
+  state?: string;
+  model?: string;
+  profile?: string;
+}
+
+/** Ask one question: the model from the flags, then the state from stdin or `--state`, then the profile. */
+async function askJev<A extends JevAnswer>(question: JevQuestion, options: AskJevOptions): Promise<JevResult<A>> {
+  const model = optionalText(options.model, '--model');
+  const state = await readState(options.state);
+  const { client } = await getJevClient(options.profile);
+  return client.ask<A>(state, question, model);
+}
+
 export interface JevProfileAddOptions extends ProfileAddOptions {
   apiKey?: string;
   model?: string;
@@ -45,7 +59,7 @@ export async function jevProfileAdd(options: JevProfileAddOptions, context: Setu
   const model = (options.model !== undefined ? checkAnswer(JEV_MODEL_INPUT, options.model) : await context.ask(JEV_MODEL_INPUT)) || undefined;
   const credentials: JevCredentials = { apiKey, ...(model ? { model } : {}) };
   // One short question proves the key and the model before the profile is saved.
-  await new JevClient(credentials).ask('Hello there', { type: 'noul', instructions: 'Is this a greeting?' });
+  await new JevClient(credentials).checkKey();
   return { credentials, suggestedProfileName: 'default', info: `Connected to Jev${model ? ` (${model})` : ''}` };
 }
 
@@ -74,10 +88,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const threshold = parseThreshold(options.threshold);
-        const model = optionalText(options.model, '--model');
-        const state = await readState(options.state);
-        const { client } = await getJevClient(options.profile);
-        const result = await client.ask<JevNoulAnswer>(state, { type: 'noul', instructions }, model);
+        const result = await askJev<JevNoulAnswer>({ type: 'noul', instructions }, options);
         const yes = result.answer.noul >= threshold;
         printYesNo(result, yes, options.json);
         process.exit(yes ? 0 : 1);
@@ -104,10 +115,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const criteria = parseOptions(options.option);
-        const model = optionalText(options.model, '--model');
-        const state = await readState(options.state);
-        const { client } = await getJevClient(options.profile);
-        printChoice(await client.ask<JevChoiceAnswer>(state, { type: 'choice', instructions, criteria }, model), options.json);
+        printChoice(await askJev<JevChoiceAnswer>({ type: 'choice', instructions, criteria }, options), options.json);
       } catch (error) {
         handleError(error);
       }
@@ -130,10 +138,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const criteria = parseLevels(options.level);
-        const model = optionalText(options.model, '--model');
-        const state = await readState(options.state);
-        const { client } = await getJevClient(options.profile);
-        printScore(await client.ask<JevScoreAnswer>(state, { type: 'score', instructions, criteria }, model), options.json);
+        printScore(await askJev<JevScoreAnswer>({ type: 'score', instructions, criteria }, options), options.json);
       } catch (error) {
         handleError(error);
       }
