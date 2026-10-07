@@ -46,11 +46,11 @@ export class JevClient implements ServiceClient {
     if (!response.ok) throw this.errorFor(response.status, data);
 
     const envelope = (data ?? {}) as { model?: unknown; answers?: Record<string, unknown>; usage?: unknown };
-    const answer = envelope.answers?.[QUESTION_ID] as JevAnswer | undefined;
-    if (!answer || answer.type !== question.type) throw new CliError('API_ERROR', 'Jev answered without an answer to the question');
+    const answer = envelope.answers?.[QUESTION_ID];
+    if (!isUsable(answer, question.type)) throw new CliError('API_ERROR', 'Jev answered without a usable answer');
     return {
       model: typeof envelope.model === 'string' ? envelope.model : body.model,
-      answer: answer as A,
+      answer: answer as unknown as A,
       usage: (envelope.usage as JevUsage | undefined) ?? null,
     };
   }
@@ -75,6 +75,20 @@ export class JevClient implements ServiceClient {
   private clean(message: string | undefined): string | undefined {
     if (!message) return undefined;
     return message.split(this.credentials.apiKey).join('[api key]');
+  }
+}
+
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** An answer of the asked type with the fields the output prints; anything else must not print, or exit as "no". */
+function isUsable(answer: unknown, type: JevQuestion['type']): answer is JevAnswer {
+  if (!answer || typeof answer !== 'object') return false;
+  const a = answer as Record<string, unknown>;
+  if (a.type !== type) return false;
+  switch (type) {
+    case 'noul': return isNumber(a.noul);
+    case 'choice': return typeof a.choice === 'string' && isNumber(a.confidence);
+    case 'score': return isNumber(a.score) && isNumber(a.confidence);
   }
 }
 

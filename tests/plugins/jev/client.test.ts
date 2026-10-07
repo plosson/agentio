@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ErrorCode } from '../../../src/utils/errors';
 import { JevClient, JEV_API_URL } from '../../../src/plugins/jev/client';
-import type { JevNoulAnswer } from '../../../src/plugins/jev/types';
+import type { JevNoulAnswer, JevQuestion } from '../../../src/plugins/jev/types';
 import { caught, FakeFetch } from '../../helpers/fake-fetch';
 import { KEY } from './key';
 
@@ -67,6 +67,29 @@ describe('ask', () => {
     expect((await caught(client().ask('x', NOUL))).code).toBe('API_ERROR');
     api.answer({ status: 200, raw: '<html>ok</html>' });
     expect((await caught(client().ask('x', NOUL))).code).toBe('API_ERROR');
+  });
+
+  test('an answer whose fields are missing, not numbers, or not finite is an error, never a value', async () => {
+    const choice: JevQuestion = { type: 'choice', instructions: 'Which?', criteria: { a: 'A', b: 'B' } };
+    const score: JevQuestion = { type: 'score', instructions: 'How?', criteria: ['low', 'high'] };
+    const bad: Array<[JevQuestion, unknown]> = [
+      [NOUL, { type: 'noul' }],
+      [NOUL, { type: 'noul', noul: '0.9' }],
+      [NOUL, { type: 'noul', noul: null }],
+      [NOUL, { type: 'noul', noul: Infinity }],  // serialises to null
+      [choice, { type: 'choice', choice: 'a' }],
+      [choice, { type: 'choice', confidence: 0.9 }],
+      [choice, { type: 'choice', choice: 7, confidence: 0.9 }],
+      [choice, { type: 'choice', choice: 'a', confidence: '0.9' }],
+      [score, { type: 'score', confidence: 0.5 }],
+      [score, { type: 'score', score: 1.3 }],
+      [score, { type: 'score', score: 'high', confidence: 0.5 }],
+    ];
+    for (const [question, answer] of bad) {
+      api.answer(ok(answer));
+      const err = await caught(client().ask('x', question));
+      expect([JSON.stringify(answer), err.code, err.message]).toEqual([JSON.stringify(answer), 'API_ERROR', 'Jev answered without a usable answer']);
+    }
   });
 
   test('no network is NETWORK_ERROR', async () => {
