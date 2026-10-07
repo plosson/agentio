@@ -24,9 +24,13 @@ export function missingCliError(tool: CliTool): CliError {
   );
 }
 
+/** Where `command` is on the current PATH, or null. Bun.which otherwise searches the PATH the process started with. */
+export function whichOnPath(command: string): string | null {
+  return Bun.which(command, { PATH: process.env.PATH ?? '' });
+}
+
 export function findCli(tool: CliTool): string {
-  // Bun.which otherwise searches the PATH the process started with, not the current one.
-  const path = Bun.which(tool.command, { PATH: process.env.PATH ?? '' });
+  const path = whichOnPath(tool.command);
   if (!path) throw missingCliError(tool);
   return path;
 }

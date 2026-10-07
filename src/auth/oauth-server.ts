@@ -2,6 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { createInterface } from 'readline';
 import { URL } from 'url';
 import { CliError } from '../utils/errors';
+import { whichOnPath } from '../utils/external-cli';
 
 const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
@@ -54,7 +55,7 @@ export function launchBrowser(url: string): boolean {
   // A missing opener throws synchronously on macOS but not on Linux, where the
   // child simply fails to exec; resolving it on PATH first behaves the same on
   // both. PATH is passed explicitly so a runtime change to it (tests) is seen.
-  if (!Bun.which(command[0], { PATH: process.env.PATH })) return false;
+  if (!whichOnPath(command[0])) return false;
   try {
     Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
     return true;

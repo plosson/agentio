@@ -9,7 +9,7 @@ import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { getCredentials } from '../auth/token-store';
 import { listProfileRefs } from '../config/config-manager';
-import { CLAUDE_CLI, CODEX_CLI, type CliTool } from '../utils/external-cli';
+import { CLAUDE_CLI, CODEX_CLI, whichOnPath, type CliTool } from '../utils/external-cli';
 import { authExpiryStatus, authExpiresAt, type SpotifyCredentials } from '../plugins/spotify/types';
 
 export interface Check {
@@ -129,8 +129,7 @@ async function checkSpotifyAuth(): Promise<Check | null> {
 export async function checkCli(tool: CliTool, service: string, services: Set<string>): Promise<Check | null> {
   if (!services.has(service)) return null;
   const name = `${tool.command} CLI`;
-  // Bun.which otherwise searches the PATH the process started with, not the current one.
-  const path = Bun.which(tool.command, { PATH: process.env.PATH ?? '' });
+  const path = whichOnPath(tool.command);
   if (!path) return { name, status: 'warn', detail: 'not installed', fix: tool.install };
   const proc = Bun.spawn([path, '--version'], { env: process.env, stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
   const version = (await new Response(proc.stdout).text()).trim().split('\n')[0];
