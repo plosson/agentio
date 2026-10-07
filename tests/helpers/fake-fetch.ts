@@ -1,17 +1,11 @@
 /**
- * A stand-in for auth.openai.com: replaces globalThis.fetch so a test
- * never leaves the machine, records every request, and answers with what the
- * test queues (status and body as the real API sends them).
+ * A stand-in for a remote service: replaces globalThis.fetch so a test never leaves the machine,
+ * records every request, and answers with what the test queues (status and body as the real API
+ * sends them). A form-encoded request body is parsed as form data, any other as JSON.
  */
 
 import { expect } from 'bun:test';
-import { CliError } from '../../../src/utils/errors';
-
-/** An unsigned JWT with `claims` as its payload, as far as agentio reads one. */
-export function jwt(claims: Record<string, unknown>): string {
-  const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-  return `${part({ alg: 'none' })}.${part(claims)}.sig`;
-}
+import { CliError } from '../../src/utils/errors';
 
 /** The CliError a promise rejects with; fails the test when it resolves or throws anything else. */
 export async function caught(p: Promise<unknown>): Promise<CliError> {
@@ -33,7 +27,7 @@ export interface LoggedRequest {
 
 type Answer = { status: number; body?: unknown; raw?: string } | 'network-error';
 
-export class FakeOpenAiAuth {
+export class FakeFetch {
   readonly log: LoggedRequest[] = [];
   private readonly answers: Answer[] = [];
   private readonly original = globalThis.fetch;

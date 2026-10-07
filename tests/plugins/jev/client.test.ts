@@ -2,14 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ErrorCode } from '../../../src/utils/errors';
 import { JevClient, JEV_API_URL } from '../../../src/plugins/jev/client';
 import type { JevNoulAnswer } from '../../../src/plugins/jev/types';
-import { caught, FakeJev, KEY } from './fake-api';
+import { caught, FakeFetch } from '../../helpers/fake-fetch';
+import { KEY } from './key';
 
-let api: FakeJev;
+let api: FakeFetch;
 const client = (model?: string) => new JevClient({ apiKey: KEY, model });
 const NOUL = { type: 'noul', instructions: 'Is it urgent?' } as const;
 const ok = (answer: unknown) => ({ status: 200, body: { model: 'jev-1.13.0', answers: { answer }, usage: { input_tokens: 12, output_tokens: 0 } } });
 
-beforeEach(() => { api = new FakeJev(); });
+beforeEach(() => { api = new FakeFetch(); });
 afterEach(() => api.restore());
 
 describe('ask', () => {

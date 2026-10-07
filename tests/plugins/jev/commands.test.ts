@@ -4,7 +4,7 @@ import { withTempVault } from '../../helpers/vault';
 import { runCli } from '../../helpers/cli';
 import { exitCodeForError } from '../../../src/utils/errors';
 import { YESNO_ERROR_EXIT } from '../../../src/plugins/jev/commands';
-import { KEY } from './fake-api';
+import { KEY } from './key';
 
 let vault: ReturnType<typeof withTempVault>;
 function withProfiles(names: string[]): void {

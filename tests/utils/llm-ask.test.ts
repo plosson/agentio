@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { caught } from '../helpers/fake-fetch';
 import { askRequest, printAnswer, readPrompt } from '../../src/utils/llm-ask';
-import { CliError } from '../../src/utils/errors';
 
 const stdin = (value: string | null) => async () => value;
-const fails = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as CliError; } throw new Error('expected an error'); };
 
 test('the prompt, then piped stdin after a blank line', async () => {
   expect(await readPrompt('claude', 'Review this', stdin('diff --git\n'))).toBe('Review this\n\ndiff --git');
@@ -13,7 +12,7 @@ test('the prompt, then piped stdin after a blank line', async () => {
 
 test('nothing at all, or only blanks, is refused with how to give a prompt', async () => {
   for (const [arg, piped] of [[undefined, null], ['  ', null], [undefined, ' \n '], ['', '']] as const) {
-    const err = await fails(readPrompt('claude', arg, stdin(piped)));
+    const err = await caught(readPrompt('claude', arg, stdin(piped)));
     expect(err.code).toBe('INVALID_PARAMS');
     expect(err.suggestion).toContain('agentio claude ask');
   }
@@ -21,7 +20,7 @@ test('nothing at all, or only blanks, is refused with how to give a prompt', asy
 
 test('blank --model, --system or --effort are refused; given ones are trimmed', async () => {
   for (const key of ['model', 'system', 'effort'] as const) {
-    const err = await fails(askRequest('claude', 'hi', { [key]: '  ' }, stdin(null)));
+    const err = await caught(askRequest('claude', 'hi', { [key]: '  ' }, stdin(null)));
     expect(err.message).toContain(`--${key}`);
   }
   expect(await askRequest('claude', 'hi', { model: ' opus ' }, stdin(null))).toEqual({ prompt: 'hi', model: 'opus', system: undefined, effort: undefined });

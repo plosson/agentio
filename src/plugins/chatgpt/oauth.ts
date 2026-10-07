@@ -16,6 +16,8 @@ const SIGN_IN_SCOPE = 'openid profile email offline_access';
 const REFRESH_SCOPE = 'openid profile email';
 const DEFAULT_LIFETIME_MS = 60 * 60_000;
 const REAUTH = 'Run: agentio profile reauth chatgpt <profile>';
+/** A first sign-in has no profile to reauthenticate. */
+const SIGN_IN_AGAIN = 'Run: agentio chatgpt profile add --method chatgpt again';
 
 export function buildAuthorizeUrl(params: { redirectUri: string; challenge: string; state: string }): string {
   const url = new URL(`${OPENAI_AUTH_URL}/oauth/authorize`);
@@ -32,7 +34,7 @@ export function buildAuthorizeUrl(params: { redirectUri: string; challenge: stri
   return url.toString();
 }
 
-async function postToken(body: string, contentType: string, secret: string): Promise<OpenAiTokens> {
+async function postToken(body: string, contentType: string, secret: string, suggestion: string): Promise<OpenAiTokens> {
   let response: Response;
   try {
     response = await fetch(`${OPENAI_AUTH_URL}/oauth/token`, {
@@ -55,19 +57,19 @@ async function postToken(body: string, contentType: string, secret: string): Pro
   const detail = [data.error_description, data.error].find((v): v is string => typeof v === 'string');
   const reason = detail ? `: ${detail.split(secret).join('[token]')}` : '';
   if (response.status === 400 || response.status === 401) {
-    throw new CliError('AUTH_EXPIRED', `OpenAI refused the ChatGPT sign-in${reason}`, REAUTH);
+    throw new CliError('AUTH_EXPIRED', `OpenAI refused the ChatGPT sign-in${reason}`, suggestion);
   }
   throw new CliError('API_ERROR', `auth.openai.com answered ${response.status}${reason}`);
 }
 
 export function exchangeCode(code: string, verifier: string, redirectUri: string): Promise<OpenAiTokens> {
   const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: CODEX_CLIENT_ID, code_verifier: verifier });
-  return postToken(body.toString(), 'application/x-www-form-urlencoded', code);
+  return postToken(body.toString(), 'application/x-www-form-urlencoded', code, SIGN_IN_AGAIN);
 }
 
 export function refreshTokens(refreshToken: string): Promise<OpenAiTokens> {
   const body = JSON.stringify({ client_id: CODEX_CLIENT_ID, grant_type: 'refresh_token', refresh_token: refreshToken, scope: REFRESH_SCOPE });
-  return postToken(body, 'application/json', refreshToken);
+  return postToken(body, 'application/json', refreshToken, REAUTH);
 }
 
 /** A JWT's payload, or {} when it is not one. The signature is OpenAI's business, not ours. */

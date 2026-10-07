@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'fs';
 import { ClaudeClient, tokenKind } from '../../../src/plugins/claude/client';
-import { CliError } from '../../../src/utils/errors';
+import { caught } from '../../helpers/fake-fetch';
 import { installFakeCli, type FakeCli } from '../../helpers/fake-cli';
 
 const OAUTH = 'sk-ant-oat01-SECRET-oauth';
@@ -15,7 +15,6 @@ let fake: FakeCli;
 beforeEach(async () => { fake = await installFakeCli('claude'); fake.respond({ stdout: OK }); });
 afterEach(async () => { await fake.restore(); });
 
-const fails = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as CliError; } throw new Error('expected an error'); };
 
 describe('tokenKind', () => {
   test('the prefix decides; anything else is refused', () => {
@@ -70,7 +69,7 @@ describe('ask', () => {
 
   test('a refused token is AUTH_FAILED, and the error never shows it', async () => {
     fake.respond({ exit: 1, stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: `Invalid API key ${OAUTH} · Please run /login`, api_error_status: 401 }) });
-    const err = await fails(new ClaudeClient({ token: OAUTH, kind: 'oauth' }).ask({ prompt: 'x' }));
+    const err = await caught(new ClaudeClient({ token: OAUTH, kind: 'oauth' }).ask({ prompt: 'x' }));
     expect(err.code).toBe('AUTH_FAILED');
     expect(err.message).not.toContain(OAUTH);
     expect(err.suggestion).toContain('agentio claude profile add');
@@ -78,27 +77,27 @@ describe('ask', () => {
 
   test('a rate limit is RATE_LIMITED; another failure is API_ERROR with claude\'s message', async () => {
     fake.respond({ exit: 1, stdout: JSON.stringify({ is_error: true, result: 'Too many requests', api_error_status: 429 }) });
-    expect((await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('RATE_LIMITED');
+    expect((await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('RATE_LIMITED');
     fake.respond({ exit: 1, stdout: JSON.stringify({ is_error: true, result: 'model not found: opux' }) });
-    const err = await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
+    const err = await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
     expect([err.code, err.message]).toEqual(['API_ERROR', 'Claude Code failed: model not found: opux']);
   });
 
   test('output that is not claude\'s JSON is an error, with stderr when it crashed', async () => {
     fake.respond({ exit: 2, stderr: `error: unknown option '--tools' ${API}` });
-    const crashed = await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
+    const crashed = await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
     expect(crashed.code).toBe('API_ERROR');
     expect(crashed.message).toContain('unknown option');
     expect(crashed.message).not.toContain(API);
     fake.respond({ stdout: 'not json' });
-    expect((await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('API_ERROR');
+    expect((await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('API_ERROR');
     fake.respond({ stdout: JSON.stringify({ is_error: false }) });
-    expect((await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('API_ERROR');
+    expect((await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }))).code).toBe('API_ERROR');
   });
 
   test('no claude on PATH gives the install error', async () => {
     process.env.PATH = '/nonexistent';
-    const err = await fails(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
+    const err = await caught(new ClaudeClient({ token: API, kind: 'apiKey' }).ask({ prompt: 'x' }));
     expect(err.code).toBe('CONFIG_ERROR');
     expect(err.suggestion).toContain('claude.ai/install.sh');
   });

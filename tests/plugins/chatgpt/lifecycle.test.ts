@@ -3,12 +3,13 @@ import { chatGptCredentialLifecycle as life, reauthenticateChatGpt } from '../..
 import type { ChatGptCredentials } from '../../../src/plugins/chatgpt/types';
 import { redactForRemote } from '../../../src/auth/refresh';
 import { fakeSetupContext } from '../../helpers/setup-context';
-import { FakeOpenAiAuth, jwt } from './fake-auth';
+import { FakeFetch } from '../../helpers/fake-fetch';
+import { jwt } from './jwt';
 
 const SIGNED_IN: ChatGptCredentials = { kind: 'chatgpt', accessToken: 'a', refreshToken: 'r1', idToken: 'i', accountId: 'acc', expiresAt: 1_000, model: 'gpt-5.5' };
 
-let auth: FakeOpenAiAuth;
-beforeEach(() => { auth = new FakeOpenAiAuth(); });
+let auth: FakeFetch;
+beforeEach(() => { auth = new FakeFetch(); });
 afterEach(() => auth.restore());
 
 test('applies to a ChatGPT sign-in only, never to an API key', () => {

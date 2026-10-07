@@ -3,11 +3,12 @@ import { withTempVault } from '../../helpers/vault';
 import { fakeSetupContext } from '../../helpers/setup-context';
 import { chatGptProfileAdd } from '../../../src/plugins/chatgpt/commands';
 import type { OAuthSetupOptions } from '../../../src/plugin-sdk';
-import { FakeOpenAiAuth, jwt } from './fake-auth';
+import { FakeFetch } from '../../helpers/fake-fetch';
+import { jwt } from './jwt';
 
 withTempVault('agentio-chatgpt-setup-', () => ({ config: { profiles: {} } as never }));
 
-let auth: FakeOpenAiAuth | undefined;
+let auth: FakeFetch | undefined;
 afterEach(() => { auth?.restore(); auth = undefined; });
 
 test('--api-key implies the key method and asks only for the model; a blank model is no model', async () => {
@@ -31,7 +32,7 @@ test('an empty API key is refused', async () => {
 });
 
 test('the ChatGPT method signs in on codex\'s registered port and path', async () => {
-  auth = new FakeOpenAiAuth().answer({
+  auth = new FakeFetch().answer({
     status: 200,
     body: {
       id_token: jwt({ email: 'me@x.com', 'https://api.openai.com/auth': { chatgpt_account_id: 'acc' } }),
