@@ -10,13 +10,14 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   key: 'Use to manage the API keys that let remote agents read credentials from this vault hub - create, list, update, rotate, revoke.',
 };
 
-function formatOption(opt: { flags: string; description: string; defaultValue?: string }): string {
+function formatOption(opt: { flags: string; description: string; defaultValue?: unknown }): string {
   let line = `- \`${opt.flags}\``;
   if (opt.description) {
     line += `: ${opt.description}`;
   }
-  if (opt.defaultValue !== undefined && opt.defaultValue !== '') {
-    line += ` (default: ${opt.defaultValue})`;
+  const fallback = Array.isArray(opt.defaultValue) ? opt.defaultValue.join(', ') : opt.defaultValue;
+  if (fallback !== undefined && fallback !== '') {
+    line += ` (default: ${fallback})`;
   }
   return line;
 }
@@ -76,7 +77,8 @@ export function generateSkill(program: Command, service: string): string {
   out.push(`description: ${description}`);
   out.push('---');
   out.push('');
-  out.push(`# ${service.charAt(0).toUpperCase() + service.slice(1)} via agentio`);
+  const title = findServicePlugin(service)?.displayName ?? service.charAt(0).toUpperCase() + service.slice(1);
+  out.push(`# ${title} via agentio`);
   out.push('');
   out.push(`Auto-generated from \`agentio skill ${service}\`. Do not edit by hand.`);
   out.push('');

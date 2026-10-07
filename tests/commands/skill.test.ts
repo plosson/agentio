@@ -49,4 +49,27 @@ describe('generateSkill', () => {
       /no commands found/i,
     );
   });
+
+  it('skips an empty-array default and joins a non-empty one', () => {
+    const program = new Command('agentio');
+    const svc = program.command('gmail').description('Gmail operations');
+    const collect = (value: string, previous: string[]) => [...previous, value];
+    svc.command('pick').description('Pick').option('--opt <v>', 'Repeatable', collect, []).option('--tag <v>', 'Tagged', collect, ['a', 'b']).action(() => {});
+    const out = generateSkill(program, 'gmail');
+    expect(out).toContain('- `--opt <v>`: Repeatable\n');
+    expect(out).not.toContain('(default: )');
+    expect(out).toContain('- `--tag <v>`: Tagged (default: a, b)');
+  });
+
+  it('titles a plugin skill with its display name', () => {
+    const program = new Command('agentio');
+    program.command('chatgpt').description('x').command('ask').action(() => {});
+    expect(generateSkill(program, 'chatgpt')).toContain('# ChatGPT via agentio');
+  });
+
+  it('falls back to the capitalised id when the service is not a plugin', () => {
+    const program = new Command('agentio');
+    program.command('daemon').description('x').command('start').action(() => {});
+    expect(generateSkill(program, 'daemon')).toContain('# Daemon via agentio');
+  });
 });
