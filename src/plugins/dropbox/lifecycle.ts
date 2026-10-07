@@ -3,7 +3,8 @@ import type { SetupContext } from '../../plugin-sdk';
 import { createSetupContext } from '../host-context';
 import type { CredentialLifecycle } from '../types';
 import { DropboxClient } from './client';
-import { buildAuthorizeUrl, createPkcePair, exchangeCodeForTokens, refreshDropboxToken } from './oauth';
+import { createPkcePair } from '../../auth/pkce';
+import { buildAuthorizeUrl, exchangeCodeForTokens, refreshDropboxToken } from './oauth';
 import { CODE_INPUT } from './setup-needs';
 import type { DropboxCredentials } from './types';
 

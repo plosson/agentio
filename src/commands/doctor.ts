@@ -8,7 +8,8 @@ import { getDaemonHealth } from '../daemon/client';
 import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { getCredentials } from '../auth/token-store';
-import { listProfileRefs } from '../config/config-manager';
+import { listProfileRefs, type ProfileRef } from '../config/config-manager';
+import { CLAUDE_CLI, CODEX_CLI, whichOnPath, type CliTool } from '../utils/external-cli';
 import { authExpiryStatus, authExpiresAt, type SpotifyCredentials } from '../plugins/spotify/types';
 
 export interface Check {
@@ -87,9 +88,9 @@ async function checkProfiles(): Promise<Check> {
 }
 
 
-async function checkSpotifyAuth(): Promise<Check | null> {
+async function checkSpotifyAuth(profiles: ProfileRef[]): Promise<Check | null> {
   if (isRemoteMode()) return null;
-  const refs = (await listProfileRefs()).filter((r) => r.service === 'spotify');
+  const refs = profiles.filter((r) => r.service === 'spotify');
   if (refs.length === 0) return null;
 
   const items: string[] = [];
@@ -124,17 +125,40 @@ async function checkSpotifyAuth(): Promise<Check | null> {
   };
 }
 
+/** Whether `tool` is installed, shown only where a profile of `service` can be used. Never runs a prompt. */
+export async function checkCli(tool: CliTool, service: string, services: Set<string>): Promise<Check | null> {
+  if (!services.has(service)) return null;
+  const name = `${tool.command} CLI`;
+  const path = whichOnPath(tool.command);
+  if (!path) return { name, status: 'warn', detail: 'not installed', fix: tool.install };
+  const proc = Bun.spawn([path, '--version'], { env: process.env, stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
+  const version = (await new Response(proc.stdout).text()).trim().split('\n')[0];
+  await proc.exited;
+  return { name, status: 'ok', detail: version ? `found, ${version}` : 'found' };
+}
+
+/** The CLI checks, for the services `profiles` holds. */
+export async function cliChecks(profiles: ProfileRef[]): Promise<Check[]> {
+  const services = new Set(profiles.map((r) => r.service));
+  const found = await Promise.all([checkCli(CLAUDE_CLI, 'claude', services), checkCli(CODEX_CLI, 'chatgpt', services)]);
+  return found.filter((c): c is Check => c !== null);
+}
+
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = program
     .command('doctor')
     .description('Diagnose vault, daemon, and profiles')
     .action(async () => {
       try {
-        const checks: Check[] = isRemoteMode()
-          ? [await checkHub()]
-          : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
-        const spotifyAuth = await checkSpotifyAuth();
+        // No profiles when they cannot be listed (hub down, token expired, vault locked), so the report still prints.
+        const profiles = await listProfileRefs().catch(() => []);
+        const [checks, spotifyAuth, clis] = await Promise.all([
+          isRemoteMode() ? Promise.all([checkHub()]) : Promise.all([checkVault(), checkDaemon(), checkProfiles()]),
+          checkSpotifyAuth(profiles),
+          cliChecks(profiles),
+        ]);
         if (spotifyAuth) checks.push(spotifyAuth);
+        checks.push(...clis);
 
         console.log(renderChecks(checks));
 

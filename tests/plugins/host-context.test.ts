@@ -213,3 +213,20 @@ test('oauth: without host, the redirect stays on localhost', async () => {
   await fetch(`${redirectUri}?code=c`);
   expect(await result).toEqual({ code: 'c', state: undefined, redirectUri });
 });
+
+test('oauth: a provider\'s own callback path is listened on, and only it', async () => {
+  const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+  const result = ctx.oauth({ serviceName: 'Test', path: '/auth/callback', authorizationUrl: authUrl });
+  const redirectUri = new URL((await openEvent()).url).searchParams.get('r')!;
+  expect(redirectUri).toMatch(/^http:\/\/localhost:\d+\/auth\/callback$/);
+  expect((await fetch(redirectUri.replace('/auth/callback', '/callback') + '?code=x')).status).toBe(404);
+  await fetch(`${redirectUri}?code=c`);
+  expect((await result).code).toBe('c');
+});
+
+test('only terminal setup can run a program in the terminal, and it resolves to the exit code', async () => {
+  expect('runInTerminal' in createJsonSetupContext({}, createLineReader(new PassThrough()))).toBe(false);
+  const ctx = createSetupContext();
+  expect(await ctx.runInTerminal!(['/bin/sh', '-c', 'exit 3'])).toBe(3);
+  expect(await ctx.runInTerminal!(['/bin/sh', '-c', 'exit 0'])).toBe(0);
+});

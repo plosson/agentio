@@ -14,6 +14,8 @@ import { isLegacyServicePlugin, type RegisteredServicePlugin } from '../../src/p
 import { PluginRegistry } from '../../src/plugins/plugin-registry';
 
 const SERVICE_ORDER = [
+  'chatgpt',
+  'claude',
   'confluence',
   'discourse',
   'dropbox',
@@ -28,6 +30,7 @@ const SERVICE_ORDER = [
   'gslides',
   'gscript',
   'gtasks',
+  'jev',
   'jira',
   'kite',
   'notes',

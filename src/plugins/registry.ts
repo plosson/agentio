@@ -1,4 +1,6 @@
 import type { Command } from 'commander';
+import chatgpt from './chatgpt';
+import claude from './claude';
 import confluence from './confluence';
 import discourse from './discourse';
 import dropbox from './dropbox';
@@ -13,6 +15,7 @@ import gsheets from './google/gsheets';
 import gslides from './google/gslides';
 import gscript from './google/gscript';
 import gtasks from './google/gtasks';
+import jev from './jev';
 import jira from './jira';
 import kite from './kite';
 import notes from './notes';
@@ -31,6 +34,8 @@ import { registerDeclarativePlugin } from './declarative';
 
 /** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
+  chatgpt,
+  claude,
   confluence,
   discourse,
   dropbox,
@@ -45,6 +50,7 @@ export const SERVICE_PLUGINS = [
   gslides,
   gscript,
   gtasks,
+  jev,
   jira,
   kite,
   notes,

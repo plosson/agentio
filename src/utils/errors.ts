@@ -73,6 +73,11 @@ export function exitCodeForError(code: ErrorCode): number {
   }
 }
 
+/** `text` with each secret replaced by `placeholder`; empty or missing secrets are skipped. */
+export function redact(text: string, secrets: readonly (string | undefined)[], placeholder: string): string {
+  return secrets.reduce<string>((t, secret) => (secret ? t.split(secret).join(placeholder) : t), text);
+}
+
 export function multipleProfilesError(service: ServiceName, names: string[]): CliError {
   const list = names.join(', ');
   return new CliError(
@@ -103,33 +108,33 @@ export function cannotManageProfilesError(hubUrl?: string): CliError {
   );
 }
 
-export function handleError(error: unknown): never {
+/**
+ * Print `error` for people or programs, then exit. `generalExitCode` replaces exit code 1, for a
+ * command whose 1 already means an answer (`jev yesno`: 1 is "no").
+ */
+export function handleError(error: unknown, generalExitCode = 1): never {
+  const isCliError = error instanceof CliError;
+  let exitCode = generalExitCode;
+  if (isCliError) {
+    const n = exitCodeForError(error.code);
+    exitCode = n === 1 ? generalExitCode : n;
+  }
+
   if (isJsonMode()) {
-    if (error instanceof CliError) {
-      printJson({ event: 'error', code: error.code, message: error.message, suggestion: error.suggestion });
-      process.exit(exitCodeForError(error.code));
-    }
-    printJson({
-      event: 'error',
-      code: 'UNKNOWN_ERROR',
-      message: error instanceof Error ? error.message : 'An unexpected error occurred',
-    });
-    process.exit(1);
-  }
-
-  if (error instanceof CliError) {
+    printJson(
+      isCliError
+        ? { event: 'error', code: error.code, message: error.message, suggestion: error.suggestion }
+        : {
+            event: 'error',
+            code: 'UNKNOWN_ERROR',
+            message: error instanceof Error ? error.message : 'An unexpected error occurred',
+          },
+    );
+  } else if (isCliError) {
     console.error(`Error [${error.code}]: ${error.message}`);
-    if (error.suggestion) {
-      console.error(`Suggestion: ${error.suggestion}`);
-    }
-    process.exit(exitCodeForError(error.code));
+    if (error.suggestion) console.error(`Suggestion: ${error.suggestion}`);
+  } else {
+    console.error(error instanceof Error ? `Error: ${error.message}` : 'An unexpected error occurred');
   }
-
-  if (error instanceof Error) {
-    console.error(`Error: ${error.message}`);
-    process.exit(1);
-  }
-
-  console.error('An unexpected error occurred');
-  process.exit(1);
+  process.exit(exitCode);
 }

@@ -45,6 +45,7 @@ const SERVICE_USE = {
   dropbox: 'Files', notes: 'Notes on this Mac', whatsapp: 'Chats', discourse: 'Forum posts', revolut: 'Accounts and payments',
   sql: 'A database', secrets: 'API keys and tokens', rss: 'Feeds', gscript: 'Scripts', falco: 'Accounting and invoices',
   kite: 'Pages you share', pocketalert: 'Push notifications', pagerio: 'Alerts on your iPhone and Mac',
+  jev: 'Yes/no answers for scripts', claude: 'Ask Claude', chatgpt: 'Ask ChatGPT',
 };
 
 /** An empty vault: a welcome, the services to start with, then connecting a machine. */

@@ -52,11 +52,14 @@ src/plugins/
 │   ├── client.ts
 │   ├── output.ts
 │   └── types.ts
+├── chatgpt/          # prompts through codex; ChatGPT sign-in (refreshed) or API key
+├── claude/           # prompts through the claude CLI; setup-token or API key
 ├── confluence/          # OAuth lifecycle owned by the service folder
 ├── discourse/
 ├── dropbox/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
+├── jev/              # typed answers (yes/no, choice, score); API key
 ├── kite/             # device sign-in, owned by the service folder
 ├── notes/            # Apple Notes through an apple-notes-api server; API key
 ├── pagerio/          # pages to your iPhone and Mac; secret URL, send only

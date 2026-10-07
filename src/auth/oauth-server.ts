@@ -2,6 +2,10 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { createInterface } from 'readline';
 import { URL } from 'url';
 import { CliError } from '../utils/errors';
+import { whichOnPath } from '../utils/external-cli';
+
+/** Where the local sign-in server listens for the provider's redirect. */
+export const DEFAULT_CALLBACK_PATH = '/callback';
 
 const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
@@ -54,7 +58,7 @@ export function launchBrowser(url: string): boolean {
   // A missing opener throws synchronously on macOS but not on Linux, where the
   // child simply fails to exec; resolving it on PATH first behaves the same on
   // both. PATH is passed explicitly so a runtime change to it (tests) is seen.
-  if (!Bun.which(command[0], { PATH: process.env.PATH })) return false;
+  if (!whichOnPath(command[0])) return false;
   try {
     Bun.spawn(command, { stdout: 'ignore', stderr: 'ignore' });
     return true;
@@ -84,6 +88,8 @@ export interface OAuthServerConfig {
   expectedState?: string;
   /** Bind address. Spotify requires 127.0.0.1 (not localhost). */
   host?: string;
+  /** The path the code comes back on; default /callback. */
+  path?: string;
   /** Closes the server when the code arrived some other way. */
   signal?: AbortSignal;
 }
@@ -100,7 +106,7 @@ export type OAuthCallbackServer = Promise<OAuthCallbackResult> & { listening: Pr
 export function startOAuthCallbackServer(
   config: OAuthServerConfig
 ): OAuthCallbackServer {
-  const { port, serviceName, expectedState, host } = config;
+  const { port, serviceName, expectedState, host, path = DEFAULT_CALLBACK_PATH } = config;
   let listened!: () => void;
   let notListening!: (error: unknown) => void;
   const listening = new Promise<void>((resolve, reject) => {
@@ -119,7 +125,7 @@ export function startOAuthCallbackServer(
     const handleCallback = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       const url = new URL(req.url || '', `http://${host ?? 'localhost'}:${port}`);
 
-      if (url.pathname !== '/callback') {
+      if (url.pathname !== path) {
         res.writeHead(404);
         res.end('Not found');
         return;

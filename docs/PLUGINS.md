@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-06. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-07. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -21,6 +21,9 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
+| claude | A `claude setup-token` token or an Anthropic API key, given only to the user's own `claude` CLI | **The user's own subscription or key** | No | Needs the `claude` CLI where the command runs |
+| chatgpt | OAuth 2.0 with PKCE, browser, `localhost:1455/auth/callback`, with **OpenAI's Codex client**; or an OpenAI API key. Prompts run through the user's own `codex` CLI | **OpenAI's public Codex client** for the sign-in; the user's own account or key | No | Uses Codex's OAuth client outside codex. Needs the `codex` CLI where the command runs |
+| jev | TypeSafe API key, sent as a Bearer token | **Created by the user at console.typesafe.ai** | No | None |
 | falco | The user's own Horus email and password, plus optional 2FA; the vault keeps only the refresh token | **The user's own account**, no app | No | Check that Horus's terms allow a third-party tool |
 | sql | Database connection URL (PostgreSQL, MySQL, SQLite) | **The user's own database** | No | None |
 | secrets | None: the user types or imports the values | **The user's own values** | No | Anyone with a hub key that covers the profile receives every value in it |
@@ -507,6 +510,80 @@ Sends push notifications to the user's devices through the [Pocket Alert](https:
 **Remote mode:** agents with a key that covers the profile receive the whole credential, API key included, as with the other static-token plugins.
 
 **What's needed:** a Pocket Alert account, and the app on at least one device.
+
+---
+
+## Claude
+
+**Code:** `src/plugins/claude/`
+
+Asks Claude a prompt by running the user's own `claude` CLI (Claude Code). agentio never installs it and never calls Anthropic's API itself.
+
+**Sign-in:** a token or key, given to `agentio claude profile add`.
+- The token kind follows its prefix: `sk-ant-oat…` is a subscription token from `claude setup-token`, `sk-ant-api…` is an Anthropic API key from console.anthropic.com.
+- In a terminal, `profile add` offers to run `claude setup-token` (when `claude` is installed) and then asks for the token it shows; under `--json` the token is asked directly and nothing is run. With `--token`, nothing is offered. The token is not checked until the first prompt.
+- A `setup-token` token lasts a year and has no refresh. When it expires, run `claude setup-token` and add the profile again.
+- The token is only ever given to the `claude` CLI, as `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+
+**How the CLI runs:**
+- In an empty temporary directory, removed afterwards.
+- With `--tools ""`, `--strict-mcp-config` and `--setting-sources ""`, so it has no tools, no MCP servers and no settings from the machine.
+- The inherited `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` are removed first, so a key in the caller's shell cannot win. So are `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY` and `ANTHROPIC_BASE_URL`, so the token goes only to Anthropic.
+
+**What the vault stores:** the token, its kind, and an optional default model.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, token included. The `claude` CLI must be installed on the agent's machine. `agentio doctor` warns when it is not.
+
+**What's needed:** the `claude` CLI, and a Claude subscription or an Anthropic API key.
+
+---
+
+## ChatGPT
+
+**Code:** `src/plugins/chatgpt/`
+
+Asks ChatGPT a prompt by running the user's own `codex` CLI. agentio never installs it. There are two sign-ins: a ChatGPT account, or an OpenAI API key.
+
+**Sign-in (ChatGPT account):** OAuth 2.0 with PKCE in the browser, the same flow as `codex login`. It uses OpenAI's public Codex client, not an app of the user's or of agentio's.
+- Authorize and token endpoints: `https://auth.openai.com/oauth/authorize` and `/oauth/token`.
+- Client id: `app_EMoamEEZ73f0CkXaXp7hrann`.
+- Redirect URI: `http://localhost:1455/auth/callback`. OpenAI registered port 1455 and this path for the client, so the port must be free.
+- Scopes: `openid profile email offline_access` to sign in, `openid profile email` to refresh.
+- Constants read from codex-cli 0.155.1. If OpenAI changes them, sign-in stops working until they are updated.
+- agentio has its own refresh-token chain, separate from any local `codex login`. Signing in with agentio does not log codex out, and the reverse.
+- The refresh token rotates on every refresh. The daemon refreshes it, and `secretFields: ['refreshToken']` keeps it out of what remote agents receive.
+- `agentio profile reauth chatgpt <name>` signs in again.
+
+**Sign-in (API key):** an OpenAI API key from platform.openai.com. It does not expire and is passed to codex as `CODEX_API_KEY`.
+
+**How the CLI runs:**
+- For a ChatGPT sign-in, codex gets a temporary `CODEX_HOME` with an `auth.json` that holds the access token and an empty refresh token. The real refresh token is never written there and never passed to codex.
+- The inherited `OPENAI_API_KEY`, `CODEX_API_KEY` and `CODEX_HOME` are removed first. So are the base URLs and endpoint overrides codex reads (`OPENAI_BASE_URL`, `CODEX_AUTHAPI_BASE_URL`, `CODEX_APP_SERVER_CHATGPT_BASE_URL`, `CODEX_CLOUD_TASKS_BASE_URL`, `CODEX_OSS_BASE_URL`, `CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL`, `CODEX_AGENT_IDENTITY_JWKS_BASE_URL`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, `CODEX_REVOKE_TOKEN_URL_OVERRIDE`), so the credential goes only to OpenAI.
+
+**What the vault stores:** for a ChatGPT sign-in, the access, refresh and ID tokens, the account id, the email, the expiry and an optional default model. For an API key, the key.
+
+**Remote mode:** agents receive the credential without the refresh token, so they cannot rotate the chain. The `codex` CLI must be installed on the agent's machine. `agentio doctor` warns when it is not.
+
+**What's needed:** the `codex` CLI (`npm i -g @openai/codex`), and a ChatGPT account or an OpenAI API key.
+
+---
+
+## Jev
+
+**Code:** `src/plugins/jev/`
+
+Asks [Jev](https://docs.typesafe.ai/api) (TypeSafe AI's System One API, `https://api.typesafe.ai/v1/systemone`) a typed question about some input: yes/no, choice or score.
+
+**Sign-in:** an API key created at console.typesafe.ai, sent as `Authorization: Bearer <key>`.
+- `agentio jev profile add` asks for the key when `--api-key` is absent, so the key can stay out of shell history.
+- Setup asks one short yes/no question to check the key and the model. A refused key stops setup.
+- There is no expiry and no refresh.
+
+**What the vault stores:** API key, and an optional default model.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, API key included, as with the other static-token plugins.
+
+**What's needed:** a TypeSafe account and an API key.
 
 ---
 
