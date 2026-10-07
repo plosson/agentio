@@ -46,7 +46,6 @@ src/plugins/
 │   ├── oauth.ts
 │   ├── output.ts
 │   └── types.ts
-├── jev/              # typed answers (yes/no, choice, score); API key
 ├── rss/
 │   ├── index.ts         # one ServicePlugin export
 │   ├── commands.ts
@@ -60,6 +59,7 @@ src/plugins/
 ├── dropbox/
 ├── falco/            # password + 2FA login, owned by the service folder
 ├── github/
+├── jev/              # typed answers (yes/no, choice, score); API key
 ├── kite/             # device sign-in, owned by the service folder
 ├── notes/            # Apple Notes through an apple-notes-api server; API key
 ├── pagerio/          # pages to your iPhone and Mac; secret URL, send only
