@@ -223,3 +223,10 @@ test('oauth: a provider\'s own callback path is listened on, and only it', async
   await fetch(`${redirectUri}?code=c`);
   expect((await result).code).toBe('c');
 });
+
+test('only terminal setup can run a program in the terminal, and it resolves to the exit code', async () => {
+  expect('runInTerminal' in createJsonSetupContext({}, createLineReader(new PassThrough()))).toBe(false);
+  const ctx = createSetupContext();
+  expect(await ctx.runInTerminal!(['/bin/sh', '-c', 'exit 3'])).toBe(3);
+  expect(await ctx.runInTerminal!(['/bin/sh', '-c', 'exit 0'])).toBe(0);
+});

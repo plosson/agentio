@@ -97,6 +97,11 @@ export interface SetupContext {
   oauth(options: OAuthSetupOptions): Promise<OAuthSetupResult>;
   fail(code: PluginErrorCode, message: string, suggestion?: string): never;
   fetch: typeof fetch;
+  /**
+   * Run a program attached to the user's terminal (its screen and keyboard), resolving to its exit
+   * code. Only setup in a terminal provides it: under --json, stdout carries events.
+   */
+  runInTerminal?(command: readonly string[]): Promise<number>;
 }
 
 export interface RunContext<Credentials extends object = Record<string, unknown>> {

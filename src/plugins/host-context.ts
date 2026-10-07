@@ -63,6 +63,10 @@ export function createSetupContext(): SetupContext {
       });
       return { ...result, redirectUri };
     },
+    async runInTerminal(command) {
+      const proc = Bun.spawn([...command], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', env: process.env });
+      return await proc.exited;
+    },
     fail,
     fetch,
   };
