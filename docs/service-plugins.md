@@ -46,6 +46,7 @@ src/plugins/
 │   ├── oauth.ts
 │   ├── output.ts
 │   └── types.ts
+├── jev/              # typed answers (yes/no, choice, score); API key
 ├── rss/
 │   ├── index.ts         # one ServicePlugin export
 │   ├── commands.ts

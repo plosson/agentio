@@ -28,6 +28,7 @@ const SERVICE_ORDER = [
   'gslides',
   'gscript',
   'gtasks',
+  'jev',
   'jira',
   'kite',
   'notes',

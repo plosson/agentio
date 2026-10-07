@@ -88,6 +88,8 @@ describe('what each service shows about a profile', () => {
     ['discourse', { apiKey: 'SECRETk', baseUrl: 'https://forum.example.com', username: 'pal' }, { account: 'pal', url: 'https://forum.example.com' }],
     ['kite', { token: 'SECRETt', baseUrl: 'https://kite.example.com', email: 'me@x.com' }, { account: 'me@x.com', url: 'https://kite.example.com' }],
     ['notes', { apiKey: 'SECRETk', baseUrl: 'https://mac.example.ts.net' }, { url: 'https://mac.example.ts.net' }],
+    ['jev', { apiKey: 'SECRETk', model: 'jev-preview' }, { account: 'jev-preview', url: 'https://console.typesafe.ai', serviceUrl: true }],
+    ['jev', { apiKey: 'SECRETk' }, { url: 'https://console.typesafe.ai', serviceUrl: true }],
     ['jira', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
     ['confluence', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
     ['revolut', { privateKey: 'SECRETp', refreshToken: 'SECRETr', accessToken: 'SECRETa', clientId: 'id' }, { url: 'https://business.revolut.com', serviceUrl: true }],

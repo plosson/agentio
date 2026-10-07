@@ -13,6 +13,7 @@ import gsheets from './google/gsheets';
 import gslides from './google/gslides';
 import gscript from './google/gscript';
 import gtasks from './google/gtasks';
+import jev from './jev';
 import jira from './jira';
 import kite from './kite';
 import notes from './notes';
@@ -45,6 +46,7 @@ export const SERVICE_PLUGINS = [
   gslides,
   gscript,
   gtasks,
+  jev,
   jira,
   kite,
   notes,

@@ -103,18 +103,27 @@ export function cannotManageProfilesError(hubUrl?: string): CliError {
   );
 }
 
-export function handleError(error: unknown): never {
+/**
+ * Print `error` for people or programs, then exit. `generalExitCode` replaces exit code 1, for a
+ * command whose 1 already means an answer (`jev yesno`: 1 is "no").
+ */
+export function handleError(error: unknown, generalExitCode = 1): never {
+  const exitFor = (code: ErrorCode) => {
+    const n = exitCodeForError(code);
+    return n === 1 ? generalExitCode : n;
+  };
+
   if (isJsonMode()) {
     if (error instanceof CliError) {
       printJson({ event: 'error', code: error.code, message: error.message, suggestion: error.suggestion });
-      process.exit(exitCodeForError(error.code));
+      process.exit(exitFor(error.code));
     }
     printJson({
       event: 'error',
       code: 'UNKNOWN_ERROR',
       message: error instanceof Error ? error.message : 'An unexpected error occurred',
     });
-    process.exit(1);
+    process.exit(generalExitCode);
   }
 
   if (error instanceof CliError) {
@@ -122,14 +131,14 @@ export function handleError(error: unknown): never {
     if (error.suggestion) {
       console.error(`Suggestion: ${error.suggestion}`);
     }
-    process.exit(exitCodeForError(error.code));
+    process.exit(exitFor(error.code));
   }
 
   if (error instanceof Error) {
     console.error(`Error: ${error.message}`);
-    process.exit(1);
+    process.exit(generalExitCode);
   }
 
   console.error('An unexpected error occurred');
-  process.exit(1);
+  process.exit(generalExitCode);
 }
