@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import { addExamples } from './command-tree';
 import { CliError, handleError } from './errors';
+import { optionalText } from './options';
 import { addJsonOption, writeJson } from './output';
 import { readStdinRaw } from './stdin';
 
@@ -36,12 +37,6 @@ export async function readPrompt(service: string, prompt: string | undefined, st
     throw new CliError('INVALID_PARAMS', 'No prompt given', `Pass it as an argument, or pipe it: echo "…" | agentio ${service} ask`);
   }
   return parts.join('\n\n');
-}
-
-function optionalText(value: string | undefined, flag: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (!value.trim()) throw new CliError('INVALID_PARAMS', `${flag} cannot be empty`);
-  return value.trim();
 }
 
 export async function askRequest(service: string, prompt: string | undefined, options: AskOptions, stdin?: () => Promise<string | null>): Promise<AskRequest> {

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
+import { optionalText } from '../../utils/options';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { readStdin } from '../../utils/stdin';
@@ -32,12 +33,6 @@ export async function readState(stateOption: string | undefined): Promise<JevSta
     throw new CliError('INVALID_PARAMS', 'Input given both on stdin and with --state', 'Use one of them');
   }
   return parseState(piped || stateOption || '');
-}
-
-function optionalModel(value: string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  if (!value.trim()) throw new CliError('INVALID_PARAMS', '--model cannot be empty');
-  return value.trim();
 }
 
 export interface JevProfileAddOptions extends ProfileAddOptions {
@@ -77,7 +72,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const threshold = parseThreshold(options.threshold);
-        const model = optionalModel(options.model);
+        const model = optionalText(options.model, '--model');
         const state = await readState(options.state);
         const { client } = await getJevClient(options.profile);
         const result = await client.ask<JevNoulAnswer>(state, { type: 'noul', instructions }, model);
@@ -107,7 +102,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const criteria = parseOptions(options.option);
-        const model = optionalModel(options.model);
+        const model = optionalText(options.model, '--model');
         const state = await readState(options.state);
         const { client } = await getJevClient(options.profile);
         printChoice(await client.ask<JevChoiceAnswer>(state, { type: 'choice', instructions, criteria }, model), options.json);
@@ -133,7 +128,7 @@ export function registerJevCommands(program: Command): void {
       try {
         const instructions = requireQuestion(question);
         const criteria = parseLevels(options.level);
-        const model = optionalModel(options.model);
+        const model = optionalText(options.model, '--model');
         const state = await readState(options.state);
         const { client } = await getJevClient(options.profile);
         printScore(await client.ask<JevScoreAnswer>(state, { type: 'score', instructions, criteria }, model), options.json);
