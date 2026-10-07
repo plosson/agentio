@@ -77,6 +77,8 @@ export interface OAuthSetupOptions {
   port?: number;
   /** The callback's host, for providers that registered one other than `localhost` (Spotify: 127.0.0.1). */
   host?: string;
+  /** The callback's path, for providers that registered one other than `/callback` (OpenAI: /auth/callback). */
+  path?: string;
 }
 
 export interface OAuthSetupResult {

@@ -1,4 +1,3 @@
-import { createHash, randomBytes } from 'crypto';
 import { URL } from 'url';
 import { CliError, httpStatusToErrorCode } from '../../utils/errors';
 
@@ -18,17 +17,6 @@ export const DROPBOX_SCOPES = [
   'sharing.read',         // read existing shared links
   'sharing.write',        // create shared links
 ];
-
-export interface PkcePair {
-  verifier: string;
-  challenge: string;
-}
-
-export function createPkcePair(): PkcePair {
-  const verifier = randomBytes(64).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  return { verifier, challenge };
-}
 
 /**
  * Built without a redirect URI on purpose: Dropbox then renders the

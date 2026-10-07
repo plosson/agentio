@@ -1,7 +1,8 @@
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { URL } from 'url';
 import { parseOAuthRedirect } from '../../auth/oauth-server';
 import { CliError, httpStatusToErrorCode } from '../../utils/errors';
+import { createPkcePair } from '../../auth/pkce';
 import type { SetupContext } from '../../plugin-sdk';
 import { REDIRECT_INPUT } from './setup-needs';
 import {
@@ -12,17 +13,6 @@ import {
   SPOTIFY_WRITE_SCOPES,
   TOKEN_URL,
 } from './types';
-
-export interface PkcePair {
-  verifier: string;
-  challenge: string;
-}
-
-export function createPkcePair(): PkcePair {
-  const verifier = randomBytes(64).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  return { verifier, challenge };
-}
 
 export function scopesFor(readOnly: boolean): string[] {
   return readOnly

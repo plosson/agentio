@@ -21,7 +21,7 @@ function fail(code: Parameters<SetupContext['fail']>[0], message: string, sugges
 async function callbackAddress(options: OAuthSetupOptions): Promise<{ port: number; host: string; redirectUri: string }> {
   const host = options.host ?? 'localhost';
   const port = options.port ?? (await findAvailablePort(options.host));
-  return { port, host, redirectUri: `http://${host}:${port}/callback` };
+  return { port, host, redirectUri: `http://${host}:${port}${options.path ?? '/callback'}` };
 }
 
 /** Setup in a terminal: questions on stderr, the browser opened here, a pasted address accepted. */
@@ -56,6 +56,7 @@ export function createSetupContext(): SetupContext {
       const result = await awaitOAuthCode({
         port,
         host: options.host,
+        path: options.path,
         serviceName: options.serviceName,
         expectedState: options.expectedState,
         authUrl: options.authorizationUrl(redirectUri),
@@ -91,7 +92,7 @@ export function createJsonSetupContext(given: Record<string, string>, lines: Lin
       const { port, redirectUri } = await callbackAddress(options);
       // Listen first: the program opens the address as soon as it reads it, and a busy port must
       // fail before the address is printed.
-      const callback = startOAuthCallbackServer({ port, host: options.host, serviceName: options.serviceName, expectedState: options.expectedState });
+      const callback = startOAuthCallbackServer({ port, host: options.host, path: options.path, serviceName: options.serviceName, expectedState: options.expectedState });
       await callback.listening;
       printJson({ event: 'open', url: options.authorizationUrl(redirectUri) });
       return { ...(await callback), redirectUri };

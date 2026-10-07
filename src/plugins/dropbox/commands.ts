@@ -4,9 +4,9 @@ import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildAuthorizeUrl,
-  createPkcePair,
   exchangeCodeForTokens,
   } from './oauth';
+import { createPkcePair } from '../../auth/pkce';
 import { DropboxClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { confirm } from '../../utils/stdin';

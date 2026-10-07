@@ -84,6 +84,8 @@ export interface OAuthServerConfig {
   expectedState?: string;
   /** Bind address. Spotify requires 127.0.0.1 (not localhost). */
   host?: string;
+  /** The path the code comes back on; default /callback. */
+  path?: string;
   /** Closes the server when the code arrived some other way. */
   signal?: AbortSignal;
 }
@@ -100,7 +102,7 @@ export type OAuthCallbackServer = Promise<OAuthCallbackResult> & { listening: Pr
 export function startOAuthCallbackServer(
   config: OAuthServerConfig
 ): OAuthCallbackServer {
-  const { port, serviceName, expectedState, host } = config;
+  const { port, serviceName, expectedState, host, path = '/callback' } = config;
   let listened!: () => void;
   let notListening!: (error: unknown) => void;
   const listening = new Promise<void>((resolve, reject) => {
@@ -119,7 +121,7 @@ export function startOAuthCallbackServer(
     const handleCallback = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       const url = new URL(req.url || '', `http://${host ?? 'localhost'}:${port}`);
 
-      if (url.pathname !== '/callback') {
+      if (url.pathname !== path) {
         res.writeHead(404);
         res.end('Not found');
         return;
