@@ -47,6 +47,28 @@ describe('yesno', () => {
     }
   }, 60_000);
 
+  test('a usage error Commander catches exits 6 too, and --help still exits 0', async () => {
+    for (const args of [
+      ['yesno'],                                  // missing question
+      ['yesno', 'Urgent?', '--treshold', '0.8'],  // unknown option
+      ['yesno', 'Urgent?', '--threshold'],        // option without its value
+    ]) {
+      const res = await cli(args, ['x']);
+      expect(res.exitCode).toBe(YESNO_ERROR_EXIT);
+      expect(res.stdout).toBe('');
+      expect(res.stderr).toContain('error:');
+    }
+    const help = await cli(['yesno', '--help'], []);
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout).toContain('Usage:');
+  }, 60_000);
+
+  test('--json with an error exits 6', async () => {
+    const res = await cli(['yesno', 'Urgent?', '--json'], []);
+    expect(res.exitCode).toBe(YESNO_ERROR_EXIT);
+    expect(res.events[0]).toMatchObject({ event: 'error', code: 'INVALID_PARAMS' });
+  }, 30_000);
+
   test('other errors keep their codes', async () => {
     const res = await cli(['yesno', 'Urgent?', '--profile', 'other'], ['x']);
     expect(res.exitCode).toBe(exitCodeForError('PROFILE_NOT_FOUND'));

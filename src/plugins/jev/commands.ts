@@ -66,6 +66,8 @@ export function registerJevCommands(program: Command): void {
       jev
         .command('yesno')
         .description('Ask a yes/no question. Exit code 0 is yes, 1 is no, 2 or more is an error')
+        // Commander exits 1 on a usage error, which here means "no": exit 6 instead. --help stays 0.
+        .exitOverride((error) => process.exit(error.exitCode === 0 ? 0 : YESNO_ERROR_EXIT))
         .argument('<question>', 'The yes/no question')
         .option('--threshold <p>', 'Probability of yes at or above which the answer is yes', '0.5'),
     ).action(async (question: string, options) => {
