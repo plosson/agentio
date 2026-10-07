@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'fs';
 import { ClaudeClient, tokenKind } from '../../../src/plugins/claude/client';
-import { caught } from '../../helpers/fake-fetch';
+import { caught } from '../../helpers/caught';
 import { installFakeCli, type FakeCli } from '../../helpers/fake-cli';
 
 const OAUTH = 'sk-ant-oat01-SECRET-oauth';

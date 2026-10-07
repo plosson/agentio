@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { caught } from '../helpers/fake-fetch';
+import { caught } from '../helpers/caught';
 import { askRequest, printAnswer, readPrompt } from '../../src/utils/llm-ask';
 
 const stdin = (value: string | null) => async () => value;
