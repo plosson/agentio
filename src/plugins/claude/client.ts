@@ -7,8 +7,14 @@ import type { ClaudeCredentials, ClaudeTokenKind } from './types';
 /** Replaces Claude Code's own system prompt, which costs thousands of tokens on every call. */
 export const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant. Answer the request directly.';
 
-/** Every variable through which claude could pick up a credential other than the profile's. */
-const CREDENTIAL_VARIABLES = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'] as const;
+/**
+ * Every variable through which claude could pick up a credential other than the profile's, or send it
+ * elsewhere than to Anthropic: the cloud-provider switches and the base URL go too.
+ */
+const CREDENTIAL_VARIABLES = [
+  'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_BASE_URL',
+] as const;
 const VARIABLE_FOR: Record<ClaudeTokenKind, string> = { oauth: 'CLAUDE_CODE_OAUTH_TOKEN', apiKey: 'ANTHROPIC_API_KEY' };
 const REAUTH = 'Run: agentio claude profile add, with a new token from `claude setup-token` or a new API key';
 

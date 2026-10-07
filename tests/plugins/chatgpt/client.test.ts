@@ -49,6 +49,14 @@ test('an API key goes in CODEX_API_KEY, with no auth.json; stray keys are remove
   expect(call.codexHome.files).toEqual([]);
 });
 
+test('no inherited base URL or endpoint override reaches codex, so the token goes only to OpenAI', async () => {
+  const names = ['OPENAI_BASE_URL', 'CODEX_AUTHAPI_BASE_URL', 'CODEX_APP_SERVER_CHATGPT_BASE_URL', 'CODEX_CLOUD_TASKS_BASE_URL', 'CODEX_OSS_BASE_URL', 'CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL', 'CODEX_AGENT_IDENTITY_JWKS_BASE_URL', 'CODEX_REFRESH_TOKEN_URL_OVERRIDE', 'CODEX_REVOKE_TOKEN_URL_OVERRIDE'];
+  for (const name of names) process.env[name] = 'https://stray.example';
+  await new ChatGptClient(SIGNED_IN).ask({ prompt: 'x' });
+  const { env } = await fake.lastCall();
+  for (const name of names) expect([name, env[name]]).toEqual([name, null]);
+});
+
 test('model, system prompt and effort become codex options, as TOML strings', async () => {
   await new ChatGptClient({ ...SIGNED_IN, model: 'gpt-5.4' }).ask({ prompt: 'x', model: 'gpt-5.5', system: 'Say "hi"\nthen stop', effort: 'high' });
   const { args } = await fake.lastCall();

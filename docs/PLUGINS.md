@@ -528,7 +528,7 @@ Asks Claude a prompt by running the user's own `claude` CLI (Claude Code). agent
 **How the CLI runs:**
 - In an empty temporary directory, removed afterwards.
 - With `--tools ""`, `--strict-mcp-config` and `--setting-sources ""`, so it has no tools, no MCP servers and no settings from the machine.
-- The inherited `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` are removed first, so a key in the caller's shell cannot win.
+- The inherited `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_AUTH_TOKEN` are removed first, so a key in the caller's shell cannot win. So are `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY` and `ANTHROPIC_BASE_URL`, so the token goes only to Anthropic.
 
 **What the vault stores:** the token, its kind, and an optional default model.
 
@@ -558,7 +558,7 @@ Asks ChatGPT a prompt by running the user's own `codex` CLI. agentio never insta
 
 **How the CLI runs:**
 - For a ChatGPT sign-in, codex gets a temporary `CODEX_HOME` with an `auth.json` that holds the access token and an empty refresh token. The real refresh token is never written there and never passed to codex.
-- The inherited `OPENAI_API_KEY`, `CODEX_API_KEY` and `CODEX_HOME` are removed first.
+- The inherited `OPENAI_API_KEY`, `CODEX_API_KEY` and `CODEX_HOME` are removed first. So are the base URLs and endpoint overrides codex reads (`OPENAI_BASE_URL`, `CODEX_AUTHAPI_BASE_URL`, `CODEX_APP_SERVER_CHATGPT_BASE_URL`, `CODEX_CLOUD_TASKS_BASE_URL`, `CODEX_OSS_BASE_URL`, `CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL`, `CODEX_AGENT_IDENTITY_JWKS_BASE_URL`, `CODEX_REFRESH_TOKEN_URL_OVERRIDE`, `CODEX_REVOKE_TOKEN_URL_OVERRIDE`), so the credential goes only to OpenAI.
 
 **What the vault stores:** for a ChatGPT sign-in, the access, refresh and ID tokens, the account id, the email, the expiry and an optional default model. For an API key, the key.
 

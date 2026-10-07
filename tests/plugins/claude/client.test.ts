@@ -44,6 +44,14 @@ describe('ask', () => {
     expect(args.slice(args.indexOf('--system-prompt'))).toEqual(['--system-prompt', 'Be terse', '--model', 'opus', '--effort', 'high']);
   });
 
+  test('nothing inherited reroutes claude: cloud-provider switches and a base URL are removed', async () => {
+    const names = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_BASE_URL'];
+    for (const name of names) process.env[name] = 'stray';
+    await new ClaudeClient({ token: OAUTH, kind: 'oauth' }).ask({ prompt: 'x' });
+    const { env } = await fake.lastCall();
+    for (const name of names) expect([name, env[name]]).toEqual([name, null]);
+  });
+
   test('the profile\'s token is the only credential claude sees', async () => {
     process.env.ANTHROPIC_API_KEY = 'stray-api';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'stray-oauth';

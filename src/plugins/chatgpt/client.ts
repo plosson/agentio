@@ -7,7 +7,16 @@ import { CODEX_CLI, runExternalCli, withTempDir } from '../../utils/external-cli
 import type { AskRequest, AskResult } from '../../utils/llm-ask';
 import type { ChatGptCredentials } from './types';
 
-const CREDENTIAL_VARIABLES = ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_HOME'] as const;
+/**
+ * Every variable through which codex could pick up another credential, or send the profile's elsewhere
+ * than to OpenAI: the base URLs and endpoint overrides it reads (found in codex-cli's binary) go too.
+ */
+const CREDENTIAL_VARIABLES = [
+  'OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_HOME',
+  'OPENAI_BASE_URL', 'CODEX_AUTHAPI_BASE_URL', 'CODEX_APP_SERVER_CHATGPT_BASE_URL', 'CODEX_CLOUD_TASKS_BASE_URL',
+  'CODEX_OSS_BASE_URL', 'CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL', 'CODEX_AGENT_IDENTITY_JWKS_BASE_URL',
+  'CODEX_REFRESH_TOKEN_URL_OVERRIDE', 'CODEX_REVOKE_TOKEN_URL_OVERRIDE',
+] as const;
 const REAUTH = 'Run: agentio profile reauth chatgpt <profile>';
 
 /**
