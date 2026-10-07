@@ -50,7 +50,11 @@ done
 ${WATCHED.map((v) => `if [ -n "\${${v}+x}" ]; then printf '%s' "$${v}" > "$log/env.${v}"; fi`).join('\n')}
 if [ -n "$CODEX_HOME" ]; then ls -A "$CODEX_HOME" > "$log/codex-files"; [ -f "$CODEX_HOME/auth.json" ] && cp "$CODEX_HOME/auth.json" "$log/auth.json"; fi
 cat > "$log/stdin"
-[ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
+if [ -n "$FAKE_SLEEP" ]; then
+  # The sleep is the process to stop when the shell is killed, so none is left running.
+  trap 'kill $! 2>/dev/null; exit 143' TERM
+  sleep "$FAKE_SLEEP" & wait $!
+fi
 [ -n "$out" ] && [ -n "$FAKE_ANSWER" ] && printf '%s' "$FAKE_ANSWER" > "$out"
 printf '%s' "$FAKE_STDOUT"
 printf '%s' "$FAKE_STDERR" >&2
