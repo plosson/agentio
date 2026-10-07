@@ -14,6 +14,7 @@ import { isLegacyServicePlugin, type RegisteredServicePlugin } from '../../src/p
 import { PluginRegistry } from '../../src/plugins/plugin-registry';
 
 const SERVICE_ORDER = [
+  'claude',
   'confluence',
   'discourse',
   'dropbox',

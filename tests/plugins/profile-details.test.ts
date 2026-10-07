@@ -90,6 +90,8 @@ describe('what each service shows about a profile', () => {
     ['notes', { apiKey: 'SECRETk', baseUrl: 'https://mac.example.ts.net' }, { url: 'https://mac.example.ts.net' }],
     ['jev', { apiKey: 'SECRETk', model: 'jev-preview' }, { account: 'jev-preview', url: 'https://console.typesafe.ai', serviceUrl: true }],
     ['jev', { apiKey: 'SECRETk' }, { url: 'https://console.typesafe.ai', serviceUrl: true }],
+    ['claude', { token: 'sk-ant-oat01-SECRETt', kind: 'oauth', model: 'opus' }, { account: 'subscription · opus', url: 'https://claude.ai', serviceUrl: true }],
+    ['claude', { token: 'sk-ant-api03-SECRETt', kind: 'apiKey' }, { account: 'API key', url: 'https://claude.ai', serviceUrl: true }],
     ['jira', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
     ['confluence', { accessToken: 'SECRETa', refreshToken: 'SECRETr', cloudId: 'c1', siteUrl: 'https://acme.atlassian.net' }, { url: 'https://acme.atlassian.net' }],
     ['revolut', { privateKey: 'SECRETp', refreshToken: 'SECRETr', accessToken: 'SECRETa', clientId: 'id' }, { url: 'https://business.revolut.com', serviceUrl: true }],

@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import claude from './claude';
 import confluence from './confluence';
 import discourse from './discourse';
 import dropbox from './dropbox';
@@ -32,6 +33,7 @@ import { registerDeclarativePlugin } from './declarative';
 
 /** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
+  claude,
   confluence,
   discourse,
   dropbox,
