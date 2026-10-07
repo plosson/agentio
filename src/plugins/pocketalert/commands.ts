@@ -5,9 +5,10 @@ import { addExamples } from '../../utils/command-tree';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt } from '../../utils/stdin';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { checkAnswer } from '../setup-inputs';
+import { POCKETALERT_API_KEY_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { parseLevel, PocketAlertClient } from './client';
 import { printSentMessage } from './output';
@@ -29,18 +30,11 @@ export interface PocketAlertProfileAddOptions extends ProfileAddOptions {
   apiKey?: string;
 }
 
-/** What setup reaches outside the process through; tests replace it. */
-export interface PocketAlertSetupDeps {
-  prompt?: (question: string) => Promise<string>;
-}
-
 export async function pocketAlertProfileAdd(
   options: PocketAlertProfileAddOptions,
-  deps: PocketAlertSetupDeps = {},
+  context: SetupContext,
 ): Promise<SetupResult<PocketAlertCredentials>> {
-  const ask = deps.prompt ?? prompt;
-  const apiKey = (options.apiKey ?? (await ask('? API key (Settings in the Pocket Alert app): '))).trim();
-  if (!apiKey) throw new CliError('INVALID_PARAMS', 'The API key is required', 'Pass --api-key, or type it when asked');
+  const apiKey = options.apiKey !== undefined ? checkAnswer(POCKETALERT_API_KEY_INPUT, options.apiKey) : await context.ask(POCKETALERT_API_KEY_INPUT);
 
   const applications = await new PocketAlertClient({ apiKey }).applications();
   const info = `Connected to Pocket Alert, ${applications.length} application${applications.length === 1 ? '' : 's'}`;
@@ -99,7 +93,7 @@ export function registerPocketAlertCommands(program: Command): void {
     )
       .action(async (options: PocketAlertProfileAddOptions) => {
         try {
-          await addProfileWithSetup('pocketalert', (o) => pocketAlertProfileAdd(o as PocketAlertProfileAddOptions), options);
+          await addProfileWithSetup('pocketalert', (o, context) => pocketAlertProfileAdd(o as PocketAlertProfileAddOptions, context), options);
         } catch (error) {
           handleError(error);
         }

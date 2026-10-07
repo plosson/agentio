@@ -1,10 +1,11 @@
+import { randomBytes } from 'crypto';
 import { URL } from 'url';
 import { ATLASSIAN_OAUTH_CONFIG } from '../../config/credentials';
-import { awaitOAuthCode } from '../../auth/oauth-server';
+import type { SetupContext } from '../../plugin-sdk';
+import { getAccessibleResources, selectAtlassianSite } from '../atlassian/sites';
 
 const ATLASSIAN_AUTH_URL = 'https://auth.atlassian.com/authorize';
 const ATLASSIAN_TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
-const ATLASSIAN_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 
 // Granular Confluence scopes (v2 API). Requires the Atlassian app to have
 // these scopes enabled in the developer console.
@@ -29,21 +30,14 @@ export interface ConfluenceOAuthResult {
   siteUrl: string;
 }
 
-export interface AtlassianSite {
-  id: string;
-  url: string;
-  name: string;
-  scopes: string[];
-  avatarUrl?: string;
-}
-
 async function exchangeCodeForTokens(
   code: string,
   clientId: string,
   clientSecret: string,
-  redirectUri: string
+  redirectUri: string,
+  fetchImpl: typeof fetch,
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
-  const response = await fetch(ATLASSIAN_TOKEN_URL, {
+  const response = await fetchImpl(ATLASSIAN_TOKEN_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -68,22 +62,6 @@ async function exchangeCodeForTokens(
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
   };
-}
-
-async function getAccessibleResources(accessToken: string): Promise<AtlassianSite[]> {
-  const response = await fetch(ATLASSIAN_RESOURCES_URL, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get accessible resources: ${error}`);
-  }
-
-  return response.json();
 }
 
 export async function refreshConfluenceToken(
@@ -115,49 +93,36 @@ export async function refreshConfluenceToken(
   };
 }
 
-export async function performConfluenceOAuthFlow(
-  selectSite?: (sites: AtlassianSite[]) => Promise<AtlassianSite>
-): Promise<ConfluenceOAuthResult> {
-  const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
-  const state = Math.random().toString(36).substring(2);
-
-  const authUrl = new URL(ATLASSIAN_AUTH_URL);
-  authUrl.searchParams.set('audience', 'api.atlassian.com');
-  authUrl.searchParams.set('client_id', ATLASSIAN_OAUTH_CONFIG.clientId);
-  authUrl.searchParams.set('scope', CONFLUENCE_SCOPES.join(' '));
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('state', state);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('prompt', 'consent');
-
-  const { code } = await awaitOAuthCode({
-    port: OAUTH_PORT,
+export async function performConfluenceOAuthFlow(context: SetupContext): Promise<ConfluenceOAuthResult> {
+  const state = randomBytes(16).toString('hex');
+  const { code, redirectUri } = await context.oauth({
     serviceName: 'Atlassian',
     expectedState: state,
-    authUrl: authUrl.toString(),
+    // Atlassian's app has this one callback registered.
+    port: OAUTH_PORT,
+    authorizationUrl(redirect) {
+      const authUrl = new URL(ATLASSIAN_AUTH_URL);
+      authUrl.searchParams.set('audience', 'api.atlassian.com');
+      authUrl.searchParams.set('client_id', ATLASSIAN_OAUTH_CONFIG.clientId);
+      authUrl.searchParams.set('scope', CONFLUENCE_SCOPES.join(' '));
+      authUrl.searchParams.set('redirect_uri', redirect);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('prompt', 'consent');
+      return authUrl.toString();
+    },
   });
 
   const tokens = await exchangeCodeForTokens(
     code,
     ATLASSIAN_OAUTH_CONFIG.clientId,
     ATLASSIAN_OAUTH_CONFIG.clientSecret,
-    redirectUri
+    redirectUri,
+    context.fetch,
   );
 
-  const sites = await getAccessibleResources(tokens.accessToken);
-
-  if (sites.length === 0) {
-    throw new Error('No accessible Confluence sites found. Make sure your app has the correct permissions.');
-  }
-
-  let selectedSite: AtlassianSite;
-  if (sites.length === 1) {
-    selectedSite = sites[0];
-  } else if (selectSite) {
-    selectedSite = await selectSite(sites);
-  } else {
-    selectedSite = sites[0];
-  }
+  const sites = await getAccessibleResources(tokens.accessToken, context.fetch);
+  const selectedSite = await selectAtlassianSite(sites, context, 'Confluence');
 
   return {
     accessToken: tokens.accessToken,

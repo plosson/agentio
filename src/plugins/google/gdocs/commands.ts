@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import { writeFile, readFile } from 'fs/promises';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
-import { performOAuthFlow } from '../oauth';
+import { googleCamelSetup } from '../shared';
 import { GDocsClient } from './client';
 import { printGDocsList, printGDocCreated, printGDocUpdated, printGDocsBatchResult, printGDocsTabs, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
@@ -381,32 +381,4 @@ https://developers.google.com/docs/api/reference/rest/v1/documents/request`,
     });
 }
 
-export async function gdocsProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Docs...\n');
-
-  const tokens = await performOAuthFlow('gdocs');
-
-  // Fetch user email for profile naming
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to fetch user email: ${errorMessage}`,
-      'Ensure the account has an email address'
-    );
-  }
-
-  const credentials: GDocsCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
-
-  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gdocs list` };
-}
+export const gdocsProfileAdd = googleCamelSetup('gdocs', 'agentio gdocs list');

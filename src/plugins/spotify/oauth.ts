@@ -1,12 +1,9 @@
 import { createHash, randomBytes } from 'crypto';
 import { URL } from 'url';
-import {
-  awaitOAuthCode,
-  launchBrowser,
-  parseOAuthRedirect,
-} from '../../auth/oauth-server';
+import { parseOAuthRedirect } from '../../auth/oauth-server';
 import { CliError, httpStatusToErrorCode } from '../../utils/errors';
-import { prompt } from '../../utils/stdin';
+import type { SetupContext } from '../../plugin-sdk';
+import { REDIRECT_INPUT } from './setup-needs';
 import {
   AUTHORIZE_URL,
   LOOPBACK_HOST,
@@ -181,13 +178,11 @@ export interface AuthorizeOptions {
   noBrowser?: boolean;
 }
 
-export async function authorizeSpotify(options: AuthorizeOptions): Promise<SpotifyTokenResult> {
+export async function authorizeSpotify(options: AuthorizeOptions, context: SetupContext): Promise<SpotifyTokenResult> {
   const scopes = scopesFor(options.readOnly);
-  const port = SPOTIFY_OAUTH_PORT;
-  const redirectUri = SPOTIFY_REDIRECT_URI;
   const { verifier, challenge } = createPkcePair();
   const state = randomBytes(16).toString('hex');
-  const authUrl = buildAuthorizeUrl({
+  const authorizationUrl = (redirectUri: string) => buildAuthorizeUrl({
     clientId: options.clientId,
     redirectUri,
     challenge,
@@ -195,37 +190,23 @@ export async function authorizeSpotify(options: AuthorizeOptions): Promise<Spoti
     scopes,
   });
 
-  let code: string;
-
   if (options.noBrowser) {
-    console.error('\nOpen this URL in a browser on any machine:\n');
-    console.error(`  ${authUrl}\n`);
-    console.error('After approving, the browser is redirected to a 127.0.0.1 address that may fail to load.');
-    console.error('Copy the full address bar contents and paste them here.\n');
-    const pasted = await prompt('? Paste the redirect URL (or just the code): ');
-    ({ code } = parseOAuthRedirect(pasted, 'Spotify', state));
-  } else {
-    try {
-      const result = await awaitOAuthCode({
-        port,
-        host: LOOPBACK_HOST,
-        serviceName: 'Spotify',
-        expectedState: state,
-        authUrl,
-      });
-      code = result.code;
-    } catch (error) {
-      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-        throw new CliError(
-          'CONFIG_ERROR',
-          `Spotify OAuth callback port ${SPOTIFY_OAUTH_PORT} is already in use.`,
-          `Stop the process using ${LOOPBACK_HOST}:${SPOTIFY_OAUTH_PORT} and try again.`,
-        );
-      }
-      throw error;
-    }
+    context.log('\nOpen this URL in a browser on any machine:\n');
+    context.log(`  ${authorizationUrl(SPOTIFY_REDIRECT_URI)}\n`);
+    context.log('After approving, the browser is redirected to a 127.0.0.1 address that may fail to load.');
+    context.log('Copy the full address bar contents and paste them here.\n');
+    const pasted = await context.ask(REDIRECT_INPUT);
+    const { code } = parseOAuthRedirect(pasted, 'Spotify', state);
+    return exchangeCodeForTokens(code, options.clientId, verifier, SPOTIFY_REDIRECT_URI);
   }
 
+  const { code, redirectUri } = await context.oauth({
+    serviceName: 'Spotify',
+    expectedState: state,
+    port: SPOTIFY_OAUTH_PORT,
+    host: LOOPBACK_HOST,
+    authorizationUrl,
+  });
   return exchangeCodeForTokens(code, options.clientId, verifier, redirectUri);
 }
 
@@ -238,10 +219,3 @@ Create a Spotify app (Development Mode; Premium required for the app owner):
   4. Copy the Client ID. agentio does not need the client secret.
   5. To let another person use the app, add their Spotify email under User Management (max 5).
 `.trim();
-
-export function printAppSetupSteps(): void {
-  console.error(`\n${SPOTIFY_APP_SETUP_STEPS}\n`);
-}
-
-/** Re-export for lifecycle reauth that still wants to open a browser. */
-export { launchBrowser };

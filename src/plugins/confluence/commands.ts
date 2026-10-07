@@ -2,14 +2,10 @@ import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
-import {
-  performConfluenceOAuthFlow,
-  type AtlassianSite,
-} from './oauth';
+import { performConfluenceOAuthFlow } from './oauth';
 import { ConfluenceClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { readStdin } from '../../utils/stdin';
-import { interactiveSelect } from '../../utils/interactive';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addExamples } from '../../utils/command-tree';
 import {
@@ -23,7 +19,7 @@ import {
   printConfluenceCommentResult,
 } from './output';
 import type { ConfluenceCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
 
 const getConfluenceClient = createClientGetter<ConfluenceCredentials, ConfluenceClient>({
   service: 'confluence',
@@ -359,26 +355,15 @@ export function registerConfluenceCommands(program: Command): void {
     });
 }
 
-export async function confluenceProfileAdd(options: {
-  profile?: string;
-  readOnly?: boolean;
-}): Promise<SetupResult<ConfluenceCredentials>> {
-  console.error('\nConfluence OAuth Setup\n');
+export async function confluenceProfileAdd(
+  _options: { profile?: string; readOnly?: boolean },
+  context: SetupContext,
+): Promise<SetupResult<ConfluenceCredentials>> {
+  context.log('\nConfluence OAuth Setup\n');
 
-  const selectSite = async (sites: AtlassianSite[]): Promise<AtlassianSite> => {
-    return interactiveSelect({
-      message: 'Select a Confluence site:',
-      choices: sites.map((site) => ({
-        name: site.name,
-        value: site,
-        description: site.url,
-      })),
-    });
-  };
+  const result = await performConfluenceOAuthFlow(context);
 
-  const result = await performConfluenceOAuthFlow(selectSite);
-
-  console.error(`\nAuthorized for site: ${result.siteUrl}\n`);
+  context.log(`\nAuthorized for site: ${result.siteUrl}\n`);
 
   const siteHostname = new URL(result.siteUrl).hostname;
 

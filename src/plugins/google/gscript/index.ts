@@ -1,3 +1,4 @@
+import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gscriptProfileAdd, registerGScriptCommands } from './commands';
 import { GScriptClient } from './client';
 import type { GScriptCredentials } from './types';
@@ -14,6 +15,7 @@ export default defineServicePlugin<GScriptCredentials, GoogleCamelTokens>()({
   registerCommands: registerGScriptCommands,
   profile: {
     setup: gscriptProfileAdd,
+    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GScriptClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GScriptCredentials>('gscript'),

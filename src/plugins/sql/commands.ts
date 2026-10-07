@@ -2,14 +2,14 @@ import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
-import { SqlClient } from './client';
+import { SqlClient, scrubConnectionSecrets } from './client';
 import { CliError, handleError } from '../../utils/errors';
-import { readStdin, prompt } from '../../utils/stdin';
-import { interactiveSelect } from '../../utils/interactive';
+import { readStdin } from '../../utils/stdin';
 import { isProfileReadOnly } from '../../config/config-manager';
 import { addExamples } from '../../utils/command-tree';
 import type { SqlCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
+import { SQL_URL_INPUT } from './setup-needs';
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
   service: 'sql',
@@ -24,7 +24,8 @@ function extractDisplayName(url: string): string {
     const db = parsed.pathname.replace(/^\//, '') || 'database';
     return username ? `${username}@${host}/${db}` : `${host}/${db}`;
   } catch {
-    return url.substring(0, 30);
+    // Not the URL itself, which may hold a password.
+    return 'database';
   }
 }
 
@@ -105,97 +106,87 @@ export function registerSqlCommands(program: Command): void {
     });
 }
 
-export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }): Promise<SetupResult<SqlCredentials>> {
+export async function sqlProfileAdd(options: { profile?: string; interactive?: boolean; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<SqlCredentials>> {
   let url: string;
 
   if (options.interactive) {
-    url = await promptInteractiveConnection();
+    url = await promptInteractiveConnection(context);
   } else {
-    console.error('\nSQL Database Setup\n');
-    console.error('Enter your database connection URL.');
-    console.error('Supported formats:');
-    console.error('  PostgreSQL: postgres://user:password@host:5432/database');
-    console.error('  MySQL:      mysql://user:password@host:3306/database');
-    console.error('  SQLite:     sqlite:///path/to/database.db\n');
-    console.error('Tip: Use --interactive to enter components separately (handles special characters)\n');
+    context.log('\nSQL Database Setup\n');
+    context.log('Enter your database connection URL.');
+    context.log('Supported formats:');
+    context.log('  PostgreSQL: postgres://user:password@host:5432/database');
+    context.log('  MySQL:      mysql://user:password@host:3306/database');
+    context.log('  SQLite:     sqlite:///path/to/database.db\n');
+    context.log('Tip: Use --interactive to enter components separately (handles special characters)\n');
 
-    const urlInput = await prompt('? Connection URL: ');
-
-    if (!urlInput) {
-      throw new CliError('INVALID_PARAMS', 'Connection URL is required');
-    }
-    url = urlInput;
+    url = await context.ask(SQL_URL_INPUT);
   }
 
   // Validate connection
-  console.error('\nValidating connection...');
-  const tempClient = new SqlClient({ url });
-  try {
-    await tempClient.query({ query: 'SELECT 1' });
-  } catch (error) {
-    tempClient.close();
-    if (error instanceof CliError) {
-      throw error;
-    }
-    throw new CliError('AUTH_FAILED', `Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-  tempClient.close();
-
+  context.log('\nValidating connection...');
   const displayName = extractDisplayName(url);
-  console.error(`\nConnected to: ${displayName}\n`);
+  let failure: string | undefined;
+  try {
+    const tempClient = new SqlClient({ url });
+    try {
+      const result = await tempClient.validate();
+      if (!result.valid) failure = result.error ?? 'Unknown error';
+    } finally {
+      tempClient.close();
+    }
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    failure = error instanceof Error ? error.message : 'Unknown error';
+  }
+  if (failure !== undefined) {
+    // The driver's own message can quote the connection URL, which holds the password.
+    throw new CliError('AUTH_FAILED', `Failed to connect to ${displayName}: ${scrubConnectionSecrets(failure, url)}`);
+  }
+
+  context.log(`\nConnected to: ${displayName}\n`);
 
   const credentials: SqlCredentials = {
     url,
     displayName,
   };
 
-  return { credentials, suggestedProfileName: displayName, info: 'Test with: agentio sql query "SELECT 1"' };
+  // A profile name cannot hold "/", which every display name has (`user@host/db`).
+  return { credentials, suggestedProfileName: displayName.replaceAll('/', '-'), info: 'Test with: agentio sql query "SELECT 1"' };
 }
 
-async function promptInteractiveConnection(): Promise<string> {
-  console.error('\nSQL Database Setup (Interactive)\n');
+// Asked at run time, not declared in the needs: the parts depend on the database type.
+const DB_TYPE_INPUT: InputSpec = {
+  id: 'dbType', label: 'Database type', kind: 'choice',
+  choices: [
+    { value: 'postgres', label: 'PostgreSQL' },
+    { value: 'mysql', label: 'MySQL' },
+    { value: 'sqlite', label: 'SQLite' },
+  ],
+};
+const PATH_INPUT: InputSpec = { id: 'path', label: 'Database file path', kind: 'text' };
+const HOST_INPUT: InputSpec = { id: 'host', label: 'Host', kind: 'text', default: 'localhost' };
+const DATABASE_INPUT: InputSpec = { id: 'database', label: 'Database name', kind: 'text' };
+const USER_INPUT: InputSpec = { id: 'user', label: 'Username', kind: 'text' };
+const PASSWORD_INPUT: InputSpec = { id: 'password', label: 'Password', kind: 'secret', required: false };
 
-  // Database type
-  const dbType = await interactiveSelect({
-    message: 'Select database type:',
-    choices: [
-      { name: 'PostgreSQL', value: 'postgres' as const, description: 'Default port 5432' },
-      { name: 'MySQL', value: 'mysql' as const, description: 'Default port 3306' },
-      { name: 'SQLite', value: 'sqlite' as const, description: 'Local file database' },
-    ],
-  });
+async function promptInteractiveConnection(context: SetupContext): Promise<string> {
+  context.log('\nSQL Database Setup (Interactive)\n');
 
-  const defaultPort = dbType === 'postgres' ? '5432' : dbType === 'mysql' ? '3306' : '';
+  const dbType = await context.ask(DB_TYPE_INPUT);
 
   // SQLite only needs a file path
   if (dbType === 'sqlite') {
-    const dbPath = await prompt('? Database file path: ');
-    if (!dbPath) {
-      throw new CliError('INVALID_PARAMS', 'Database path is required');
-    }
-    return `sqlite://${dbPath}`;
+    return `sqlite://${await context.ask(PATH_INPUT)}`;
   }
 
   // For postgres/mysql, collect connection components
-  const host = await prompt('? Host (e.g., localhost): ');
-  if (!host) {
-    throw new CliError('INVALID_PARAMS', 'Host is required');
-  }
-
-  const portInput = await prompt(`? Port [${defaultPort}]: `);
-  const port = portInput || defaultPort;
-
-  const database = await prompt('? Database name: ');
-  if (!database) {
-    throw new CliError('INVALID_PARAMS', 'Database name is required');
-  }
-
-  const username = await prompt('? Username: ');
-  if (!username) {
-    throw new CliError('INVALID_PARAMS', 'Username is required');
-  }
-
-  const password = await prompt('? Password: ');
+  const defaultPort = dbType === 'postgres' ? '5432' : '3306';
+  const host = await context.ask(HOST_INPUT);
+  const port = await context.ask({ id: 'port', label: 'Port', kind: 'text', default: defaultPort, required: false }) || defaultPort;
+  const database = await context.ask(DATABASE_INPUT);
+  const username = await context.ask(USER_INPUT);
+  const password = await context.ask(PASSWORD_INPUT);
 
   // Build URL with proper encoding
   const encodedUsername = encodeURIComponent(username);

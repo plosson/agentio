@@ -5,9 +5,10 @@ import { addExamples } from '../../utils/command-tree';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt } from '../../utils/stdin';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { checkAnswer } from '../setup-inputs';
+import { PAGERIO_URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { PagerioClient, parsePagerUrl } from './client';
 import { printSentPage } from './output';
@@ -49,17 +50,11 @@ export interface PagerioProfileAddOptions extends ProfileAddOptions {
   url?: string;
 }
 
-/** What setup reaches outside the process through; tests replace it. */
-export interface PagerioSetupDeps {
-  prompt?: (question: string) => Promise<string>;
-}
-
 export async function pagerioProfileAdd(
   options: PagerioProfileAddOptions,
-  deps: PagerioSetupDeps = {},
+  context: SetupContext,
 ): Promise<SetupResult<PagerioCredentials>> {
-  const ask = deps.prompt ?? prompt;
-  const url = parsePagerUrl(options.url ?? (await ask('? Pager URL (the Copy button on https://pagerio.chuut.com): ')));
+  const url = parsePagerUrl(options.url !== undefined ? checkAnswer(PAGERIO_URL_INPUT, options.url) : await context.ask(PAGERIO_URL_INPUT));
   await new PagerioClient({ url }).check();
   return { credentials: { url }, suggestedProfileName: 'default', info: `Connected to Pocket Pager at ${new URL(url).host}` };
 }
@@ -117,7 +112,7 @@ export function registerPagerioCommands(program: Command): void {
     )
       .action(async (options: PagerioProfileAddOptions) => {
         try {
-          await addProfileWithSetup('pagerio', (o) => pagerioProfileAdd(o as PagerioProfileAddOptions), options);
+          await addProfileWithSetup('pagerio', (o, context) => pagerioProfileAdd(o as PagerioProfileAddOptions, context), options);
         } catch (error) {
           handleError(error);
         }

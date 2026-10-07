@@ -1,14 +1,7 @@
-import { interactiveSelect } from '../../utils/interactive';
+import type { SetupContext } from '../../plugin-sdk';
 import type { CredentialLifecycle } from '../types';
-import { performConfluenceOAuthFlow, refreshConfluenceToken, type AtlassianSite } from './oauth';
+import { performConfluenceOAuthFlow, refreshConfluenceToken } from './oauth';
 import type { ConfluenceCredentials } from './types';
-
-async function selectConfluenceSite(sites: AtlassianSite[]): Promise<AtlassianSite> {
-  return interactiveSelect({
-    message: 'Select a Confluence site:',
-    choices: sites.map((site) => ({ name: site.name, value: site, description: site.url })),
-  });
-}
 
 export const confluenceCredentialLifecycle: CredentialLifecycle<ConfluenceCredentials> = {
   secretFields: ['refreshToken'],
@@ -33,9 +26,10 @@ export const confluenceCredentialLifecycle: CredentialLifecycle<ConfluenceCreden
 export async function reauthenticateConfluence(
   credentials: ConfluenceCredentials | null,
   profileName: string,
+  context: SetupContext,
 ): Promise<ConfluenceCredentials> {
-  console.error(`\nRe-authenticating confluence / ${profileName}...`);
-  const result = await performConfluenceOAuthFlow(selectConfluenceSite);
-  console.error(`  Done (${result.siteUrl})`);
+  context.log(`\nRe-authenticating confluence / ${profileName}...`);
+  const result = await performConfluenceOAuthFlow(context);
+  context.log(`  Done (${result.siteUrl})`);
   return { ...credentials, ...result };
 }

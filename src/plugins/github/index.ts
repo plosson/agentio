@@ -1,19 +1,19 @@
 import { defineServicePlugin } from '../types';
+import type { SetupContext } from '../../plugin-sdk';
 import { GitHubClient } from './client';
-import { githubProfileAdd, registerGitHubCommands } from './commands';
-import { performGitHubOAuthFlow } from './oauth';
+import { githubProfileAdd, registerGitHubCommands, signInToGitHub } from './commands';
+import { GITHUB_SETUP_NEEDS } from './setup-needs';
 import type { GitHubCredentials } from './types';
 
 async function reauthenticateGitHub(
-  credentials: GitHubCredentials | null,
+  _credentials: GitHubCredentials | null,
   profileName: string,
+  context: SetupContext,
 ): Promise<GitHubCredentials> {
-  console.error(`\nRe-authenticating github / ${profileName}...`);
-  const oauth = await performGitHubOAuthFlow();
-  const replacement = { ...credentials, accessToken: oauth.accessToken, username: '', email: null };
-  const user = await new GitHubClient(replacement).getUser();
-  console.error(`  Done (${user.login})`);
-  return { ...replacement, username: user.login, email: user.email };
+  context.log(`\nRe-authenticating github / ${profileName}...`);
+  const { credentials, login } = await signInToGitHub(context);
+  context.log(`  Done (${login})`);
+  return credentials;
 }
 
 export default defineServicePlugin<GitHubCredentials>()({
@@ -24,6 +24,7 @@ export default defineServicePlugin<GitHubCredentials>()({
   brand: { url: 'https://github.com' },
   registerCommands: registerGitHubCommands,
   profile: {
+    needs: GITHUB_SETUP_NEEDS,
     setup: githubProfileAdd,
     createClient: (credentials) => new GitHubClient(credentials),
     describe: (credentials) => ({ account: credentials.username, url: credentials.username ? `https://github.com/${encodeURIComponent(credentials.username)}` : undefined }),

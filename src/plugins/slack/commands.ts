@@ -6,11 +6,13 @@ import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { prompt, readStdin } from '../../utils/stdin';
+import { readStdin } from '../../utils/stdin';
 import { SlackClient } from './client';
+import { checkWebhookUrl } from '../webhook-check';
 import { printSlackSendResult } from './output';
 import type { SlackCredentials, SlackWebhookCredentials } from './types';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { SLACK_CHANNEL_INPUT, SLACK_WEBHOOK_INPUT } from './setup-needs';
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
   service: 'slack',
@@ -119,7 +121,7 @@ export function registerSlackCommands(program: Command): void {
     profile
       .command('add')
       .description('Add a new Slack profile (webhook)')
-      .option('--profile <name>', 'Profile name (required)')
+      .option('--profile <name>', 'Profile name (default: the channel name, else "webhook")')
       .option('--read-only', 'Create as read-only profile (blocks write operations)'),
   ).action(async (options) => {
       try {
@@ -130,57 +132,23 @@ export function registerSlackCommands(program: Command): void {
     });
 }
 
-export async function slackProfileAdd(options: { profile?: string; readOnly?: boolean }): Promise<SetupResult<SlackCredentials>> {
-  if (!options.profile) {
-    throw new CliError('INVALID_PARAMS', "required option '--profile <name>' not specified", 'Run: agentio slack profile add --profile <name>');
-  }
-  console.error('\nSlack Webhook Setup\n');
-  console.error('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
-  console.error('2. Enable "Incoming Webhooks" in Features');
-  console.error('3. Click "Add New Webhook to Workspace" and select a channel');
-  console.error('4. Copy the Webhook URL\n');
+export async function slackProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<SlackCredentials>> {
+  context.log('\nSlack Webhook Setup\n');
+  context.log('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
+  context.log('2. Enable "Incoming Webhooks" in Features');
+  context.log('3. Click "Add New Webhook to Workspace" and select a channel');
+  context.log('4. Copy the Webhook URL\n');
 
-  const webhookUrl = await prompt('? Paste your webhook URL: ');
+  const webhookUrl = await context.ask(SLACK_WEBHOOK_INPUT);
 
-  if (!webhookUrl) {
-    throw new CliError('INVALID_PARAMS', 'Webhook URL is required');
-  }
+  await checkWebhookUrl(webhookUrl, {
+    prefix: 'https://hooks.slack.com/',
+    invalidMessage: 'Invalid Slack webhook URL',
+    invalidSuggestion: 'URL should start with https://hooks.slack.com/',
+    showResponseBody: true,
+  }, context);
 
-  if (!webhookUrl.startsWith('https://hooks.slack.com/')) {
-    throw new CliError(
-      'INVALID_PARAMS',
-      'Invalid Slack webhook URL',
-      'URL should start with https://hooks.slack.com/',
-    );
-  }
-
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ text: 'Test message from agentio' }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new CliError(
-        'API_ERROR',
-        `Webhook validation failed: ${response.status} ${error}`,
-        'Check the webhook URL and try again',
-      );
-    }
-  } catch (err) {
-    if (err instanceof CliError) throw err;
-    throw new CliError(
-      'API_ERROR',
-      `Failed to validate webhook: ${err instanceof Error ? err.message : String(err)}`,
-      'Check that the URL is correct and accessible',
-    );
-  }
-
-  const channelName = await prompt('? Channel name (optional, for display): ');
+  const channelName = await context.ask(SLACK_CHANNEL_INPUT);
 
   const credentials: SlackWebhookCredentials = {
     type: 'webhook',

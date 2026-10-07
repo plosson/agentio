@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
-import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
+import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
-import { performOAuthFlow } from '../oauth';
+import { googleCamelSetup } from '../shared';
 import { GSheetsClient } from './client';
 import {
   printGSheetsList,
@@ -597,28 +597,4 @@ Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.`,
     });
 }
 
-export async function gsheetsProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Sheets...\n');
-
-  const tokens = await performOAuthFlow('gsheets');
-
-  // Fetch user email for profile naming
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError('AUTH_FAILED', `Failed to fetch user email: ${errorMessage}`, 'Ensure the account has an email address');
-  }
-
-  const credentials: GSheetsCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
-
-  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gsheets list` };
-}
+export const gsheetsProfileAdd = googleCamelSetup('gsheets', 'agentio gsheets list');

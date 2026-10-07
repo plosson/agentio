@@ -8,7 +8,7 @@ import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { promptHidden, readStdinRaw } from '../../utils/stdin';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupResult } from '../../plugin-sdk';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { parseDotenv } from './dotenv';
 import { runWithSecrets } from './exec';
@@ -19,7 +19,7 @@ import type { SecretsCredentials } from './types';
 const PROFILE_OPTION = 'Profile name (optional if only one profile exists)';
 
 /** A new profile holds nothing; values come from `set` and `import`. */
-export async function secretsProfileAdd(): Promise<SetupResult<SecretsCredentials>> {
+export async function secretsProfileAdd(_options: ProfileAddOptions, _context: SetupContext): Promise<SetupResult<SecretsCredentials>> {
   return { credentials: { values: {} }, suggestedProfileName: 'default', info: 'Add secrets with: agentio secrets set <KEY>' };
 }
 

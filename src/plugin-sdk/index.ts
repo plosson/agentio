@@ -75,6 +75,8 @@ export interface OAuthSetupOptions {
   authorizationUrl(redirectUri: string): string;
   /** A fixed callback port, for providers that registered one. */
   port?: number;
+  /** The callback's host, for providers that registered one other than `localhost` (Spotify: 127.0.0.1). */
+  host?: string;
 }
 
 export interface OAuthSetupResult {

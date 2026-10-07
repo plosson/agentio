@@ -1,3 +1,4 @@
+import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gcalProfileAdd, registerGCalCommands } from './commands';
 import { GCalClient } from './client';
 import type { GCalCredentials } from './types';
@@ -14,6 +15,7 @@ export default defineServicePlugin<GCalCredentials, OAuthTokens>()({
   registerCommands: registerGCalCommands,
   profile: {
     setup: gcalProfileAdd,
+    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GCalClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gcal'),

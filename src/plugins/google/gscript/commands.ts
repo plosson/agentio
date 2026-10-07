@@ -2,11 +2,10 @@ import { Command } from 'commander';
 import { readFile, writeFile, readdir, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
-import { fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
-import { performOAuthFlow } from '../oauth';
+import { googleCamelSetup } from '../shared';
 import { GScriptClient } from './client';
 import { readStdin } from '../../../utils/stdin';
 import {
@@ -456,31 +455,4 @@ file already exists in the project, its existing type is reused.`,
     });
 }
 
-export async function gscriptProfileAdd(_options: { profile?: string; readOnly?: boolean }) {
-  console.error('Starting OAuth flow for Google Apps Script...\n');
-
-  const tokens = await performOAuthFlow('gscript');
-
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to fetch user email: ${errorMessage}`,
-      'Ensure the account has an email address'
-    );
-  }
-
-  const credentials: GScriptCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-  };
-
-  return { credentials, suggestedProfileName: userEmail, info: `Email: ${userEmail}\nTest with: agentio gscript list` };
-}
+export const gscriptProfileAdd = googleCamelSetup('gscript', 'agentio gscript list');

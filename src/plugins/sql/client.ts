@@ -5,6 +5,27 @@ import { CliError } from '../../utils/errors';
 
 const DEFAULT_LIMIT = 100;
 
+/** A driver message fit to show: never the connection URL or its password, raw or URL-encoded. */
+export function scrubConnectionSecrets(message: string, url: string): string {
+  let encoded = '';
+  try {
+    encoded = new URL(url).password;
+  } catch {
+    // Not a URL: only the whole string is known to be secret.
+  }
+  let raw = encoded;
+  try {
+    raw = decodeURIComponent(encoded);
+  } catch {
+    // A malformed escape: the encoded form is all there is.
+  }
+  let scrubbed = message.split(url).join('[connection url]');
+  for (const secret of [encoded, raw]) {
+    if (secret) scrubbed = scrubbed.split(secret).join('[password]');
+  }
+  return scrubbed;
+}
+
 export class SqlClient implements ServiceClient {
   private db: SQL;
   private readonly adapter: 'sqlite' | 'server';

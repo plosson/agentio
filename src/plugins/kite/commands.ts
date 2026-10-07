@@ -10,7 +10,7 @@ import { enforceWriteAccess } from '../../utils/read-only';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createSetupContext } from '../host-context';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { KITE_SETUP_NEEDS, URL_INPUT } from './setup-needs';
+import { URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
@@ -337,7 +337,7 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
         .option('--read-only', 'Create as read-only profile (blocks write operations)')
         .option('--no-browser', 'Print the sign-in link without opening a browser'),
     ).action(run(async (options: KiteProfileAddOptions) => {
-      await addProfileWithSetup('kite', (o, context) => kiteProfileAdd(o as KiteProfileAddOptions, context), options, KITE_SETUP_NEEDS);
+      await addProfileWithSetup('kite', (o, context) => kiteProfileAdd(o as KiteProfileAddOptions, context), options);
     })),
     `Examples:
 

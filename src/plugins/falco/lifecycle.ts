@@ -1,8 +1,9 @@
+import type { SetupContext } from '../../plugin-sdk';
 import { CliError } from '../../utils/errors';
 import type { CredentialLifecycle } from '../types';
-import { loginToFalco, refreshFalcoToken, revokeFalcoToken } from './auth';
+import { loginWithSecondFactor, refreshFalcoToken, revokeFalcoToken } from './auth';
 import { FalcoClient } from './client';
-import { promptPassword, promptText } from './prompts';
+import { FALCO_PASSWORD_INPUT } from './setup-needs';
 import type { FalcoCredentials } from './types';
 
 export const falcoCredentialLifecycle: CredentialLifecycle<FalcoCredentials> = {
@@ -54,6 +55,7 @@ export const falcoCredentialLifecycle: CredentialLifecycle<FalcoCredentials> = {
 export async function reauthenticateFalco(
   credentials: FalcoCredentials | null,
   profileName: string,
+  context: SetupContext,
 ): Promise<FalcoCredentials> {
   if (!credentials) {
     throw new CliError(
@@ -63,33 +65,19 @@ export async function reauthenticateFalco(
     );
   }
 
-  console.error(`\nRe-authenticating falco / ${profileName} (${credentials.userEmail})`);
-  const password = await promptPassword('? Password: ');
-  if (!password) throw new CliError('AUTH_FAILED', 'A password is required');
-
-  let result = await loginToFalco({ username: credentials.userEmail, password });
-  if (result.type === 'two_factor_required') {
-    const code = await promptText('? Two-factor code: ');
-    if (!code) throw new CliError('INVALID_PARAMS', 'A two-factor code is required');
-    result = await loginToFalco({ username: credentials.userEmail, password, twoFaCode: code });
-  }
-  if (result.type !== 'success') {
-    // Reached only when Falco asks for a second factor again after one was
-    // entered, so do not claim the user supplied nothing.
-    throw new CliError(
-      'AUTH_FAILED',
-      'Falco is still asking for a two-factor code',
-      'Re-run the command and enter a fresh code.',
-    );
-  }
+  context.log(`\nRe-authenticating falco / ${profileName} (${credentials.userEmail})`);
+  const password = await context.ask(FALCO_PASSWORD_INPUT);
+  const tokens = await loginWithSecondFactor(credentials.userEmail, password, context);
 
   const now = Date.now();
+  // refreshToken is a secret field: a remote sign-in again receives these
+  // credentials without it, so every token is taken from the new login.
   const replacement: FalcoCredentials = {
     ...credentials,
-    accessToken: result.tokens.accessToken,
-    expiryDate: now + result.tokens.expiresIn * 1000,
-    refreshToken: result.tokens.refreshToken,
-    refreshExpiryDate: now + result.tokens.refreshTokenExpiresIn * 1000,
+    accessToken: tokens.accessToken,
+    expiryDate: now + tokens.expiresIn * 1000,
+    refreshToken: tokens.refreshToken,
+    refreshExpiryDate: now + tokens.refreshTokenExpiresIn * 1000,
   };
 
   const client = new FalcoClient(replacement);
@@ -108,8 +96,9 @@ export async function reauthenticateFalco(
   // The replacement works, so the token it supersedes is now orphaned and
   // would otherwise stay valid on Falco's servers for its full lifetime.
   // Revoked only after validation, so a failed reauth leaves the old one usable.
-  await revokeFalcoToken(credentials.refreshToken);
+  // A remote sign-in again has no old token to revoke; the hub holds it.
+  if (credentials.refreshToken) await revokeFalcoToken(credentials.refreshToken);
 
-  console.error(`  Done (${validation.info})`);
+  context.log(`  Done (${validation.info})`);
   return replacement;
 }

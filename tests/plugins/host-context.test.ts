@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { PassThrough } from 'stream';
-import { createJsonSetupContext } from '../../src/plugins/host-context';
+import { mkdtemp, writeFile, chmod } from 'fs/promises';
+import { existsSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { createJsonSetupContext, createSetupContext } from '../../src/plugins/host-context';
 import { createLineReader } from '../../src/utils/line-reader';
 import { CliError } from '../../src/utils/errors';
 import type { InputSpec } from '../../src/plugin-sdk';
@@ -135,4 +139,77 @@ test('oauth: a busy fixed port rejects with a CONFIG_ERROR CliError naming the p
   } finally {
     blocker.stop(true);
   }
+});
+
+/** A port nothing listens on: taken from the OS, then released. */
+function freePort(): number {
+  const probe = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response() });
+  const port = probe.port!;
+  probe.stop(true);
+  return port;
+}
+
+test('oauth (JSON): a busy fixed port on 127.0.0.1 is CONFIG_ERROR, and no open event is printed', async () => {
+  const blocker = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('busy') });
+  const port = blocker.port!;
+  try {
+    const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+    const error = await ctx.oauth({ serviceName: 'Test', port, host: '127.0.0.1', authorizationUrl: authUrl }).then(() => null, (e) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('CONFIG_ERROR');
+    expect(error.message).toBe(`Test sign-in needs port ${port} on 127.0.0.1, and another program is using it`);
+    expect(error.suggestion).toBe(`Stop the program using 127.0.0.1:${port}, then try again`);
+    await Bun.sleep(20);
+    expect(events()).toEqual([]);
+  } finally {
+    blocker.stop(true);
+  }
+});
+
+test('oauth (terminal): a busy fixed port is CONFIG_ERROR, and no browser is opened', async () => {
+  const bin = await mkdtemp(join(tmpdir(), 'agentio-bin-'));
+  const mark = join(bin, 'opened');
+  for (const name of ['open', 'xdg-open']) {
+    await writeFile(join(bin, name), `#!/bin/sh\necho "$@" > "${mark}"\n`);
+    await chmod(join(bin, name), 0o755);
+  }
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  const blocker = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('busy') });
+  const port = blocker.port!;
+  try {
+    const error = await createSetupContext().oauth({ serviceName: 'Test', port, host: '127.0.0.1', authorizationUrl: authUrl }).then(() => null, (e) => e);
+    expect(error).toBeInstanceOf(CliError);
+    expect(error.code).toBe('CONFIG_ERROR');
+    expect(error.message).toBe(`Test sign-in needs port ${port} on 127.0.0.1, and another program is using it`);
+    await Bun.sleep(50);
+    expect(existsSync(mark)).toBe(false);
+  } finally {
+    blocker.stop(true);
+    process.env.PATH = path;
+  }
+});
+
+test('oauth: with host 127.0.0.1, the redirect names it and the callback is reached there', async () => {
+  const port = freePort();
+  const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+  const result = ctx.oauth({ serviceName: 'Test', port, host: '127.0.0.1', authorizationUrl: authUrl });
+  const rejected = result.then(() => null, (e) => e);
+  const redirectUri = new URL((await openEvent()).url).searchParams.get('r')!;
+  expect(redirectUri).toBe(`http://127.0.0.1:${port}/callback`);
+  await fetch(`${redirectUri}?error=access_denied`);
+  const error = await rejected;
+  expect(error).toBeInstanceOf(CliError);
+  expect(error.code).toBe('AUTH_FAILED');
+  expect(error.message).toContain('access_denied');
+});
+
+test('oauth: without host, the redirect stays on localhost', async () => {
+  const port = freePort();
+  const ctx = createJsonSetupContext({}, createLineReader(new PassThrough()));
+  const result = ctx.oauth({ serviceName: 'Test', port, authorizationUrl: authUrl });
+  const redirectUri = new URL((await openEvent()).url).searchParams.get('r')!;
+  expect(redirectUri).toBe(`http://localhost:${port}/callback`);
+  await fetch(`${redirectUri}?code=c`);
+  expect(await result).toEqual({ code: 'c', state: undefined, redirectUri });
 });

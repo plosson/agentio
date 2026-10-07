@@ -4,13 +4,15 @@ import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
-import { confirm, prompt, readStdin } from '../../utils/stdin';
+import { confirm, readStdin } from '../../utils/stdin';
 import { addExamples, getExamples } from '../../utils/command-tree';
-import { addJsonOption } from '../../utils/output';
-import type { SetupResult } from '../../plugin-sdk';
+import { addJsonOption, isJsonMode } from '../../utils/output';
+import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { checkAnswer } from '../setup-inputs';
 import { SpotifyClient } from './client';
 import { parseSpotifyRef, resolveDevice, resolvePlaylistRef, foldName } from './ids';
-import { authorizeSpotify, printAppSetupSteps } from './oauth';
+import { authorizeSpotify, SPOTIFY_APP_SETUP_STEPS } from './oauth';
+import { SPOTIFY_CLIENT_ID_INPUT } from './setup-needs';
 import {
   formatDuration,
   parseDuration,
@@ -1506,26 +1508,26 @@ export interface SpotifyProfileAddOptions {
   browser?: boolean;
 }
 
-export async function spotifyProfileAdd(options: SpotifyProfileAddOptions): Promise<SetupResult<SpotifyCredentials>> {
-  console.error('\nSpotify Setup\n');
-  printAppSetupSteps();
+export async function spotifyProfileAdd(
+  options: SpotifyProfileAddOptions,
+  context: SetupContext,
+): Promise<SetupResult<SpotifyCredentials>> {
+  context.log('\nSpotify Setup\n');
+  context.log(`\n${SPOTIFY_APP_SETUP_STEPS}\n`);
 
-  let clientId = (options.clientId || '').trim();
-  if (!clientId) {
-    clientId = (await prompt('? Client ID: ')).trim();
-  }
-  if (!clientId) {
-    throw new CliError('INVALID_PARAMS', 'Client ID is required', 'Pass --client-id or paste it when prompted');
-  }
+  const clientId = options.clientId !== undefined
+    ? checkAnswer(SPOTIFY_CLIENT_ID_INPUT, options.clientId)
+    : await context.ask(SPOTIFY_CLIENT_ID_INPUT);
 
   const readOnly = !!options.readOnly;
-  const noBrowser = options.browser === false;
+  // JSON mode never opens a browser, so --no-browser changes nothing there.
+  const noBrowser = options.browser === false && !isJsonMode();
 
-  console.error(readOnly
+  context.log(readOnly
     ? '\nRequesting read scopes only (--read-only).\n'
     : '\nRequesting read and write scopes (including playback control).\n');
 
-  const tokens = await authorizeSpotify({ clientId, readOnly, noBrowser });
+  const tokens = await authorizeSpotify({ clientId, readOnly, noBrowser }, context);
 
   const credentials: SpotifyCredentials = {
     clientId,
@@ -1538,7 +1540,7 @@ export async function spotifyProfileAdd(options: SpotifyProfileAddOptions): Prom
     readOnly,
   };
 
-  console.error('Validating access...');
+  context.log('Validating access...');
   const client = new SpotifyClient(credentials);
   const me = await client.me();
   credentials.userId = me.id;

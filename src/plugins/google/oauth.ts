@@ -4,7 +4,7 @@ import { createSetupContext } from '../host-context';
 import type { SetupContext } from '../../plugin-sdk';
 import type { OAuthTokens } from './tokens';
 
-const SCOPES = {
+export const SCOPES = {
   gmail: [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.send',

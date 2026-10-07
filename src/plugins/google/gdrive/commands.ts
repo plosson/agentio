@@ -4,10 +4,12 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
+import { signInToGoogle, toCamelTokens } from '../shared';
+import { GDRIVE_ACCESS_INPUT } from '../setup-needs';
+import type { SetupContext } from '../../../plugin-sdk';
 import { GDriveClient } from './client';
 import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions, printGDriveCopied } from './output';
 import { CliError, handleError } from '../../../utils/errors';
-import { prompt } from '../../../utils/stdin';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GDriveCredentials, GDriveAccessLevel } from './types';
@@ -582,54 +584,44 @@ before Google deletes them permanently.`,
     });
 }
 
-export async function gdriveProfileAdd(options: { profile?: string; readonly?: boolean; full?: boolean; readOnly?: boolean }) {
-  console.error('Google Drive Setup\n');
-
-  let accessLevel: GDriveAccessLevel;
-
-  if (options.readonly || options.readOnly) {
-    accessLevel = 'readonly';
-  } else if (options.full) {
-    accessLevel = 'full';
-  } else {
-    console.error('Access level options:');
-    console.error('  1. Read-only  - List, search, download files');
-    console.error('  2. Full       - Read-only + upload, create folders, modify files\n');
-
-    const choice = await prompt('? Select access level (1 or 2): ');
-    accessLevel = choice.trim() === '2' ? 'full' : 'readonly';
+export async function gdriveProfileAdd(
+  options: { profile?: string; readonly?: boolean; full?: boolean; readOnly?: boolean },
+  context: SetupContext,
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+) {
+  const readonly = options.readonly || options.readOnly;
+  if (readonly && options.full) {
+    const flag = options.readonly ? '--readonly' : '--read-only';
+    throw new CliError('INVALID_PARAMS', `Choose one of ${flag} and --full`, 'Pass only one of them');
   }
+  context.log('Google Drive Setup\n');
 
-  const oauthService = accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly';
-  console.error(`\nStarting OAuth flow (${accessLevel} access)...\n`);
+  // --read-only wins over an answer to the access input, as it always has.
+  const accessLevel = (readonly ? 'readonly' : options.full ? 'full' : await context.ask(GDRIVE_ACCESS_INPUT)) as GDriveAccessLevel;
 
-  const tokens = await performOAuthFlow(oauthService);
+  context.log(`\nStarting OAuth flow (${accessLevel} access)...\n`);
+  const { tokens, email } = await signInToGoogle(accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly', context, performOAuth, fetchEmail);
 
-  let userEmail: string;
-  try {
-    userEmail = await fetchGoogleUserEmail(tokens.access_token);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new CliError(
-      'AUTH_FAILED',
-      `Failed to fetch user email: ${errorMessage}`,
-      'Ensure the account has an email address'
-    );
-  }
-
-  const credentials: GDriveCredentials = {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    expiryDate: tokens.expiry_date,
-    tokenType: tokens.token_type,
-    scope: tokens.scope,
-    email: userEmail,
-    accessLevel,
-  };
+  const credentials: GDriveCredentials = { ...toCamelTokens(tokens), email, accessLevel };
 
   return {
     credentials,
-    suggestedProfileName: userEmail,
-    info: `Email: ${userEmail}\nAPI Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}\nTest with: agentio gdrive list`,
+    suggestedProfileName: email,
+    info: `Email: ${email}\nAPI Access: ${accessLevel === 'full' ? 'Full (read & write)' : 'Read-only'}\nTest with: agentio gdrive list`,
+  };
+}
+
+/** `profile.reauthenticate`: signs in again at the access level the profile already has (not a secret, so a remote reauth has it). */
+export function gdriveReauthenticate(
+  performOAuth: typeof performOAuthFlow = performOAuthFlow,
+  fetchEmail: typeof fetchGoogleUserEmail = fetchGoogleUserEmail,
+) {
+  return async (existing: GDriveCredentials | null | undefined, profileName: string, context: SetupContext): Promise<GDriveCredentials> => {
+    const accessLevel = existing?.accessLevel || 'readonly';
+    context.log(`\nRe-authenticating gdrive / ${profileName}...`);
+    const { tokens, email } = await signInToGoogle(accessLevel === 'full' ? 'gdrive-full' : 'gdrive-readonly', context, performOAuth, fetchEmail);
+    context.log(`  Done (${email}, ${accessLevel})`);
+    return { ...existing, ...toCamelTokens(tokens), email, accessLevel };
   };
 }

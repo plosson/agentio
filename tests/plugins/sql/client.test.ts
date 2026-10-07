@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { SqlClient, assertSingleReadOnlyStatement } from '../../../src/plugins/sql/client';
+import { SqlClient, assertSingleReadOnlyStatement, scrubConnectionSecrets } from '../../../src/plugins/sql/client';
 
 const clients: SqlClient[] = [];
 
@@ -34,5 +34,30 @@ describe('SQL read-only execution', () => {
     expect(() => assertSingleReadOnlyStatement('SELECT 1; DELETE FROM items')).toThrow(/exactly one statement/);
     expect(() => assertSingleReadOnlyStatement('PRAGMA query_only = OFF')).toThrow(/not allowed/);
     expect(() => assertSingleReadOnlyStatement("SELECT ';' AS value; -- one statement")).not.toThrow();
+  });
+});
+
+describe('scrubConnectionSecrets', () => {
+  const password = 'p@ss w/rd';
+  const encoded = encodeURIComponent(password);
+  const url = `postgres://u:${encoded}@db.example/app`;
+
+  test('removes the URL, the raw password and the URL-encoded password', () => {
+    const message = `could not reach ${url}; password "${password}" (${encoded}) refused`;
+    const scrubbed = scrubConnectionSecrets(message, url);
+    expect(scrubbed).not.toContain(url);
+    expect(scrubbed).not.toContain(password);
+    expect(scrubbed).not.toContain(encoded);
+    expect(scrubbed).toContain('could not reach');
+  });
+
+  test('a URL without a password, or not a URL at all, only loses the URL itself', () => {
+    expect(scrubConnectionSecrets('Failed to connect', 'postgres://u@h/db')).toBe('Failed to connect');
+    expect(scrubConnectionSecrets('bad host:notaport', 'postgres://u:pw@host:notaport/db')).toBe('bad host:notaport');
+    expect(scrubConnectionSecrets('see postgres://u:pw@host:notaport/db', 'postgres://u:pw@host:notaport/db')).not.toContain('pw');
+  });
+
+  test('an empty password does not erase the message', () => {
+    expect(scrubConnectionSecrets('Failed to connect', 'postgres://u:@h/db')).toBe('Failed to connect');
   });
 });

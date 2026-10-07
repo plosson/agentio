@@ -1,4 +1,6 @@
+import type { SetupContext } from '../../plugin-sdk';
 import { CliError } from '../../utils/errors';
+import { FALCO_CODE_INPUT } from './setup-needs';
 import { AUTH_URL, BRAND, LOGIN_SCOPES, REFRESH_SCOPES } from './types';
 
 export interface FalcoTokens {
@@ -107,6 +109,32 @@ export async function loginToFalco(params: {
     );
   }
   throw new CliError('AUTH_FAILED', `Falco login failed (HTTP ${response.status}): ${text.slice(0, 200)}`);
+}
+
+/**
+ * Login that asks for the second factor only when Falco wants one. Setup and
+ * sign-in again both go through here; the password is never logged.
+ */
+export async function loginWithSecondFactor(
+  email: string,
+  password: string,
+  context: SetupContext,
+): Promise<FalcoTokens> {
+  let result = await loginToFalco({ username: email, password });
+  if (result.type === 'two_factor_required') {
+    const code = await context.ask(FALCO_CODE_INPUT);
+    result = await loginToFalco({ username: email, password, twoFaCode: code });
+  }
+  if (result.type !== 'success') {
+    // Reached only when Falco asks for a second factor again after one was
+    // entered, so do not claim the user supplied nothing.
+    throw new CliError(
+      'AUTH_FAILED',
+      'Falco is still asking for a two-factor code',
+      'Re-run the command and enter a fresh code.',
+    );
+  }
+  return result.tokens;
 }
 
 /**
