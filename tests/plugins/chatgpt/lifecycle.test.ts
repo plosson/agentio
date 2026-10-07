@@ -30,8 +30,7 @@ test('refresh replaces the rotating token and keeps the model', async () => {
   expect(next).toMatchObject({ refreshToken: 'r2', expiresAt: 3_000_000, accountId: 'acc', model: 'gpt-5.5' });
 });
 
-// Needs the plugin registered, which Task 7 does; switch to `test` there.
-test.todo('a remote agent never receives the refresh token', () => {
+test('a remote agent never receives the refresh token', () => {
   const remote = redactForRemote('chatgpt', SIGNED_IN as unknown as Record<string, unknown>);
   expect(remote.refreshToken).toBeUndefined();
   expect(remote.accessToken).toBe('a');

@@ -53,6 +53,7 @@ src/plugins/
 │   ├── client.ts
 │   ├── output.ts
 │   └── types.ts
+├── chatgpt/          # prompts through codex; ChatGPT sign-in (refreshed) or API key
 ├── claude/           # prompts through the claude CLI; setup-token or API key
 ├── confluence/          # OAuth lifecycle owned by the service folder
 ├── discourse/

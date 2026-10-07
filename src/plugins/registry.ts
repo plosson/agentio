@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import chatgpt from './chatgpt';
 import claude from './claude';
 import confluence from './confluence';
 import discourse from './discourse';
@@ -33,6 +34,7 @@ import { registerDeclarativePlugin } from './declarative';
 
 /** Complete ordered catalog of in-tree service plugins. */
 export const SERVICE_PLUGINS = [
+  chatgpt,
   claude,
   confluence,
   discourse,
