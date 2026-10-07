@@ -4,6 +4,9 @@ import { URL } from 'url';
 import { CliError } from '../utils/errors';
 import { whichOnPath } from '../utils/external-cli';
 
+/** Where the local sign-in server listens for the provider's redirect. */
+export const DEFAULT_CALLBACK_PATH = '/callback';
+
 const PORT_RANGE_START = 3000;
 const PORT_RANGE_END = 3010;
 const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -103,7 +106,7 @@ export type OAuthCallbackServer = Promise<OAuthCallbackResult> & { listening: Pr
 export function startOAuthCallbackServer(
   config: OAuthServerConfig
 ): OAuthCallbackServer {
-  const { port, serviceName, expectedState, host, path = '/callback' } = config;
+  const { port, serviceName, expectedState, host, path = DEFAULT_CALLBACK_PATH } = config;
   let listened!: () => void;
   let notListening!: (error: unknown) => void;
   const listening = new Promise<void>((resolve, reject) => {

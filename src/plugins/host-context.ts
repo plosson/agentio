@@ -1,5 +1,5 @@
 import { password } from '@inquirer/prompts';
-import { awaitOAuthCode, findAvailablePort, launchBrowser, startOAuthCallbackServer } from '../auth/oauth-server';
+import { DEFAULT_CALLBACK_PATH, awaitOAuthCode, findAvailablePort, launchBrowser, startOAuthCallbackServer } from '../auth/oauth-server';
 import { CliError } from '../utils/errors';
 import { interactiveSelect } from '../utils/interactive';
 import type { LineReader } from '../utils/line-reader';
@@ -21,7 +21,7 @@ function fail(code: Parameters<SetupContext['fail']>[0], message: string, sugges
 async function callbackAddress(options: OAuthSetupOptions): Promise<{ port: number; host: string; redirectUri: string }> {
   const host = options.host ?? 'localhost';
   const port = options.port ?? (await findAvailablePort(options.host));
-  return { port, host, redirectUri: `http://${host}:${port}${options.path ?? '/callback'}` };
+  return { port, host, redirectUri: `http://${host}:${port}${options.path ?? DEFAULT_CALLBACK_PATH}` };
 }
 
 /** Setup in a terminal: questions on stderr, the browser opened here, a pasted address accepted. */
