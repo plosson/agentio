@@ -521,7 +521,7 @@ Asks Claude a prompt by running the user's own `claude` CLI (Claude Code). agent
 
 **Sign-in:** a token or key, given to `agentio claude profile add`.
 - The token kind follows its prefix: `sk-ant-oat…` is a subscription token from `claude setup-token`, `sk-ant-api…` is an Anthropic API key from console.anthropic.com.
-- Setup never runs `claude`. Nothing is checked until the first prompt.
+- In a terminal, `profile add` offers to run `claude setup-token` (when `claude` is installed) and then asks for the token it shows; under `--json` the token is asked directly and nothing is run. With `--token`, nothing is offered. The token is not checked until the first prompt.
 - A `setup-token` token lasts a year and has no refresh. When it expires, run `claude setup-token` and add the profile again.
 - The token is only ever given to the `claude` CLI, as `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 

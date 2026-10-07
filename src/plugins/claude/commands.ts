@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { whichOnPath } from '../../utils/external-cli';
 import { createClientGetter } from '../../utils/client-factory';
 import { handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
@@ -9,7 +10,7 @@ import type { SetupContext, SetupResult } from '../../plugin-sdk';
 import { answerOrAsk } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { ClaudeClient, tokenKind } from './client';
-import { CLAUDE_MODEL_INPUT, CLAUDE_TOKEN_INPUT } from './setup-needs';
+import { CLAUDE_CREATE_TOKEN_INPUT, CLAUDE_MODEL_INPUT, CLAUDE_TOKEN_INPUT } from './setup-needs';
 import type { ClaudeCredentials } from './types';
 
 const getClaudeClient = createClientGetter<ClaudeCredentials, ClaudeClient>({
@@ -22,7 +23,23 @@ export interface ClaudeProfileAddOptions extends ProfileAddOptions {
   model?: string;
 }
 
+/** In a terminal, offer to run `claude setup-token` so the token it shows can be pasted next. */
+async function offerSetupToken(context: SetupContext): Promise<void> {
+  if (!context.runInTerminal) return;
+  const claude = whichOnPath('claude');
+  if (!claude) {
+    context.log('`claude` is not installed here; prompts need it. Install it with `curl -fsSL https://claude.ai/install.sh | bash`. A token can still be added now.');
+    return;
+  }
+  if ((await context.ask(CLAUDE_CREATE_TOKEN_INPUT)) !== 'setupToken') return;
+  context.log('Opening `claude setup-token`; copy the token it shows, then paste it below.');
+  if ((await context.runInTerminal([claude, 'setup-token'])) !== 0) {
+    context.log('`claude setup-token` did not finish. A token can still be pasted below.');
+  }
+}
+
 export async function claudeProfileAdd(options: ClaudeProfileAddOptions, context: SetupContext): Promise<SetupResult<ClaudeCredentials>> {
+  if (options.token === undefined) await offerSetupToken(context);
   const token = await answerOrAsk(context, CLAUDE_TOKEN_INPUT, options.token);
   const kind = tokenKind(token);
   const model = (await answerOrAsk(context, CLAUDE_MODEL_INPUT, options.model)) || undefined;
@@ -47,7 +64,7 @@ export function registerClaudeCommands(program: Command): void {
     addSetupOptions(
       profile
         .command('add')
-        .description('Add a Claude subscription token (claude setup-token) or an API key')
+        .description('Add a Claude subscription token (offers to run claude setup-token) or an API key')
         .option('--token <token>', 'Token from `claude setup-token`, or an API key (asked for when absent)')
         .option('--model <model>', 'Default model, such as opus')
         .option('--profile <name>', 'Profile name (default: default)')
@@ -61,8 +78,10 @@ export function registerClaudeCommands(program: Command): void {
     }),
     `Examples:
 
-  # create a token for your subscription first; agentio asks for it
-  claude setup-token
-  agentio claude profile add --model opus`,
+  # offers to run claude setup-token, then asks for the token it shows
+  agentio claude profile add
+
+  # a token or API key you already have
+  agentio claude profile add --token sk-ant-api03-... --model opus`,
   );
 }
