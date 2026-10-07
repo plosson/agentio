@@ -138,6 +138,13 @@ export async function checkCli(tool: CliTool, service: string, services: Set<str
   return { name, status: 'ok', detail: version ? `found, ${version}` : 'found' };
 }
 
+/** The CLI checks; none when profiles cannot be listed (hub down, token expired, vault locked), so the report still prints. */
+export async function cliChecks(): Promise<Check[]> {
+  const services = new Set((await listProfileRefs().catch(() => [])).map((r) => r.service));
+  const found = await Promise.all([checkCli(CLAUDE_CLI, 'claude', services), checkCli(CODEX_CLI, 'chatgpt', services)]);
+  return found.filter((c): c is Check => c !== null);
+}
+
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = program
     .command('doctor')
@@ -149,10 +156,7 @@ export function registerDoctorCommand(program: Command): void {
           : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
         const spotifyAuth = await checkSpotifyAuth();
         if (spotifyAuth) checks.push(spotifyAuth);
-        const services = new Set((await listProfileRefs()).map((r) => r.service));
-        for (const check of await Promise.all([checkCli(CLAUDE_CLI, 'claude', services), checkCli(CODEX_CLI, 'chatgpt', services)])) {
-          if (check) checks.push(check);
-        }
+        checks.push(...(await cliChecks()));
 
         console.log(renderChecks(checks));
 

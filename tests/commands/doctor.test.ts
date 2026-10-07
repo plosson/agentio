@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { checkCli, renderChecks, type Check } from '../../src/commands/doctor';
+import { checkCli, cliChecks, renderChecks, type Check } from '../../src/commands/doctor';
 import { CLAUDE_CLI } from '../../src/utils/external-cli';
+import { encodeToken } from '../../src/auth/token';
+import { resetRemoteCache } from '../../src/auth/remote';
 import { installFakeCli, type FakeCli } from '../helpers/fake-cli';
 
 describe('renderChecks', () => {
@@ -40,5 +42,25 @@ describe('checkCli', () => {
     process.env.PATH = '/nonexistent';
     const check = await checkCli(CLAUDE_CLI, 'claude', new Set(['claude']));
     expect(check).toMatchObject({ name: 'claude CLI', status: 'warn', detail: 'not installed', fix: 'curl -fsSL https://claude.ai/install.sh | bash' });
+  });
+});
+
+describe('cliChecks', () => {
+  let fake: FakeCli;
+  beforeEach(async () => {
+    fake = await installFakeCli('claude');
+    fake.respond({ stdout: '2.3.0\n' });
+  });
+  afterEach(async () => {
+    delete process.env.AGENTIO_TOKEN;
+    resetRemoteCache();
+    await fake.restore();
+  });
+
+  test('an unreachable hub yields no checks and does not throw', async () => {
+    // Port 1 refuses connections: remoteProfiles() throws, which must not lose the doctor report.
+    process.env.AGENTIO_TOKEN = encodeToken({ url: 'http://127.0.0.1:1', kid: 'kid', secret: 'secret' });
+    resetRemoteCache();
+    expect(await cliChecks()).toEqual([]);
   });
 });
