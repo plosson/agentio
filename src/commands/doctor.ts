@@ -9,6 +9,7 @@ import { addExamples } from '../utils/command-tree';
 import { hub, isRemoteMode, remoteCanManageProfiles, remoteProfiles } from '../auth/remote';
 import { getCredentials } from '../auth/token-store';
 import { listProfileRefs } from '../config/config-manager';
+import { CLAUDE_CLI, CODEX_CLI, type CliTool } from '../utils/external-cli';
 import { authExpiryStatus, authExpiresAt, type SpotifyCredentials } from '../plugins/spotify/types';
 
 export interface Check {
@@ -124,6 +125,19 @@ async function checkSpotifyAuth(): Promise<Check | null> {
   };
 }
 
+/** Whether `tool` is installed, shown only where a profile of `service` can be used. Never runs a prompt. */
+export async function checkCli(tool: CliTool, service: string, services: Set<string>): Promise<Check | null> {
+  if (!services.has(service)) return null;
+  const name = `${tool.command} CLI`;
+  // Bun.which otherwise searches the PATH the process started with, not the current one.
+  const path = Bun.which(tool.command, { PATH: process.env.PATH ?? '' });
+  if (!path) return { name, status: 'warn', detail: 'not installed', fix: tool.install };
+  const proc = Bun.spawn([path, '--version'], { env: process.env, stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
+  const version = (await new Response(proc.stdout).text()).trim().split('\n')[0];
+  await proc.exited;
+  return { name, status: 'ok', detail: version ? `found, ${version}` : 'found' };
+}
+
 export function registerDoctorCommand(program: Command): void {
   const doctorCmd = program
     .command('doctor')
@@ -135,6 +149,10 @@ export function registerDoctorCommand(program: Command): void {
           : await Promise.all([checkVault(), checkDaemon(), checkProfiles()]);
         const spotifyAuth = await checkSpotifyAuth();
         if (spotifyAuth) checks.push(spotifyAuth);
+        const services = new Set((await listProfileRefs()).map((r) => r.service));
+        for (const check of await Promise.all([checkCli(CLAUDE_CLI, 'claude', services), checkCli(CODEX_CLI, 'chatgpt', services)])) {
+          if (check) checks.push(check);
+        }
 
         console.log(renderChecks(checks));
 
