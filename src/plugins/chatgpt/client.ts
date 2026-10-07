@@ -1,10 +1,10 @@
-import { existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { ServiceClient, ValidationResult } from '../../types/service';
 import { CliError, redact } from '../../utils/errors';
 import { CODEX_CLI, runExternalCli, withTempDir } from '../../utils/external-cli';
 import type { AskRequest, AskResult } from '../../utils/llm-ask';
+import { REAUTH } from './oauth';
 import type { ChatGptCredentials } from './types';
 
 /**
@@ -17,7 +17,6 @@ const CREDENTIAL_VARIABLES = [
   'CODEX_OSS_BASE_URL', 'CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL', 'CODEX_AGENT_IDENTITY_JWKS_BASE_URL',
   'CODEX_REFRESH_TOKEN_URL_OVERRIDE', 'CODEX_REVOKE_TOKEN_URL_OVERRIDE',
 ] as const;
-const REAUTH = 'Run: agentio profile reauth chatgpt <profile>';
 
 /**
  * codex's auth.json for a sign-in: the access token only. With no refresh token, codex cannot
@@ -55,14 +54,24 @@ export class ChatGptClient implements ServiceClient {
 
   async validate(): Promise<ValidationResult> {
     const c = this.credentials;
-    const valid = c.kind === 'apiKey' ? !!c.apiKey : !!c.accessToken;
-    return valid ? { valid, info: c.kind === 'apiKey' ? 'API key' : c.email ?? 'ChatGPT sign-in' } : { valid, error: 'No usable credential' };
+    try {
+      this.assertUsable();
+    } catch {
+      return { valid: false, error: 'No usable credential' };
+    }
+    return { valid: true, info: c.kind === 'apiKey' ? 'API key' : c.email ?? 'ChatGPT sign-in' };
+  }
+
+  /** Throws unless the profile holds the token or key its kind needs. */
+  private assertUsable(): void {
+    const c = this.credentials;
+    if (c.kind === 'chatgpt' && !c.accessToken) throw new CliError('AUTH_FAILED', 'This ChatGPT profile has no access token', REAUTH);
+    if (c.kind === 'apiKey' && !c.apiKey) throw new CliError('AUTH_FAILED', 'This ChatGPT profile has no API key', 'Run: agentio chatgpt profile add');
   }
 
   async ask(request: AskRequest): Promise<AskResult> {
     const c = this.credentials;
-    if (c.kind === 'chatgpt' && !c.accessToken) throw new CliError('AUTH_FAILED', 'This ChatGPT profile has no access token', REAUTH);
-    if (c.kind === 'apiKey' && !c.apiKey) throw new CliError('AUTH_FAILED', 'This ChatGPT profile has no API key', 'Run: agentio chatgpt profile add');
+    this.assertUsable();
     const model = request.model ?? c.model;
     const secrets = [c.accessToken, c.apiKey, c.idToken].filter((s): s is string => !!s);
     const clean = (text: string) => redact(text, secrets, '[token]').trim().slice(0, 500);
@@ -95,7 +104,7 @@ export class ChatGptClient implements ServiceClient {
         if (/\b429\b|rate limit|usage limit/i.test(message)) throw new CliError('RATE_LIMITED', `ChatGPT's limit is reached: ${message}`, 'Wait and retry');
         throw new CliError('API_ERROR', `Codex failed: ${message}`);
       }
-      const answer = existsSync(answerPath) ? await readFile(answerPath, 'utf8') : '';
+      const answer = await readFile(answerPath, 'utf8').catch(() => '');
       if (!answer.trim()) throw new CliError('API_ERROR', 'Codex finished without an answer');
       return { answer, model: model ?? null, usage, costUsd: null, durationMs: Date.now() - started };
     }));

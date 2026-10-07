@@ -15,7 +15,7 @@ const CALLBACK_PATH = '/auth/callback';
 const SIGN_IN_SCOPE = 'openid profile email offline_access';
 const REFRESH_SCOPE = 'openid profile email';
 const DEFAULT_LIFETIME_MS = 60 * 60_000;
-const REAUTH = 'Run: agentio profile reauth chatgpt <profile>';
+export const REAUTH = 'Run: agentio profile reauth chatgpt <profile>';
 /** A first sign-in has no profile to reauthenticate. */
 const SIGN_IN_AGAIN = 'Run: agentio chatgpt profile add --method chatgpt again';
 
