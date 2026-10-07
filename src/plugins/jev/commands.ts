@@ -73,13 +73,13 @@ function withCommonOptions(cmd: Command): Command {
 }
 
 export function registerJevCommands(program: Command): void {
-  const jev = program.command('jev').description('Ask Jev typed questions about some input: yes/no, choice, score');
+  const jev = program.command('jev').description('Ask Jev typed questions about some input: yes/no, choice, score. The input to evaluate comes from stdin or --state; JSON input is sent as JSON');
 
   addExamples(
     withCommonOptions(
       jev
         .command('yesno')
-        .description('Ask a yes/no question. Exit code 0 is yes, 1 is no, 2 or more is an error')
+        .description('Ask a yes/no question. Exit code 0 is yes, 1 is no, 2 or more is an error. Text output is the decision, then the probability of yes: yes 0.97 or no 0.12')
         // Commander exits 1 on a usage error, which here means "no": exit 6 instead. --help stays 0.
         .exitOverride((error) => process.exit(error.exitCode === 0 ? 0 : YESNO_ERROR_EXIT))
         .argument('<question>', 'The yes/no question')
@@ -101,14 +101,17 @@ export function registerJevCommands(program: Command): void {
   agentio gmail get <id> | agentio jev yesno "Does this email need a reply?"
 
   # in a script: exit code 0 is yes, 1 is no, 2 or more is an error
-  if agentio jev yesno "Is this urgent?" --threshold 0.8 < ticket.txt; then echo urgent; fi`,
+  if agentio jev yesno "Is this urgent?" --threshold 0.8 < ticket.txt; then echo urgent; fi
+
+  # --json prints {type, noul, model, usage}
+  agentio jev yesno "Is this urgent?" --json < ticket.txt`,
   );
 
   addExamples(
     withCommonOptions(
       jev
         .command('choice')
-        .description('Pick one option from a set')
+        .description('Pick one option from a set. Text output is the chosen key, then the confidence: billing 0.91. Give at least 2 --option key="description", up to 255')
         .argument('<question>', 'The question')
         .option('--option <key=description>', 'An option, as key=description (repeat, at least 2)', collect, []),
     ).action(async (question: string, options) => {
@@ -124,14 +127,17 @@ export function registerJevCommands(program: Command): void {
 
   agentio jev choice "Which team should handle this?" \\
     --option billing="Charges, invoices, payments" \\
-    --option shipping="Delivery, delays, lost packages" < ticket.txt`,
+    --option shipping="Delivery, delays, lost packages" < ticket.txt
+
+  # --json prints {type, choice, confidence, probabilities, model, usage}
+  agentio jev choice "Which team?" --option a="First" --option b="Second" --json < ticket.txt`,
   );
 
   addExamples(
     withCommonOptions(
       jev
         .command('score')
-        .description('Place the input on a ranked scale')
+        .description('Place the input on a ranked scale. Give 2 to 10 --level values, lowest first. Text output is the score, then its confidence: 1.3 (confidence 0.54). The score is a position on the 0-based scale, so it can fall between levels')
         .argument('<question>', 'The question')
         .option('--level <description>', 'A level, lowest first (repeat, 2 to 10)', collect, []),
     ).action(async (question: string, options) => {
@@ -146,7 +152,10 @@ export function registerJevCommands(program: Command): void {
     `Examples:
 
   agentio jev score "How severe is this bug?" \\
-    --level "Cosmetic" --level "Broken, with a workaround" --level "Blocking" < bug.txt`,
+    --level "Cosmetic" --level "Broken, with a workaround" --level "Blocking" < bug.txt
+
+  # --json prints {type, score, confidence, probabilities, legend, model, usage}
+  agentio jev score "How severe?" --level "Low" --level "High" --json < bug.txt`,
   );
 
   const profile = createProfileCommands<JevCredentials>(jev, { service: 'jev', displayName: 'Jev' });

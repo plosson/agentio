@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { CODEX_CLI } from '../../utils/external-cli';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
@@ -47,7 +48,7 @@ export async function chatGptProfileAdd(options: ChatGptProfileAddOptions, conte
 export function registerChatGptCommands(program: Command): void {
   const chatgpt = program.command('chatgpt').description('Ask ChatGPT through the codex CLI, with a sign-in or key from the vault');
 
-  registerAskCommand(chatgpt, 'chatgpt', 'ChatGPT', async (request, profile) => {
+  registerAskCommand(chatgpt, 'chatgpt', 'ChatGPT', CODEX_CLI, async (request, profile) => {
     const { client } = await getChatGptClient(profile);
     return client.ask(request);
   });

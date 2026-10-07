@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 import { addExamples } from './command-tree';
 import { CliError, handleError } from './errors';
+import type { CliTool } from './external-cli';
 import { optionalText } from './options';
 import { addJsonOption, writeJson } from './output';
 import { readStdinRaw } from './stdin';
@@ -59,13 +60,18 @@ export function registerAskCommand(
   parent: Command,
   service: string,
   displayName: string,
+  tool: CliTool,
   run: (request: AskRequest, profile?: string) => Promise<AskResult>,
 ): void {
   addExamples(
     addJsonOption(
       parent
         .command('ask')
-        .description(`Ask ${displayName} and print the answer. A plain question: no tools, no files, no project settings`)
+        .description(
+          `Ask ${displayName} and print the answer. A plain question: no tools, no files, no project settings. `
+          + 'Piped stdin is added after the prompt, so a prompt, stdin, or both are needed. '
+          + `The ${tool.command} CLI must be installed on this machine`,
+        )
         .argument('[prompt]', 'The prompt; piped stdin is added after it')
         .option('--model <model>', 'Model (default: the profile\'s, else the CLI\'s default)')
         .option('--system <text>', 'System prompt')
@@ -83,6 +89,12 @@ export function registerAskCommand(
   agentio ${service} ask "What is the capital of France?"
 
   # a second opinion on a diff
-  git diff | agentio ${service} ask "Review this change for bugs" --json`,
+  git diff | agentio ${service} ask "Review this change for bugs" --json
+
+  # --json prints {answer, model, usage, costUsd, durationMs}
+  agentio ${service} ask "Summarise this in one line" --json < notes.txt
+
+  # choose the model and set a system prompt
+  agentio ${service} ask "Explain this error" --model <model> --system "Answer in two sentences" < error.log`,
   );
 }

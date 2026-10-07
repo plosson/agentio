@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { whichOnPath } from '../../utils/external-cli';
+import { CLAUDE_CLI, whichOnPath } from '../../utils/external-cli';
 import { createClientGetter } from '../../utils/client-factory';
 import { handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
@@ -53,7 +53,7 @@ export async function claudeProfileAdd(options: ClaudeProfileAddOptions, context
 export function registerClaudeCommands(program: Command): void {
   const claude = program.command('claude').description('Ask Claude through the claude CLI (Claude Code), with a token from the vault');
 
-  registerAskCommand(claude, 'claude', 'Claude', async (request, profile) => {
+  registerAskCommand(claude, 'claude', 'Claude', CLAUDE_CLI, async (request, profile) => {
     const { client } = await getClaudeClient(profile);
     return client.ask(request);
   });
