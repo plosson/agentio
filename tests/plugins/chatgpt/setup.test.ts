@@ -5,6 +5,7 @@ import { chatGptProfileAdd } from '../../../src/plugins/chatgpt/commands';
 import type { OAuthSetupOptions } from '../../../src/plugin-sdk';
 import { FakeFetch } from '../../helpers/fake-fetch';
 import { jwt } from './jwt';
+import { CliError } from '../../../src/utils/errors';
 
 withTempVault('agentio-chatgpt-setup-', () => ({ config: { profiles: {} } as never }));
 
@@ -25,6 +26,19 @@ test('answers alone can choose the key method and give a model', async () => {
 
 test('an unknown method is refused before anything is asked or saved', async () => {
   await expect(chatGptProfileAdd({ method: 'other', model: '' }, fakeSetupContext({}))).rejects.toThrow('must be one of: chatgpt, apiKey');
+});
+
+test('--api-key with --method chatgpt is a conflict, refused before anything is asked', async () => {
+  const context = fakeSetupContext({});
+  const err = await chatGptProfileAdd({ method: 'chatgpt', apiKey: 'sk-x', model: '' }, context).catch((e) => e);
+  expect(err).toBeInstanceOf(CliError);
+  expect([err.code, err.message]).toEqual(['INVALID_PARAMS', '--api-key cannot be used with --method chatgpt']);
+  expect(context.asked).toEqual([]);
+});
+
+test('--api-key with --method apiKey is fine', async () => {
+  const result = await chatGptProfileAdd({ method: 'apiKey', apiKey: 'sk-x', model: '' }, fakeSetupContext({}));
+  expect(result.credentials).toEqual({ kind: 'apiKey', apiKey: 'sk-x' });
 });
 
 test('an empty API key is refused', async () => {

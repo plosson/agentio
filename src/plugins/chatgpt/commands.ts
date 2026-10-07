@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createClientGetter } from '../../utils/client-factory';
-import { handleError } from '../../utils/errors';
+import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
 import { registerAskCommand } from '../../utils/llm-ask';
 import { createProfileCommands } from '../../utils/profile-commands';
@@ -25,9 +25,11 @@ export interface ChatGptProfileAddOptions extends ProfileAddOptions {
 }
 
 export async function chatGptProfileAdd(options: ChatGptProfileAddOptions, context: SetupContext): Promise<SetupResult<ChatGptCredentials>> {
-  const method = options.apiKey !== undefined ? 'apiKey'
-    : options.method !== undefined ? checkAnswer(CHATGPT_METHOD_INPUT, options.method)
-    : await context.ask(CHATGPT_METHOD_INPUT);
+  const chosen = options.method !== undefined ? checkAnswer(CHATGPT_METHOD_INPUT, options.method) : undefined;
+  if (options.apiKey !== undefined && chosen !== undefined && chosen !== 'apiKey') {
+    throw new CliError('INVALID_PARAMS', `--api-key cannot be used with --method ${chosen}`);
+  }
+  const method = options.apiKey !== undefined ? 'apiKey' : chosen ?? await context.ask(CHATGPT_METHOD_INPUT);
   const model = (options.model !== undefined ? checkAnswer(CHATGPT_MODEL_INPUT, options.model) : await context.ask(CHATGPT_MODEL_INPUT)) || undefined;
 
   if (method === 'apiKey') {
