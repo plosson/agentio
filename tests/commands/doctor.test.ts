@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { checkCli, cliChecks, renderChecks, type Check } from '../../src/commands/doctor';
 import { CLAUDE_CLI } from '../../src/utils/external-cli';
-import { encodeToken } from '../../src/auth/token';
-import { resetRemoteCache } from '../../src/auth/remote';
 import { installFakeCli, type FakeCli } from '../helpers/fake-cli';
 
 describe('renderChecks', () => {
@@ -52,15 +50,15 @@ describe('cliChecks', () => {
     fake.respond({ stdout: '2.3.0\n' });
   });
   afterEach(async () => {
-    delete process.env.AGENTIO_TOKEN;
-    resetRemoteCache();
     await fake.restore();
   });
 
-  test('an unreachable hub yields no checks and does not throw', async () => {
-    // Port 1 refuses connections: remoteProfiles() throws, which must not lose the doctor report.
-    process.env.AGENTIO_TOKEN = encodeToken({ url: 'http://127.0.0.1:1', kid: 'kid', secret: 'secret' });
-    resetRemoteCache();
-    expect(await cliChecks()).toEqual([]);
+  test('no profiles yield no checks', async () => {
+    expect(await cliChecks([])).toEqual([]);
+  });
+
+  test('only the services with a profile are checked', async () => {
+    const checks = await cliChecks([{ service: 'claude', name: 'work' }]);
+    expect(checks.map((c) => c.name)).toEqual(['claude CLI']);
   });
 });
