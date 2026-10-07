@@ -6,7 +6,7 @@ import { registerAskCommand } from '../../utils/llm-ask';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { checkAnswer } from '../setup-inputs';
+import { answerOrAsk, checkAnswer } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { ChatGptClient } from './client';
 import { signInWithChatGpt } from './oauth';
@@ -30,10 +30,10 @@ export async function chatGptProfileAdd(options: ChatGptProfileAddOptions, conte
     throw new CliError('INVALID_PARAMS', `--api-key cannot be used with --method ${chosen}`);
   }
   const method = options.apiKey !== undefined ? 'apiKey' : chosen ?? await context.ask(CHATGPT_METHOD_INPUT);
-  const model = (options.model !== undefined ? checkAnswer(CHATGPT_MODEL_INPUT, options.model) : await context.ask(CHATGPT_MODEL_INPUT)) || undefined;
+  const model = (await answerOrAsk(context, CHATGPT_MODEL_INPUT, options.model)) || undefined;
 
   if (method === 'apiKey') {
-    const apiKey = options.apiKey !== undefined ? checkAnswer(CHATGPT_API_KEY_INPUT, options.apiKey) : await context.ask(CHATGPT_API_KEY_INPUT);
+    const apiKey = await answerOrAsk(context, CHATGPT_API_KEY_INPUT, options.apiKey);
     return { credentials: { kind: 'apiKey', apiKey, ...(model ? { model } : {}) }, suggestedProfileName: 'default', info: 'OpenAI API key saved; prompts run through codex' };
   }
   const signedIn = await signInWithChatGpt(context, model);

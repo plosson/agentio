@@ -6,7 +6,7 @@ import { registerAskCommand } from '../../utils/llm-ask';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { checkAnswer } from '../setup-inputs';
+import { answerOrAsk } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { ClaudeClient, tokenKind } from './client';
 import { CLAUDE_MODEL_INPUT, CLAUDE_TOKEN_INPUT } from './setup-needs';
@@ -23,9 +23,9 @@ export interface ClaudeProfileAddOptions extends ProfileAddOptions {
 }
 
 export async function claudeProfileAdd(options: ClaudeProfileAddOptions, context: SetupContext): Promise<SetupResult<ClaudeCredentials>> {
-  const token = options.token !== undefined ? checkAnswer(CLAUDE_TOKEN_INPUT, options.token) : await context.ask(CLAUDE_TOKEN_INPUT);
+  const token = await answerOrAsk(context, CLAUDE_TOKEN_INPUT, options.token);
   const kind = tokenKind(token);
-  const model = (options.model !== undefined ? checkAnswer(CLAUDE_MODEL_INPUT, options.model) : await context.ask(CLAUDE_MODEL_INPUT)) || undefined;
+  const model = (await answerOrAsk(context, CLAUDE_MODEL_INPUT, options.model)) || undefined;
   return {
     credentials: { token, kind, ...(model ? { model } : {}) },
     suggestedProfileName: 'default',

@@ -8,7 +8,7 @@ import { createProfileCommands } from '../../utils/profile-commands';
 import { readStdin } from '../../utils/stdin';
 import { addProfileWithSetup, addSetupOptions } from '../profile-host';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { checkAnswer } from '../setup-inputs';
+import { answerOrAsk } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { JevClient } from './client';
 import { printChoice, printScore, printYesNo } from './output';
@@ -55,8 +55,8 @@ export interface JevProfileAddOptions extends ProfileAddOptions {
 }
 
 export async function jevProfileAdd(options: JevProfileAddOptions, context: SetupContext): Promise<SetupResult<JevCredentials>> {
-  const apiKey = options.apiKey !== undefined ? checkAnswer(JEV_API_KEY_INPUT, options.apiKey) : await context.ask(JEV_API_KEY_INPUT);
-  const model = (options.model !== undefined ? checkAnswer(JEV_MODEL_INPUT, options.model) : await context.ask(JEV_MODEL_INPUT)) || undefined;
+  const apiKey = await answerOrAsk(context, JEV_API_KEY_INPUT, options.apiKey);
+  const model = (await answerOrAsk(context, JEV_MODEL_INPUT, options.model)) || undefined;
   const credentials: JevCredentials = { apiKey, ...(model ? { model } : {}) };
   // One short question proves the key and the model before the profile is saved.
   await new JevClient(credentials).checkKey();
