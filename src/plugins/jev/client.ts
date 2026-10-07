@@ -1,5 +1,5 @@
 import type { ServiceClient, ValidationResult } from '../../types/service';
-import { CliError } from '../../utils/errors';
+import { CliError, redact } from '../../utils/errors';
 import type { JevAnswer, JevCredentials, JevQuestion, JevResult, JevState, JevUsage } from './types';
 
 /** TypeSafe AI's System One API (https://docs.typesafe.ai/api). */
@@ -79,7 +79,7 @@ export class JevClient implements ServiceClient {
   /** A server message fit to show: never the API key. */
   private clean(message: string | undefined): string | undefined {
     if (!message) return undefined;
-    return message.split(this.credentials.apiKey).join('[api key]');
+    return redact(message, [this.credentials.apiKey], '[api key]');
   }
 }
 

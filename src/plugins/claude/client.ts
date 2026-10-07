@@ -1,5 +1,5 @@
 import type { ServiceClient, ValidationResult } from '../../types/service';
-import { CliError } from '../../utils/errors';
+import { CliError, redact } from '../../utils/errors';
 import { CLAUDE_CLI, runExternalCli, withTempDir, type CliRun } from '../../utils/external-cli';
 import type { AskRequest, AskResult } from '../../utils/llm-ask';
 import type { ClaudeCredentials, ClaudeTokenKind } from './types';
@@ -69,7 +69,7 @@ interface ClaudeJsonResult {
 
 /** What `claude -p --output-format json` printed, as an answer or as the right error. Never shows `secret`. */
 export function parseClaudeResult(run: CliRun, secret: string): AskResult {
-  const clean = (text: string) => text.split(secret).join('[token]').trim().slice(0, 500);
+  const clean = (text: string) => redact(text, [secret], '[token]').trim().slice(0, 500);
   let parsed: ClaudeJsonResult | null = null;
   try {
     const value: unknown = JSON.parse(run.stdout.trim());

@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { createPkcePair } from '../../auth/pkce';
-import { CliError } from '../../utils/errors';
+import { CliError, redact } from '../../utils/errors';
 import type { SetupContext } from '../../plugin-sdk';
 import type { ChatGptCredentials, OpenAiTokens } from './types';
 
@@ -55,7 +55,7 @@ async function postToken(body: string, contentType: string, secret: string, sugg
   }
   if (response.ok) return data as OpenAiTokens;
   const detail = [data.error_description, data.error].find((v): v is string => typeof v === 'string');
-  const reason = detail ? `: ${detail.split(secret).join('[token]')}` : '';
+  const reason = detail ? `: ${redact(detail, [secret], '[token]')}` : '';
   if (response.status === 400 || response.status === 401) {
     throw new CliError('AUTH_EXPIRED', `OpenAI refused the ChatGPT sign-in${reason}`, suggestion);
   }

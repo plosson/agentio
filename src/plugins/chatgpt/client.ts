@@ -2,7 +2,7 @@ import { existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { ServiceClient, ValidationResult } from '../../types/service';
-import { CliError } from '../../utils/errors';
+import { CliError, redact } from '../../utils/errors';
 import { CODEX_CLI, runExternalCli, withTempDir } from '../../utils/external-cli';
 import type { AskRequest, AskResult } from '../../utils/llm-ask';
 import type { ChatGptCredentials } from './types';
@@ -65,7 +65,7 @@ export class ChatGptClient implements ServiceClient {
     if (c.kind === 'apiKey' && !c.apiKey) throw new CliError('AUTH_FAILED', 'This ChatGPT profile has no API key', 'Run: agentio chatgpt profile add');
     const model = request.model ?? c.model;
     const secrets = [c.accessToken, c.apiKey, c.idToken].filter((s): s is string => !!s);
-    const clean = (text: string) => secrets.reduce((t, s) => t.split(s).join('[token]'), text).trim().slice(0, 500);
+    const clean = (text: string) => redact(text, secrets, '[token]').trim().slice(0, 500);
     const started = Date.now();
 
     return withTempDir('agentio-codex-home-', (codexHome) => withTempDir('agentio-codex-', async (cwd) => {

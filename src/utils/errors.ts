@@ -73,6 +73,11 @@ export function exitCodeForError(code: ErrorCode): number {
   }
 }
 
+/** `text` with each secret replaced by `placeholder`; empty or missing secrets are skipped. */
+export function redact(text: string, secrets: readonly (string | undefined)[], placeholder: string): string {
+  return secrets.reduce<string>((t, secret) => (secret ? t.split(secret).join(placeholder) : t), text);
+}
+
 export function multipleProfilesError(service: ServiceName, names: string[]): CliError {
   const list = names.join(', ');
   return new CliError(
