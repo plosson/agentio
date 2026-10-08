@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { installGuide } from '../../../src/daemon/install-guide';
+import { installGuide, INSTALL_COMMAND } from '../../../src/daemon/install-guide';
 import {
   accessCell,
   accountShown,
@@ -28,7 +28,6 @@ import {
   welcomeServices,
   loginCommand,
   connectPrompt,
-  INSTALL_COMMAND,
   machineCanUse,
   machinesUsing,
   paneOf,
@@ -202,7 +201,9 @@ describe('commands', () => {
     expect(connectPrompt('http://127.0.0.1:7890')).toEndWith(' http://127.0.0.1:7890/install.md');
     const guide = installGuide('https://agentio.chuut.com');
     expect(guide).toContain(`    ${INSTALL_COMMAND}\n`);
-    expect(guide).toContain(`    ${loginCommand('https://agentio.chuut.com')}\n`);
+    for (const origin of ['https://agentio.chuut.com', 'http://127.0.0.1:7890', 'http://hub-1.local:80']) {
+      expect(installGuide(origin)).toContain(`    ${loginCommand(origin)}\n`);
+    }
   });
 
   test('fixCommand reauths where the plugin supports it, else adds the profile again by name', () => {

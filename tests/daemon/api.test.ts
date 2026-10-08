@@ -522,7 +522,7 @@ describe('/install.md', () => {
   });
 
   test('a host that is not a plain host name gets no guide', async () => {
-    for (const host of ['hub_under', 'a!b', 'a$b']) {
+    for (const host of ['hub_under', 'a!b', 'a$b', '[::1]:7890']) {
       const res = await handle(new Request(`http://${host}/install.md`), peer);
       expect(res.status).toBe(400);
       expect(await res.text()).not.toContain('agentio login');

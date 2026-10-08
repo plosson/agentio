@@ -487,6 +487,9 @@ describe('the assembled admin page', () => {
     expect(card).toContain('connectPrompt(location.origin)');
     expect(card).toContain('command(loginCommand(location.origin))');
     expect(card).toContain('command(INSTALL_COMMAND)');
+    // The install command comes from the server's install guide, defined once ahead of the screens.
+    expect(script).toContain('const INSTALL_COMMAND = "curl -LsSf https://agentio.houlahop.com/install | sh";');
+    expect(script.indexOf('const INSTALL_COMMAND')).toBeLessThan(script.indexOf('function connectCard('));
     expect(card).toContain('data-action="copy" data-text="${prompt}"');
     // A waiting machine is denied in place but approved on the approval page, where its access is chosen.
     expect(card).toContain('data-action="deny-sign-in" data-code="${req.userCode}"');
