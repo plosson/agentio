@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { ServiceClient } from '../types/service';
-import type { AgentioPlugin, SetupContext, SetupNeeds, SetupResult } from '../plugin-sdk';
+import type { AgentioPlugin, SetupContext, SetupResult } from '../plugin-sdk';
 import type { PluginStore } from '../daemon/plugin-store';
 
 export interface ProfileAddOptions {
@@ -9,15 +9,10 @@ export interface ProfileAddOptions {
 }
 
 export interface ProfilePlugin<TCredentials extends object> {
-  /** What setup needs, for `profile add --describe --json`; without it, `--json` is refused. */
-  needs?: SetupNeeds;
   /** Authenticate and return credentials, asking only through `context`; the host names and persists them. */
   setup(options: ProfileAddOptions, context: SetupContext): Promise<SetupResult<TCredentials>>;
   createClient(credentials: TCredentials): ServiceClient;
-  /**
-   * Sign in again and return replacement credentials, asking only through `context`; the host
-   * persists them. `profile reauth --json` runs it only for a plugin that declares `needs`.
-   */
+  /** Sign in again and return replacement credentials, asking only through `context`; the host persists them. */
   reauthenticate?(credentials: TCredentials | null, profileName: string, context: SetupContext): Promise<TCredentials>;
   /**
    * What the admin may show about a profile without calling the service: the

@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { PAGERIO_URL, PagerioClient } from './client';
 import { pagerioProfileAdd, registerPagerioCommands } from './commands';
-import { PAGERIO_SETUP_NEEDS } from './setup-needs';
 import type { PagerioCredentials } from './types';
 
 export default defineServicePlugin<PagerioCredentials>()({
@@ -13,7 +12,6 @@ export default defineServicePlugin<PagerioCredentials>()({
   brand: { url: PAGERIO_URL },
   registerCommands: registerPagerioCommands,
   profile: {
-    needs: PAGERIO_SETUP_NEEDS,
     setup: pagerioProfileAdd,
     createClient: (credentials) => new PagerioClient(credentials),
   },

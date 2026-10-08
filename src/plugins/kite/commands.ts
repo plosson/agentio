@@ -4,13 +4,12 @@ import { dirname, resolve } from 'path';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
-import { addJsonOption, isJsonMode, printJson } from '../../utils/output';
+import { addJsonOption, printJson } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createSetupContext } from '../host-context';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { URL_INPUT } from './setup-needs';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
@@ -29,6 +28,8 @@ import {
   printWorkspaces,
 } from './output';
 import type { KiteCredentials } from './types';
+
+const URL_INPUT: InputSpec = { label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' };
 
 const getKiteClient = createClientGetter<KiteCredentials, KiteClient>({
   service: 'kite',
@@ -169,8 +170,7 @@ export async function reauthenticateKite(
       `Run: agentio kite profile add --profile ${profileName} --url <url>`);
   }
   context.log(`\nRe-authenticating kite / ${profileName}...`);
-  // A program reading `--json` gets the code as an event, as `profile add --json` gives it.
-  const replacement = await signIn(credentials.baseUrl, { json: isJsonMode() }, context, deps);
+  const replacement = await signIn(credentials.baseUrl, {}, context, deps);
   context.log(`  Done (${replacement.email})`);
   return replacement;
 }
@@ -328,7 +328,7 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
   });
 
   addExamples(
-    addSetupOptions(
+    addJsonOption(
       profile
         .command('add')
         .description('Sign in to a Kite server in the browser and store the profile')
@@ -348,11 +348,7 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
   agentio kite profile add --url https://kite.example.com --no-browser
 
   # a second, read-only account under a chosen name
-  agentio kite profile add --url https://kite.example.com --profile team --read-only
-
-  # for a program: what it needs, then the URL as JSON on stdin
-  agentio kite profile add --describe --json
-  echo '{"url":"https://kite.example.com"}' | agentio kite profile add --json --input -`,
+  agentio kite profile add --url https://kite.example.com --profile team --read-only`,
   );
 }
 

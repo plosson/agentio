@@ -6,7 +6,7 @@ import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { loginWithSecondFactor } from './auth';
@@ -24,7 +24,7 @@ import {
   printSyncSummary,
   type SyncTally,
 } from './output';
-import { FALCO_EMAIL_INPUT, FALCO_PASSWORD_INPUT } from './setup-needs';
+import { FALCO_EMAIL_INPUT, FALCO_PASSWORD_INPUT } from './setup-questions';
 import { extractEmbeddedPdf } from './ubl';
 import { renderUblXmlToPdf } from './ubl-render';
 import type { BillingDocument, FalcoCredentials, Invoice, InvoicePaymentStatus, PeppolDocument } from './types';
@@ -215,11 +215,10 @@ export async function falcoProfileAdd(
     throw new CliError('CONFIG_ERROR', 'This Falco account has no organizations');
   }
 
-  // One organization is taken directly; several are asked at run time.
+  // One organization is taken directly; with several, the user picks one.
   let organization = me.organizations[0]!;
   if (me.organizations.length > 1) {
     const id = await context.ask({
-      id: 'organization',
       label: 'Organization',
       kind: 'choice',
       choices: me.organizations.map((org) => ({
@@ -487,13 +486,11 @@ export function registerFalcoCommands(program: Command): void {
   });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add a new Falco profile')
-        .option('--profile <name>', 'Profile name (defaults to a slug of the organization)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    )
+    profile
+      .command('add')
+      .description('Add a new Falco profile')
+      .option('--profile <name>', 'Profile name (defaults to a slug of the organization)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
       .action(async (options) => {
         try {
           await addProfileWithSetup('falco', falcoProfileAdd, options);

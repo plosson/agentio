@@ -1,18 +1,18 @@
 import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { confirm, readStdin } from '../../utils/stdin';
 import { addExamples, getExamples } from '../../utils/command-tree';
-import { addJsonOption, isJsonMode } from '../../utils/output';
+import { addJsonOption } from '../../utils/output';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
 import { checkAnswer } from '../setup-inputs';
 import { SpotifyClient } from './client';
 import { parseSpotifyRef, resolveDevice, resolvePlaylistRef, foldName } from './ids';
 import { authorizeSpotify, SPOTIFY_APP_SETUP_STEPS } from './oauth';
-import { SPOTIFY_CLIENT_ID_INPUT } from './setup-needs';
+import { SPOTIFY_CLIENT_ID_INPUT } from './setup-questions';
 import {
   formatDuration,
   parseDuration,
@@ -1483,15 +1483,13 @@ function registerProfileCommands(spotify: Command): void {
       : ''),
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Spotify profile (PKCE; bring your own app)')
-      .option('--profile <name>', 'Profile name (defaults to Spotify user ID)')
-      .option('--client-id <id>', 'Client ID from the Spotify Developer Dashboard')
-      .option('--read-only', 'Request read scopes only; block writes and playback control')
-      .option('--no-browser', 'Print the authorisation URL and paste the redirect URL back')
-  )
+  profile
+    .command('add')
+    .description('Add a new Spotify profile (PKCE; bring your own app)')
+    .option('--profile <name>', 'Profile name (defaults to Spotify user ID)')
+    .option('--client-id <id>', 'Client ID from the Spotify Developer Dashboard')
+    .option('--read-only', 'Request read scopes only; block writes and playback control')
+    .option('--no-browser', 'Print the authorisation URL and paste the redirect URL back')
     .action(async (options) => {
       try {
         await addProfileWithSetup('spotify', spotifyProfileAdd, options);
@@ -1520,8 +1518,7 @@ export async function spotifyProfileAdd(
     : await context.ask(SPOTIFY_CLIENT_ID_INPUT);
 
   const readOnly = !!options.readOnly;
-  // JSON mode never opens a browser, so --no-browser changes nothing there.
-  const noBrowser = options.browser === false && !isJsonMode();
+  const noBrowser = options.browser === false;
 
   context.log(readOnly
     ? '\nRequesting read scopes only (--read-only).\n'

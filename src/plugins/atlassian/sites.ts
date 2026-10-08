@@ -49,7 +49,6 @@ export async function selectAtlassianSite(
   }
   if (sites.length === 1) return sites[0];
   const id = await context.ask({
-    id: 'site',
     label: `${product} site`,
     kind: 'choice',
     choices: sites.map((site) => ({ value: site.id, label: `${site.name} (${site.url})` })),

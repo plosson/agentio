@@ -2,7 +2,6 @@ import { defineServicePlugin } from '../types';
 import { SpotifyClient } from './client';
 import { registerSpotifyCommands, spotifyProfileAdd } from './commands';
 import { reauthenticateSpotify, spotifyCredentialLifecycle } from './lifecycle';
-import { SPOTIFY_SETUP_NEEDS } from './setup-needs';
 import type { SpotifyCredentials } from './types';
 
 export default defineServicePlugin<SpotifyCredentials>()({
@@ -14,7 +13,6 @@ export default defineServicePlugin<SpotifyCredentials>()({
   brand: { url: 'https://open.spotify.com' },
   registerCommands: registerSpotifyCommands,
   profile: {
-    needs: SPOTIFY_SETUP_NEEDS,
     setup: spotifyProfileAdd,
     createClient: (credentials) => new SpotifyClient(credentials),
     describe: (credentials) => ({ account: credentials.displayName ?? credentials.userId }),

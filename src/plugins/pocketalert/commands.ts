@@ -5,14 +5,15 @@ import { addExamples } from '../../utils/command-tree';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { checkAnswer } from '../setup-inputs';
-import { POCKETALERT_API_KEY_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { parseLevel, PocketAlertClient } from './client';
 import { printSentMessage } from './output';
 import type { PocketAlertCredentials } from './types';
+
+const POCKETALERT_API_KEY_INPUT: InputSpec = { label: 'API key', kind: 'secret', help: 'Settings in the Pocket Alert app' };
 
 const getPocketAlertClient = createClientGetter<PocketAlertCredentials, PocketAlertClient>({
   service: 'pocketalert',
@@ -83,14 +84,12 @@ export function registerPocketAlertCommands(program: Command): void {
   });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add a Pocket Alert account with its API key')
-        .option('--api-key <key>', 'API key, from Settings in the Pocket Alert app (asked for when absent)')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    )
+    profile
+      .command('add')
+      .description('Add a Pocket Alert account with its API key')
+      .option('--api-key <key>', 'API key, from Settings in the Pocket Alert app (asked for when absent)')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
       .action(async (options: PocketAlertProfileAddOptions) => {
         try {
           await addProfileWithSetup('pocketalert', (o, context) => pocketAlertProfileAdd(o as PocketAlertProfileAddOptions, context), options);

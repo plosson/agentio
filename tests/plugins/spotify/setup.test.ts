@@ -1,17 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, writeFile, chmod } from 'fs/promises';
-import { existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname } from 'path';
 import { spotifyProfileAdd } from '../../../src/plugins/spotify/commands';
 import spotifyPlugin from '../../../src/plugins/spotify';
 import { authorizeSpotify, SPOTIFY_REDIRECT_URI } from '../../../src/plugins/spotify/oauth';
-import type { OAuthSetupOptions, SetupContext } from '../../../src/plugin-sdk';
+import { REDIRECT_INPUT, SPOTIFY_CLIENT_ID_INPUT } from '../../../src/plugins/spotify/setup-questions';
+import type { InputSpec, OAuthSetupOptions, SetupContext } from '../../../src/plugin-sdk';
 import { fakeSetupContext } from '../../helpers/setup-context';
 import { withTempVault } from '../../helpers/vault';
-import { runCli } from '../../helpers/cli';
+import { spawnCli } from '../../helpers/cli';
 
-const vault = withTempVault('agentio-spotify-json-', () => ({ config: { profiles: {} } as never }));
+const vault = withTempVault('agentio-spotify-setup-', () => ({ config: { profiles: {} } as never }));
 
 type Call = { url: string; body?: string };
 
@@ -36,15 +34,15 @@ function oauthContext(answers: Record<string, string> = {}, seen: OAuthSetupOpti
   };
 }
 
-/** A context for --no-browser: the logged address is kept, and `redirect` is answered from it. */
-function pasteContext(paste: (state: string) => string, logged: string[] = []): SetupContext & { asked: { id: string }[] } {
+/** A context for --no-browser: the logged address is kept, and the redirect question is answered from it. */
+function pasteContext(paste: (state: string) => string, logged: string[] = []): SetupContext & { asked: InputSpec[] } {
   const base = fakeSetupContext({});
   return {
     ...base,
     log: (...parts) => { logged.push(parts.join(' ')); },
     async ask(spec) {
       base.asked.push(spec);
-      if (spec.id !== 'redirect') throw new Error(`unexpected question: ${spec.id}`);
+      if (spec !== REDIRECT_INPUT) throw new Error(`unexpected question: ${spec.label}`);
       const address = logged.join('\n').match(/https:\/\/accounts\.spotify\.com\/authorize\?\S+/)![0];
       return paste(new URL(address).searchParams.get('state')!);
     },
@@ -82,7 +80,7 @@ describe('authorizeSpotify', () => {
     const logged: string[] = [];
     const ctx = pasteContext((state) => `http://127.0.0.1:3010/callback?code=x&state=${state}`, logged);
     const tokens = await authorizeSpotify({ clientId: 'abc', readOnly: false, noBrowser: true }, ctx);
-    expect(ctx.asked.map((spec) => spec.id)).toEqual(['redirect']);
+    expect(ctx.asked).toEqual([REDIRECT_INPUT]);
     expect(tokens.accessToken).toBe('new-access');
     const body = new URLSearchParams(calls[0].body);
     expect(body.get('code')).toBe('x');
@@ -97,9 +95,9 @@ describe('Spotify setup and sign in again', () => {
 
   test('setup asks the client ID through the context and returns the account', async () => {
     stubSpotify([]);
-    const ctx = oauthContext({ clientId: ' abc ' });
+    const ctx = oauthContext({ 'Client ID': ' abc ' });
     const result = await spotifyProfileAdd({}, ctx);
-    expect(ctx.asked.map((spec) => (spec as { id: string }).id)).toEqual(['clientId']);
+    expect(ctx.asked).toEqual([SPOTIFY_CLIENT_ID_INPUT]);
     expect(result.credentials).toMatchObject({ clientId: 'abc', refreshToken: 'new-refresh', userId: 'spotty', readOnly: false });
     expect(result.suggestedProfileName).toBe('spotty');
   });
@@ -137,117 +135,35 @@ function port3010Free(): boolean {
 }
 
 const portFree = port3010Free();
-if (!portFree) console.warn('Skipping the Spotify --json sign-in tests: port 3010 on 127.0.0.1 is in use on this machine');
+if (!portFree) console.warn('Skipping the Spotify sign-in tests: port 3010 on 127.0.0.1 is in use on this machine');
 
-/** A PATH whose `open` and `xdg-open` leave a mark, so an opened browser shows. */
-async function fakeOpeners(): Promise<{ path: string; mark: string }> {
-  const bin = await mkdtemp(join(tmpdir(), 'agentio-bin-'));
-  const mark = join(bin, 'opened');
-  for (const name of ['open', 'xdg-open']) {
-    await writeFile(join(bin, name), `#!/bin/sh\necho "$@" > "${mark}"\n`);
-    await chmod(join(bin, name), 0o755);
-  }
-  return { path: `${bin}:${process.env.PATH}`, mark };
-}
+// Only bun on PATH: no browser opener can be found, so the address is printed instead.
+const terminal = (args: string[]) => spawnCli(['spotify', 'profile', 'add', ...args], { ...vault.env(), PATH: dirname(process.execPath) }, 15_000);
 
-/** Read stdout up to the end of its first line. */
-async function firstLine(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<{ line: string; rest: string }> {
-  let text = '';
-  while (!text.includes('\n')) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    text += new TextDecoder().decode(value);
-  }
-  const at = text.indexOf('\n');
-  return { line: text.slice(0, at), rest: text.slice(at + 1) };
-}
-
-/** Run `spotify profile add --json --input -` with `inputs`; the first event must be `open`; deny it. */
-async function runDenied(inputs: string, extra: string[] = []): Promise<{ url: URL; error: Record<string, unknown>; opened: boolean }> {
-  const { path, mark } = await fakeOpeners();
-  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'spotify', 'profile', 'add', '--json', '--input', '-', ...extra], {
-    stdin: new Blob([`${inputs}\n`]),
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: { ...vault.env(), PATH: path },
-  });
-  const timer = setTimeout(() => proc.kill(), 15_000);
-  const reader = proc.stdout.getReader();
-  const { line, rest: first } = await firstLine(reader);
-  const event = JSON.parse(line);
-  expect(event.event).toBe('open');
-  const url = new URL(event.url);
-  const res = await fetch('http://127.0.0.1:3010/callback?error=access_denied');
-  expect(res.status).toBe(200);
-  expect(await proc.exited).toBe(2);
-  clearTimeout(timer);
-  let rest = first;
-  for (let r = await reader.read(); !r.done; r = await reader.read()) rest += new TextDecoder().decode(r.value);
-  const error = rest.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === 'error');
-  return { url, error, opened: existsSync(mark) };
-}
-
-describe('spotify profile add --json', () => {
-  test('--describe --json: the client ID, then a browser sign-in', async () => {
-    const res = await runCli(['spotify', 'profile', 'add', '--describe', '--json'], vault.env());
-    expect(res.exitCode).toBe(0);
-    expect(res.events).toEqual([{
-      v: 1,
-      event: 'needs',
-      service: 'spotify',
-      inputs: [{ id: 'clientId', label: 'Client ID', kind: 'text', help: 'From your app at https://developer.spotify.com/dashboard (redirect URI http://127.0.0.1:3010/callback)' }],
-      auth: 'browser',
-    }]);
-  }, 20_000);
-
-  test('a blank client ID is refused before anything opens', async () => {
-    const res = await runCli(['spotify', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"clientId":"   "}']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0]).toMatchObject({ code: 'INVALID_PARAMS', message: 'Client ID is required' });
-  }, 20_000);
-
-  test('an unknown input id is refused before anything opens', async () => {
-    const res = await runCli(['spotify', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"redirect":"x"}']);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0]).toMatchObject({ code: 'INVALID_PARAMS', message: 'Unknown setup value "redirect"' });
-  }, 20_000);
-
-  test('stdin closed with no client ID ends with "No answer", never hangs', async () => {
-    const res = await runCli(['spotify', 'profile', 'add', '--json'], vault.env());
-    expect(res.events.map((e) => e.event)).toEqual(['ask', 'error']);
-    expect(res.events[1]).toMatchObject({ code: 'INVALID_PARAMS', message: 'No answer for "Client ID"' });
-  }, 20_000);
-
-  test.skipIf(!portFree)('the Spotify address comes first, nothing is opened, and a denied callback is AUTH_FAILED', async () => {
-    const { url, error, opened } = await runDenied('{"clientId":"abc"}');
+describe('spotify profile add', () => {
+  test.skipIf(!portFree)('the Spotify address is printed, nothing is opened, and a denied callback is AUTH_FAILED', async () => {
+    const run = terminal(['--client-id', 'abc']);
+    const url = new URL((await run.printed(/visit:\n(\S+)/))[1]);
     expect(url.host).toBe('accounts.spotify.com');
     expect(url.searchParams.get('client_id')).toBe('abc');
     expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:3010/callback');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{32}$/);
-    expect(error).toMatchObject({ code: 'AUTH_FAILED' });
-    expect(String(error.message)).toContain('access_denied');
-    expect(opened).toBe(false);
+    expect((await fetch('http://127.0.0.1:3010/callback?error=access_denied')).status).toBe(200);
+    const res = await run.finish();
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('No browser could be opened on this machine.');
+    expect(res.stderr).toMatch(/Error \[AUTH_FAILED\]: .*access_denied/);
   }, 20_000);
 
-  test.skipIf(!portFree)('--client-id wins over the input line, and --no-browser changes nothing in JSON mode', async () => {
-    const { url, error } = await runDenied('{"clientId":"from-input"}', ['--client-id', 'from-flag', '--no-browser']);
-    expect(url.searchParams.get('client_id')).toBe('from-flag');
-    expect(error).toMatchObject({ code: 'AUTH_FAILED' });
-  }, 20_000);
-
-  test.skipIf(!portFree)('port 3010 taken: one CONFIG_ERROR event and no open event', async () => {
+  test.skipIf(!portFree)('port 3010 taken: CONFIG_ERROR, and no address is printed to open', async () => {
     const blocker = Bun.serve({ port: 3010, hostname: '127.0.0.1', fetch: () => new Response('busy') });
     try {
-      const res = await runCli(['spotify', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"clientId":"abc"}'], 15_000);
-      expect(res.events).toEqual([{
-        v: 1,
-        event: 'error',
-        code: 'CONFIG_ERROR',
-        message: 'Spotify sign-in needs port 3010 on 127.0.0.1, and another program is using it',
-        suggestion: 'Stop the program using 127.0.0.1:3010, then try again',
-      }]);
+      const res = await terminal(['--client-id', 'abc']).finish();
+      expect(res.exitCode).toBe(3);
+      expect(res.stderr).toContain(`Error [CONFIG_ERROR]: Spotify sign-in needs port 3010 on 127.0.0.1, and another program is using it
+Suggestion: Stop the program using 127.0.0.1:3010, then try again`);
+      expect(res.stderr).not.toContain('accounts.spotify.com');
     } finally {
       blocker.stop(true);
     }

@@ -62,8 +62,6 @@ function page(ctx: UiContext): Response {
     session: isLegacyServicePlugin(plugin) && Boolean(plugin.session),
     // `agentio profile reauth` only works where the plugin defines it; otherwise the fix is `profile add --profile <name>`.
     reauth: Boolean(plugin.profile?.reauthenticate),
-    // `profile add --json` exists for a plugin that declares what its setup needs: a program can add it.
-    json: Boolean(plugin.profile?.needs),
   }]));
   const serialized = JSON.stringify(metadata).replace(/[<>&]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
   const html = INDEX_HTML

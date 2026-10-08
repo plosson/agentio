@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { googleSnakeSetup } from '../shared';
 import { GTasksClient } from './client';
 import {
@@ -424,13 +424,11 @@ At least one of --parent or --previous is required.`,
     getExtraInfo: (credentials) => credentials?.email ? ` - ${credentials.email}` : '',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Google Tasks profile')
-      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Google Tasks profile')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('gtasks', gtasksProfileAdd, options);

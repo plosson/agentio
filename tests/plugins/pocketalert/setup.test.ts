@@ -54,24 +54,29 @@ test('setup checks the key without sending a message, and trims it', async () =>
   expect(api.log.map((r) => `${r.method} ${r.url}`)).toEqual(['GET https://api.pocketalert.app/v1/applications']);
 });
 
-test('the key is asked for when --api-key is absent', async () => {
+test('the key is asked for when --api-key is absent, as a secret', async () => {
   api.answer({ status: 200, body: [] });
-  const context = fakeSetupContext({ apiKey: KEY });
+  const context = fakeSetupContext({ 'API key': KEY });
   const result = await pocketAlertProfileAdd({}, context);
-  expect(context.asked.map((s) => s.id)).toEqual(['apiKey']);
+  expect(context.asked.map((s) => s.label)).toEqual(['API key']);
+  expect(context.asked[0].kind).toBe('secret');
   expect(result.credentials.apiKey).toBe(KEY);
+  expect(result.suggestedProfileName).toBe('default');
+  expect(result.info).not.toContain(KEY);
 });
 
 test('a blank key is refused before any request', async () => {
   expect((await caught(pocketAlertProfileAdd({ apiKey: '   ' }, noPrompt()))).code).toBe('INVALID_PARAMS');
-  expect((await caught(pocketAlertProfileAdd({}, fakeSetupContext({ apiKey: '' })))).code).toBe('INVALID_PARAMS');
+  expect((await caught(pocketAlertProfileAdd({}, fakeSetupContext({ 'API key': '' })))).code).toBe('INVALID_PARAMS');
   expect(api.log).toHaveLength(0);
 });
 
-test('a refused key saves no profile', async () => {
+test('a refused key saves no profile, and the key is never in the error', async () => {
+  const secret = 'SECRET-KEY-123';
   api.answer({ status: 401, body: { error: 'Invalid token' } });
-  const err = await caught(addProfileWithSetup('pocketalert', (o) => pocketAlertProfileAdd(o, noPrompt()), { apiKey: 'nope' } as never));
+  const err = await caught(addProfileWithSetup('pocketalert', (o) => pocketAlertProfileAdd(o, noPrompt()), { apiKey: secret } as never));
   expect(err.code).toBe('AUTH_FAILED');
+  expect(`${err.message} ${err.suggestion ?? ''}`).not.toContain(secret);
   expect(await getCredentials<PocketAlertCredentials>('pocketalert', 'default')).toBeNull();
 });
 

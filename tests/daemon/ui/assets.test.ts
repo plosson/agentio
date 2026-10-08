@@ -216,31 +216,25 @@ describe('the assembled admin page', () => {
     expect(script).toContain("VIEWS.add = () => {\n  const services = addableServices()");
   });
 
-  test('inside the app, a service that can be set up with --json is added by the app, not by a command', () => {
+  test('inside the app, every service is added by the app, not by a command', () => {
     const fn = script.match(/function addInApp\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-    // Only when the page runs in the app, the key may manage profiles, the service supports it, and the app has the call.
+    // Only when the page runs in the app, the key may manage profiles, and the app has the call; any service.
     expect(fn).toContain('window.agentioCompanion?.canManageProfiles !== true');
-    expect(fn).toContain('!PLUGIN_METADATA[service]?.json');
+    expect(fn).not.toContain('PLUGIN_METADATA');
     expect(fn).toContain("typeof window.agentioCompanion.addProfile !== 'function'");
     expect(fn).toContain('window.agentioCompanion.addProfile(service, displayName(service))');
     // The welcome card and the Add page try the app first, then fall back to the command.
     expect(script).toMatch(/ACTIONS\['add-service'\] = async \(el\) => \{\s*const service = el\.dataset\.service;\s*if \(!addableServices\(\)\.includes\(service\)\) return;\s*if \(addInApp\(service\)\) return;/);
     expect(script).toMatch(/ACTIONS\['pick-service'\] = \(el\) => \{\s*if \(el\.dataset\.service && addInApp\(el\.dataset\.service\)\) return;/);
-    // A service the app cannot add says so, next to its command, but only to a key that could otherwise add in the app.
-    const helper = script.match(/function onlyFromTerminal\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(helper).toContain('window.agentioCompanion?.canManageProfiles === true');
-    expect(helper).toContain('!PLUGIN_METADATA[service]?.json');
-    expect(helper).not.toContain('present');
-    expect(script).toContain('Add this one from a terminal for now.');
-    expect(script).toContain('const appCannot = onlyFromTerminal(service);');
-    expect(script).toContain('${onlyFromTerminal(picked) ?');
-    expect(script).not.toContain('agentioCompanion?.present === true && !PLUGIN_METADATA');
+    // No service is left to the terminal inside the app.
+    expect(script).not.toContain('onlyFromTerminal');
+    expect(script).not.toContain('Add this one from a terminal for now.');
+    expect(script).not.toContain('?.json');
   });
 
   test('inside the app, a failed profile is signed in again by the app, then tested again', () => {
     const fn = (script.match(/function canReauthInApp\(service\) \{[\s\S]*?\n\}/)?.[0] ?? '') + (script.match(/function reauthInApp\(service, profile\) \{[\s\S]*?\n\}/)?.[0] ?? '');
     expect(fn).toContain('window.agentioCompanion?.canManageProfiles !== true');
-    expect(fn).toContain('!PLUGIN_METADATA[service]?.json');
     expect(fn).toContain('!PLUGIN_METADATA[service]?.reauth');
     expect(fn).toContain("typeof window.agentioCompanion.reauth === 'function'");
     expect(fn).toContain('window.agentioCompanion.reauth(service, profile, displayName(service))');

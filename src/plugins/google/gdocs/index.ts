@@ -1,4 +1,3 @@
-import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gdocsProfileAdd, registerGDocsCommands } from './commands';
 import { GDocsClient } from './client';
 import type { GDocsCredentials } from './types';
@@ -15,7 +14,6 @@ export default defineServicePlugin<GDocsCredentials, GoogleCamelTokens>()({
   registerCommands: registerGDocsCommands,
   profile: {
     setup: gdocsProfileAdd,
-    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GDocsClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GDocsCredentials>('gdocs'),

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildAuthorizeUrl,
@@ -22,7 +22,7 @@ import {
 } from './output';
 import type { DropboxCredentials } from './types';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { APP_KEY_INPUT, CODE_INPUT } from './setup-needs';
+import { APP_KEY_INPUT, CODE_INPUT } from './setup-questions';
 
 const getDropboxClient = createClientGetter<DropboxCredentials, DropboxClient>({
   service: 'dropbox',
@@ -394,20 +394,19 @@ Deleted items go to the Dropbox trash and stay recoverable for 30 days
     getExtraInfo: (credentials) => (credentials?.email ? ` - ${credentials.email}` : ''),
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Dropbox profile')
-      .option('--profile <name>', 'Profile name (defaults to the account email)')
-      .option('--app-key <key>', 'App key from the Dropbox App Console')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-  ).action(async (options) => {
-    try {
-      await addProfileWithSetup('dropbox', (o, context) => dropboxProfileAdd(o as DropboxProfileAddOptions, context), options);
-    } catch (error) {
-      handleError(error);
-    }
-  });
+  profile
+    .command('add')
+    .description('Add a new Dropbox profile')
+    .option('--profile <name>', 'Profile name (defaults to the account email)')
+    .option('--app-key <key>', 'App key from the Dropbox App Console')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    .action(async (options) => {
+      try {
+        await addProfileWithSetup('dropbox', (o, context) => dropboxProfileAdd(o as DropboxProfileAddOptions, context), options);
+      } catch (error) {
+        handleError(error);
+      }
+    });
 }
 
 export interface DropboxProfileAddOptions {

@@ -5,7 +5,7 @@ import type { CredentialLifecycle } from '../types';
 import { DropboxClient } from './client';
 import { createPkcePair } from '../../auth/pkce';
 import { buildAuthorizeUrl, exchangeCodeForTokens, refreshDropboxToken } from './oauth';
-import { CODE_INPUT } from './setup-needs';
+import { CODE_INPUT } from './setup-questions';
 import type { DropboxCredentials } from './types';
 
 export const dropboxCredentialLifecycle: CredentialLifecycle<DropboxCredentials> = {

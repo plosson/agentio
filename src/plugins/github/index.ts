@@ -2,7 +2,6 @@ import { defineServicePlugin } from '../types';
 import type { SetupContext } from '../../plugin-sdk';
 import { GitHubClient } from './client';
 import { githubProfileAdd, registerGitHubCommands, signInToGitHub } from './commands';
-import { GITHUB_SETUP_NEEDS } from './setup-needs';
 import type { GitHubCredentials } from './types';
 
 async function reauthenticateGitHub(
@@ -24,7 +23,6 @@ export default defineServicePlugin<GitHubCredentials>()({
   brand: { url: 'https://github.com' },
   registerCommands: registerGitHubCommands,
   profile: {
-    needs: GITHUB_SETUP_NEEDS,
     setup: githubProfileAdd,
     createClient: (credentials) => new GitHubClient(credentials),
     describe: (credentials) => ({ account: credentials.username, url: credentials.username ? `https://github.com/${encodeURIComponent(credentials.username)}` : undefined }),

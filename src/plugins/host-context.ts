@@ -1,27 +1,13 @@
 import { password } from '@inquirer/prompts';
-import { DEFAULT_CALLBACK_PATH, awaitOAuthCode, findAvailablePort, launchBrowser, startOAuthCallbackServer } from '../auth/oauth-server';
+import { DEFAULT_CALLBACK_PATH, awaitOAuthCode, findAvailablePort, launchBrowser } from '../auth/oauth-server';
 import { CliError } from '../utils/errors';
 import { interactiveSelect } from '../utils/interactive';
-import type { LineReader } from '../utils/line-reader';
-import { printJson } from '../utils/output';
 import { confirm, prompt } from '../utils/stdin';
-import { checkAnswer, parseAnswer } from './setup-inputs';
-import type { InputSpec, OAuthSetupOptions, RunContext, SetupContext } from '../plugin-sdk';
-
-const YES_NO = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
+import { checkAnswer } from './setup-inputs';
+import type { OAuthSetupOptions, RunContext, SetupContext } from '../plugin-sdk';
 
 function fail(code: Parameters<SetupContext['fail']>[0], message: string, suggestion?: string): never {
   throw new CliError(code, message, suggestion);
-}
-
-/**
- * The callback address a sign-in listens on: the provider's fixed port, or a free one, on its host.
- * A busy port fails with CONFIG_ERROR from the callback server, before anything is opened.
- */
-async function callbackAddress(options: OAuthSetupOptions): Promise<{ port: number; host: string; redirectUri: string }> {
-  const host = options.host ?? 'localhost';
-  const port = options.port ?? (await findAvailablePort(options.host));
-  return { port, host, redirectUri: `http://${host}:${port}${options.path ?? DEFAULT_CALLBACK_PATH}` };
 }
 
 /** Setup in a terminal: questions on stderr, the browser opened here, a pasted address accepted. */
@@ -52,7 +38,9 @@ export function createSetupContext(): SetupContext {
     log: (...parts) => console.error(...parts),
     openUrl: launchBrowser,
     async oauth(options) {
-      const { port, redirectUri } = await callbackAddress(options);
+      // The provider's fixed port, or a free one; a busy port fails with CONFIG_ERROR before anything is opened.
+      const port = options.port ?? (await findAvailablePort(options.host));
+      const redirectUri = `http://${options.host ?? 'localhost'}:${port}${options.path ?? DEFAULT_CALLBACK_PATH}`;
       const result = await awaitOAuthCode({
         port,
         host: options.host,
@@ -66,40 +54,6 @@ export function createSetupContext(): SetupContext {
     async runInTerminal(command) {
       const proc = Bun.spawn([...command], { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit', env: process.env });
       return await proc.exited;
-    },
-    fail,
-    fetch,
-  };
-}
-
-/**
- * Setup for a program, `profile add --json`: every question is an `ask` event answered by one stdin
- * line, every address to open is an `open` event, and nothing is prompted or opened here.
- * `given` holds the `--input` values, already checked.
- */
-export function createJsonSetupContext(given: Record<string, string>, lines: LineReader): SetupContext {
-  async function ask(spec: InputSpec): Promise<string> {
-    if (Object.hasOwn(given, spec.id)) return given[spec.id];
-    printJson({ event: 'ask', ...spec });
-    return parseAnswer(await lines.next(), spec);
-  }
-  return {
-    ask,
-    prompt: (question, options) => ask({ id: 'prompt', label: question.trim(), kind: options?.secret ? 'secret' : 'text' }),
-    confirm: async (question) => (await ask({ id: 'confirm', label: question.trim(), kind: 'choice', choices: YES_NO })) === 'yes',
-    log: (...parts) => console.error(...parts),
-    openUrl(url) {
-      printJson({ event: 'open', url });
-      return true;
-    },
-    async oauth(options) {
-      const { port, redirectUri } = await callbackAddress(options);
-      // Listen first: the program opens the address as soon as it reads it, and a busy port must
-      // fail before the address is printed.
-      const callback = startOAuthCallbackServer({ port, host: options.host, path: options.path, serviceName: options.serviceName, expectedState: options.expectedState });
-      await callback.listening;
-      printJson({ event: 'open', url: options.authorizationUrl(redirectUri) });
-      return { ...(await callback), redirectUri };
     },
     fail,
     fetch,

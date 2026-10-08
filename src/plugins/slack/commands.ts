@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { readFile } from 'fs/promises';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { addExamples } from '../../utils/command-tree';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
@@ -11,8 +11,13 @@ import { SlackClient } from './client';
 import { checkWebhookUrl } from '../webhook-check';
 import { printSlackSendResult } from './output';
 import type { SlackCredentials, SlackWebhookCredentials } from './types';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { SLACK_CHANNEL_INPUT, SLACK_WEBHOOK_INPUT } from './setup-needs';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
+
+const SLACK_WEBHOOK_INPUT: InputSpec = {
+  label: 'Webhook URL', kind: 'secret',
+  help: 'From your Slack app: Incoming Webhooks, Add New Webhook to Workspace (https://api.slack.com/apps)',
+};
+const SLACK_CHANNEL_INPUT: InputSpec = { label: 'Channel name', kind: 'text', required: false, help: 'Only for display; also the default profile name' };
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
   service: 'slack',
@@ -117,19 +122,18 @@ export function registerSlackCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Slack profile (webhook)')
-      .option('--profile <name>', 'Profile name (default: the channel name, else "webhook")')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-  ).action(async (options) => {
-      try {
-        await addProfileWithSetup('slack', slackProfileAdd, options);
-      } catch (error) {
-        handleError(error);
-      }
-    });
+  profile
+    .command('add')
+    .description('Add a new Slack profile (webhook)')
+    .option('--profile <name>', 'Profile name (default: the channel name, else "webhook")')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    .action(async (options) => {
+        try {
+          await addProfileWithSetup('slack', slackProfileAdd, options);
+        } catch (error) {
+          handleError(error);
+        }
+      });
 }
 
 export async function slackProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<SlackCredentials>> {

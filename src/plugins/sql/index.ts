@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { SqlClient } from './client';
 import { registerSqlCommands, sqlProfileAdd } from './commands';
-import { SQL_SETUP_NEEDS } from './setup-needs';
 import type { SqlCredentials } from './types';
 
 export default defineServicePlugin<SqlCredentials>()({
@@ -11,7 +10,6 @@ export default defineServicePlugin<SqlCredentials>()({
   description: 'Use when running SQL queries via the agentio CLI.',
   registerCommands: registerSqlCommands,
   profile: {
-    needs: SQL_SETUP_NEEDS,
     setup: sqlProfileAdd,
     createClient: (credentials) => new SqlClient(credentials),
     describe: (credentials) => ({ account: credentials.displayName }),

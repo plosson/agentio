@@ -5,13 +5,26 @@ import { handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
 import { registerAskCommand } from '../../utils/llm-ask';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { answerOrAsk } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { ClaudeClient, tokenKind } from './client';
-import { CLAUDE_CREATE_TOKEN_INPUT, CLAUDE_MODEL_INPUT, CLAUDE_TOKEN_INPUT } from './setup-needs';
 import type { ClaudeCredentials } from './types';
+
+/** Asked only when `claude` is installed. */
+export const CLAUDE_CREATE_TOKEN_INPUT: InputSpec = {
+  label: 'How do you want to add Claude?', kind: 'choice', default: 'setupToken',
+  choices: [
+    { value: 'setupToken', label: 'Create a subscription token now (runs claude setup-token)' },
+    { value: 'paste', label: 'Paste a token or API key I already have' },
+  ],
+};
+const CLAUDE_TOKEN_INPUT: InputSpec = {
+  label: 'Token or API key', kind: 'secret',
+  help: 'Run `claude setup-token` for your subscription, or create an API key at console.anthropic.com',
+};
+const CLAUDE_MODEL_INPUT: InputSpec = { label: 'Default model', kind: 'text', required: false, help: 'Such as opus or sonnet; blank for Claude Code\'s default' };
 
 const getClaudeClient = createClientGetter<ClaudeCredentials, ClaudeClient>({
   service: 'claude',
@@ -23,9 +36,8 @@ export interface ClaudeProfileAddOptions extends ProfileAddOptions {
   model?: string;
 }
 
-/** In a terminal, offer to run `claude setup-token` so the token it shows can be pasted next. */
+/** Offer to run `claude setup-token` so the token it shows can be pasted next. */
 async function offerSetupToken(context: SetupContext): Promise<void> {
-  if (!context.runInTerminal) return;
   const claude = whichOnPath('claude');
   if (!claude) {
     context.log('`claude` is not installed here; prompts need it. Install it with `curl -fsSL https://claude.ai/install.sh | bash`. A token can still be added now.');
@@ -61,21 +73,20 @@ export function registerClaudeCommands(program: Command): void {
   const profile = createProfileCommands<ClaudeCredentials>(claude, { service: 'claude', displayName: 'Claude' });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add a Claude subscription token (offers to run claude setup-token) or an API key')
-        .option('--token <token>', 'Token from `claude setup-token`, or an API key (asked for when absent)')
-        .option('--model <model>', 'Default model, such as opus')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-    ).action(async (options: ClaudeProfileAddOptions) => {
-      try {
-        await addProfileWithSetup('claude', (o, context) => claudeProfileAdd(o as ClaudeProfileAddOptions, context), options);
-      } catch (error) {
-        handleError(error);
-      }
-    }),
+    profile
+      .command('add')
+      .description('Add a Claude subscription token (offers to run claude setup-token) or an API key')
+      .option('--token <token>', 'Token from `claude setup-token`, or an API key (asked for when absent)')
+      .option('--model <model>', 'Default model, such as opus')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+      .action(async (options: ClaudeProfileAddOptions) => {
+        try {
+          await addProfileWithSetup('claude', (o, context) => claudeProfileAdd(o as ClaudeProfileAddOptions, context), options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
     `Examples:
 
   # offers to run claude setup-token, then asks for the token it shows

@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { PocketAlertClient } from './client';
 import { pocketAlertProfileAdd, registerPocketAlertCommands } from './commands';
-import { POCKETALERT_SETUP_NEEDS } from './setup-needs';
 import type { PocketAlertCredentials } from './types';
 
 export default defineServicePlugin<PocketAlertCredentials>()({
@@ -12,7 +11,6 @@ export default defineServicePlugin<PocketAlertCredentials>()({
   brand: { url: 'https://pocketalert.app' },
   registerCommands: registerPocketAlertCommands,
   profile: {
-    needs: POCKETALERT_SETUP_NEEDS,
     setup: pocketAlertProfileAdd,
     createClient: (credentials) => new PocketAlertClient(credentials),
   },

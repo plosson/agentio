@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { readFile, writeFile } from 'fs/promises';
 import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { googleCamelSetup } from '../shared';
 import { GSheetsClient } from './client';
@@ -581,13 +581,11 @@ Formats: xlsx (default), pdf, csv, ods, tsv. csv and tsv are first sheet only.`,
     getExtraInfo: (credentials) => (credentials?.email ? ` - ${credentials.email}` : ''),
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Google Sheets profile')
-      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Google Sheets profile')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('gsheets', gsheetsProfileAdd, options);

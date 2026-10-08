@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { performJiraOAuthFlow } from './oauth';
 import { JiraClient } from './client';
@@ -217,19 +217,18 @@ Combine with AND / OR / NOT. Quote multi-word values.`,
     getExtraInfo: (credentials) => credentials?.siteUrl ? ` - ${credentials.siteUrl}` : '',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new JIRA profile with OAuth authentication')
-      .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-  ).action(async (options) => {
-    try {
-      await addProfileWithSetup('jira', jiraProfileAdd, options);
-    } catch (error) {
-      handleError(error);
-    }
-  });
+  profile
+    .command('add')
+    .description('Add a new JIRA profile with OAuth authentication')
+    .option('--profile <name>', 'Profile name (auto-detected from site URL if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    .action(async (options) => {
+      try {
+        await addProfileWithSetup('jira', jiraProfileAdd, options);
+      } catch (error) {
+        handleError(error);
+      }
+    });
 }
 
 export async function jiraProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<JiraCredentials>> {

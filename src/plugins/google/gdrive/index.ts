@@ -1,5 +1,4 @@
 import { gdriveProfileAdd, gdriveReauthenticate, registerGDriveCommands } from './commands';
-import { GDRIVE_SETUP_NEEDS } from '../setup-needs';
 import { GDriveClient } from './client';
 import type { GDriveCredentials } from './types';
 import type { GoogleCamelTokens } from '../tokens';
@@ -18,7 +17,6 @@ export default defineServicePlugin<GDriveCredentials, GoogleCamelTokens>()({
     createClient: (credentials) => new GDriveClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: gdriveReauthenticate(),
-    needs: GDRIVE_SETUP_NEEDS,
   },
   credentialLifecycle: googleCamelCredentialLifecycle,
 });

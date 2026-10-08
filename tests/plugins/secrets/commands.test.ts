@@ -20,6 +20,25 @@ describe('profile add', () => {
     expect(await revealed('smtp')).toEqual({});
   });
 
+  test('without --profile: an empty "default", then the next free name', async () => {
+    const first = await cli(['secrets', 'profile', 'add']);
+    expect(first.code).toBe(0);
+    expect(first.stdout).toContain('Profile "default" configured!');
+    expect(await revealed('default')).toEqual({});
+    const second = await cli(['secrets', 'profile', 'add']);
+    expect(second.code).toBe(0);
+    expect(second.stdout).toContain('Profile "default-2" configured!');
+    expect(await revealed('default-2')).toEqual({});
+  });
+
+  test('--read-only creates a profile whose set is refused', async () => {
+    const res = await cli(['secrets', 'profile', 'add', '--profile', 'ro', '--read-only']);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('Access: read-only');
+    expect((await cli(['secrets', 'set', 'A', 'a', '--profile', 'ro'])).code).toBe(exitCodeForError('PERMISSION_DENIED'));
+    expect(await revealed('ro')).toEqual({});
+  });
+
   test('commands on a profile that does not exist fail', async () => {
     expect((await cli(['secrets', 'get', 'A', '--profile', 'nope'])).code).toBe(exitCodeForError('PROFILE_NOT_FOUND'));
   });

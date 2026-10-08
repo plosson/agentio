@@ -46,9 +46,8 @@ export interface InputChoice {
   label: string;
 }
 
-/** One value setup needs. `id` keys it in `--input` and in answers. */
+/** One question setup asks, and how its answer is checked. */
 export interface InputSpec {
-  id: string;
   label: string;
   kind: InputKind;
   /** Default true. An optional value may be answered with ''. */
@@ -57,15 +56,6 @@ export interface InputSpec {
   help?: string;
   /** For `choice` only. */
   choices?: readonly InputChoice[];
-}
-
-/** How setup signs in, beyond its inputs. */
-export type AuthKind = 'none' | 'browser' | 'browser-code' | 'device-code' | 'pairing';
-
-/** What setup needs, known before it starts: printed by `profile add --describe --json`. */
-export interface SetupNeeds {
-  inputs: readonly InputSpec[];
-  auth: AuthKind;
 }
 
 export interface OAuthSetupOptions {
@@ -88,7 +78,7 @@ export interface OAuthSetupResult {
 }
 
 export interface SetupContext {
-  /** Ask for one value; checked against its spec. */
+  /** Ask one question in the terminal; the answer is checked against its spec. */
   ask(spec: InputSpec): Promise<string>;
   prompt(question: string, options?: { secret?: boolean }): Promise<string>;
   confirm(question: string): Promise<boolean>;
@@ -97,11 +87,8 @@ export interface SetupContext {
   oauth(options: OAuthSetupOptions): Promise<OAuthSetupResult>;
   fail(code: PluginErrorCode, message: string, suggestion?: string): never;
   fetch: typeof fetch;
-  /**
-   * Run a program attached to the user's terminal (its screen and keyboard), resolving to its exit
-   * code. Only setup in a terminal provides it: under --json, stdout carries events.
-   */
-  runInTerminal?(command: readonly string[]): Promise<number>;
+  /** Run a program attached to the user's terminal (its screen and keyboard), resolving to its exit code. */
+  runInTerminal(command: readonly string[]): Promise<number>;
 }
 
 export interface RunContext<Credentials extends object = Record<string, unknown>> {
@@ -158,7 +145,6 @@ export interface ProfileSpec<Credentials extends object> {
   validate(context: RunContext<Credentials>): Promise<ValidationResult>;
   reauthenticate?(credentials: Credentials | null, profileName: string, context: SetupContext): Promise<Credentials>;
   refresh?: RefreshSpec<Credentials>;
-  needs?: SetupNeeds;
 }
 
 export interface AgentioPlugin<Credentials extends object = Record<string, unknown>> {

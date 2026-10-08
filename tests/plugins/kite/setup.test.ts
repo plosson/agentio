@@ -98,9 +98,9 @@ test('ftp and garbage are refused before any request', async () => {
 
 test('without --url the URL is asked for, as a url', async () => {
   fake.nextDeviceApproval = { afterPolls: 1, email: EMAIL };
-  const ctx = fakeSetupContext({ url: fake.url }, opened);
+  const ctx = fakeSetupContext({ 'Kite server URL': fake.url }, opened);
   await kiteProfileAdd({}, ctx, deps());
-  expect(ctx.asked).toEqual([{ id: 'url', label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' }]);
+  expect(ctx.asked).toEqual([{ label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' }]);
 });
 
 test('the browser opens only after the code is printed', async () => {

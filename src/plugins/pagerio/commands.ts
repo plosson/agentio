@@ -5,14 +5,16 @@ import { addExamples } from '../../utils/command-tree';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { checkAnswer } from '../setup-inputs';
-import { PAGERIO_URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { PagerioClient, parsePagerUrl } from './client';
 import { printSentPage } from './output';
 import type { PagerioCredentials, PagerioPageInput } from './types';
+
+// The URL is a secret (anyone with it can page you), so it is `secret`, not `url`; parsePagerUrl checks its shape.
+const PAGERIO_URL_INPUT: InputSpec = { label: 'Pager URL', kind: 'secret', help: 'The Copy button on https://pagerio.chuut.com' };
 
 const getPagerioClient = createClientGetter<PagerioCredentials, PagerioClient>({
   service: 'pagerio',
@@ -102,14 +104,12 @@ export function registerPagerioCommands(program: Command): void {
   });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add a pager with its URL')
-        .option('--url <url>', 'Pager URL, from the dashboard\'s Copy button (asked for when absent)')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    )
+    profile
+      .command('add')
+      .description('Add a pager with its URL')
+      .option('--url <url>', 'Pager URL, from the dashboard\'s Copy button (asked for when absent)')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
       .action(async (options: PagerioProfileAddOptions) => {
         try {
           await addProfileWithSetup('pagerio', (o, context) => pagerioProfileAdd(o as PagerioProfileAddOptions, context), options);

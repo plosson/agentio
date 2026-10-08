@@ -13,15 +13,19 @@ let auth: FakeFetch | undefined;
 afterEach(() => { auth?.restore(); auth = undefined; });
 
 test('--api-key implies the key method and asks only for the model; a blank model is no model', async () => {
-  const context = fakeSetupContext({ model: '' });
+  const context = fakeSetupContext({ 'Default model': '' });
   const result = await chatGptProfileAdd({ apiKey: ' sk-x\n' }, context);
   expect(result.credentials).toEqual({ kind: 'apiKey', apiKey: 'sk-x' });
-  expect(context.asked.map((s) => s.id)).toEqual(['model']);
+  expect(result.suggestedProfileName).toBe('default');
+  expect(result.info ?? '').not.toContain('sk-x');
+  expect(context.asked.map((s) => s.label)).toEqual(['Default model']);
 });
 
-test('answers alone can choose the key method and give a model', async () => {
-  const result = await chatGptProfileAdd({}, fakeSetupContext({ method: 'apiKey', apiKey: 'sk-y', model: 'gpt-5.5' }));
+test('answers alone can choose the key method and give a model; the key is asked as a secret', async () => {
+  const context = fakeSetupContext({ 'Sign in with': 'apiKey', 'OpenAI API key': 'sk-y', 'Default model': 'gpt-5.5' });
+  const result = await chatGptProfileAdd({}, context);
   expect(result.credentials).toEqual({ kind: 'apiKey', apiKey: 'sk-y', model: 'gpt-5.5' });
+  expect(context.asked.find((s) => s.label === 'OpenAI API key')?.kind).toBe('secret');
 });
 
 test('an unknown method is refused before anything is asked or saved', async () => {
@@ -55,7 +59,7 @@ test('the ChatGPT method signs in on codex\'s registered port and path', async (
     },
   });
   const recorded: OAuthSetupOptions[] = [];
-  const context = fakeSetupContext({ method: 'chatgpt', model: 'gpt-5.5' });
+  const context = fakeSetupContext({ 'Sign in with': 'chatgpt', 'Default model': 'gpt-5.5' });
   context.oauth = async (options) => {
     recorded.push(options);
     return { code: 'c', redirectUri: 'http://localhost:1455/auth/callback' } as never;

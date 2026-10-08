@@ -1,18 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, writeFile, chmod } from 'fs/promises';
-import { existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname } from 'path';
 import { fakeSetupContext } from '../../../helpers/setup-context';
 import { withTempVault } from '../../../helpers/vault';
-import { runCli } from '../../../helpers/cli';
-import { gdriveProfileAdd, gdriveReauthenticate } from '../../../../src/plugins/google/gdrive/commands';
-import { GDRIVE_SETUP_NEEDS } from '../../../../src/plugins/google/setup-needs';
+import { spawnCli } from '../../../helpers/cli';
+import { GDRIVE_ACCESS_INPUT, gdriveProfileAdd, gdriveReauthenticate } from '../../../../src/plugins/google/gdrive/commands';
 import { SCOPES } from '../../../../src/plugins/google/oauth';
 import { CliError } from '../../../../src/utils/errors';
 import type { OAuthTokens } from '../../../../src/plugins/google/tokens';
 
-const vault = withTempVault('agentio-gdrive-json-', () => ({ config: { profiles: {} } as never }));
+const vault = withTempVault('agentio-gdrive-setup-', () => ({ config: { profiles: {} } as never }));
 
 const TOKENS: OAuthTokens = { access_token: 'at', refresh_token: 'rt-new', expiry_date: 1234, token_type: 'Bearer', scope: 'a b' };
 
@@ -54,7 +50,7 @@ describe('gdriveProfileAdd', () => {
 
   test('an answer outside the choices is refused, with no sign-in', async () => {
     const { services, performOAuth, fetchEmail } = stubs();
-    const error = await failure(() => gdriveProfileAdd({}, fakeSetupContext({ access: 'everything' }), performOAuth, fetchEmail));
+    const error = await failure(() => gdriveProfileAdd({}, fakeSetupContext({ Access: 'everything' }), performOAuth, fetchEmail));
     expect(error.code).toBe('INVALID_PARAMS');
     expect(error.message).toBe('Access must be one of: readonly, full');
     expect(services).toEqual([]);
@@ -62,7 +58,7 @@ describe('gdriveProfileAdd', () => {
 
   test('--read-only wins over an access answer: nothing is asked, read-only scopes are used', async () => {
     const { services, performOAuth, fetchEmail } = stubs();
-    const context = fakeSetupContext({ access: 'full' });
+    const context = fakeSetupContext({ Access: 'full' });
     const result = await gdriveProfileAdd({ readOnly: true }, context, performOAuth, fetchEmail);
     expect(context.asked).toEqual([]);
     expect(services).toEqual(['gdrive-readonly']);
@@ -80,9 +76,9 @@ describe('gdriveProfileAdd', () => {
 
   test('no flags: asks access once; the answer full signs in with gdrive-full', async () => {
     const { services, performOAuth, fetchEmail } = stubs();
-    const context = fakeSetupContext({ access: 'full' });
+    const context = fakeSetupContext({ Access: 'full' });
     const result = await gdriveProfileAdd({}, context, performOAuth, fetchEmail);
-    expect(context.asked).toEqual([GDRIVE_SETUP_NEEDS.inputs[0]]);
+    expect(context.asked).toEqual([GDRIVE_ACCESS_INPUT]);
     expect(services).toEqual(['gdrive-full']);
     expect(result.credentials).toEqual({
       accessToken: 'at', refreshToken: 'rt-new', expiryDate: 1234, tokenType: 'Bearer', scope: 'a b', email: 'a@b.c', accessLevel: 'full',
@@ -93,7 +89,7 @@ describe('gdriveProfileAdd', () => {
 
   test('no flags: the answer readonly signs in read-only', async () => {
     const { services, performOAuth, fetchEmail } = stubs();
-    const result = await gdriveProfileAdd({}, fakeSetupContext({ access: 'readonly' }), performOAuth, fetchEmail);
+    const result = await gdriveProfileAdd({}, fakeSetupContext({ Access: 'readonly' }), performOAuth, fetchEmail);
     expect(services).toEqual(['gdrive-readonly']);
     expect(result.info).toContain('API Access: Read-only');
   });
@@ -117,60 +113,18 @@ describe('gdrive reauthenticate', () => {
   });
 });
 
-describe('gdrive profile add --json', () => {
-  test('--describe --json prints exactly the needs', async () => {
-    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'gdrive', 'profile', 'add', '--describe', '--json'], { stdout: 'pipe', stderr: 'pipe', env: vault.env() });
-    expect(await proc.exited).toBe(0);
-    expect(JSON.parse(await new Response(proc.stdout).text())).toEqual({ v: 1, event: 'needs', service: 'gdrive', ...GDRIVE_SETUP_NEEDS });
-  }, 20_000);
-
-  test('an access value outside the choices is refused before anything opens', async () => {
-    const res = await runCli(['gdrive', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"access":"everything"}']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0]).toMatchObject({ code: 'INVALID_PARAMS', message: 'Access must be one of: readonly, full' });
-  }, 20_000);
-
-  test('an unknown input id is refused', async () => {
-    const res = await runCli(['gdrive', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"x":"1"}']);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0].message).toContain('Unknown setup value "x"');
-  }, 20_000);
-
-  test('stdin closed with no access value gives No answer for "Access", never a hang', async () => {
-    const res = await runCli(['gdrive', 'profile', 'add', '--json'], vault.env(), []);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'INVALID_PARAMS', message: 'No answer for "Access"' });
-  }, 20_000);
-
-  test('--readonly --full is refused with one error and no open', async () => {
-    const res = await runCli(['gdrive', 'profile', 'add', '--json', '--readonly', '--full'], vault.env(), []);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0]).toMatchObject({ code: 'INVALID_PARAMS', message: 'Choose one of --readonly and --full' });
-  }, 20_000);
-
-  test('{"access":"full"} prints an open URL with the full Drive scope and opens no browser', async () => {
-    const bin = await mkdtemp(join(tmpdir(), 'agentio-bin-'));
-    const mark = join(bin, 'opened');
-    for (const name of ['open', 'xdg-open']) {
-      await writeFile(join(bin, name), `#!/bin/sh\necho "$@" > "${mark}"\n`);
-      await chmod(join(bin, name), 0o755);
-    }
-    const env = { ...vault.env(), PATH: `${bin}:${process.env.PATH}` };
-    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'gdrive', 'profile', 'add', '--json', '--input', '-'], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env });
-    proc.stdin.write('{"access":"full"}\n');
-    proc.stdin.flush();
-    const reader = proc.stdout.getReader();
-    const { value } = await reader.read();
-    const event = JSON.parse(new TextDecoder().decode(value).split('\n')[0]);
-    expect(event.event).toBe('open');
-    const url = new URL(event.url);
+describe('gdrive profile add', () => {
+  test('--full prints a Google address with the full Drive scope, opens no browser, and a denied callback is AUTH_FAILED', async () => {
+    // Only bun on PATH: no browser opener can be found, so the address is printed instead.
+    const run = spawnCli(['gdrive', 'profile', 'add', '--full'], { ...vault.env(), PATH: dirname(process.execPath) });
+    const url = new URL((await run.printed(/visit:\n(\S+)/))[1]);
     const scope = url.searchParams.get('scope') ?? '';
     for (const wanted of SCOPES['gdrive-full']) expect(scope).toContain(wanted);
     expect(scope).not.toBe(SCOPES['gdrive-readonly'].join(' '));
-    const res = await fetch(`${url.searchParams.get('redirect_uri')}?error=access_denied`);
-    expect(res.status).toBe(200);
-    expect(await proc.exited).toBe(2);
-    expect(existsSync(mark)).toBe(false);
+    expect((await fetch(`${url.searchParams.get('redirect_uri')}?error=access_denied`)).status).toBe(200);
+    const res = await run.finish();
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('No browser could be opened on this machine.');
+    expect(res.stderr).toMatch(/Error \[AUTH_FAILED\]: .*access_denied/);
   }, 20_000);
 });

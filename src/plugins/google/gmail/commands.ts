@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { getValidTokens } from '../profile-tokens';
 import { createGoogleAuth } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { googleSnakeSetup } from '../shared';
 import { GmailClient } from './client';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
@@ -1140,19 +1140,18 @@ Requires Chrome, Chromium, or Microsoft Edge installed locally.`,
     getExtraInfo: (credentials) => credentials?.email ? ` - ${credentials.email}` : '',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Gmail profile')
-      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-  ).action(async (options) => {
-    try {
-      await addProfileWithSetup('gmail', gmailProfileAdd, options);
-    } catch (error) {
-      handleError(error);
-    }
-  });
+  profile
+    .command('add')
+    .description('Add a new Gmail profile')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
+    .action(async (options) => {
+      try {
+        await addProfileWithSetup('gmail', gmailProfileAdd, options);
+      } catch (error) {
+        handleError(error);
+      }
+    });
 }
 
 export const gmailProfileAdd = googleSnakeSetup('gmail', 'agentio gmail --help');

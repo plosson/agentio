@@ -1,17 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, writeFile, chmod } from 'fs/promises';
-import { existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname } from 'path';
 import { githubProfileAdd } from '../../../src/plugins/github/commands';
 import githubPlugin from '../../../src/plugins/github';
 import { performGitHubOAuthFlow } from '../../../src/plugins/github/oauth';
 import type { OAuthSetupOptions, SetupContext } from '../../../src/plugin-sdk';
 import { fakeSetupContext } from '../../helpers/setup-context';
 import { withTempVault } from '../../helpers/vault';
-import { runCli } from '../../helpers/cli';
+import { spawnCli } from '../../helpers/cli';
 
-const vault = withTempVault('agentio-github-json-', () => ({ config: { profiles: {} } as never }));
+const vault = withTempVault('agentio-github-setup-', () => ({ config: { profiles: {} } as never }));
 const REDIRECT = 'http://localhost:3001/callback';
 
 type Call = { url: string; init?: RequestInit };
@@ -103,45 +100,18 @@ describe('GitHub setup and sign in again', () => {
   });
 });
 
-describe('github profile add --json', () => {
-  test('--describe --json: a browser sign-in and nothing else', async () => {
-    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'github', 'profile', 'add', '--describe', '--json'], { stdout: 'pipe', stderr: 'pipe', env: vault.env() });
-    expect(await proc.exited).toBe(0);
-    expect(JSON.parse(await new Response(proc.stdout).text())).toEqual({ v: 1, event: 'needs', service: 'github', inputs: [], auth: 'browser' });
-  }, 20_000);
-
-  test('an unknown input id is refused before anything opens', async () => {
-    const res = await runCli(['github', 'profile', 'add', '--json', '--input', '-'], vault.env(), ['{"x":"1"}']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['error']);
-    expect(res.events[0]).toMatchObject({ code: 'INVALID_PARAMS' });
-  }, 20_000);
-
-  test('--json prints the GitHub address, opens no browser, and a denied callback is AUTH_FAILED', async () => {
-    const bin = await mkdtemp(join(tmpdir(), 'agentio-bin-'));
-    const mark = join(bin, 'opened');
-    for (const name of ['open', 'xdg-open']) {
-      await writeFile(join(bin, name), `#!/bin/sh\necho "$@" > "${mark}"\n`);
-      await chmod(join(bin, name), 0o755);
-    }
-    const env = { ...vault.env(), PATH: `${bin}:${process.env.PATH}` };
-    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'github', 'profile', 'add', '--json'], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env });
-    const reader = proc.stdout.getReader();
-    const { value } = await reader.read();
-    const event = JSON.parse(new TextDecoder().decode(value).split('\n')[0]);
-    expect(event.event).toBe('open');
-    const url = new URL(event.url);
+describe('github profile add', () => {
+  test('prints the GitHub address, opens no browser, and a denied callback is AUTH_FAILED', async () => {
+    // Only bun on PATH: no browser opener can be found, so the address is printed instead.
+    const run = spawnCli(['github', 'profile', 'add'], { ...vault.env(), PATH: dirname(process.execPath) });
+    const url = new URL((await run.printed(/visit:\n(\S+)/))[1]);
     expect(url.host).toBe('github.com');
     expect(url.pathname).toBe('/login/oauth/authorize');
     const redirect = url.searchParams.get('redirect_uri')!;
-    const res = await fetch(`${redirect}?error=access_denied`);
-    expect(res.status).toBe(200);
-    expect(await proc.exited).toBe(2);
-    let rest = '';
-    for (let r = await reader.read(); !r.done; r = await reader.read()) rest += new TextDecoder().decode(r.value);
-    const error = rest.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === 'error');
-    expect(error.code).toBe('AUTH_FAILED');
-    expect(error.message).toContain('access_denied');
-    expect(existsSync(mark)).toBe(false);
+    expect((await fetch(`${redirect}?error=access_denied`)).status).toBe(200);
+    const res = await run.finish();
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('No browser could be opened on this machine.');
+    expect(res.stderr).toMatch(/Error \[AUTH_FAILED\]: .*access_denied/);
   }, 20_000);
 });

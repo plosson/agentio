@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { SqlClient, scrubConnectionSecrets } from './client';
 import { CliError, handleError } from '../../utils/errors';
@@ -9,7 +9,12 @@ import { isProfileReadOnly } from '../../config/config-manager';
 import { addExamples } from '../../utils/command-tree';
 import type { SqlCredentials } from './types';
 import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
-import { SQL_URL_INPUT } from './setup-needs';
+
+// A connection URL holds the password, so it is a secret; `url` would refuse postgres:// and sqlite://.
+export const SQL_URL_INPUT: InputSpec = {
+  label: 'Connection URL', kind: 'secret',
+  help: 'postgres://user:password@host:5432/db, mysql://user:password@host:3306/db or sqlite:///path/to/file.db',
+};
 
 const getSqlClient = createClientGetter<SqlCredentials, SqlClient>({
   service: 'sql',
@@ -89,14 +94,12 @@ export function registerSqlCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.displayName ? ` - ${credentials.displayName}` : '',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new SQL database profile')
-      .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
-      .option('--interactive', 'Interactive mode: prompt for individual connection components')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new SQL database profile')
+    .option('--profile <name>', 'Profile name (auto-detected from connection if not provided)')
+    .option('--interactive', 'Interactive mode: prompt for individual connection components')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('sql', sqlProfileAdd, options);
@@ -155,20 +158,20 @@ export async function sqlProfileAdd(options: { profile?: string; interactive?: b
   return { credentials, suggestedProfileName: displayName.replaceAll('/', '-'), info: 'Test with: agentio sql query "SELECT 1"' };
 }
 
-// Asked at run time, not declared in the needs: the parts depend on the database type.
+// The parts asked depend on the database type.
 const DB_TYPE_INPUT: InputSpec = {
-  id: 'dbType', label: 'Database type', kind: 'choice',
+  label: 'Database type', kind: 'choice',
   choices: [
     { value: 'postgres', label: 'PostgreSQL' },
     { value: 'mysql', label: 'MySQL' },
     { value: 'sqlite', label: 'SQLite' },
   ],
 };
-const PATH_INPUT: InputSpec = { id: 'path', label: 'Database file path', kind: 'text' };
-const HOST_INPUT: InputSpec = { id: 'host', label: 'Host', kind: 'text', default: 'localhost' };
-const DATABASE_INPUT: InputSpec = { id: 'database', label: 'Database name', kind: 'text' };
-const USER_INPUT: InputSpec = { id: 'user', label: 'Username', kind: 'text' };
-const PASSWORD_INPUT: InputSpec = { id: 'password', label: 'Password', kind: 'secret', required: false };
+const PATH_INPUT: InputSpec = { label: 'Database file path', kind: 'text' };
+const HOST_INPUT: InputSpec = { label: 'Host', kind: 'text', default: 'localhost' };
+const DATABASE_INPUT: InputSpec = { label: 'Database name', kind: 'text' };
+const USER_INPUT: InputSpec = { label: 'Username', kind: 'text' };
+const PASSWORD_INPUT: InputSpec = { label: 'Password', kind: 'secret', required: false };
 
 async function promptInteractiveConnection(context: SetupContext): Promise<string> {
   context.log('\nSQL Database Setup (Interactive)\n');
@@ -183,7 +186,7 @@ async function promptInteractiveConnection(context: SetupContext): Promise<strin
   // For postgres/mysql, collect connection components
   const defaultPort = dbType === 'postgres' ? '5432' : '3306';
   const host = await context.ask(HOST_INPUT);
-  const port = await context.ask({ id: 'port', label: 'Port', kind: 'text', default: defaultPort, required: false }) || defaultPort;
+  const port = await context.ask({ label: 'Port', kind: 'text', default: defaultPort, required: false }) || defaultPort;
   const database = await context.ask(DATABASE_INPUT);
   const username = await context.ask(USER_INPUT);
   const password = await context.ask(PASSWORD_INPUT);

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { withTempVault } from '../helpers/vault';
-import { runCli } from '../helpers/cli';
+import { runCli, spawnCli } from '../helpers/cli';
 import { FakeKite } from '../plugins/kite/fake-kite';
 import { getCredentials } from '../../src/auth/token-store';
 import { deleteProfile } from '../../src/config/profile-store';
@@ -14,21 +14,22 @@ import type { KiteCredentials } from '../../src/plugins/kite/types';
 import type { RevolutCredentials } from '../../src/plugins/revolut/types';
 
 /**
- * `profile reauth --json`: the CLI in its own process, against a fake Kite. The seeded Kite profile
- * is read-only and points at the fake, so a re-sign-in reaches nothing else.
+ * `profile reauth` in a terminal: the CLI in its own process, against a fake Kite. The seeded Kite
+ * profile is read-only and points at the fake, so a re-sign-in reaches nothing else. Only bun is on
+ * PATH: no browser opener can be found, so nothing opens, and the address to open is on stderr.
  */
 
 const PASSPHRASE = 'reauth-pw-12345';
 const OLD_EMAIL = 'old@example.com';
 const OLD_TOKEN = 'old-token';
 let fake: FakeKite;
-// Revolut is the plugin that is not migrated: a private key file plus a pasted redirect.
+// Revolut signs in again with its private key, which a hub never hands out.
 const REVOLUT: RevolutCredentials = {
   environment: 'sandbox', clientId: 'cid', privateKey: 'pem', redirectUri: 'https://example.com/cb',
   accessToken: 'a', refreshToken: 'r', expiryDate: 0,
 };
 
-const vault = withTempVault('agentio-reauth-json-', () => {
+const vault = withTempVault('agentio-reauth-flow-', () => {
   fake = new FakeKite();
   return {
     passphrase: PASSPHRASE,
@@ -50,8 +51,8 @@ const vault = withTempVault('agentio-reauth-json-', () => {
 });
 afterEach(() => fake.stop());
 
-const cli = (args: string[], lines: string[] = [], env: Record<string, string> = {}) =>
-  runCli(args, { ...vault.env(), ...env }, lines);
+const TERMINAL = { PATH: dirname(process.execPath) };
+const cli = (args: string[]) => runCli(args, { ...vault.env(), ...TERMINAL });
 
 /** Start a reauth, delete the profile once the code is out and before approval, then approve. */
 async function deletedDuringSignIn(run: () => Promise<Awaited<ReturnType<typeof runCli>>>) {
@@ -64,11 +65,8 @@ async function deletedDuringSignIn(run: () => Promise<Awaited<ReturnType<typeof 
   return pending;
 }
 
-const GONE = {
-  v: 1, event: 'error', code: 'PROFILE_NOT_FOUND',
-  message: `Profile "${OLD_EMAIL}" no longer exists for kite`,
-  suggestion: 'Add it again with: agentio kite profile add',
-};
+const GONE = `Error [PROFILE_NOT_FOUND]: Profile "${OLD_EMAIL}" no longer exists for kite
+Suggestion: Add it again with: agentio kite profile add`;
 
 async function expectKiteGone(): Promise<void> {
   clearVaultCache();
@@ -82,37 +80,33 @@ async function storedKite(profile = OLD_EMAIL): Promise<KiteCredentials | null> 
   return getCredentials<KiteCredentials>('kite', profile);
 }
 
-describe('profile reauth --json, local vault', () => {
-  test('the code, the address to open, then reauthed; the profile keeps its name and read-only flag', async () => {
+describe('profile reauth, local vault', () => {
+  test('signs in again and saves: the profile keeps its name and read-only flag, no secret is printed', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };
     const started = Date.now();
-    const res = await cli(['profile', 'reauth', 'kite', OLD_EMAIL, '--json']);
+    const res = await cli(['profile', 'reauth', 'kite', OLD_EMAIL]);
     // It ends by itself once saved; the helper's kill is not what stops it.
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(res.exitCode).toBe(0);
     const device = [...fake.devices.values()][0];
-    const page = `${fake.url}/auth/device?code=${device.userCode}`;
-    expect(res.events).toEqual([
-      { v: 1, event: 'code', userCode: device.userCode, verificationUrl: page, expiresIn: 600 },
-      { v: 1, event: 'open', url: page },
-      { v: 1, event: 'reauthed', service: 'kite', profile: OLD_EMAIL },
-    ]);
+    expect(res.stderr).toContain(`To sign in to Kite, open:\n  ${fake.url}/auth/device?code=${device.userCode}`);
+    expect(res.events).toEqual([]);
     const saved = await storedKite();
     expect(saved?.token).not.toBe(OLD_TOKEN);
     expect(fake.tokens.get(saved!.token)).toBe(OLD_EMAIL);
     expect(saved?.email).toBe(OLD_EMAIL);
     expect(saved?.baseUrl).toBe(fake.url);
-    // Secrets never reach stdout.
-    expect(res.stdout).not.toContain(saved!.token);
-    expect(res.stdout).not.toContain(device.deviceCode);
+    for (const secret of [saved!.token, device.deviceCode]) {
+      expect(res.stdout).not.toContain(secret);
+      expect(res.stderr).not.toContain(secret);
+    }
     expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
   }, 30_000);
 
   test('signing in as another account stores that account under the same profile name', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: 'new@example.com' };
-    const res = await cli(['profile', 'reauth', 'kite', OLD_EMAIL, '--json']);
+    const res = await cli(['profile', 'reauth', 'kite', OLD_EMAIL]);
     expect(res.exitCode).toBe(0);
-    expect(res.events.at(-1)).toEqual({ v: 1, event: 'reauthed', service: 'kite', profile: OLD_EMAIL });
     const saved = await storedKite();
     expect(saved?.email).toBe('new@example.com');
     expect(fake.tokens.get(saved!.token)).toBe('new@example.com');
@@ -120,73 +114,37 @@ describe('profile reauth --json, local vault', () => {
     expect(await storedKite('new@example.com')).toBeNull();
   }, 30_000);
 
-  test('a service without declared needs is refused, and its credentials are left alone', async () => {
-    const res = await cli(['profile', 'reauth', 'revolut', 'biz', '--json']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events).toEqual([{
-      v: 1, event: 'error', code: 'INVALID_PARAMS',
-      message: 'revolut cannot be signed in again with --json yet',
-      suggestion: 'Run: agentio profile reauth revolut biz',
-    }]);
-    clearVaultCache();
-    expect(await getCredentials('revolut', 'biz')).toMatchObject({ accessToken: 'a', refreshToken: 'r' });
-  }, 30_000);
-
   test('a profile that does not exist is PROFILE_NOT_FOUND, before anything is opened or requested', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };
-    const res = await cli(['profile', 'reauth', 'kite', 'nobody@example.com', '--json']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events).toEqual([expect.objectContaining({ event: 'error', code: 'PROFILE_NOT_FOUND' })]);
+    const res = await cli(['profile', 'reauth', 'kite', 'nobody@example.com']);
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toContain('Error [PROFILE_NOT_FOUND]');
+    expect(res.stderr).not.toContain('To sign in to Kite');
     expect(fake.requests()).toEqual([]);
     expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
   }, 30_000);
 
   test('a profile deleted while the sign-in runs is not brought back: PROFILE_NOT_FOUND, nothing created', async () => {
-    const res = await deletedDuringSignIn(() => cli(['profile', 'reauth', 'kite', OLD_EMAIL, '--json']));
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['code', 'open', 'error']);
-    expect(res.events.at(-1)).toEqual(GONE);
+    const res = await deletedDuringSignIn(() => cli(['profile', 'reauth', 'kite', OLD_EMAIL]));
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toContain('To sign in to Kite, open:');
+    expect(res.stderr).toContain(GONE);
     await expectKiteGone();
   }, 30_000);
 
-  test('a refused sign-in saves nothing and ends with an error event', async () => {
+  test('a refused sign-in saves nothing and ends with AUTH_FAILED', async () => {
     fake.nextDeviceApproval = undefined;
-    const run = cli(['profile', 'reauth', 'kite', OLD_EMAIL, '--json']);
+    const run = cli(['profile', 'reauth', 'kite', OLD_EMAIL]);
     for (let i = 0; i < 200 && fake.devices.size === 0; i++) await Bun.sleep(25);
     fake.deny([...fake.devices.values()][0].userCode);
     const res = await run;
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.at(-1)).toMatchObject({ event: 'error', code: 'AUTH_FAILED' });
-    expect(res.events.some((e) => e.event === 'reauthed')).toBe(false);
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain('Error [AUTH_FAILED]');
     expect((await storedKite())?.token).toBe(OLD_TOKEN);
-  }, 30_000);
-
-  test('Dropbox asks for the code through stdin; a closed stdin ends the run without reaching Dropbox', async () => {
-    const res = await cli(['profile', 'reauth', 'dropbox', 'box', '--json']);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events[0].event).toBe('open');
-    const open = new URL(res.events[0].url);
-    expect(open.searchParams.get('client_id')).toBe('my-app-key');
-    expect(res.events[1]).toEqual({ v: 1, event: 'ask', id: 'code', label: 'Code Dropbox shows after you allow access', kind: 'secret' });
-    expect(res.events[2]).toMatchObject({ event: 'error', code: 'INVALID_PARAMS', message: 'No answer for "Code Dropbox shows after you allow access"' });
-    expect(res.events).toHaveLength(3);
-  }, 30_000);
-
-  test('without --json the terminal flow still signs in again and saves', async () => {
-    fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };
-    // Only bun on PATH: no browser opener can be found, so nothing opens.
-    const res = await cli(['profile', 'reauth', 'kite', OLD_EMAIL], [], { PATH: dirname(process.execPath) });
-    expect(res.exitCode).toBe(0);
-    expect(res.events).toEqual([]);
-    expect(res.stderr).toContain('To sign in to Kite, open:');
-    const saved = await storedKite();
-    expect(saved?.token).not.toBe(OLD_TOKEN);
-    expect(fake.tokens.get(saved!.token)).toBe(OLD_EMAIL);
-    expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
   }, 30_000);
 });
 
-describe('profile reauth --json against a hub', () => {
+describe('profile reauth against a hub', () => {
   let server: ReturnType<typeof Bun.serve>;
   let hubUrl = '';
   let clientHome = '';
@@ -207,7 +165,7 @@ describe('profile reauth --json against a hub', () => {
 
   /** The CLI as an agent runs it: no vault of its own, only a key to the hub. */
   const remote = (args: string[], token: string) => runCli(args, {
-    PATH: process.env.PATH ?? '',
+    ...TERMINAL,
     HOME: clientHome,
     AGENTIO_HOME: join(clientHome, '.config', 'agentio'),
     AGENTIO_TOKEN: token,
@@ -216,12 +174,12 @@ describe('profile reauth --json against a hub', () => {
   test('a key without the managing right gets the same refusal as profile add, before anything opens', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };
     const token = (await createApiKey({ name: 'agent', allowedProfiles: [`kite/${OLD_EMAIL}`] }, hubUrl)).token;
-    const reauth = await remote(['profile', 'reauth', 'kite', OLD_EMAIL, '--json'], token);
-    const add = await remote(['kite', 'profile', 'add', '--json'], token);
-    expect(reauth.exitCode).not.toBe(0);
-    expect(reauth.events).toHaveLength(1);
-    expect(reauth.events[0]).toMatchObject({ event: 'error', code: 'PERMISSION_DENIED' });
-    expect(reauth.events).toEqual(add.events);
+    const reauth = await remote(['profile', 'reauth', 'kite', OLD_EMAIL], token);
+    const add = await remote(['kite', 'profile', 'add', '--url', fake.url], token);
+    expect(reauth.exitCode).toBe(2);
+    expect(reauth.stderr).toStartWith('Error [PERMISSION_DENIED]');
+    expect(reauth.stderr).not.toContain('To sign in to Kite');
+    expect([add.exitCode, add.stderr]).toEqual([reauth.exitCode, reauth.stderr]);
     expect(fake.requests()).toEqual([]);
     expect((await loadVault()).credentials.kite?.[OLD_EMAIL]).toMatchObject({ token: OLD_TOKEN });
   }, 30_000);
@@ -229,23 +187,23 @@ describe('profile reauth --json against a hub', () => {
   test('a managing key signs in again on the hub: same name, same read-only flag, new credentials', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: 'new@example.com' };
     const token = (await createApiKey({ name: 'manager', allowedProfiles: [`kite/${OLD_EMAIL}`], canManageProfiles: true }, hubUrl)).token;
-    const res = await remote(['profile', 'reauth', 'kite', OLD_EMAIL, '--json'], token);
+    const res = await remote(['profile', 'reauth', 'kite', OLD_EMAIL], token);
     expect(res.exitCode).toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['code', 'open', 'reauthed']);
-    expect(res.events.at(-1)).toEqual({ v: 1, event: 'reauthed', service: 'kite', profile: OLD_EMAIL });
+    expect(res.stderr).toContain('To sign in to Kite, open:');
     const saved = await getCredentials<KiteCredentials>('kite', OLD_EMAIL);
     expect(saved?.email).toBe('new@example.com');
     expect(fake.tokens.get(saved!.token)).toBe('new@example.com');
     expect(res.stdout).not.toContain(saved!.token);
+    expect(res.stderr).not.toContain(saved!.token);
     expect((await loadVault()).config.profiles.kite).toEqual([{ name: OLD_EMAIL, readOnly: true }]);
   }, 30_000);
 
   test('a profile the owner deletes while a managing key signs in again is not brought back', async () => {
     const token = (await createApiKey({ name: 'manager', allowedProfiles: [`kite/${OLD_EMAIL}`], canManageProfiles: true }, hubUrl)).token;
-    const res = await deletedDuringSignIn(() => remote(['profile', 'reauth', 'kite', OLD_EMAIL, '--json'], token));
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events.map((e) => e.event)).toEqual(['code', 'open', 'error']);
-    expect(res.events.at(-1)).toEqual(GONE);
+    const res = await deletedDuringSignIn(() => remote(['profile', 'reauth', 'kite', OLD_EMAIL], token));
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toContain('To sign in to Kite, open:');
+    expect(res.stderr).toContain(GONE);
     await expectKiteGone();
   }, 30_000);
 
@@ -269,49 +227,27 @@ describe('profile reauth --json against a hub', () => {
     expect(await bad.json()).toMatchObject({ code: 'INVALID_PARAMS', error: 'replaceOnly must be true or false' });
   }, 30_000);
 
-  for (const json of [true, false]) {
-    test(`a plugin whose sign-in does not re-issue every secret is refused from a remote machine${json ? ' (--json)' : ''}`, async () => {
-      const token = (await createApiKey({ name: 'manager', allowedProfiles: ['revolut/biz'], canManageProfiles: true }, hubUrl)).token;
-      const res = await remote(['profile', 'reauth', 'revolut', 'biz', ...(json ? ['--json'] : [])], token);
-      expect(res.exitCode).not.toBe(0);
-      const refusal = {
-        code: 'INVALID_PARAMS',
-        message: 'revolut cannot be signed in again from this machine yet',
-        suggestion: 'Run on the hub: agentio profile reauth revolut biz',
-      };
-      if (json) {
-        expect(res.events).toEqual([{ v: 1, event: 'error', ...refusal }]);
-      } else {
-        expect(res.events).toEqual([]);
-        expect(res.stderr).toContain(refusal.message);
-        expect(res.stderr).toContain(refusal.suggestion);
-      }
-      clearVaultCache();
-      expect((await loadVault()).credentials.revolut?.biz).toMatchObject({ accessToken: 'a', refreshToken: 'r' });
-    }, 30_000);
-  }
+  test('Revolut, whose sign-in needs the private key a hub never hands out, is refused from a remote machine', async () => {
+    const token = (await createApiKey({ name: 'manager', allowedProfiles: ['revolut/biz'], canManageProfiles: true }, hubUrl)).token;
+    const res = await remote(['profile', 'reauth', 'revolut', 'biz'], token);
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stderr).toContain(`Error [INVALID_PARAMS]: revolut cannot be signed in again from this machine yet
+Suggestion: Run on the hub: agentio profile reauth revolut biz`);
+    // Refused before the consent address is built.
+    expect(res.stderr).not.toContain('Re-authenticating');
+    clearVaultCache();
+    expect((await loadVault()).credentials.revolut?.biz).toEqual({ ...REVOLUT });
+  }, 30_000);
 
-  test('Calendar, a plugin that declares needs, is accepted from a remote machine and stops at the Google callback', async () => {
+  test('Calendar, whose sign-in issues every secret afresh, is accepted from a remote machine and stops at the Google callback', async () => {
     const token = (await createApiKey({ name: 'manager', allowedProfiles: ['gcal/cal@example.com'], canManageProfiles: true }, hubUrl)).token;
-    const proc = Bun.spawn(['bun', 'run', 'src/index.ts', 'profile', 'reauth', 'gcal', 'cal@example.com', '--json'], {
-      stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
-      env: { PATH: process.env.PATH ?? '', HOME: clientHome, AGENTIO_HOME: join(clientHome, '.config', 'agentio'), AGENTIO_TOKEN: token, NO_COLOR: '1' },
-    });
-    const timer = setTimeout(() => proc.kill(), 25_000);
-    const reader = proc.stdout.getReader();
-    const { value } = await reader.read();
-    const open = JSON.parse(new TextDecoder().decode(value).split('\n')[0]);
-    expect(open.event).toBe('open');
-    const url = new URL(open.url);
+    const run = spawnCli(['profile', 'reauth', 'gcal', 'cal@example.com'], { ...TERMINAL, HOME: clientHome, AGENTIO_HOME: join(clientHome, '.config', 'agentio'), AGENTIO_TOKEN: token });
+    const url = new URL((await run.printed(/visit:\n(\S+)/))[1]);
     expect(url.host).toBe('accounts.google.com');
     expect((await fetch(`${url.searchParams.get('redirect_uri')}?error=access_denied`)).status).toBe(200);
-    expect(await proc.exited).not.toBe(0);
-    clearTimeout(timer);
-    let rest = '';
-    for (let r = await reader.read(); !r.done; r = await reader.read()) rest += new TextDecoder().decode(r.value);
-    const error = rest.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === 'error');
-    expect(error).toMatchObject({ v: 1, event: 'error', code: 'AUTH_FAILED' });
-    expect(error.message).toContain('access_denied');
+    const res = await run.finish();
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toMatch(/Error \[AUTH_FAILED\]: .*access_denied/);
     clearVaultCache();
     expect((await loadVault()).credentials.gcal?.['cal@example.com']).toMatchObject({ access_token: 'a', refresh_token: 'r' });
   }, 30_000);
@@ -319,9 +255,9 @@ describe('profile reauth --json against a hub', () => {
   test('a managing key cannot sign in again a profile outside its allow-list', async () => {
     fake.nextDeviceApproval = { afterPolls: 1, email: OLD_EMAIL };
     const token = (await createApiKey({ name: 'narrow', allowedProfiles: ['gcal/cal@example.com'], canManageProfiles: true }, hubUrl)).token;
-    const res = await remote(['profile', 'reauth', 'kite', OLD_EMAIL, '--json'], token);
-    expect(res.exitCode).not.toBe(0);
-    expect(res.events).toEqual([expect.objectContaining({ event: 'error', code: 'PROFILE_NOT_FOUND' })]);
+    const res = await remote(['profile', 'reauth', 'kite', OLD_EMAIL], token);
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toStartWith('Error [PROFILE_NOT_FOUND]');
     expect(fake.requests()).toEqual([]);
     expect((await loadVault()).credentials.kite?.[OLD_EMAIL]).toMatchObject({ token: OLD_TOKEN });
   }, 30_000);
@@ -370,18 +306,18 @@ describe('profile reauth --json against a hub', () => {
       expect(plain.status).toBe(other.status);
     });
 
-    test('profile reauth --json reaches the sign-in instead of stopping at the dead refresh', async () => {
-      const res = await remote(['profile', 'reauth', 'dropbox', 'box', '--json'], await manager());
-      expect(res.exitCode).not.toBe(0);
-      expect(res.events.map((e) => e.event)).toEqual(['open', 'ask', 'error']);
-      expect(new URL(res.events[0].url).searchParams.get('client_id')).toBe('my-app-key');
-      expect(res.events[2]).toMatchObject({ code: 'INVALID_PARAMS', message: 'No answer for "Code Dropbox shows after you allow access"' });
+    test('profile reauth reaches the sign-in instead of stopping at the dead refresh', async () => {
+      // stdin is closed, so the sign-in stops at the code question: nothing reaches Dropbox.
+      const res = await remote(['profile', 'reauth', 'dropbox', 'box'], await manager());
+      const address = res.stderr.match(/https:\/\/www\.dropbox\.com\/oauth2\/authorize\S+/)?.[0];
+      expect(address).toBeDefined();
+      expect(new URL(address!).searchParams.get('client_id')).toBe('my-app-key');
       expect(refreshCalls).toBe(0);
       expect((await loadVault()).credentials.dropbox?.box).toMatchObject({ refreshToken: 'r', accessToken: 'a' });
     }, 30_000);
   });
 
-  test('a credentials read the hub refuses for another reason is an error event, before anything opens', async () => {
+  test('a credentials read the hub refuses for another reason is an error, before anything opens', async () => {
     const paths: string[] = [];
     const broken = Bun.serve({
       port: 0,
@@ -396,11 +332,11 @@ describe('profile reauth --json against a hub', () => {
     });
     try {
       const token = (await createApiKey({ name: 'k', allowedProfiles: '*', canManageProfiles: true }, `http://127.0.0.1:${broken.port}`)).token;
-      const res = await remote(['profile', 'reauth', 'dropbox', 'box', '--json'], token);
+      const res = await remote(['profile', 'reauth', 'dropbox', 'box'], token);
       expect(res.exitCode).not.toBe(0);
-      expect(res.events).toEqual([expect.objectContaining({
-        event: 'error', code: 'NOT_FOUND', message: expect.stringContaining('Plugin "dropbox" is not installed on this hub'),
-      })]);
+      expect(res.stderr).toStartWith('Error [NOT_FOUND]: ');
+      expect(res.stderr).toContain('Plugin "dropbox" is not installed on this hub');
+      expect(res.stderr).not.toContain('dropbox.com/oauth2');
       // The reauth asked for the stored credentials, not a refresh.
       expect(paths).toContain('POST /v1/profiles/dropbox/box/credentials?refresh=false');
     } finally {

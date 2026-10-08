@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { ClaudeClient } from './client';
 import { claudeProfileAdd, registerClaudeCommands } from './commands';
-import { CLAUDE_SETUP_NEEDS } from './setup-needs';
 import type { ClaudeCredentials } from './types';
 
 export default defineServicePlugin<ClaudeCredentials>()({
@@ -12,7 +11,6 @@ export default defineServicePlugin<ClaudeCredentials>()({
   brand: { url: 'https://claude.ai' },
   registerCommands: registerClaudeCommands,
   profile: {
-    needs: CLAUDE_SETUP_NEEDS,
     setup: claudeProfileAdd,
     createClient: (credentials) => new ClaudeClient(credentials),
     describe: (credentials) => ({
