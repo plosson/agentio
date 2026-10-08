@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { installGuide } from '../../../src/daemon/install-guide';
 import {
   accessCell,
   accountShown,
@@ -26,6 +27,8 @@ import {
   serviceNames,
   welcomeServices,
   loginCommand,
+  connectPrompt,
+  INSTALL_COMMAND,
   machineCanUse,
   machinesUsing,
   paneOf,
@@ -192,6 +195,14 @@ describe('commands', () => {
     expect(reauthCommand('gmail', 'my work')).toBe("agentio profile reauth gmail 'my work'");
     expect(addCommand('jira')).toBe('agentio jira profile add');
     expect(loginCommand('https://agentio.chuut.com')).toBe('agentio login https://agentio.chuut.com');
+  });
+
+  test('the prompt for an agent points at this hub\'s install.md, which shows the same commands as the page', () => {
+    expect(connectPrompt('https://agentio.chuut.com')).toBe('Set up agentio so you can use my profiles: follow https://agentio.chuut.com/install.md');
+    expect(connectPrompt('http://127.0.0.1:7890')).toEndWith(' http://127.0.0.1:7890/install.md');
+    const guide = installGuide('https://agentio.chuut.com');
+    expect(guide).toContain(`    ${INSTALL_COMMAND}\n`);
+    expect(guide).toContain(`    ${loginCommand('https://agentio.chuut.com')}\n`);
   });
 
   test('fixCommand reauths where the plugin supports it, else adds the profile again by name', () => {

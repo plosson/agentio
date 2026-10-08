@@ -123,6 +123,9 @@ window.addEventListener('hashchange', async () => {
   state.ui.renameDraft = undefined;
   state.ui.byHand = false;
   state.ui.editScope = null;
+  state.ui.entrance = true;
+  state.ui.connected = null;
+  state.ui.connectOpen = false;
   clearToasts();
   render();
   // A new page starts at the top of the details. Focus moves to it for screen readers, without scrolling.

@@ -228,6 +228,14 @@ export function loginCommand(origin: string): string {
   return `agentio login ${shellQuote(origin)}`;
 }
 
+/** Installs agentio on macOS or Linux; the hub's install.md and Connect card both show it. */
+export const INSTALL_COMMAND = 'curl -LsSf https://agentio.houlahop.com/install | sh';
+
+/** The sentence an owner pastes into their agent: the hub's install.md does the rest. */
+export function connectPrompt(origin: string): string {
+  return `Set up agentio so you can use my profiles: follow ${origin}/install.md`;
+}
+
 // ---------- Data the page receives ----------
 
 export type Status = 'ok' | 'invalid' | 'no-creds' | 'skipped' | 'testing';

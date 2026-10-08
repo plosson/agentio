@@ -496,3 +496,48 @@ describe('daemon HTTP surface', () => {
     expect(html).not.toContain('"json":');
   });
 });
+
+describe('/install.md', () => {
+  test('is public, even locked and without a session, and names this hub in the login command', async () => {
+    const res = await call('/install.md');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/markdown; charset=utf-8');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = await res.text();
+    expect(body).toContain('    agentio login http://hub\n');
+    expect(body).toContain('curl -LsSf https://agentio.houlahop.com/install | sh');
+  });
+
+  test('behind the TLS proxy it says https, and keeps a port', async () => {
+    const proxied = await (await call('/install.md', { headers: { 'x-forwarded-proto': 'https' } })).text();
+    expect(proxied).toContain('agentio login https://hub\n');
+    expect(proxied).not.toContain('http://hub');
+    const res = await handle(new Request('http://hub.example:7890/install.md'), peer);
+    expect(await res.text()).toContain('agentio login http://hub.example:7890\n');
+  });
+
+  test('a forwarded protocol other than https stays http', async () => {
+    const body = await (await call('/install.md', { headers: { 'x-forwarded-proto': 'https, http' } })).text();
+    expect(body).toContain('agentio login http://hub\n');
+  });
+
+  test('a host that is not a plain host name gets no guide', async () => {
+    for (const host of ['hub_under', 'a!b', 'a$b']) {
+      const res = await handle(new Request(`http://${host}/install.md`), peer);
+      expect(res.status).toBe(400);
+      expect(await res.text()).not.toContain('agentio login');
+    }
+  });
+
+  test('says nothing about the vault: no profile, service or key', async () => {
+    await unlock();
+    const body = await (await call('/install.md')).text();
+    for (const secret of ['discourse', 'bot', 'slack', 'empty']) expect(body).not.toContain(secret);
+  });
+
+  test('only GET, only that exact path', async () => {
+    expect((await call('/install.md', { method: 'POST' })).status).toBe(404);
+    expect((await call('/install.md/')).status).toBe(404);
+    expect((await call('/INSTALL.md')).status).toBe(404);
+  });
+});

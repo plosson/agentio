@@ -182,7 +182,7 @@ describe('the assembled admin page', () => {
     // The button asks the app; an older app without the call does nothing rather than throw.
     expect(script).toMatch(/ACTIONS\['app-sign-in-again'\] = \(\) => window\.agentioCompanion\?\.signInAgain\?\.\(\);/);
     // It joins the waiting sign-ins under the header, and stays off the approval page.
-    expect(script).toContain("const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + signInBanner().__html;");
+    expect(script).toContain("const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + (showsRequests(route) ? '' : signInBanner().__html);");
   });
 
   test('an empty vault welcomes the owner with service cards, not a command', () => {
@@ -459,14 +459,80 @@ describe('the assembled admin page', () => {
     expect(script).toContain('Revoke instead');
   });
 
-  test('overview: first tab, the vault in the display panel, recently seen machines, no activity log', () => {
+  test('overview: the connect card first, then the accounts and the connected machines; no activity log', () => {
     expect(script).toMatch(/VIEWS\.overview = /);
     expect(INDEX_HTML).toMatch(/<nav class="tabs" id="tabs" aria-label="Main">\s*<a href="#overview" data-tab="overview">/);
-    expect(script).toContain("displayPanel('In the vault'");
-    expect(script).toContain('<h2>Recently seen</h2>');
-    expect(script).toContain('recentlySeen(');
+    const overview = script.slice(script.indexOf('VIEWS.overview ='), script.indexOf('// ---------- An empty vault: welcome'));
+    expect(overview.indexOf('connectCard({ compact: state.keys.length > 0 })')).toBeLessThan(overview.indexOf('profilesCard(s, now)'));
+    expect(overview.indexOf('profilesCard(s, now)')).toBeLessThan(overview.indexOf('machinesCard(now)'));
+    // Problems first, a few at most, each with its last test; Test all is the page's own action.
+    expect(overview).toContain('problemsFirst(state.rows, state.results)');
+    expect(overview).toContain('.slice(0, PROFILES_SHOWN)');
+    expect(overview).toContain('data-action="test-all"');
+    expect(overview).toContain('recentlySeen(state.keys, RECENT)');
     expect(script).toContain('attentionParts(');
+    expect(script).not.toContain("displayPanel('In the vault'");
+    expect(script).not.toContain('<h2>Recently seen</h2>');
     expect(script).not.toMatch(/activity log|Recent activity/i);
+  });
+
+  test('one word for what connects: a machine. "Agent" only for who benefits', () => {
+    const screens = script.slice(script.indexOf('// Connect a machine: the card'), script.indexOf('// ---------- An empty vault: welcome'));
+    for (const word of ['Connect an agent', 'Connect another agent', 'Your agents', 'agent will appear', 'Waiting for an agent']) expect(screens).not.toContain(word);
+    for (const line of ['Let your agents use this vault', 'Connect another machine', 'Connected machines', 'Your first machine will appear here', 'Waiting for a machine to connect…']) expect(screens).toContain(line);
+  });
+
+  test('the connect card: a prompt for the agent, or the two commands; both name this hub', () => {
+    const card = script.slice(script.indexOf('function connectCard('), script.indexOf("ACTIONS['connect-tab']"));
+    expect(card).toContain('connectPrompt(location.origin)');
+    expect(card).toContain('command(loginCommand(location.origin))');
+    expect(card).toContain('command(INSTALL_COMMAND)');
+    expect(card).toContain('data-action="copy" data-text="${prompt}"');
+    // A waiting machine is denied in place but approved on the approval page, where its access is chosen.
+    expect(card).toContain('data-action="deny-sign-in" data-code="${req.userCode}"');
+    expect(card).toContain("routeHash({ view: 'authorize', code: req.userCode })");
+    expect(card).not.toContain('approve: true');
+    // The Connect page is the same card, plus the key made by hand.
+    const connect = script.slice(script.indexOf('VIEWS.connect ='), script.indexOf("SUBMITS['create-key']"));
+    expect(connect).toContain('${connectCard()}');
+    expect(connect).toContain('data-submit="create-key"');
+  });
+
+  test('the connect card owns the waiting sign-ins; other screens keep the banner', () => {
+    const fn = script.match(/function showsRequests\(route\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    const shows = new Function('state', `${fn}; return showsRequests;`);
+    expect(shows({ rows: [{}] })({ view: 'overview' })).toBe(true);
+    expect(shows({ rows: [{}] })({ view: 'connect' })).toBe(true);
+    // An empty vault shows the welcome, not the card: the banner must stay there.
+    expect(shows({ rows: [] })({ view: 'overview' })).toBe(false);
+    for (const view of ['profiles', 'machines', 'machine', 'settings', 'add']) expect(shows({ rows: [{}] })({ view })).toBe(false);
+  });
+
+  test('the tab changes in place, and the page asks for waiting machines only while it says it waits', () => {
+    const tab = script.slice(script.indexOf("ACTIONS['connect-tab']"), script.indexOf("ACTIONS['connect-open']"));
+    expect(tab).not.toContain('render()');
+    expect(tab).toContain('seg.dataset.on = tab');
+    expect(style).toMatch(/\.seg\[data-on="hand"\] \.thumb \{ transform: translateX\(100%\); \}/);
+    expect(script).toMatch(/syncCountdowns\(\);\s*syncWaiting\(\);/);
+    const sync = script.match(/function syncWaiting\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(sync).toContain("document.querySelector('[data-waiting], .request')");
+    // Folded, the card still listens: a new request unfolds it.
+    expect(script).toContain('<section class="connect-card folded" data-waiting>');
+    expect(sync).toContain('clearInterval(waitPoll)');
+    const poll = script.match(/async function pollWaiting\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    // Never while hidden, never over a form being filled; nothing redraws when nothing changed.
+    expect(poll).toContain("if (document.visibilityState !== 'visible' || formOpen()) return;");
+    expect(poll.indexOf('=== before) return;')).toBeLessThan(poll.indexOf('render()'));
+  });
+
+  test('entrances play once: the cards on arrival, a test result, a new machine', () => {
+    const overview = script.slice(script.indexOf('VIEWS.overview ='), script.indexOf('function profilesCard('));
+    expect(overview).toMatch(/const enter = state\.ui\.entrance;\s*state\.ui\.entrance = false;/);
+    const machines = script.slice(script.indexOf('function machinesCard('), script.indexOf('// ---------- An empty vault: welcome'));
+    expect(machines).toMatch(/const arrived = state\.ui\.justConnected;\s*state\.ui\.justConnected = null;/);
+    expect(script).toContain('popped.add(mark)');
+    expect(script).toMatch(/state\.ui\.justConnected = res\.body\.key\.id;/);
+    expect(script).toMatch(/state\.ui\.entrance = true;/);
   });
 
   test('read-only is shown on a profile, never switched from the page', () => {
@@ -670,12 +736,11 @@ describe('the assembled admin page', () => {
     expect(script).toContain('class="button strong wide" id="unlock-btn"');
   });
 
-  test('the gate: motion only on state changes; only the dial turning while checking may loop', () => {
+  test('motion only on state changes; only what is under way may loop: the dial checking, a test, a wait', () => {
     for (const mood of ['checking', 'nope', 'open']) expect(style).toContain(`.vault.${mood}`);
     expect(style).not.toMatch(/\.lock(?![\w-])/);
-    const looping = style.match(/[^{}]+\{[^{}]*infinite[^{}]*\}/g) ?? [];
-    expect(looping.length).toBeGreaterThan(0);
-    for (const rule of looping) expect(rule.trim().startsWith('.vault.checking')).toBe(true);
+    const looping = (style.match(/[^{}]+\{[^{}]*infinite[^{}]*\}/g) ?? []).map((rule) => rule.trim().split(' {')[0]);
+    expect(looping.sort()).toEqual(['.pulse::after', '.spin', '.vault.checking .dial']);
   });
 
   test('the gate: when a session ends mid-task it opens over the screen and cannot be dismissed', () => {
