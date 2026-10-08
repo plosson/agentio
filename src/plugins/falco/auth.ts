@@ -1,6 +1,6 @@
 import type { SetupContext } from '../../plugin-sdk';
 import { CliError } from '../../utils/errors';
-import { FALCO_CODE_INPUT } from './setup-needs';
+import { FALCO_CODE_INPUT } from './setup-questions';
 import { AUTH_URL, BRAND, LOGIN_SCOPES, REFRESH_SCOPES } from './types';
 
 export interface FalcoTokens {

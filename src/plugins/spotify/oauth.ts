@@ -4,7 +4,7 @@ import { parseOAuthRedirect } from '../../auth/oauth-server';
 import { CliError, httpStatusToErrorCode } from '../../utils/errors';
 import { createPkcePair } from '../../auth/pkce';
 import type { SetupContext } from '../../plugin-sdk';
-import { REDIRECT_INPUT } from './setup-needs';
+import { REDIRECT_INPUT } from './setup-questions';
 import {
   AUTHORIZE_URL,
   LOOPBACK_HOST,

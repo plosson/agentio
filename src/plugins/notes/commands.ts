@@ -8,14 +8,16 @@ import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { checkAnswer } from '../setup-inputs';
-import { NOTES_API_KEY_INPUT, NOTES_URL_INPUT } from './setup-needs';
 import type { ProfileAddOptions } from '../types';
 import { bodyToHtml, NotesClient, normaliseNotesUrl, parseLimit } from './client';
 import { printDeleted, printFolders, printNote, printNoteList, printSavedNote } from './output';
 import type { NoteBodyFormat, NoteOutputFormat, NotesCredentials } from './types';
+
+export const NOTES_URL_INPUT: InputSpec = { label: 'Notes server URL', kind: 'url', help: 'For example https://mac-mini.example.ts.net' };
+const NOTES_API_KEY_INPUT: InputSpec = { label: 'API key', kind: 'secret', help: 'NOTES_API_KEY on the Mac that runs apple-notes-api' };
 
 const getNotesClient = createClientGetter<NotesCredentials, NotesClient>({
   service: 'notes',
@@ -299,15 +301,13 @@ The note stays in Recently Deleted in Notes.app for 30 days.`,
   });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Connect to an apple-notes-api server with its URL and API key')
-        .option('--url <url>', 'Server URL (asked for when absent)')
-        .option('--api-key <key>', 'The server\'s NOTES_API_KEY (asked for when absent)')
-        .option('--profile <name>', 'Profile name (defaults to the server\'s host name)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    )
+    profile
+      .command('add')
+      .description('Connect to an apple-notes-api server with its URL and API key')
+      .option('--url <url>', 'Server URL (asked for when absent)')
+      .option('--api-key <key>', 'The server\'s NOTES_API_KEY (asked for when absent)')
+      .option('--profile <name>', 'Profile name (defaults to the server\'s host name)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
       .action(run(async (options: NotesProfileAddOptions) => {
         await addProfileWithSetup('notes', (o, context) => notesProfileAdd(o as NotesProfileAddOptions, context), options);
       })),

@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { DropboxClient } from './client';
 import { dropboxProfileAdd, registerDropboxCommands } from './commands';
-import { DROPBOX_SETUP_NEEDS } from './setup-needs';
 import { dropboxCredentialLifecycle, reauthenticateDropbox } from './lifecycle';
 import type { DropboxCredentials } from './types';
 
@@ -14,7 +13,6 @@ export default defineServicePlugin<DropboxCredentials>()({
   registerCommands: registerDropboxCommands,
   profile: {
     setup: dropboxProfileAdd,
-    needs: DROPBOX_SETUP_NEEDS,
     createClient: (credentials) => new DropboxClient(credentials),
     describe: (credentials) => ({ account: credentials.email ?? credentials.name }),
     reauthenticate: reauthenticateDropbox,

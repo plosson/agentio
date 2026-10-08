@@ -2,7 +2,6 @@ import { defineServicePlugin } from '../types';
 import { ChatGptClient } from './client';
 import { chatGptProfileAdd, registerChatGptCommands } from './commands';
 import { chatGptCredentialLifecycle, reauthenticateChatGpt } from './lifecycle';
-import { CHATGPT_SETUP_NEEDS } from './setup-needs';
 import type { ChatGptCredentials } from './types';
 
 export default defineServicePlugin<ChatGptCredentials>()({
@@ -13,7 +12,6 @@ export default defineServicePlugin<ChatGptCredentials>()({
   brand: { url: 'https://chatgpt.com' },
   registerCommands: registerChatGptCommands,
   profile: {
-    needs: CHATGPT_SETUP_NEEDS,
     setup: chatGptProfileAdd,
     createClient: (credentials) => new ChatGptClient(credentials),
     describe: (credentials) => ({

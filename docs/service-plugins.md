@@ -169,49 +169,36 @@ formatting helpers remain at the `google/` level. The legacy `commands/`,
 `services/`, `types/`, and Google auth paths no longer contain Google service
 implementations.
 
-## Setting up without a terminal
+## Writing setup
 
-`agentio <service> profile add --json` lets a program, such as AgentIO
-Companion or the hub page, add a profile without a terminal. The program reads
-JSON events from stdout and answers on stdin. A plugin that declares `needs`
-supports this; a plugin without `needs` is refused. A plugin that also has
-`reauthenticate` supports "Sign in again" the same way.
-
+`agentio <service> profile add` and `agentio profile reauth` run setup in a
+terminal: AgentIO Companion runs the same commands in its terminal sheet.
 `src/plugins/kite/` is the worked example. A plugin follows these rules.
 
-1. **Declare the needs once.** Set `profile.needs` in `index.ts`, from a
-   constant in the plugin's `setup-needs.ts`. The command file passes no `needs`.
-2. **Ask every question with `context.ask(spec)`**, with a stable camelCase `id`.
-   - A value known before sign-in goes in `needs.inputs`. Setup passes the same
-     `InputSpec` to `ask`, so a value given with `--input -` is never asked again.
-   - A value known only during the run (a two-factor code, a site chosen from a
-     list) is asked with `ask` and is not in `needs.inputs`.
-   - Never use `context.prompt` or `context.confirm`. Their ids are not stable.
-3. **Open addresses with `context.openUrl(url)` and take OAuth callbacks with
+1. **Ask every question with `context.ask(spec)`.** Never use `prompt`,
+   `confirm` or `promptHidden` from `src/utils/stdin` in setup or reauth.
+2. **Open addresses with `context.openUrl(url)` and take OAuth callbacks with
    `context.oauth({...})`.** Setup and reauth never call these directly:
-   `prompt`, `confirm` or `promptHidden` from `src/utils/stdin`;
    `interactiveSelect` or `interactiveCheckbox`; anything from
    `@inquirer/prompts`; `awaitOAuthCode`, `startOAuthCallbackServer` or
    `launchBrowser`.
-4. **Report progress with `context.log(...)`**, never `console.log` or
+3. **Report progress with `context.log(...)`**, never `console.log` or
    `console.error`, in setup and reauth.
-5. **Let CLI flags win.** Read a flag-backed input as
+4. **Let CLI flags win.** Read a flag-backed question as
    `options.x !== undefined ? checkAnswer(SPEC, options.x) : await context.ask(SPEC)`.
    A flag value is then checked like an answer. `checkAnswer` is in
    `src/plugins/setup-inputs.ts`.
-6. **Sign in again.** `reauthenticate` takes `context` as its third parameter and
-   uses it for everything in rule 3. It never reads a field listed in
+5. **Sign in again.** `reauthenticate` takes `context` as its third parameter and
+   uses it for everything in rule 2. It never reads a field listed in
    `secretFields` from the existing credentials, because a remote reauth
    receives them removed. It returns every secret field afresh.
-7. **Keep the terminal flow unchanged**, apart from prompt wording: the same
-   flags, defaults, saved credentials and `Profile "<name>" configured!` lines.
 
-Keep the `needs` constant and the `InputSpec` constants in `setup-needs.ts`, and
-let that file import types only. `index.ts` reads the constant when the module
-loads, and `commands.ts` sits in an import cycle with the registry. A constant
-defined in `commands.ts` fails with `ReferenceError: Cannot access '...' before
-initialization` when a test imports the commands first. Google plugins use
-`src/plugins/google/setup-needs.ts`.
+Keep an `InputSpec` constant in `commands.ts` when only the commands ask it. When
+`lifecycle.ts`, `oauth.ts` or `auth.ts` asks it too, put it in the plugin's
+`setup-questions.ts`, and let that file import types only: `index.ts` loads
+those modules, and `commands.ts` sits in an import cycle with the registry. A
+constant they import from `commands.ts` fails with `ReferenceError: Cannot
+access '...' before initialization` when a test imports the commands first.
 
 Labels and help texts are plain English in sentence case, with no trailing colon
 or question mark. Choice values are machine values (`oauth`, `readonly`), not
@@ -219,22 +206,18 @@ labels.
 
 ### Testing
 
-Write the tests that can fail first: a malformed `--input` line, an unknown id,
-a value of the wrong kind, stdin closed before an `ask`, and a secret that must
-not appear in any event.
+Write the tests that can fail first: a flag value of the wrong kind, a refused
+sign-in, and a secret that must not appear in the output.
 
 - `fakeSetupContext` (`tests/helpers/setup-context.ts`) unit-tests setup and
   reauth with scripted answers. Pass credentials without the `secretFields` to
-  test rule 6.
+  test rule 5.
 - `runCli` (`tests/helpers/cli.ts`) runs the real command in a separate process.
-  Close stdin after the inputs line and check that the run ends with
-  `No answer for "<label>"` instead of hanging. Check that stdout does not
-  contain the secret.
+  Check that its output does not contain the secret.
 - `withTempVault` (`tests/helpers/vault.ts`) gives a test its own vault. A test
   never reads the real `~/.config/agentio`.
-- To check that JSON mode opens no browser, put a fake `open` first in `PATH`
-  and check that it was not called. See
-  `tests/plugins/google/google-profile-add-json.test.ts`.
+- A test never opens a real browser. `Bun.spawn` ignores a `PATH` changed at
+  runtime: set `PATH` in the child's environment, or stub `openUrl`.
 - Reach only fakes, a local `Bun.serve` or a stubbed `fetch`. Stop OAuth tests
   at the callback, with `?error=access_denied`.
 

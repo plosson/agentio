@@ -1,4 +1,3 @@
-import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gslidesProfileAdd, registerGSlidesCommands } from './commands';
 import { GSlidesClient } from './client';
 import type { GSlidesCredentials } from './types';
@@ -15,7 +14,6 @@ export default defineServicePlugin<GSlidesCredentials, GoogleCamelTokens>()({
   registerCommands: registerGSlidesCommands,
   profile: {
     setup: gslidesProfileAdd,
-    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GSlidesClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GSlidesCredentials>('gslides'),

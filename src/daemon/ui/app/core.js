@@ -35,12 +35,11 @@ function addableServices() {
   return Object.entries(PLUGIN_METADATA).filter(([, m]) => m.addable).map(([id]) => id);
 }
 /**
- * Inside AgentIO Companion, a service whose setup runs with --json is added by the app, in a native
- * sheet. True when the app took it; false when the page should show the command instead.
+ * Inside AgentIO Companion, a service is added by the app, in its terminal sheet. True when the app
+ * took it; false when the page should show the command instead.
  */
 function addInApp(service) {
   if (window.agentioCompanion?.canManageProfiles !== true) return false;
-  if (!PLUGIN_METADATA[service]?.json) return false;
   if (typeof window.agentioCompanion.addProfile !== 'function') return false;
   window.agentioCompanion.addProfile(service, displayName(service));
   return true;
@@ -48,11 +47,10 @@ function addInApp(service) {
 /** Whether the app can sign a profile of this service in again: the page runs in it, the key may manage profiles, the service supports it. */
 function canReauthInApp(service) {
   if (window.agentioCompanion?.canManageProfiles !== true) return false;
-  if (!PLUGIN_METADATA[service]?.json) return false;
   if (!PLUGIN_METADATA[service]?.reauth) return false;
   return typeof window.agentioCompanion.reauth === 'function';
 }
-/** Inside the app, a failed profile is signed in again by the app, in a native sheet. True when the app took it. */
+/** Inside the app, a failed profile is signed in again by the app, in its terminal sheet. True when the app took it. */
 function reauthInApp(service, profile) {
   if (!canReauthInApp(service)) return false;
   window.agentioCompanion.reauth(service, profile, displayName(service));
@@ -63,10 +61,6 @@ ACTIONS['reauth-in-app'] = (el) => {
   const i = ref.indexOf('/');
   if (i > 0) reauthInApp(ref.slice(0, i), ref.slice(i + 1));
 };
-/** Inside the app, for a key that may manage profiles, a service the app cannot set up yet: its command is all there is. */
-function onlyFromTerminal(service) {
-  return window.agentioCompanion?.canManageProfiles === true && !PLUGIN_METADATA[service]?.json;
-}
 const allRefs = () => state.rows.map(refOf).sort();
 const rowByRef = (ref) => state.rows.find((r) => refOf(r) === ref);
 const keyById = (id) => state.keys.find((k) => k.id === id);

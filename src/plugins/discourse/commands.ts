@@ -1,18 +1,21 @@
 import { Command } from 'commander';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import { DiscourseClient } from './client';
 import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
 import type { DiscourseCredentials } from './types';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
-import { DISCOURSE_URL_INPUT, DISCOURSE_API_KEY_INPUT, DISCOURSE_USERNAME_INPUT } from './setup-needs';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import {
   printDiscourseTopicList,
   printDiscourseTopic,
   printDiscourseCategoryList,
 } from './output';
+
+const DISCOURSE_URL_INPUT: InputSpec = { label: 'Forum URL', kind: 'url', help: 'For example https://meta.discourse.org' };
+const DISCOURSE_API_KEY_INPUT: InputSpec = { label: 'API key', kind: 'secret', help: 'Create one in your forum\'s admin, API keys (/admin/api/keys)' };
+const DISCOURSE_USERNAME_INPUT: InputSpec = { label: 'Username', kind: 'text', help: 'The user the API key acts as' };
 
 const getDiscourseClient = createClientGetter<DiscourseCredentials, DiscourseClient>({
   service: 'discourse',
@@ -115,13 +118,11 @@ export function registerDiscourseCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.baseUrl ? ` - ${credentials.baseUrl}` : '',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Discourse profile')
-      .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Discourse profile')
+    .option('--profile <name>', 'Profile name (auto-detected from username if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('discourse', discourseProfileAdd, options);

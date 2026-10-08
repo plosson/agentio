@@ -1,4 +1,3 @@
-import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gsheetsProfileAdd, registerGSheetsCommands } from './commands';
 import { GSheetsClient } from './client';
 import type { GSheetsCredentials } from './types';
@@ -15,7 +14,6 @@ export default defineServicePlugin<GSheetsCredentials, GoogleCamelTokens>()({
   registerCommands: registerGSheetsCommands,
   profile: {
     setup: gsheetsProfileAdd,
-    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GSheetsClient(credentials),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleCamel<GSheetsCredentials>('gsheets'),

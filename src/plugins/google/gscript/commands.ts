@@ -3,7 +3,7 @@ import { readFile, writeFile, readdir, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, extname, basename, resolve } from 'path';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { googleCamelSetup } from '../shared';
 import { GScriptClient } from './client';
@@ -439,13 +439,11 @@ file already exists in the project, its existing type is reused.`,
     getExtraInfo: (credentials) => (credentials?.email ? ` - ${credentials.email}` : ''),
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Google Apps Script profile')
-      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Google Apps Script profile')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('gscript', gscriptProfileAdd, options);

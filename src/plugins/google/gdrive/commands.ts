@@ -1,18 +1,25 @@
 import { Command } from 'commander';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { signInToGoogle, toCamelTokens } from '../shared';
-import { GDRIVE_ACCESS_INPUT } from '../setup-needs';
-import type { SetupContext } from '../../../plugin-sdk';
+import type { InputSpec, SetupContext } from '../../../plugin-sdk';
 import { GDriveClient } from './client';
 import { printGDriveFileList, printGDriveFile, printGDriveDownloaded, printGDriveUploaded, printGDriveShared, printGDrivePermissions, printGDriveCopied } from './output';
 import { CliError, handleError } from '../../../utils/errors';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GDriveCredentials, GDriveAccessLevel } from './types';
+
+export const GDRIVE_ACCESS_INPUT: InputSpec = {
+  label: 'Access', kind: 'choice', default: 'readonly',
+  choices: [
+    { value: 'readonly', label: 'Read-only: list, search and download files' },
+    { value: 'full', label: 'Full: also upload, create folders and change files' },
+  ],
+};
 
 const getGDriveClient = createClientGetter<GDriveCredentials, GDriveClient>({
   service: 'gdrive',
@@ -566,15 +573,13 @@ before Google deletes them permanently.`,
     },
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Google Drive profile')
-      .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
-      .option('--readonly', 'Create a read-only profile (skip access level prompt)')
-      .option('--full', 'Create a full access profile (skip access level prompt)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Google Drive profile')
+    .option('--profile <name>', 'Profile name (auto-detected from email if not provided)')
+    .option('--readonly', 'Create a read-only profile (skip access level prompt)')
+    .option('--full', 'Create a full access profile (skip access level prompt)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('gdrive', gdriveProfileAdd, options);
@@ -597,7 +602,7 @@ export async function gdriveProfileAdd(
   }
   context.log('Google Drive Setup\n');
 
-  // --read-only wins over an answer to the access input, as it always has.
+  // --read-only wins over an answer to the access question, as it always has.
   const accessLevel = (readonly ? 'readonly' : options.full ? 'full' : await context.ask(GDRIVE_ACCESS_INPUT)) as GDriveAccessLevel;
 
   context.log(`\nStarting OAuth flow (${accessLevel} access)...\n`);

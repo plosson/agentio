@@ -4,9 +4,10 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { fakeSetupContext } from '../../helpers/setup-context';
-import { notesProfileAdd, suggestedName } from '../../../src/plugins/notes/commands';
+import { NOTES_URL_INPUT, notesProfileAdd, suggestedName } from '../../../src/plugins/notes/commands';
 import { addProfileWithSetup } from '../../../src/plugins/profile-host';
 import { getCredentials } from '../../../src/auth/token-store';
+import { checkAnswer } from '../../../src/plugins/setup-inputs';
 import type { NotesCredentials } from '../../../src/plugins/notes/types';
 import { caught, FakeNotes, KEY } from './fake-notes';
 
@@ -67,9 +68,12 @@ test('setup checks the server and the key, and returns normalised credentials', 
   expect(fake.log[0].authorization).toBeNull();
 });
 
-test('a wrong key stops setup and nothing is returned to save', async () => {
-  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: 'nope' }, noPrompt()));
+test('a wrong key stops setup and nothing is returned to save; the key is never in the error', async () => {
+  const secret = 'SECRET-KEY-123';
+  const err = await caught(notesProfileAdd({ url: fake.url, apiKey: secret }, noPrompt()));
   expect(err.code).toBe('AUTH_FAILED');
+  expect(`${err.message} ${err.suggestion ?? ''}`).not.toContain(secret);
+  expect(errors.join('\n')).not.toContain(secret);
 });
 
 test('a key that works while Notes.app does not answer is kept, with a warning', async () => {
@@ -116,15 +120,21 @@ test('bad URLs and an empty key are refused before any request', async () => {
 });
 
 test('without --url and --api-key both are asked for', async () => {
-  const context = fakeSetupContext({ url: fake.url, apiKey: KEY });
+  const context = fakeSetupContext({ 'Notes server URL': fake.url, 'API key': KEY });
   const result = await notesProfileAdd({}, context);
-  expect(context.asked.map((s) => s.id)).toEqual(['url', 'apiKey']);
+  expect(context.asked.map((s) => s.label)).toEqual(['Notes server URL', 'API key']);
+  expect(context.asked[1].kind).toBe('secret');
   expect(result.credentials).toEqual({ baseUrl: fake.url, apiKey: KEY });
 });
 
 test('the profile is saved in the vault under the host name', async () => {
   await addProfileWithSetup('notes', (o) => notesProfileAdd({ ...o, url: fake.url, apiKey: KEY }, noPrompt()), {});
   expect(await getCredentials<NotesCredentials>('notes', '127.0.0.1')).toEqual({ baseUrl: fake.url, apiKey: KEY });
+});
+
+test('a URL without a scheme is completed with https', () => {
+  expect(checkAnswer(NOTES_URL_INPUT, 'mac-mini.example.ts.net')).toBe('https://mac-mini.example.ts.net');
+  expect(checkAnswer(NOTES_URL_INPUT, `localhost:${fake.url.split(':').pop()}`)).toMatch(/^https:\/\/localhost:\d+$/);
 });
 
 test('suggestedName uses the first host label, or the whole address for an IP', () => {

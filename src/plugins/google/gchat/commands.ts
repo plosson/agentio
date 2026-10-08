@@ -2,12 +2,11 @@ import { Command } from 'commander';
 import { chat as gchat } from '@googleapis/chat';
 import { readFile } from 'fs/promises';
 import { createProfileCommands } from '../../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../../profile-host';
+import { addProfileWithSetup } from '../../profile-host';
 import { createClientGetter } from '../../../utils/client-factory';
 import { performOAuthFlow } from '../oauth';
 import { createGoogleAuth, fetchGoogleUserEmail } from '../token-manager';
 import { signInToGoogle, toCamelTokens } from '../shared';
-import { GCHAT_TYPE_INPUT, GCHAT_WEBHOOK_INPUT } from '../setup-needs';
 import { GChatClient } from './client';
 import { checkWebhookUrl, type WebhookCheck } from '../../webhook-check';
 import { CliError, handleError } from '../../../utils/errors';
@@ -16,7 +15,20 @@ import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGC
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from './types';
-import type { SetupContext, SetupResult } from '../../../plugin-sdk';
+import type { InputSpec, SetupContext, SetupResult } from '../../../plugin-sdk';
+
+const GCHAT_TYPE_INPUT: InputSpec = {
+  label: 'Profile type', kind: 'choice', default: 'oauth',
+  choices: [
+    { value: 'oauth', label: 'Google account: full API access (Google Workspace)' },
+    { value: 'webhook', label: 'Webhook: send messages to one space' },
+  ],
+};
+
+export const GCHAT_WEBHOOK_INPUT: InputSpec = {
+  label: 'Webhook URL', kind: 'secret',
+  help: 'In Google Chat: the space\'s settings, Apps & integrations, Webhooks, then copy the URL',
+};
 
 const getGChatClient = createClientGetter<GChatCredentials, GChatClient>({
   service: 'gchat',
@@ -367,13 +379,11 @@ export function registerGChatCommands(program: Command): void {
     getExtraInfo: (credentials) => credentials?.type === 'webhook' ? ' - webhook' : ' - oauth',
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Google Chat profile (webhook or OAuth)')
-      .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Google Chat profile (webhook or OAuth)')
+    .option('--profile <name>', 'Profile name (required for webhook, auto-detected for OAuth)')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('gchat', gchatProfileAdd, options);
@@ -405,7 +415,7 @@ const GCHAT_WEBHOOK_CHECK: WebhookCheck = {
   invalidSuggestion: 'It starts with https://chat.googleapis.com/',
 };
 
-/** The address of a webhook, asked during the run: only a webhook profile has one. */
+/** The address of a webhook: only a webhook profile has one. */
 async function askWebhookUrl(context: SetupContext): Promise<string> {
   const webhookUrl = await context.ask(GCHAT_WEBHOOK_INPUT);
   await checkWebhookUrl(webhookUrl, GCHAT_WEBHOOK_CHECK, context);

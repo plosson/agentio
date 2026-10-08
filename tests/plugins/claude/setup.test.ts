@@ -2,8 +2,7 @@ import { expect, test } from 'bun:test';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { fakeSetupContext } from '../../helpers/setup-context';
-import { claudeProfileAdd } from '../../../src/plugins/claude/commands';
-import { CLAUDE_CREATE_TOKEN_INPUT } from '../../../src/plugins/claude/setup-needs';
+import { claudeProfileAdd, CLAUDE_CREATE_TOKEN_INPUT } from '../../../src/plugins/claude/commands';
 import { installFakeCli, type FakeCli } from '../../helpers/fake-cli';
 
 withTempVault('agentio-claude-setup-', () => ({ config: { profiles: {} } as never }));
@@ -11,13 +10,17 @@ withTempVault('agentio-claude-setup-', () => ({ config: { profiles: {} } as neve
 test('the kind follows the prefix, the token is trimmed, a blank model is no model', async () => {
   const oauth = await claudeProfileAdd({ token: ' sk-ant-oat01-abc\n', model: '' }, fakeSetupContext({}));
   expect(oauth.credentials).toEqual({ token: 'sk-ant-oat01-abc', kind: 'oauth' });
-  const api = await claudeProfileAdd({}, fakeSetupContext({ token: 'sk-ant-api03-abc', model: 'opus' }));
+  const api = await claudeProfileAdd({}, fakeSetupContext({ 'How do you want to add Claude?': 'paste', 'Token or API key': 'sk-ant-api03-abc', 'Default model': 'opus' }));
   expect(api.credentials).toEqual({ token: 'sk-ant-api03-abc', kind: 'apiKey', model: 'opus' });
+  expect(api.suggestedProfileName).toBe('default');
+  expect(api.info ?? '').not.toContain('sk-ant-api03-abc');
 });
 
-test('a token of another provider is refused before anything is saved', async () => {
-  for (const token of ['sk-proj-abc', 'sk-ant-other', 'oat01']) {
-    await expect(claudeProfileAdd({ token, model: '' }, fakeSetupContext({}))).rejects.toThrow('not a Claude');
+test('a token of another provider is refused before anything is saved, and never repeated', async () => {
+  for (const token of ['sk-proj-SECRET', 'sk-ant-SECRET', 'oat01-SECRET']) {
+    const err = await claudeProfileAdd({ token, model: '' }, fakeSetupContext({})).catch((e) => e);
+    expect(err).toMatchObject({ code: 'INVALID_PARAMS', message: expect.stringContaining('not a Claude') });
+    expect(`${err.message} ${err.suggestion ?? ''}`).not.toContain('SECRET');
   }
 });
 
@@ -57,9 +60,9 @@ const TOKEN = 'sk-ant-oat01-abc';
 
 test('terminal setup offers to create the token, runs claude setup-token, then asks for the token and model', async () => {
   await withFakeClaude(async (cli) => {
-    const { context, ran, logs } = terminalContext({ createToken: 'setupToken', token: TOKEN, model: 'opus' });
+    const { context, ran, logs } = terminalContext({ 'How do you want to add Claude?': 'setupToken', 'Token or API key': TOKEN, 'Default model': 'opus' });
     const result = await claudeProfileAdd({}, context);
-    expect(context.asked.map((s) => s.id)).toEqual(['createToken', 'token', 'model']);
+    expect(context.asked.map((s) => s.label)).toEqual(['How do you want to add Claude?', 'Token or API key', 'Default model']);
     expect(context.asked[0]).toEqual(CLAUDE_CREATE_TOKEN_INPUT);
     expect(ran).toEqual([[join(cli.binDir, 'claude'), 'setup-token']]);
     expect(logs.some((l) => l.includes('claude setup-token'))).toBe(true);
@@ -67,9 +70,9 @@ test('terminal setup offers to create the token, runs claude setup-token, then a
   });
 });
 
-test('the createToken question is a choice that defaults to creating the token', () => {
+test('the question about creating a token is a choice that defaults to creating the token', () => {
   expect(CLAUDE_CREATE_TOKEN_INPUT).toEqual({
-    id: 'createToken', label: 'How do you want to add Claude?', kind: 'choice', default: 'setupToken',
+    label: 'How do you want to add Claude?', kind: 'choice', default: 'setupToken',
     choices: [
       { value: 'setupToken', label: 'Create a subscription token now (runs claude setup-token)' },
       { value: 'paste', label: 'Paste a token or API key I already have' },
@@ -79,20 +82,20 @@ test('the createToken question is a choice that defaults to creating the token',
 
 test('pasting a token runs nothing', async () => {
   await withFakeClaude(async () => {
-    const { context, ran } = terminalContext({ createToken: 'paste', token: TOKEN, model: '' });
+    const { context, ran } = terminalContext({ 'How do you want to add Claude?': 'paste', 'Token or API key': TOKEN, 'Default model': '' });
     await claudeProfileAdd({}, context);
     expect(ran).toEqual([]);
-    expect(context.asked.map((s) => s.id)).toEqual(['createToken', 'token', 'model']);
+    expect(context.asked.map((s) => s.label)).toEqual(['How do you want to add Claude?', 'Token or API key', 'Default model']);
   });
 });
 
 test('a setup-token that fails is logged, and the token can still be pasted', async () => {
   await withFakeClaude(async () => {
-    const { context, ran, logs } = terminalContext({ createToken: 'setupToken', token: TOKEN, model: '' }, 1);
+    const { context, ran, logs } = terminalContext({ 'How do you want to add Claude?': 'setupToken', 'Token or API key': TOKEN, 'Default model': '' }, 1);
     const result = await claudeProfileAdd({}, context);
     expect(ran).toHaveLength(1);
     expect(logs.some((l) => l.includes('did not finish') && l.includes('paste'))).toBe(true);
-    expect(context.asked.map((s) => s.id)).toEqual(['createToken', 'token', 'model']);
+    expect(context.asked.map((s) => s.label)).toEqual(['How do you want to add Claude?', 'Token or API key', 'Default model']);
     expect(result.credentials.token).toBe(TOKEN);
   });
 });
@@ -101,9 +104,9 @@ test('terminal setup without claude on PATH asks no question, runs nothing, and 
   const path = process.env.PATH;
   process.env.PATH = '/nonexistent';
   try {
-    const { context, ran, logs } = terminalContext({ token: TOKEN, model: '' });
+    const { context, ran, logs } = terminalContext({ 'Token or API key': TOKEN, 'Default model': '' });
     await claudeProfileAdd({}, context);
-    expect(context.asked.map((s) => s.id)).toEqual(['token', 'model']);
+    expect(context.asked.map((s) => s.label)).toEqual(['Token or API key', 'Default model']);
     expect(ran).toEqual([]);
     expect(logs.filter((l) => l.includes('curl -fsSL https://claude.ai/install.sh | bash'))).toHaveLength(1);
   } finally {
@@ -111,28 +114,18 @@ test('terminal setup without claude on PATH asks no question, runs nothing, and 
   }
 });
 
-test('setup without a terminal (JSON) asks no createToken question and runs nothing, even with claude installed', async () => {
-  await withFakeClaude(async (cli) => {
-    const context = fakeSetupContext({ token: TOKEN, model: '' });
-    expect('runInTerminal' in context).toBe(false);
-    await claudeProfileAdd({}, context);
-    expect(context.asked.map((s) => s.id)).toEqual(['token', 'model']);
-    expect(await cli.lastCall().then(() => true, () => false)).toBe(false);
-  });
-});
-
 test('--token given: nothing about creating is asked or run, and no install hint is logged', async () => {
   await withFakeClaude(async () => {
-    const { context, ran, logs } = terminalContext({ model: '' });
+    const { context, ran, logs } = terminalContext({ 'Default model': '' });
     await claudeProfileAdd({ token: TOKEN }, context);
-    expect(context.asked.map((s) => s.id)).toEqual(['model']);
+    expect(context.asked.map((s) => s.label)).toEqual(['Default model']);
     expect(ran).toEqual([]);
     expect(logs).toEqual([]);
   });
   const path = process.env.PATH;
   process.env.PATH = '/nonexistent';
   try {
-    const { context, logs } = terminalContext({ model: '' });
+    const { context, logs } = terminalContext({ 'Default model': '' });
     await claudeProfileAdd({ token: TOKEN }, context);
     expect(logs).toEqual([]);
   } finally {

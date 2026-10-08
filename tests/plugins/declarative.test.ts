@@ -126,8 +126,8 @@ describe('declarative plugins', () => {
   });
 });
 
-describe('declarative plugins: profile add --json', () => {
-  const vault = withTempVault('agentio-declarative-json-', () => ({ config: { profiles: {} } as never }));
+describe('declarative plugins: profile add', () => {
+  const vault = withTempVault('agentio-declarative-add-', () => ({ config: { profiles: {} } as never }));
 
   async function cliWithPlugin(source: string, args: string[]) {
     const directory = await mkdtemp(join(tmpdir(), 'agentio-external-plugin-'));
@@ -140,34 +140,33 @@ describe('declarative plugins: profile add --json', () => {
       const timer = setTimeout(() => proc.kill(), 30_000);
       const exit = await proc.exited;
       clearTimeout(timer);
-      const stdout = await new Response(proc.stdout).text();
-      return { exit, events: stdout.split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)) };
+      return { exit, stdout: await new Response(proc.stdout).text(), stderr: await new Response(proc.stderr).text() };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   }
 
-  const plugin = (needs: string) => `export default {
-    apiVersion: 1, id: 'acme-json', displayName: 'Acme', description: 'Acme',
-    profile: { ${needs} async setup() { return { credentials: { token: 't' }, suggestedProfileName: 'x' }; }, async validate() { return { valid: true }; } },
+  const plugin = `export default {
+    apiVersion: 1, id: 'acme-add', displayName: 'Acme', description: 'Acme',
+    profile: { async setup() { return { credentials: { token: 't' }, suggestedProfileName: 'x' }; }, async validate() { return { valid: true }; } },
     commands: [],
   };`;
 
-  test('--describe --json prints the needs a plugin declares', async () => {
-    const res = await cliWithPlugin(
-      plugin(`needs: { inputs: [{ id: 'token', label: 'API token', kind: 'secret' }], auth: 'none' },`),
-      ['acme-json', 'profile', 'add', '--describe', '--json'],
-    );
+  test('runs the plugin setup in the terminal and the host saves it under the suggested name', async () => {
+    const res = await cliWithPlugin(plugin, ['acme-add', 'profile', 'add', '--read-only']);
     expect(res.exit).toBe(0);
-    expect(res.events).toEqual([{ v: 1, event: 'needs', service: 'acme-json', inputs: [{ id: 'token', label: 'API token', kind: 'secret' }], auth: 'none' }]);
+    expect(res.stdout).toContain('Profile "x" configured!');
+    const saved = await loadVault();
+    expect(saved.config.profiles['acme-add']).toEqual([{ name: 'x', readOnly: true }]);
+    expect(saved.credentials['acme-add']?.x).toEqual({ token: 't' });
   }, 30_000);
 
-  test('a plugin without needs is refused with the INVALID_PARAMS event', async () => {
-    const res = await cliWithPlugin(plugin(''), ['acme-json', 'profile', 'add', '--describe', '--json']);
-    expect(res.exit).toBe(1);
-    expect(res.events).toEqual([{
-      v: 1, event: 'error', code: 'INVALID_PARAMS',
-      message: 'acme-json cannot be set up with --json yet', suggestion: 'Run: agentio acme-json profile add',
-    }]);
+  test('the program-facing setup options are gone: --describe and --json are unknown, nothing is saved', async () => {
+    for (const flag of ['--describe', '--json']) {
+      const res = await cliWithPlugin(plugin, ['acme-add', 'profile', 'add', flag]);
+      expect(res.exit).not.toBe(0);
+      expect(res.stderr).toContain(`unknown option '${flag}'`);
+    }
+    expect((await loadVault()).config.profiles['acme-add'] ?? []).toEqual([]);
   }, 30_000);
 });

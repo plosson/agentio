@@ -53,6 +53,18 @@ function file(name: string, content: string): string {
 
 const INVALID = exitCodeForError('INVALID_PARAMS');
 
+describe('profile add', () => {
+  withProfiles(() => ({}));
+
+  test('the terminal flow with every value as a flag asks nothing, saves, and never prints the key', async () => {
+    const res = await cli(['notes', 'profile', 'add', '--url', fake.url, '--api-key', KEY, '--profile', 'main']);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('Profile "main" configured!');
+    expect(res.stdout + res.stderr).not.toContain(KEY);
+    expect((await cli(['notes', 'folders', '--profile', 'main'])).code).toBe(0);
+  });
+});
+
 describe('one profile', () => {
   withProfiles(() => ({ main: {} }));
 

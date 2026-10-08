@@ -1,7 +1,6 @@
 import { defineServicePlugin } from '../types';
 import { JiraClient } from './client';
 import { jiraProfileAdd, registerJiraCommands } from './commands';
-import { JIRA_SETUP_NEEDS } from './setup-needs';
 import { jiraCredentialLifecycle, reauthenticateJira } from './lifecycle';
 import type { JiraCredentials } from './types';
 
@@ -13,7 +12,6 @@ const jira = defineServicePlugin<JiraCredentials>()({
   registerCommands: registerJiraCommands,
   profile: {
     setup: jiraProfileAdd,
-    needs: JIRA_SETUP_NEEDS,
     createClient: (credentials) => new JiraClient(credentials),
     describe: (credentials) => ({ url: credentials.siteUrl }),
     reauthenticate: reauthenticateJira,

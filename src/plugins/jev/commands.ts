@@ -6,15 +6,17 @@ import { optionalText } from '../../utils/options';
 import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { readStdin } from '../../utils/stdin';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { answerOrAsk } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { JevClient } from './client';
 import { printChoice, printScore, printYesNo } from './output';
 import { parseLevels, parseOptions, parseState, parseThreshold, requireQuestion } from './questions';
-import { JEV_API_KEY_INPUT, JEV_MODEL_INPUT } from './setup-needs';
 import type { JevAnswer, JevChoiceAnswer, JevCredentials, JevNoulAnswer, JevQuestion, JevResult, JevScoreAnswer, JevState } from './types';
+
+const JEV_API_KEY_INPUT: InputSpec = { label: 'API key', kind: 'secret', help: 'console.typesafe.ai → Settings → Keys' };
+const JEV_MODEL_INPUT: InputSpec = { label: 'Default model', kind: 'text', required: false, help: 'Blank for jev-latest' };
 
 /** Exit code of `yesno` for an error that would otherwise exit 1, which means "no" there. */
 export const YESNO_ERROR_EXIT = 6;
@@ -161,21 +163,20 @@ export function registerJevCommands(program: Command): void {
   const profile = createProfileCommands<JevCredentials>(jev, { service: 'jev', displayName: 'Jev' });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add a Jev account with its API key')
-        .option('--api-key <key>', 'API key, from console.typesafe.ai (asked for when absent)')
-        .option('--model <model>', 'Default model (default: jev-latest)')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-    ).action(async (options: JevProfileAddOptions) => {
-      try {
-        await addProfileWithSetup('jev', (o, context) => jevProfileAdd(o as JevProfileAddOptions, context), options);
-      } catch (error) {
-        handleError(error);
-      }
-    }),
+    profile
+      .command('add')
+      .description('Add a Jev account with its API key')
+      .option('--api-key <key>', 'API key, from console.typesafe.ai (asked for when absent)')
+      .option('--model <model>', 'Default model (default: jev-latest)')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+      .action(async (options: JevProfileAddOptions) => {
+        try {
+          await addProfileWithSetup('jev', (o, context) => jevProfileAdd(o as JevProfileAddOptions, context), options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
     `Examples:
 
   # asks for the API key, so it stays out of shell history

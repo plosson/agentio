@@ -1,4 +1,3 @@
-import { GOOGLE_SETUP_NEEDS } from '../setup-needs';
 import { gtasksProfileAdd, registerGTasksCommands } from './commands';
 import { GTasksClient } from './client';
 import type { GTasksCredentials } from './types';
@@ -15,7 +14,6 @@ export default defineServicePlugin<GTasksCredentials, OAuthTokens>()({
   registerCommands: registerGTasksCommands,
   profile: {
     setup: gtasksProfileAdd,
-    needs: GOOGLE_SETUP_NEEDS,
     createClient: (credentials) => new GTasksClient(googleAuthFromSnakeCredentials(credentials)),
     describe: (credentials) => ({ account: credentials.email }),
     reauthenticate: reauthenticateGoogleSnake('gtasks'),

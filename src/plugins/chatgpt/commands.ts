@@ -5,14 +5,21 @@ import { CliError, handleError } from '../../utils/errors';
 import { addExamples } from '../../utils/command-tree';
 import { registerAskCommand } from '../../utils/llm-ask';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
-import type { SetupContext, SetupResult } from '../../plugin-sdk';
+import { addProfileWithSetup } from '../profile-host';
+import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import { answerOrAsk, checkAnswer } from '../setup-inputs';
 import type { ProfileAddOptions } from '../types';
 import { ChatGptClient } from './client';
 import { signInWithChatGpt } from './oauth';
-import { CHATGPT_API_KEY_INPUT, CHATGPT_METHOD_INPUT, CHATGPT_MODEL_INPUT } from './setup-needs';
 import type { ChatGptCredentials } from './types';
+
+const CHATGPT_METHOD_INPUT: InputSpec = {
+  label: 'Sign in with', kind: 'choice', default: 'chatgpt',
+  choices: [{ value: 'chatgpt', label: 'ChatGPT account (subscription)' }, { value: 'apiKey', label: 'OpenAI API key' }],
+};
+/** Asked only for the API key method. */
+const CHATGPT_API_KEY_INPUT: InputSpec = { label: 'OpenAI API key', kind: 'secret', help: 'platform.openai.com → API keys' };
+const CHATGPT_MODEL_INPUT: InputSpec = { label: 'Default model', kind: 'text', required: false, help: 'Blank for Codex\'s default' };
 
 const getChatGptClient = createClientGetter<ChatGptCredentials, ChatGptClient>({
   service: 'chatgpt',
@@ -56,22 +63,21 @@ export function registerChatGptCommands(program: Command): void {
   const profile = createProfileCommands<ChatGptCredentials>(chatgpt, { service: 'chatgpt', displayName: 'ChatGPT' });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Sign in with your ChatGPT account, or add an OpenAI API key')
-        .option('--method <method>', 'chatgpt (sign in in the browser) or apiKey')
-        .option('--api-key <key>', 'OpenAI API key; implies --method apiKey')
-        .option('--model <model>', 'Default model')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks write operations)'),
-    ).action(async (options: ChatGptProfileAddOptions) => {
-      try {
-        await addProfileWithSetup('chatgpt', (o, context) => chatGptProfileAdd(o as ChatGptProfileAddOptions, context), options);
-      } catch (error) {
-        handleError(error);
-      }
-    }),
+    profile
+      .command('add')
+      .description('Sign in with your ChatGPT account, or add an OpenAI API key')
+      .option('--method <method>', 'chatgpt (sign in in the browser) or apiKey')
+      .option('--api-key <key>', 'OpenAI API key; implies --method apiKey')
+      .option('--model <model>', 'Default model')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+      .action(async (options: ChatGptProfileAddOptions) => {
+        try {
+          await addProfileWithSetup('chatgpt', (o, context) => chatGptProfileAdd(o as ChatGptProfileAddOptions, context), options);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
     `Examples:
 
   # opens the browser to sign in with your ChatGPT account

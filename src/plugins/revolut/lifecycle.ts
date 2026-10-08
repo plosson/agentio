@@ -26,6 +26,10 @@ export async function reauthenticateRevolut(
   profileName: string,
 ): Promise<RevolutCredentials> {
   if (!credentials) throw new CliError('AUTH_FAILED', 'Revolut client configuration is missing');
+  // A hub hands out credentials without their secrets, and signing in again needs the private key.
+  if (!credentials.privateKey) {
+    throw new CliError('INVALID_PARAMS', 'revolut cannot be signed in again from this machine yet', `Run on the hub: agentio profile reauth revolut ${profileName}`);
+  }
   console.error(`\nRe-authenticating revolut / ${profileName}...`);
   const consentUrl = buildConsentUrl(credentials);
   console.error(`  ${consentUrl}\n`);

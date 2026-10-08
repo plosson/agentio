@@ -3,7 +3,7 @@ import { CliError } from '../../utils/errors';
 import type { CredentialLifecycle } from '../types';
 import { loginWithSecondFactor, refreshFalcoToken, revokeFalcoToken } from './auth';
 import { FalcoClient } from './client';
-import { FALCO_PASSWORD_INPUT } from './setup-needs';
+import { FALCO_PASSWORD_INPUT } from './setup-questions';
 import type { FalcoCredentials } from './types';
 
 export const falcoCredentialLifecycle: CredentialLifecycle<FalcoCredentials> = {

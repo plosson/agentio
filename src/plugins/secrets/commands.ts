@@ -7,7 +7,7 @@ import { addJsonOption } from '../../utils/output';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { promptHidden, readStdinRaw } from '../../utils/stdin';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { parseDotenv } from './dotenv';
@@ -203,13 +203,11 @@ export function registerSecretsCommands(program: Command): Command {
   });
 
   addExamples(
-    addSetupOptions(
-      profile
-        .command('add')
-        .description('Add an empty secrets profile')
-        .option('--profile <name>', 'Profile name (default: default)')
-        .option('--read-only', 'Create as read-only profile (blocks set, unset and import)')
-    )
+    profile
+      .command('add')
+      .description('Add an empty secrets profile')
+      .option('--profile <name>', 'Profile name (default: default)')
+      .option('--read-only', 'Create as read-only profile (blocks set, unset and import)')
       .action(async (options: ProfileAddOptions) => {
         try {
           await addProfileWithSetup(SERVICE, secretsProfileAdd, options);

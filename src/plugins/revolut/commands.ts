@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { createPrivateKey, randomUUID } from 'crypto';
 import { createProfileCommands } from '../../utils/profile-commands';
-import { addProfileWithSetup, addSetupOptions } from '../profile-host';
+import { addProfileWithSetup } from '../profile-host';
 import { createClientGetter } from '../../utils/client-factory';
 import {
   buildConsentUrl,
@@ -968,17 +968,15 @@ export function registerRevolutCommands(program: Command): void {
     getExtraInfo: (credentials) => (credentials ? ` - ${credentials.environment}` : ''),
   });
 
-  addSetupOptions(
-    profile
-      .command('add')
-      .description('Add a new Revolut profile')
-      .option('--profile <name>', 'Profile name (defaults to the environment)')
-      .option('--environment <env>', 'production or sandbox')
-      .option('--client-id <id>', 'Client ID issued by Revolut')
-      .option('--private-key <path>', 'Path to the PEM private key matching your uploaded certificate')
-      .option('--redirect-uri <uri>', 'OAuth redirect URI registered with Revolut')
-      .option('--read-only', 'Create as read-only profile (blocks write operations)')
-  )
+  profile
+    .command('add')
+    .description('Add a new Revolut profile')
+    .option('--profile <name>', 'Profile name (defaults to the environment)')
+    .option('--environment <env>', 'production or sandbox')
+    .option('--client-id <id>', 'Client ID issued by Revolut')
+    .option('--private-key <path>', 'Path to the PEM private key matching your uploaded certificate')
+    .option('--redirect-uri <uri>', 'OAuth redirect URI registered with Revolut')
+    .option('--read-only', 'Create as read-only profile (blocks write operations)')
     .action(async (options) => {
       try {
         await addProfileWithSetup('revolut', revolutProfileAdd, options);
