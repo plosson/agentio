@@ -19,6 +19,7 @@ import authorize from './app/authorize.js' with { type: 'text' };
 import access from './app/access.js' with { type: 'text' };
 import settings from './app/settings.js' with { type: 'text' };
 import main from './app/main.js' with { type: 'text' };
+import { INSTALL_COMMAND } from '../install-guide';
 
 const text = (source: unknown): string => source as string;
 
@@ -38,7 +39,7 @@ const model = new Bun.Transpiler({ loader: 'ts' })
   .replace(/^export (?=(async )?function |const |let |class )/gm, '');
 
 /** Order matters: the screens use the model, the icons and core; main boots last. The gate draws the vault icon inline. */
-const script = [`const VAULT_ICON = ${JSON.stringify(ICON_SVG)};`, ...[model, icons, core, unlock, profiles, machines, connect, overview, authorize, access, settings, main].map(text)].join('\n');
+const script = [`const VAULT_ICON = ${JSON.stringify(ICON_SVG)};`, `const INSTALL_COMMAND = ${JSON.stringify(INSTALL_COMMAND)};`, ...[model, icons, core, unlock, profiles, machines, connect, overview, authorize, access, settings, main].map(text)].join('\n');
 
 /**
  * The admin page with its style and script inlined. Function replacers keep
