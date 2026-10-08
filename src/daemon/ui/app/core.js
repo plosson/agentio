@@ -11,7 +11,8 @@ const state = {
   pending: [],
   results: new Map(),
   loaded: false,
-  ui: { listScroll: {} },
+  // entrance: the next view drawn may animate in (set on every move).
+  ui: { listScroll: {}, entrance: true },
 };
 
 /** route view -> (route) => Raw markup. Each screen file registers its views. */
@@ -388,12 +389,14 @@ function render() {
   list.dataset.list = lister ? panes.list : '';
   list.scrollTop = state.ui.listScroll[panes.list] || 0;
   main.innerHTML = view(route).__html;
-  const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + signInBanner().__html;
+  // The connect card lists waiting sign-ins itself; the approval page is about one of them.
+  const pending = route.view === 'authorize' ? '' : appKeyBanner().__html + (showsRequests(route) ? '' : signInBanner().__html);
   const head = main.querySelector(':scope > .pane-head');
   if (head) head.insertAdjacentHTML('afterend', pending);
   else main.insertAdjacentHTML('afterbegin', pending);
   setTitle();
   syncCountdowns();
+  syncWaiting();
   const again = focused && $(focused);
   if (!again) return;
   again.focus();
@@ -425,6 +428,11 @@ function signInBanner() {
     html`<button class="button" data-action="deny-sign-in" data-code="${req.userCode}">Deny</button>
       <a class="button" href="${routeHash({ view: 'authorize', code: req.userCode })}">Review</a>`,
     true))}`;
+}
+
+/** The connect card shows the waiting sign-ins: on the Connect page, and on an Overview that has profiles. */
+function showsRequests(route) {
+  return route.view === 'connect' || (route.view === 'overview' && state.rows.length > 0);
 }
 
 /** One timer while a countdown is on screen; it updates the text only, never redraws. */
@@ -533,17 +541,26 @@ async function confirmLeaveKey() {
   return confirmDialog(LEAVE_KEY);
 }
 
-async function copyText(text) {
+async function copyText(text, button) {
   try {
     await navigator.clipboard.writeText(text);
-    toast('Copied');
+    if (button) flashCopied(button);
+    else toast('Copied');
     if (state.ui.shownKey) state.ui.shownKey.copied = true;
   } catch {
     toast('Copy failed: select the text and copy it by hand.', 'error');
   }
 }
 
-ACTIONS.copy = (el) => copyText(el.dataset.text);
+/** The Copy button says it worked, then goes back to Copy. */
+function flashCopied(button) {
+  const label = button.textContent;
+  button.textContent = '✓ Copied';
+  button.classList.add('copied');
+  setTimeout(() => { button.textContent = label; button.classList.remove('copied'); }, 1600);
+}
+
+ACTIONS.copy = (el) => copyText(el.dataset.text, el);
 
 // ---------- Access choices (sign-in step 2, connect a machine, change a machine) ----------
 

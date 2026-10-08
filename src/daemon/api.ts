@@ -5,6 +5,7 @@ import { clientIp } from './rate-limit';
 import { handleUiRequest, type UiContext } from './routes-ui';
 import { handleV1Request } from './routes-v1';
 import { json } from './http';
+import { handleInstallGuide } from './install-guide';
 
 /** The slice of Bun's Server the handler needs; tests pass a stub. */
 export interface PeerSource {
@@ -35,6 +36,7 @@ export function createRequestHandler(ctx: UiContext) {
     const path = new URL(request.url).pathname;
 
     if (path === '/health' && request.method === 'GET') return handleHealth(ctx.version);
+    if (path === '/install.md' && request.method === 'GET') return handleInstallGuide(request);
     // The domain alone lands on the admin UI; the API lives under /v1 and /health.
     // Relative on purpose: behind the TLS proxy the daemon sees plain http, and an absolute
     // Location would send the browser to http://… for the proxy to bounce back to https.

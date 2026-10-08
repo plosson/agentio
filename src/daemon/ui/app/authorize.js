@@ -119,6 +119,8 @@ SUBMITS['auth-approve'] = async (form) => {
   // A successful approval always lands on done, whatever the screen showed meanwhile.
   auth.key = res.body.key;
   auth.step = 'done';
+  // The Overview greets it once: the new machine slides into its list.
+  state.ui.justConnected = res.body.key.id;
   // The replaced key is gone on the hub; drop it here too.
   state.keys = [...state.keys.filter((k) => k.id !== res.body.replaced), res.body.key];
   await loadPending();
