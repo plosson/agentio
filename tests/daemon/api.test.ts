@@ -505,7 +505,8 @@ describe('/install.md', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = await res.text();
     expect(body).toContain('    agentio login http://hub\n');
-    expect(body).toContain('curl -LsSf https://agentio.houlahop.com/install | sh');
+    expect(body).toContain('curl -LsSf https://houlahop.com/agentio/install | sh');
+    expect(body).not.toContain('agentio.houlahop.com');
   });
 
   test('behind the TLS proxy it says https, and keeps a port', async () => {

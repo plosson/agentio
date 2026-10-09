@@ -124,7 +124,7 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
       throw new CliError(
         'RATE_LIMITED',
         `GitHub API rate limit exceeded${minutes ? ` (resets in ~${minutes} min)` : ''}`,
-        'Set GITHUB_TOKEN (or GH_TOKEN) to raise the limit, or install manually with: curl -LsSf https://agentio.houlahop.com/install | sh'
+        'Set GITHUB_TOKEN (or GH_TOKEN) to raise the limit, or install manually with: curl -LsSf https://houlahop.com/agentio/install | sh'
       );
     }
     throw new CliError('API_ERROR', `Failed to fetch release info: ${response.statusText}`);
@@ -424,9 +424,9 @@ export function registerUpdateCommand(program: Command): void {
           console.error('Automatic update failed. You can update manually:');
           console.error('');
           if (os.platform() === 'win32') {
-            console.error('  iwr -useb https://agentio.houlahop.com/install.ps1 | iex');
+            console.error('  iwr -useb https://houlahop.com/agentio/install.ps1 | iex');
           } else {
-            console.error('  curl -LsSf https://agentio.houlahop.com/install | sh');
+            console.error('  curl -LsSf https://houlahop.com/agentio/install | sh');
           }
           console.error('');
           throw error;

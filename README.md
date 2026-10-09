@@ -57,7 +57,7 @@ jobs:
       AGENTIO_CONFIG: ${{ secrets.AGENTIO_CONFIG }}
       AGENTIO_KEY: ${{ secrets.AGENTIO_KEY }}
     steps:
-      - run: curl -LsSf https://agentio.houlahop.com/install | sh
+      - run: curl -LsSf https://houlahop.com/agentio/install | sh
       - run: agentio vault import
       - run: |
           agentio gmail list --query "is:unread" --limit 5
@@ -68,12 +68,12 @@ jobs:
 
 **macOS / Linux:**
 ```bash
-curl -LsSf https://agentio.houlahop.com/install | sh
+curl -LsSf https://houlahop.com/agentio/install | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-iwr -useb https://agentio.houlahop.com/install.ps1 | iex
+iwr -useb https://houlahop.com/agentio/install.ps1 | iex
 ```
 
 <details>
@@ -323,7 +323,7 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: curl -LsSf https://agentio.houlahop.com/install | sh
+      - run: curl -LsSf https://houlahop.com/agentio/install | sh
       - run: npm install -g @anthropic-ai/claude-code
       - run: agentio vault import
       - run: claude plugin marketplace add https://github.com/plosson/agentio

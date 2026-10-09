@@ -4,7 +4,7 @@ import { isSecureRequest } from './session';
 // bun build --compile cannot load one file both as text and as code.
 
 /** Installs agentio on macOS or Linux; this guide and the page's Connect card (through assets.ts) both show it. */
-export const INSTALL_COMMAND = 'curl -LsSf https://agentio.houlahop.com/install | sh';
+export const INSTALL_COMMAND = 'curl -LsSf https://houlahop.com/agentio/install | sh';
 
 /**
  * Host names, with an optional port. No IPv6 literal: its brackets would need shell quoting,
@@ -40,7 +40,7 @@ On macOS or Linux:
 
 On Windows (PowerShell):
 
-    iwr -useb https://agentio.houlahop.com/install.ps1 | iex
+    iwr -useb https://houlahop.com/agentio/install.ps1 | iex
 
 ## 2. Connect to the vault
 
