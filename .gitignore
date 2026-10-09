@@ -48,7 +48,6 @@ TODO.md
 .siteio
 
 # site build output
-site/dist
 
 # isolated config dir used by `bun run dev` (AGENTIO_HOME)
 .dev-home

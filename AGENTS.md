@@ -37,7 +37,6 @@ Bun and TypeScript throughout, with Commander.js for the CLI.
 | `bun test` | Run the test suite |
 | `bun run build` | JS bundle to `dist/index.js` |
 | `bun run build:native` | Single-file native executable |
-| `bun run build:site` | Build the static site |
 
 The bundle targets `bun`, not node — the code uses Bun-native APIs (`Bun.serve`,
 `Bun.spawn`, `SQL` from `bun`), so a node target will not run.
@@ -62,7 +61,7 @@ always current:
 | `src/daemon/` | HTTP daemon: health, credential API, admin UI |
 | `src/utils/`, `src/types/` | Shared helpers and types |
 | `tests/` | Mirrors the source tree |
-| `docs/`, `site/`, `examples/`, `docker/` | Documentation, website, runnable examples, container image |
+| `docs/`, `examples/`, `docker/` | Documentation, runnable examples, container image |
 | `dist/` | Build output (generated) |
 
 ## Adding a service
