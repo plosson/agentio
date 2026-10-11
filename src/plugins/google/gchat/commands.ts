@@ -11,7 +11,7 @@ import { GChatClient } from './client';
 import { checkWebhookUrl, type WebhookCheck } from '../../webhook-check';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
-import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser } from './output';
+import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser, printGChatAttachmentsResult } from './output';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GChatCredentials, GChatWebhookCredentials, GChatOAuthCredentials } from './types';
@@ -256,6 +256,90 @@ export function registerGChatCommands(program: Command): void {
 
   addExamples(
     gchat
+      .command('attachments')
+      .description('Download every file attached in a space (uploads and Drive files) with a manifest (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .requiredOption('--space <id>', 'Space ID (AAAA1234 or spaces/AAAA1234) or display name')
+      .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
+      .option('--until <date>', 'Only messages before this date (YYYY-MM-DD)')
+      .option('--out <dir>', 'Folder to save files and manifest.json / manifest.csv into', 'gchat-attachments')
+      .option('--dry-run', 'Only list the attachments and write the manifest; download nothing')
+      .option('--format <format>', 'Summary format: text or json', 'text')
+      .action(async (options) => {
+        try {
+          if (options.format !== 'text' && options.format !== 'json') {
+            throw new CliError('INVALID_PARAMS', `Unknown format: ${options.format}`, 'Use --format text or --format json');
+          }
+          const since = parseDateOption(options.since, '--since');
+          const until = parseDateOption(options.until, '--until');
+          const { client } = await getGChatClient(options.profile);
+          const result = await client.exportAttachments({
+            spaceId: options.space,
+            since,
+            until,
+            outDir: options.out,
+            dryRun: !!options.dryRun,
+            onProgress: (entry, index) => {
+              const tag = entry.status === 'failed' ? `failed: ${entry.error}` : entry.status;
+              console.error(`[${index + 1}] ${entry.contentName} -> ${entry.savedPath} (${tag})`);
+            },
+          });
+          if (options.format === 'json') {
+            const { entries: _entries, ...summary } = result;
+            console.log(JSON.stringify(summary, null, 2));
+          } else {
+            printGChatAttachmentsResult(result, !!options.dryRun);
+          }
+          if (result.failed > 0) process.exitCode = 1;
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # save every attachment of a space into ./media, with manifest.json and manifest.csv
+  agentio gchat attachments --space AAAA1234 --out ./media
+
+  # only one month, by resource name or display name
+  agentio gchat attachments --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --out ./april
+
+  # see what would be saved, without downloading
+  agentio gchat attachments --space "Team" --dry-run
+
+Files are named <YYYY-MM-DD>_<sender>_<file name>; clashes get " (2)", " (3)"...
+Uploaded files come from the Chat media API; Drive files from Drive (Google Docs,
+Sheets and Slides are exported to docx/xlsx/pptx). A file that fails is recorded
+in the manifest with its error and the run continues; the exit code is 1 if any failed.
+Drive files need the drive.readonly scope: profiles added before it was requested
+must sign in again with \`agentio profile reauth gchat <profile>\`.`,
+  );
+
+  addExamples(
+    gchat
+      .command('download')
+      .argument('<attachment>', 'Attachment name (spaces/X/messages/Y/attachments/Z) or an attachmentDataRef.resourceName')
+      .description('Download one message attachment (OAuth profiles only)')
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+      .option('--out <path>', 'Output file path (default: the attachment file name in the current folder)')
+      .action(async (attachment: string, options) => {
+        try {
+          const { client } = await getGChatClient(options.profile);
+          const result = await client.downloadAttachment(attachment, options.out);
+          console.log(`Saved: ${result.path}`);
+          console.log(`Bytes: ${result.bytes}`);
+          if (result.attachment.contentType) console.log(`Type: ${result.attachment.contentType}`);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # attachment names are listed by \`agentio gchat get <id> --space <space>\`
+  agentio gchat download spaces/AAAA1234/messages/MSG.MSG/attachments/ATT --out ./photo.jpg`,
+  );
+
+  addExamples(
+    gchat
       .command('spaces')
       .description('List available Google Chat spaces (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
@@ -391,6 +475,16 @@ export function registerGChatCommands(program: Command): void {
         handleError(error);
       }
     });
+}
+
+/** `--since` / `--until`: refuse a date that does not parse instead of sending "Invalid Date" to the API. */
+export function parseDateOption(value: string | undefined, flag: string): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new CliError('INVALID_PARAMS', `Invalid ${flag} date: ${value}`, 'Use YYYY-MM-DD or an ISO 8601 timestamp');
+  }
+  return date;
 }
 
 export async function gchatProfileAdd(

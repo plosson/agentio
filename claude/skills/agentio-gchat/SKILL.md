@@ -3,7 +3,7 @@ name: agentio-gchat
 description: Use when interacting with Google Chat via the agentio CLI - send messages, list spaces, read history.
 ---
 
-# Gchat via agentio
+# Google Chat via agentio
 
 Auto-generated from `agentio skill gchat`. Do not edit by hand.
 
@@ -17,7 +17,7 @@ Options:
 - `--space <id>`: Space ID (required for OAuth profiles)
 - `--thread <id>`: Thread ID (optional)
 - `--json [file]`: Send rich message from JSON file (or stdin if no file specified)
-- `--attachment <path>`: File to attach (repeatable, OAuth profiles only) (default: )
+- `--attachment <path>`: File to attach (repeatable, OAuth profiles only)
 
 ```
 Examples:
@@ -87,6 +87,56 @@ Examples:
 
   # as JSON for scripting
   agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json
+```
+
+## agentio gchat attachments
+
+Download every file attached in a space (uploads and Drive files) with a manifest (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--space <id>`: Space ID (AAAA1234 or spaces/AAAA1234) or display name
+- `--since <date>`: Only messages after this date (YYYY-MM-DD)
+- `--until <date>`: Only messages before this date (YYYY-MM-DD)
+- `--out <dir>`: Folder to save files and manifest.json / manifest.csv into (default: gchat-attachments)
+- `--dry-run`: Only list the attachments and write the manifest; download nothing
+- `--format <format>`: Summary format: text or json (default: text)
+
+```
+Examples:
+
+  # save every attachment of a space into ./media, with manifest.json and manifest.csv
+  agentio gchat attachments --space AAAA1234 --out ./media
+
+  # only one month, by resource name or display name
+  agentio gchat attachments --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --out ./april
+
+  # see what would be saved, without downloading
+  agentio gchat attachments --space "Team" --dry-run
+
+Files are named <YYYY-MM-DD>_<sender>_<file name>; clashes get " (2)", " (3)"...
+Uploaded files come from the Chat media API; Drive files from Drive (Google Docs,
+Sheets and Slides are exported to docx/xlsx/pptx). A file that fails is recorded
+in the manifest with its error and the run continues; the exit code is 1 if any failed.
+Drive files need the drive.readonly scope: profiles added before it was requested
+must sign in again with `agentio profile reauth gchat <profile>`.
+```
+
+## agentio gchat download <attachment>
+
+Download one message attachment (OAuth profiles only)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--out <path>`: Output file path (default: the attachment file name in the current folder)
+
+```
+Examples:
+
+  # attachment names are listed by `agentio gchat get <id> --space <space>`
+  agentio gchat download spaces/AAAA1234/messages/MSG.MSG/attachments/ATT --out ./photo.jpg
 ```
 
 ## agentio gchat spaces

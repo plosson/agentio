@@ -1,4 +1,5 @@
-import type { GChatMessage, GChatSpace, GChatMember, GChatUser } from './types';
+import type { GChatMessage, GChatSpace, GChatMember, GChatUser, GChatAttachmentsResult } from './types';
+import { messageMarkers } from './attachments';
 
 // Google Chat specific formatters
 export function printGChatSendResult(result: { messageId: string; spaceId?: string; isJsonPayload?: boolean }): void {
@@ -33,6 +34,9 @@ export function printGChatMessageList(messages: GChatMessage[]): void {
       const snippet = msg.text.length > 100 ? msg.text.substring(0, 100) + '...' : msg.text;
       console.log(`    > ${snippet}`);
     }
+    for (const marker of messageMarkers(msg)) {
+      console.log(`    ${marker}`);
+    }
     console.log(`    Date: ${msg.createTime}`);
     console.log('');
   }
@@ -50,9 +54,36 @@ export function printGChatMessage(msg: GChatMessage): void {
   if (msg.thread) {
     console.log(`Thread: ${msg.thread.name}`);
   }
-  if (msg.text) {
+  const markers = messageMarkers(msg);
+  if (msg.text || markers.length) {
     console.log('---');
-    console.log(msg.text);
+    if (msg.text) console.log(msg.text);
+    for (const marker of markers) console.log(marker);
+  }
+  for (const a of msg.attachment || []) {
+    console.log(`Attachment: ${a.name}`);
+    if (a.attachmentDataRef?.resourceName || a.driveDataRef?.driveFileId) console.log(`  Download: agentio gchat download ${a.name}`);
+    if (a.driveDataRef?.driveFileId) console.log(`  Drive file: ${a.driveDataRef.driveFileId}`);
+  }
+}
+
+export function printGChatAttachmentsResult(result: GChatAttachmentsResult, dryRun = false): void {
+  console.log(`Messages scanned: ${result.messagesScanned}`);
+  console.log(`Messages with attachments: ${result.messagesWithAttachments}`);
+  console.log(`Attachments: ${result.attachments}`);
+  if (dryRun) {
+    console.log('Dry run: nothing downloaded');
+  } else {
+    console.log(`Saved: ${result.saved}`);
+    console.log(`Failed: ${result.failed}`);
+  }
+  console.log(`Folder: ${result.outDir}`);
+  console.log(`Manifest: ${result.manifestJson}, ${result.manifestCsv}`);
+  const failures = result.entries.filter(e => e.status === 'failed');
+  if (failures.length) {
+    console.log('\nFailures:');
+    for (const f of failures.slice(0, 20)) console.log(`  ${f.contentName} (${f.messageName}): ${f.error}`);
+    if (failures.length > 20) console.log(`  … ${failures.length - 20} more in the manifest`);
   }
 }
 
