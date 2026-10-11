@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-07. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-11. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -68,7 +68,7 @@ The **"Create your own app"** steps below were checked against each provider's o
 | gslides | presentations **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |
 | gcal | calendar **S**, userinfo.email NS |
 | gtasks | tasks **S**, userinfo.email NS |
-| gchat | chat.messages.create **S**, chat.messages.readonly **R**, chat.spaces.readonly **S**, chat.memberships.readonly **S**, directory.readonly, userinfo.email NS |
+| gchat | chat.messages.create **S**, chat.messages.readonly **R**, chat.spaces.readonly **S**, chat.memberships.readonly **S**, directory.readonly, drive.readonly **R**, userinfo.email NS. drive.readonly lets `gchat attachments` / `gchat download` fetch Drive files shared in messages; uploaded files only need chat.messages.readonly. Profiles signed in before drive.readonly was added keep working, but their Drive attachments fail until they sign in again (`agentio profile reauth gchat`) |
 | gscript | script.projects **S**, drive **R**, userinfo.email NS |
 
 The Gmail, Drive and Chat classes are confirmed from Google's documentation. For calendar, tasks, documents, spreadsheets, presentations, script.projects and directory.readonly, confirm the class in the Google Cloud console.
@@ -107,7 +107,7 @@ agentio can't use your own Google app yet: it always uses its shared app. These 
    | gslides | Slides API |
    | gcal | Calendar API |
    | gtasks | Tasks API |
-   | gchat | Chat API, and People API for `directory.readonly` |
+   | gchat | Chat API, People API for `directory.readonly`, and Drive API for Drive attachments |
    | gscript | Apps Script API |
 
 3. **Set up the consent screen:** **Menu > Google Auth platform > Branding**. If it says "Google Auth platform not configured yet", click **Get Started**.

@@ -7,6 +7,17 @@ import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../../utils/
 import type { ServiceClient, ValidationResult } from '../../../types/service';
 import { GOOGLE_OAUTH_CONFIG } from '../../../config/credentials';
 import { GChatDirectory } from './directory';
+import {
+  exportAttachments,
+  grantAllowsDrive,
+  mapChatMessage,
+  normalizeMessageId,
+  normalizeSpaceId,
+  openAttachment,
+  sanitizeFilenamePart,
+  threadResourceName,
+  type DownloadDeps,
+} from './attachments';
 import type {
   GChatCredentials,
   GChatSendOptions,
@@ -20,6 +31,9 @@ import type {
   GChatSpace,
   GChatUser,
   GChatMember,
+  GChatAttachment,
+  GChatAttachmentsOptions,
+  GChatAttachmentsResult,
 } from './types';
 
 interface ResolvedUser {
@@ -138,6 +152,115 @@ export class GChatClient implements ServiceClient {
     this.ensureOAuth('Getting messages');
     options.spaceId = await this.resolveSpaceId(options.spaceId);
     return this.getViaOAuth(options);
+  }
+
+  /**
+   * Every message in a space, oldest first, page by page (1000 per page), with
+   * senders resolved. Used by `gchat attachments`, which must see the whole range.
+   */
+  async *iterateMessages(options: { spaceId: string; since?: Date; until?: Date }): AsyncGenerator<GChatMessage> {
+    this.ensureOAuth('Listing messages');
+    const spaceId = await this.resolveSpaceId(options.spaceId);
+    const { auth, chat } = this.getOAuthChatApi();
+    const filters: string[] = [];
+    if (options.since) filters.push(`createTime > "${options.since.toISOString()}"`);
+    if (options.until) filters.push(`createTime < "${options.until.toISOString()}"`);
+    const filter = filters.length ? filters.join(' AND ') : undefined;
+
+    let pageToken: string | undefined;
+    do {
+      let page: chat_v1.Schema$Message[];
+      try {
+        const response = await chat.spaces.messages.list({
+          parent: `spaces/${spaceId}`,
+          pageSize: 1000,
+          orderBy: 'createTime asc',
+          filter,
+          pageToken,
+        });
+        page = response.data.messages || [];
+        pageToken = response.data.nextPageToken || undefined;
+      } catch (err) {
+        throw new CliError(
+          this.getErrorCode(err),
+          `Failed to list messages: ${this.getErrorMessage(err)}`,
+          'Check that the space ID is valid and OAuth token is not expired'
+        );
+      }
+      const senderIds = [...new Set(page.filter(m => m.attachment?.length).map(m => m.sender?.name).filter(Boolean))] as string[];
+      await this.resolveUsers(senderIds, auth);
+      for (const msg of page) yield mapChatMessage(msg, this.enrichSender(msg));
+    } while (pageToken);
+  }
+
+  private downloadDeps(): DownloadDeps {
+    const { auth } = this.getOAuthChatApi();
+    return {
+      driveAllowed: grantAllowsDrive((this.credentials as GChatOAuthCredentials).scope),
+      fetch: (url, init) => fetch(url, init),
+      getAccessToken: async () => {
+        const token = await auth.getAccessToken();
+        if (!token.token) throw new CliError('AUTH_FAILED', 'Failed to obtain access token');
+        return token.token;
+      },
+    };
+  }
+
+  /** Saves every attachment in a space (or a date window) to a folder, with a manifest. */
+  async exportAttachments(options: GChatAttachmentsOptions): Promise<GChatAttachmentsResult> {
+    if (!options.spaceId?.trim()) {
+      throw new CliError('INVALID_PARAMS', 'spaceId is required', 'Specify with --space');
+    }
+    this.ensureOAuth('Downloading attachments');
+    return exportAttachments(
+      this.iterateMessages({ spaceId: options.spaceId, since: options.since, until: options.until }),
+      { outDir: options.outDir, dryRun: options.dryRun, onProgress: options.onProgress },
+      this.downloadDeps()
+    );
+  }
+
+  /**
+   * Downloads one attachment. `ref` is either an attachment name
+   * (`spaces/X/messages/Y/attachments/Z`, looked up first) or an uploaded
+   * file's `attachmentDataRef.resourceName`.
+   */
+  async downloadAttachment(ref: string, outPath?: string): Promise<{ path: string; bytes: number; attachment: GChatAttachment }> {
+    this.ensureOAuth('Downloading attachments');
+    let attachment: GChatAttachment;
+    if (/^spaces\/[^/]+\/messages\/[^/]+\/attachments\/.+/.test(ref)) {
+      const { chat } = this.getOAuthChatApi();
+      try {
+        const res = await chat.spaces.messages.attachments.get({ name: ref });
+        const a = res.data;
+        attachment = {
+          name: a.name || ref,
+          contentName: a.contentName || undefined,
+          contentType: a.contentType || undefined,
+          source: a.source || undefined,
+          attachmentDataRef: a.attachmentDataRef?.resourceName ? { resourceName: a.attachmentDataRef.resourceName } : undefined,
+          driveDataRef: a.driveDataRef?.driveFileId ? { driveFileId: a.driveDataRef.driveFileId } : undefined,
+        };
+      } catch (err) {
+        throw new CliError(
+          this.getErrorCode(err),
+          `Failed to get attachment: ${this.getErrorMessage(err)}`,
+          'Use the attachment name from `agentio gchat get --format json`'
+        );
+      }
+    } else {
+      attachment = { name: ref, source: 'UPLOADED_CONTENT', attachmentDataRef: { resourceName: ref } };
+    }
+
+    let opened: Awaited<ReturnType<typeof openAttachment>>;
+    try {
+      opened = await openAttachment(attachment, this.downloadDeps());
+    } catch (err) {
+      throw new CliError('API_ERROR', `Failed to download attachment: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    let path = outPath || sanitizeFilenamePart(attachment.contentName || '') || 'attachment';
+    if (!outPath && opened.extension && !path.toLowerCase().endsWith(opened.extension)) path += opened.extension;
+    const bytes = await Bun.write(path, opened.response);
+    return { path, bytes, attachment };
   }
 
   async listSpaces(): Promise<GChatSpace[]> {
@@ -430,7 +553,7 @@ export class GChatClient implements ServiceClient {
       // Build filter from options
       const filters: string[] = [];
       if (options.threadId) {
-        filters.push(`thread.name = "spaces/${options.spaceId}/threads/${options.threadId}"`);
+        filters.push(`thread.name = "${threadResourceName(options.spaceId, options.threadId)}"`);
       }
       if (options.since) {
         filters.push(`createTime > "${options.since.toISOString()}"`);
@@ -468,22 +591,7 @@ export class GChatClient implements ServiceClient {
       const senderIds = [...new Set(messages.map(m => m.sender?.name).filter(Boolean))] as string[];
       await this.resolveUsers(senderIds, auth);
 
-      const mapped = messages.map((msg: chat_v1.Schema$Message) => {
-        const gchatMsg: GChatMessage = {
-          name: msg.name || '',
-          createTime: msg.createTime || new Date().toISOString(),
-          // updateTime is not defined in chat_v1.Schema$Message, use lastUpdateTime as fallback
-          updateTime: (msg as Record<string, unknown>).lastUpdateTime as string || new Date().toISOString(),
-        };
-        if (msg.text) gchatMsg.text = msg.text;
-        gchatMsg.sender = this.enrichSender(msg);
-        if (msg.thread?.name) {
-          gchatMsg.thread = {
-            name: msg.thread.name,
-          };
-        }
-        return gchatMsg;
-      });
+      const mapped = messages.map((msg: chat_v1.Schema$Message) => mapChatMessage(msg, this.enrichSender(msg)));
 
       return { messages: mapped, truncated };
     } catch (err) {
@@ -502,7 +610,7 @@ export class GChatClient implements ServiceClient {
 
     try {
       const response = await chat.spaces.messages.get({
-        name: `spaces/${options.spaceId}/messages/${options.messageId}`,
+        name: `spaces/${options.spaceId}/messages/${normalizeMessageId(options.messageId)}`,
       });
 
       if (!response.data) {
@@ -516,20 +624,7 @@ export class GChatClient implements ServiceClient {
         await this.resolveUsers([msg.sender.name], auth);
       }
 
-      const gchatMsg: GChatMessage = {
-        name: msg.name || '',
-        createTime: msg.createTime || new Date().toISOString(),
-        // updateTime is not defined in chat_v1.Schema$Message, use lastUpdateTime as fallback
-        updateTime: (msg as Record<string, unknown>).lastUpdateTime as string || new Date().toISOString(),
-      };
-      if (msg.text) gchatMsg.text = msg.text;
-      gchatMsg.sender = this.enrichSender(msg);
-      if (msg.thread?.name) {
-        gchatMsg.thread = {
-          name: msg.thread.name,
-        };
-      }
-      return gchatMsg;
+      return mapChatMessage(msg, this.enrichSender(msg));
     } catch (err) {
       const code = this.getErrorCode(err);
       const message = this.getErrorMessage(err);
@@ -722,7 +817,9 @@ export class GChatClient implements ServiceClient {
    * Tries as ID first (no API call), falls back to name resolution via listSpaces.
    * Results are cached for the lifetime of this client instance.
    */
-  private async resolveSpaceId(spaceIdOrName: string): Promise<string> {
+  private async resolveSpaceId(rawSpaceIdOrName: string): Promise<string> {
+    // Accept both `AAAA1234` and the `spaces/AAAA1234` resource name.
+    const spaceIdOrName = normalizeSpaceId(rawSpaceIdOrName);
     const cached = this.spaceIdCache.get(spaceIdOrName);
     if (cached) return cached;
 

@@ -19,6 +19,8 @@ export const SCOPES = {
     'https://www.googleapis.com/auth/chat.spaces.readonly',
     'https://www.googleapis.com/auth/chat.memberships.readonly',
     'https://www.googleapis.com/auth/directory.readonly',
+    // `gchat attachments` / `gchat download`: Drive files shared in a message.
+    'https://www.googleapis.com/auth/drive.readonly',
     'https://www.googleapis.com/auth/userinfo.email',
   ],
   gdocs: [
