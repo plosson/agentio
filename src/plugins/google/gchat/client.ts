@@ -120,6 +120,13 @@ export class GChatClient implements ServiceClient {
           'Use an OAuth profile to send attachments'
         );
       }
+      if (options.threadId) {
+        throw new CliError(
+          'PERMISSION_DENIED',
+          'Replying in a thread is not supported for webhook profiles',
+          'Use an OAuth profile to reply in a thread'
+        );
+      }
       return this.sendViaWebhook(options);
     }
     if (options.spaceId) {
@@ -459,6 +466,9 @@ export class GChatClient implements ServiceClient {
       );
     }
 
+    // Checked before any upload, so a thread from another space posts nothing.
+    const threadName = options.threadId ? threadResourceName(options.spaceId, options.threadId) : undefined;
+
     // Upload file attachments first (in parallel) to obtain attachmentDataRefs
     const attachmentRefs = options.attachments?.length
       ? await Promise.all(options.attachments.map(p => this.uploadAttachment(options.spaceId!, p, chat)))
@@ -474,10 +484,17 @@ export class GChatClient implements ServiceClient {
       requestBody.attachment = [...existing, ...attachmentRefs.map(ref => ({ attachmentDataRef: ref }))];
     }
 
+    // Without messageReplyOption the API ignores thread.name and starts a new
+    // thread. Fail instead of falling back, so a reply never lands elsewhere.
+    if (threadName) {
+      requestBody.thread = { name: threadName };
+    }
+
     try {
       const response = await chat.spaces.messages.create({
         parent: `spaces/${options.spaceId}`,
         requestBody: requestBody as chat_v1.Schema$Message,
+        messageReplyOption: threadName ? 'REPLY_MESSAGE_OR_FAIL' : undefined,
       });
 
       const messageId = response.data.name?.split('/').pop() || 'unknown';
@@ -548,12 +565,14 @@ export class GChatClient implements ServiceClient {
 
   private async listViaOAuth(options: GChatListOptions): Promise<GChatListResult> {
     const { auth, chat } = this.getOAuthChatApi();
+    // Outside the try, so a bad --thread is reported as such, not as an API error.
+    const threadName = options.threadId ? threadResourceName(options.spaceId, options.threadId) : undefined;
 
     try {
       // Build filter from options
       const filters: string[] = [];
-      if (options.threadId) {
-        filters.push(`thread.name = "${threadResourceName(options.spaceId, options.threadId)}"`);
+      if (threadName) {
+        filters.push(`thread.name = "${threadName}"`);
       }
       if (options.since) {
         filters.push(`createTime > "${options.since.toISOString()}"`);
@@ -607,10 +626,12 @@ export class GChatClient implements ServiceClient {
 
   private async getViaOAuth(options: GChatGetOptions): Promise<GChatMessage> {
     const { auth, chat } = this.getOAuthChatApi();
+    // Outside the try, so a bad message ID is reported as such, not as an API error.
+    const messageId = normalizeMessageId(options.spaceId, options.messageId);
 
     try {
       const response = await chat.spaces.messages.get({
-        name: `spaces/${options.spaceId}/messages/${normalizeMessageId(options.messageId)}`,
+        name: `spaces/${options.spaceId}/messages/${messageId}`,
       });
 
       if (!response.data) {

@@ -25,6 +25,7 @@ import { printGChatMessage, printGChatMessageList } from '../../../../src/plugin
 import { parseDateOption } from '../../../../src/plugins/google/gchat/commands';
 import { GChatClient } from '../../../../src/plugins/google/gchat/client';
 import { SCOPES } from '../../../../src/plugins/google/oauth';
+import { CliError } from '../../../../src/utils/errors';
 import type { GChatAttachment, GChatMessage } from '../../../../src/plugins/google/gchat/types';
 
 const UPLOAD: GChatAttachment = {
@@ -62,6 +63,15 @@ function captureLog(run: () => void): string {
   return lines.join('\n');
 }
 
+function invalid(run: () => unknown): CliError {
+  try {
+    run();
+  } catch (error) {
+    return error as CliError;
+  }
+  throw new Error('expected a failure');
+}
+
 describe('resource names', () => {
   test('space ids are accepted bare or as spaces/ resource names', () => {
     expect(normalizeSpaceId('AAAAU78G66k')).toBe('AAAAU78G66k');
@@ -70,14 +80,55 @@ describe('resource names', () => {
     expect(normalizeSpaceId('EA - Team')).toBe('EA - Team');
   });
 
+  test('the spaces/ prefix is stripped once, not repeatedly', () => {
+    expect(invalid(() => normalizeSpaceId('spaces/spaces/AAAA1234')).code).toBe('INVALID_PARAMS');
+  });
+
+  test('a bare "spaces/" is rejected instead of becoming an empty ID', () => {
+    expect(invalid(() => normalizeSpaceId('spaces/')).code).toBe('INVALID_PARAMS');
+  });
+
+  test('a message resource name passed as a space is rejected', () => {
+    expect(invalid(() => normalizeSpaceId('spaces/AAAA1234/messages/xyz')).code).toBe('INVALID_PARAMS');
+  });
+
+  test('display names pass through untouched, slashes included', () => {
+    expect(normalizeSpaceId('EA - Team / Ops')).toBe('EA - Team / Ops');
+    expect(normalizeSpaceId('Spaces/AAAA1234')).toBe('Spaces/AAAA1234');
+    expect(normalizeSpaceId('my spaces/AAAA1234')).toBe('my spaces/AAAA1234');
+  });
+
   test('message ids are accepted bare or as full names', () => {
-    expect(normalizeMessageId('IJI.IJI')).toBe('IJI.IJI');
-    expect(normalizeMessageId('spaces/S/messages/IJI.IJI')).toBe('IJI.IJI');
+    expect(normalizeMessageId('S', 'IJI.IJI')).toBe('IJI.IJI');
+    expect(normalizeMessageId('S', 'spaces/S/messages/IJI.IJI')).toBe('IJI.IJI');
   });
 
   test('thread ids are accepted bare or as full names', () => {
     expect(threadResourceName('S', 'T1')).toBe('spaces/S/threads/T1');
     expect(threadResourceName('S', 'spaces/S/threads/T1')).toBe('spaces/S/threads/T1');
+  });
+
+  test('a message or thread from another space is rejected, naming the right space', () => {
+    const error = invalid(() => normalizeMessageId('S1', 'spaces/S2/messages/M1'));
+    expect(error.code).toBe('INVALID_PARAMS');
+    expect(error.message).toContain('S2');
+    expect(error.suggestion).toBe('Use --space S2');
+    expect(invalid(() => threadResourceName('S1', 'spaces/S2/threads/T1')).suggestion).toBe('Use --space S2');
+  });
+
+  test('a thread name is not accepted as a message, nor the reverse', () => {
+    expect(invalid(() => normalizeMessageId('S1', 'spaces/S1/threads/T1')).code).toBe('INVALID_PARAMS');
+    expect(invalid(() => threadResourceName('S1', 'spaces/S1/messages/M1')).code).toBe('INVALID_PARAMS');
+  });
+
+  test('extra or missing path segments are rejected', () => {
+    expect(invalid(() => normalizeMessageId('S1', 'spaces/S1/messages/M1/extra')).code).toBe('INVALID_PARAMS');
+    expect(invalid(() => normalizeMessageId('S1', 'spaces/S1/messages/')).code).toBe('INVALID_PARAMS');
+    expect(invalid(() => normalizeMessageId('S1', 'messages/M1')).code).toBe('INVALID_PARAMS');
+  });
+
+  test('an empty or blank ID is rejected', () => {
+    expect(invalid(() => threadResourceName('S1', '   ')).code).toBe('INVALID_PARAMS');
   });
 });
 
