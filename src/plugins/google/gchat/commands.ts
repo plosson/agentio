@@ -44,7 +44,7 @@ export function registerGChatCommands(program: Command): void {
     .command('send')
     .description('Send a message to Google Chat')
     .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-    .option('--space <id>', 'Space ID (required for OAuth profiles)')
+    .option('--space <id-or-name>', 'Space ID (AAAA1234 or spaces/AAAA1234) or display name (required for OAuth profiles)')
     .option('--thread <id>', 'Thread ID (optional)')
     .option('--json [file]', 'Send rich message from JSON file (or stdin if no file specified)')
     .option('--attachment <path>', 'File to attach (repeatable, OAuth profiles only)', (val: string, acc: string[]) => [...acc, val], [] as string[])
@@ -146,17 +146,17 @@ export function registerGChatCommands(program: Command): void {
   agentio gchat send "Deployment complete"
 
   # OAuth profile: send to a specific space
-  agentio gchat send "Status update" --space spaces/AAAA1234
+  agentio gchat send "Status update" --space AAAA1234
 
   # reply within an existing thread
-  agentio gchat send "Following up" --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+  agentio gchat send "Following up" --space AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
 
   # rich card via JSON file (OAuth or webhook)
-  agentio gchat send --json ./card.json --space spaces/AAAA1234
+  agentio gchat send --json ./card.json --space AAAA1234
 
   # JSON via stdin (good for inline cards)
   echo '{"text":"Build status","cards":[{"header":{"title":"CI"}}]}' | \\
-    agentio gchat send --json --space spaces/AAAA1234`,
+    agentio gchat send --json --space AAAA1234`,
   );
 
   addExamples(
@@ -164,9 +164,9 @@ export function registerGChatCommands(program: Command): void {
       .command('list')
       .description('List messages from a Google Chat space (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .requiredOption('--space <id>', 'Space ID')
+      .requiredOption('--space <id-or-name>', 'Space ID (AAAA1234 or spaces/AAAA1234) or display name')
       .option('--limit <n>', 'Number of messages', '10')
-      .option('--thread <id>', 'Filter by thread ID')
+      .option('--thread <id>', 'Filter by thread ID (abcDEF or spaces/AAAA1234/threads/abcDEF)')
       .option('--since <date>', 'Only messages after this date (YYYY-MM-DD)')
       .option('--until <date>', 'Only messages before this date (YYYY-MM-DD)')
       .option('--format <format>', 'Output format: text or json', 'text')
@@ -205,25 +205,25 @@ export function registerGChatCommands(program: Command): void {
     `Examples:
 
   # 10 most recent messages in a space (OAuth only)
-  agentio gchat list --space spaces/AAAA1234
+  agentio gchat list --space AAAA1234
 
   # last 50 messages
-  agentio gchat list --space spaces/AAAA1234 --limit 50
+  agentio gchat list --space AAAA1234 --limit 50
 
   # only messages in a specific thread
-  agentio gchat list --space spaces/AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
+  agentio gchat list --space AAAA1234 --thread spaces/AAAA1234/threads/abcDEF
 
   # messages within a closed date range, as JSON for scripting
-  agentio gchat list --space spaces/AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json`,
+  agentio gchat list --space AAAA1234 --since 2026-04-01 --until 2026-05-01 --limit 5000 --format json`,
   );
 
   addExamples(
     gchat
       .command('get')
-      .argument('<message-id>', 'Message ID')
+      .argument('<message-id>', 'Message ID (9876543210 or spaces/AAAA1234/messages/9876543210)')
       .description('Get a message from a Google Chat space (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .requiredOption('--space <id>', 'Space ID')
+      .requiredOption('--space <id-or-name>', 'Space ID (AAAA1234 or spaces/AAAA1234) or display name')
       .option('--format <format>', 'Output format: text or json', 'text')
       .action(async (messageId: string, options) => {
         try {
@@ -248,10 +248,10 @@ export function registerGChatCommands(program: Command): void {
     `Examples:
 
   # fetch one message by id from a space (OAuth only)
-  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space AAAA1234
 
   # as JSON for scripting
-  agentio gchat get spaces/AAAA1234/messages/9876543210 --space spaces/AAAA1234 --format json`,
+  agentio gchat get spaces/AAAA1234/messages/9876543210 --space AAAA1234 --format json`,
   );
 
   addExamples(
@@ -300,7 +300,7 @@ export function registerGChatCommands(program: Command): void {
       .command('members')
       .description('List members of a Google Chat space (OAuth profiles only)')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .requiredOption('--space <id-or-name>', 'Space ID or display name')
+      .requiredOption('--space <id-or-name>', 'Space ID (AAAA1234 or spaces/AAAA1234) or display name')
       .action(async (options) => {
         try {
           const { client } = await getGChatClient(options.profile);
@@ -313,7 +313,7 @@ export function registerGChatCommands(program: Command): void {
     `Examples:
 
   # members by space id
-  agentio gchat members --space spaces/AAAA1234
+  agentio gchat members --space AAAA1234
 
   # members by space display name (resolved against the space list)
   agentio gchat members --space "Engineering"`,

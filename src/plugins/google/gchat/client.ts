@@ -49,6 +49,58 @@ const ATTACHMENT_EXT_TO_MIME: Record<string, string> = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
+/**
+ * Bare space ID from either "AAAA1234" or the resource name "spaces/AAAA1234".
+ * `gchat spaces` prints the bare ID while API responses carry the resource
+ * name, so both reach --space. Anything else (a display name) passes through.
+ */
+export function spaceIdFrom(ref: string): string {
+  const value = ref.trim();
+  if (!value.startsWith('spaces/')) return value;
+  const id = value.slice('spaces/'.length);
+  if (!id || id.includes('/')) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Invalid space: "${ref}"`,
+      'Pass a space ID ("AAAA1234"), its resource name ("spaces/AAAA1234") or a display name'
+    );
+  }
+  return id;
+}
+
+/**
+ * Bare message or thread ID from either "abcDEF" or the resource name
+ * "spaces/AAAA1234/<collection>/abcDEF" that `gchat list` and `gchat get`
+ * print. A resource name from another space or collection is rejected
+ * rather than silently resolved against --space.
+ */
+export function childIdFrom(ref: string, collection: 'messages' | 'threads', spaceId: string): string {
+  const value = ref.trim();
+  const label = collection === 'messages' ? 'message' : 'thread';
+  if (!value.includes('/')) {
+    if (!value) {
+      throw new CliError('INVALID_PARAMS', `Empty ${label} ID`);
+    }
+    return value;
+  }
+  const match = value.match(/^spaces\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (!match || match[2] !== collection) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Invalid ${label} ID: "${ref}"`,
+      `Pass a ${label} ID ("abcDEF") or its resource name ("spaces/AAAA1234/${collection}/abcDEF")`
+    );
+  }
+  if (match[1] !== spaceId) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `${label[0].toUpperCase()}${label.slice(1)} "${ref}" belongs to space ${match[1]}, not ${spaceId}`,
+      `Use --space ${match[1]}`
+    );
+  }
+  return match[3];
+}
+
 export class GChatClient implements ServiceClient {
   private credentials: GChatCredentials;
   private userCache = new Map<string, ResolvedUser>();
@@ -106,10 +158,20 @@ export class GChatClient implements ServiceClient {
           'Use an OAuth profile to send attachments'
         );
       }
+      if (options.threadId) {
+        throw new CliError(
+          'PERMISSION_DENIED',
+          'Replying in a thread is not supported for webhook profiles',
+          'Use an OAuth profile to reply in a thread'
+        );
+      }
       return this.sendViaWebhook(options);
     }
     if (options.spaceId) {
       options.spaceId = await this.resolveSpaceId(options.spaceId);
+      if (options.threadId) {
+        options.threadId = childIdFrom(options.threadId, 'threads', options.spaceId);
+      }
     }
     return this.sendViaOAuth(options);
   }
@@ -124,6 +186,9 @@ export class GChatClient implements ServiceClient {
     }
     this.ensureOAuth('Listing messages');
     options.spaceId = await this.resolveSpaceId(options.spaceId);
+    if (options.threadId) {
+      options.threadId = childIdFrom(options.threadId, 'threads', options.spaceId);
+    }
     return this.listViaOAuth(options);
   }
 
@@ -137,6 +202,7 @@ export class GChatClient implements ServiceClient {
     }
     this.ensureOAuth('Getting messages');
     options.spaceId = await this.resolveSpaceId(options.spaceId);
+    options.messageId = childIdFrom(options.messageId, 'messages', options.spaceId);
     return this.getViaOAuth(options);
   }
 
@@ -351,10 +417,17 @@ export class GChatClient implements ServiceClient {
       requestBody.attachment = [...existing, ...attachmentRefs.map(ref => ({ attachmentDataRef: ref }))];
     }
 
+    // Without messageReplyOption the API ignores thread.name and starts a new
+    // thread. Fail instead of falling back, so a reply never lands elsewhere.
+    if (options.threadId) {
+      requestBody.thread = { name: `spaces/${options.spaceId}/threads/${options.threadId}` };
+    }
+
     try {
       const response = await chat.spaces.messages.create({
         parent: `spaces/${options.spaceId}`,
         requestBody: requestBody as chat_v1.Schema$Message,
+        messageReplyOption: options.threadId ? 'REPLY_MESSAGE_OR_FAIL' : undefined,
       });
 
       const messageId = response.data.name?.split('/').pop() || 'unknown';
@@ -722,7 +795,8 @@ export class GChatClient implements ServiceClient {
    * Tries as ID first (no API call), falls back to name resolution via listSpaces.
    * Results are cached for the lifetime of this client instance.
    */
-  private async resolveSpaceId(spaceIdOrName: string): Promise<string> {
+  private async resolveSpaceId(spaceRef: string): Promise<string> {
+    const spaceIdOrName = spaceIdFrom(spaceRef);
     const cached = this.spaceIdCache.get(spaceIdOrName);
     if (cached) return cached;
 
