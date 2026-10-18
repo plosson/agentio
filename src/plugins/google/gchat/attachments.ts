@@ -1,6 +1,7 @@
 import { mkdir, unlink } from 'fs/promises';
 import { join, extname } from 'path';
 import type { chat_v1 } from '@googleapis/chat';
+import { CliError } from '../../../utils/errors';
 import type {
   GChatAttachment,
   GChatAttachmentsResult,
@@ -17,24 +18,62 @@ export const DRIVE_REAUTH_HINT =
 // Resource names
 // ---------------------------------------------------------------------------
 
-/** `AAAA1234`, `spaces/AAAA1234` and `spaces/AAAA1234/` all become `AAAA1234`. */
+/**
+ * `AAAA1234`, `spaces/AAAA1234` and `spaces/AAAA1234/` all become `AAAA1234`.
+ * Anything without the prefix is a display name and passes through untouched.
+ */
 export function normalizeSpaceId(input: string): string {
-  const trimmed = input.trim().replace(/\/+$/, '');
-  return trimmed.startsWith('spaces/') ? trimmed.slice('spaces/'.length) : trimmed;
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('spaces/')) return trimmed;
+  const id = trimmed.slice('spaces/'.length).replace(/\/+$/, '');
+  if (!id || id.includes('/')) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Invalid space: "${input}"`,
+      'Pass a space ID ("AAAA1234"), its resource name ("spaces/AAAA1234") or a display name'
+    );
+  }
+  return id;
 }
 
-/** A message id, or a full `spaces/X/messages/Y` name, becomes the bare message id. */
-export function normalizeMessageId(input: string): string {
+/**
+ * The bare id from a message or thread id, or from its full
+ * `spaces/X/<collection>/Y` name. A name from another space or collection is
+ * rejected rather than silently resolved against `spaceId`.
+ */
+function childId(spaceId: string, input: string, collection: 'messages' | 'threads'): string {
+  const label = collection === 'messages' ? 'message' : 'thread';
   const trimmed = input.trim().replace(/\/+$/, '');
-  const match = trimmed.match(/^spaces\/[^/]+\/messages\/(.+)$/);
-  return match ? match[1] : trimmed;
+  if (!trimmed) {
+    throw new CliError('INVALID_PARAMS', `Empty ${label} ID`);
+  }
+  if (!trimmed.includes('/')) return trimmed;
+  const match = trimmed.match(/^spaces\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (!match || match[2] !== collection) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `Invalid ${label} ID: "${input}"`,
+      `Pass a ${label} ID ("abcDEF") or its resource name ("spaces/AAAA1234/${collection}/abcDEF")`
+    );
+  }
+  if (match[1] !== spaceId) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `${label[0].toUpperCase()}${label.slice(1)} "${input}" belongs to space ${match[1]}, not ${spaceId}`,
+      `Use --space ${match[1]}`
+    );
+  }
+  return match[3];
 }
 
-/** A thread id, or a full `spaces/X/threads/Y` name, becomes the thread resource name in `spaceId`. */
+/** A message id, or a full `spaces/X/messages/Y` name in `spaceId`, becomes the bare message id. */
+export function normalizeMessageId(spaceId: string, input: string): string {
+  return childId(spaceId, input, 'messages');
+}
+
+/** A thread id, or a full `spaces/X/threads/Y` name in `spaceId`, becomes the thread resource name. */
 export function threadResourceName(spaceId: string, input: string): string {
-  const trimmed = input.trim().replace(/\/+$/, '');
-  if (/^spaces\/[^/]+\/threads\/.+$/.test(trimmed)) return trimmed;
-  return `spaces/${spaceId}/threads/${trimmed}`;
+  return `spaces/${spaceId}/threads/${childId(spaceId, input, 'threads')}`;
 }
 
 // ---------------------------------------------------------------------------
