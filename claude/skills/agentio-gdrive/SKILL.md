@@ -3,7 +3,7 @@ name: agentio-gdrive
 description: Use when interacting with Google Drive via the agentio CLI - list, search, download, upload, folder navigation.
 ---
 
-# Gdrive via agentio
+# Google Drive via agentio
 
 Auto-generated from `agentio skill gdrive`. Do not edit by hand.
 
@@ -241,13 +241,17 @@ Examples:
   agentio gdrive rename https://drive.google.com/drive/folders/1A2bCdEf... "Archive 2025"
 ```
 
-## agentio gdrive move <file-id-or-url> <folder-id-or-url>
+## agentio gdrive move [ids...]
 
-Move a file or folder to another folder
+Move one or many files or folders to another folder
 
 Options:
 
 - `--profile <name>`: Profile name
+- `--to <folder-id>`: Destination folder ID or URL for every ID given (use "root" for My Drive root)
+- `--batch <file>`: CSV of fileId,destFolderId lines ("-" for stdin; header, blank and # lines skipped)
+- `--chunk <n>`: Calls per Drive batch request (1-100) (default: 50)
+- `--dry-run`: Look up current parents and report what would move, without moving
 
 ```
 Examples:
@@ -260,6 +264,20 @@ Examples:
 
   # move a file back to My Drive root
   agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz root
+
+  # move several files into one folder (batched)
+  agentio gdrive move 1AaA... 1BbB... 1CcC... --to 1XyZaBc...
+
+  # move from a CSV of fileId,destFolderId lines
+  agentio gdrive move --batch moves.csv
+
+  # same, from stdin, checking first without moving anything
+  cat moves.csv | agentio gdrive move --batch - --dry-run
+
+Batch moves print one JSON line per file ({fileId, dest, status: ok|error,
+error?}) and a final {summary} line, and exit 5 if any file failed.
+Calls are sent through Drive's batch endpoint (--chunk per request, max 100);
+rate-limit (403/429) and 5xx answers are retried with exponential backoff.
 ```
 
 ## agentio gdrive trash <file-id-or-url>
