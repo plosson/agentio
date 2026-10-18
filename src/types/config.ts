@@ -19,6 +19,8 @@ export interface ApiKey {
   readOnly: boolean;       // forces read-only on every profile the key can see
   canManageProfiles?: boolean; // may add, replace, rename and delete profiles from an agent machine
   canAddProfiles?: boolean;    // v2.4.0 spelling of the same right, read as a fallback in view()
+  /** /v1 requests a minute. Absent: the default (120). null or 0: unlimited. */
+  requestsPerMinute?: number | null;
   createdAt: string;       // ISO
   lastUsedAt?: string;     // ISO
 }

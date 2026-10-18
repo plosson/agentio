@@ -3,7 +3,7 @@ import { isVaultUnlocked } from '../vault/vault';
 import { isProfileReadOnly, listProfileRefs, resolveProfile } from '../config/config-manager';
 import { getAllCredentials, getCredentials, hasStored } from '../auth/token-store';
 import { HUB_REFRESH_BUFFER_MS, getFreshCredentials, redactForRemote } from '../auth/refresh';
-import { authenticateLocalToken, authenticateToken, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
+import { authenticateLocalToken, authenticateToken, DEFAULT_REQUESTS_PER_MINUTE, effectiveReadOnly, keyAllows, touchApiKey, validateFlag, type ApiKeyView } from '../auth/api-keys';
 import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailure, type WriteOutcome } from '../config/profile-store';
 import { NO_STORED_CREDENTIALS, type RemoteAddBody, type RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
@@ -32,16 +32,19 @@ import {
 export const v1AuthLimiter = new RateLimiter(5, 60_000);
 
 /**
- * Requests a minute per key. An agent touches a handful of profiles per
- * command, so this is far above any honest use and only stops a leaked token
- * from hammering the hub. Upstream token endpoints are protected separately,
- * by the refresh buffer and the per-profile mutex.
+ * Requests a minute per key, by default. An agent touches a handful of
+ * profiles per command, so this is far above any honest single-agent use and
+ * only stops a leaked token from hammering the hub. A key shared by many
+ * agents can be given its own limit, or none (`requestsPerMinute` on the key,
+ * read on every request, so a change applies at once). Upstream token
+ * endpoints are protected separately, by the refresh buffer and the
+ * per-profile mutex.
  */
-export const V1_REQUESTS_PER_MINUTE = 120;
+export const V1_REQUESTS_PER_MINUTE = DEFAULT_REQUESTS_PER_MINUTE;
 export const v1KeyLimiter = new RateLimiter(
   V1_REQUESTS_PER_MINUTE,
   60_000,
-  `More than ${V1_REQUESTS_PER_MINUTE} requests a minute for this key, try again in a minute`,
+  (limit) => `More than ${limit} requests a minute for this key, try again in a minute`,
 );
 
 /**
@@ -326,7 +329,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
 
     if (!isVaultUnlocked()) throw new CliError('VAULT_LOCKED', 'Vault is locked on the hub');
     const key = await authenticate(request, ip);
-    v1KeyLimiter.check(key.id);
+    v1KeyLimiter.check(key.id, Date.now(), key.requestsPerMinute);
     // Awaited: a write must never be left pending after the request is answered.
     await touchApiKey(key);
 

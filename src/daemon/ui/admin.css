@@ -192,6 +192,10 @@ input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--link); fle
 .setting { display: flex; align-items: center; gap: var(--s2); min-height: calc(var(--tap) + 12px); padding: 6px 12px; cursor: pointer; }
 .setting + .setting { border-top: 1px solid var(--line); }
 .setting .text { flex: 1; min-width: 0; }
+.setting.rate-edit { flex-wrap: wrap; cursor: default; }
+.setting.rate-edit .input { flex: 0 1 9rem; width: auto; }
+.setting.rate-edit .field-error { flex-basis: 100%; margin-top: 0; }
+.setting.rate-edit .check { white-space: nowrap; }
 
 .table-box { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
 table.grid { width: 100%; border-collapse: collapse; }

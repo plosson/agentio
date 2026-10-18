@@ -8,12 +8,24 @@ import {
   rotateApiKey,
   updateApiKey,
   describeScope,
+  DEFAULT_REQUESTS_PER_MINUTE,
   type ApiKeyInput,
   type IssuedKey,
 } from '../auth/api-keys';
 import type { ApiKeyScope } from '../types/config';
 
-type KeyOptions = { name?: string; profiles?: string; all?: boolean; readOnly?: boolean; canManageProfiles?: boolean };
+type KeyOptions = { name?: string; profiles?: string; all?: boolean; readOnly?: boolean; canManageProfiles?: boolean; requestsPerMinute?: string };
+
+/** `--requests-per-minute`: a whole number, or `unlimited` / `0`; validation of the range is updateApiKey's. */
+export function parseRequestsPerMinute(value: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === 'unlimited' || v === 'none') return null;
+  if (!/^\d+$/.test(v)) {
+    throw new CliError('INVALID_PARAMS', `Invalid --requests-per-minute: ${value}`, 'Use a whole number, or "unlimited"');
+  }
+  return Number(v);
+}
 
 function scopeFromOptions(opts: KeyOptions): ApiKeyScope | undefined {
   if (opts.all && opts.profiles) {
@@ -26,7 +38,13 @@ function scopeFromOptions(opts: KeyOptions): ApiKeyScope | undefined {
 
 /** The options as createApiKey and updateApiKey take them; an option not given stays undefined. */
 function keyInputFromOptions(opts: KeyOptions): ApiKeyInput {
-  return { name: opts.name, allowedProfiles: scopeFromOptions(opts), readOnly: opts.readOnly, canManageProfiles: opts.canManageProfiles };
+  return {
+    name: opts.name,
+    allowedProfiles: scopeFromOptions(opts),
+    readOnly: opts.readOnly,
+    canManageProfiles: opts.canManageProfiles,
+    requestsPerMinute: parseRequestsPerMinute(opts.requestsPerMinute),
+  };
 }
 
 /** The token goes to stdout alone so it can be captured; everything else to stderr. */
@@ -51,6 +69,7 @@ export function registerKeyCommands(program: Command): void {
       .option('--all', 'Allow every profile')
       .option('--read-only', 'Force read-only on every profile the key can see', false)
       .option('--can-manage-profiles', 'Let the agent add, replace, rename and delete profiles from its machine', false)
+      .option('--requests-per-minute <n>', `Hub requests a minute this key may make (default ${DEFAULT_REQUESTS_PER_MINUTE}); "unlimited" or 0 for no limit`)
       .action(async (name: string, opts) => {
         try {
           const input = { ...keyInputFromOptions(opts), name };
@@ -70,6 +89,9 @@ export function registerKeyCommands(program: Command): void {
 
   # a laptop that manages its own profiles in the vault
   agentio key create laptop --url https://vault.example.com --all --can-manage-profiles
+
+  # one key shared by every agent on a busy machine, with no request cap
+  agentio key create box --url https://vault.example.com --all --requests-per-minute unlimited
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)`,
@@ -102,7 +124,7 @@ export function registerKeyCommands(program: Command): void {
   addExamples(
     key
       .command('update')
-      .description('Rename a key or change its scope')
+      .description('Rename a key or change its scope, flags or request limit')
       .argument('<id>', 'Key id from `agentio key list`')
       .option('--name <name>', 'New display name')
       .option('--profiles <list>', 'Comma-separated service/name pairs the key may use')
@@ -111,6 +133,7 @@ export function registerKeyCommands(program: Command): void {
       .option('--no-read-only', 'Lift the key-level read-only restriction')
       .option('--can-manage-profiles', 'Let the agent add, replace, rename and delete profiles from its machine')
       .option('--no-can-manage-profiles', 'Stop the agent from managing profiles')
+      .option('--requests-per-minute <n>', `Hub requests a minute this key may make (default ${DEFAULT_REQUESTS_PER_MINUTE}); "unlimited" or 0 for no limit`)
       .action(async (id: string, opts) => {
         try {
           const patch = keyInputFromOptions(opts);
@@ -127,7 +150,9 @@ export function registerKeyCommands(program: Command): void {
 
   agentio key update a1b2c3d4 --profiles gdrive/docunit
   agentio key update a1b2c3d4 --no-read-only
-  agentio key update a1b2c3d4 --can-manage-profiles`,
+  agentio key update a1b2c3d4 --can-manage-profiles
+  agentio key update a1b2c3d4 --requests-per-minute 600
+  agentio key update a1b2c3d4 --requests-per-minute unlimited`,
   );
 
   addExamples(

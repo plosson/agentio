@@ -13,11 +13,16 @@ export class RateLimiter {
   constructor(
     private readonly limit: number,
     private readonly windowMs: number,
-    private readonly message = 'Too many attempts, try again in a minute',
+    private readonly message: string | ((limit: number) => string) = 'Too many attempts, try again in a minute',
   ) {}
 
-  /** Records a hit and says whether it is within the limit. */
-  allow(key: string, now = Date.now()): boolean {
+  /**
+   * Records a hit and says whether it is within the limit. `limit` overrides
+   * the constructor's for this caller (a per-key setting); null or 0 means no
+   * limit, and such a hit is not even counted.
+   */
+  allow(key: string, now = Date.now(), limit: number | null = this.limit): boolean {
+    if (limit === null || limit <= 0) return true;
     const entry = this.hits.get(key);
     if (!entry || now - entry.windowStart >= this.windowMs) {
       this.hits.delete(key);
@@ -26,12 +31,15 @@ export class RateLimiter {
       return true;
     }
     entry.count += 1;
-    return entry.count <= this.limit;
+    return entry.count <= limit;
   }
 
-  /** Records a hit and throws RATE_LIMITED when it is over the limit. */
-  check(key: string, now = Date.now()): void {
-    if (!this.allow(key, now)) throw new CliError('RATE_LIMITED', this.message);
+  /** Records a hit and throws RATE_LIMITED when it is over the limit (see allow for `limit`). */
+  check(key: string, now = Date.now(), limit: number | null = this.limit): void {
+    if (!this.allow(key, now, limit)) {
+      const message = typeof this.message === 'function' ? this.message(limit!) : this.message;
+      throw new CliError('RATE_LIMITED', message);
+    }
   }
 
   reset(): void {

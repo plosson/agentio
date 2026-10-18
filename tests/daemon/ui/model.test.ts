@@ -38,6 +38,8 @@ import {
   overviewStatus,
   plural,
   presetInput,
+  rateLabel,
+  readRate,
   raw,
   reachableRefs,
   reauthCommand,
@@ -308,6 +310,12 @@ describe('access presets', () => {
     expect(input).toEqual({ name: 'build-box', allowedProfiles: ['gmail/work'], readOnly: false, canManageProfiles: true });
     (input.allowedProfiles as string[]).push('x/y');
     expect(other.allowedProfiles).toEqual(['gmail/work']);
+  });
+
+  test('same as copies the request limit too, unlimited included', () => {
+    expect(presetInput({ kind: 'same-as', key: key('a', { requestsPerMinute: null }) }, 'b')).toMatchObject({ requestsPerMinute: null });
+    expect(presetInput({ kind: 'same-as', key: key('a', { requestsPerMinute: 600 }) }, 'b')).toMatchObject({ requestsPerMinute: 600 });
+    expect(presetInput({ kind: 'same-as', key: key('a') }, 'b')).not.toHaveProperty('requestsPerMinute');
   });
 
   test('choose needs at least one profile and never grants profile management', () => {
@@ -666,5 +674,24 @@ describe('access requests', () => {
     const now = Date.parse('2026-10-05T12:00:00Z');
     expect(replacementLine({ name: "Pierre's Mac", createdAt: '2026-10-03T09:00:00Z' }, now)).toBe('This replaces “Pierre\'s Mac” (created Oct 3)');
     expect(replacementLine({ name: 'old', createdAt: '2025-12-31T12:00:00Z' }, now)).toBe('This replaces “old” (created Dec 31, 2025)');
+  });
+});
+
+describe('request limit', () => {
+  test('rateLabel', () => {
+    expect(rateLabel(null)).toBe('Unlimited');
+    expect(rateLabel(600)).toBe('600/min');
+    expect(rateLabel(undefined)).toBe('120/min');
+  });
+
+  test('readRate', () => {
+    expect(readRate('', true)).toEqual({ value: null });
+    expect(readRate(' 600 ', false)).toEqual({ value: 600 });
+    expect(readRate('0', false)).toEqual({ value: null });
+    expect(readRate('1.5', false)).toHaveProperty('error');
+    expect(readRate('', false)).toHaveProperty('error');
+    expect(readRate('-3', false)).toHaveProperty('error');
+    expect(readRate('100001', false)).toHaveProperty('error');
+    expect(readRate('100000', false)).toEqual({ value: 100000 });
   });
 });
