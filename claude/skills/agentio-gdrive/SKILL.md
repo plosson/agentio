@@ -14,11 +14,16 @@ List files
 Options:
 
 - `--profile <name>`: Profile name
-- `--limit <n>`: Number of files (default: 20)
-- `--folder <id>`: Folder ID to list (use "root" for root folder)
+- `--limit <n>`: Number of files (default: 20; no limit with --recursive)
+- `--folder <id>`: Folder ID or URL to list (use "root" for root folder)
 - `--query <query>`: Drive API query filter
-- `--order <field>`: Order by field (default: modifiedTime desc)
+- `--order <field>`: Order by field (default: modifiedTime desc; folder,name with --recursive)
 - `--trash`: Include trashed files
+- `--recursive`: Walk every subfolder too, printing each item with its path
+- `--max-depth <n>`: With --recursive: deepest level to list (1 = direct children only)
+- `--follow-shortcuts`: With --recursive: also walk folders that shortcuts point at (cycles are cut)
+- `--fields <list>`: Extra fields on each item's second text line: md5,bytes,modified,created,mime,owners,parents,path,link,target
+- `--json`: Output JSON for programs to read
 
 ```
 Examples:
@@ -35,9 +40,19 @@ Examples:
   # files you own, sorted by name
   agentio gdrive list --query "'me' in owners" --order "name"
 
+  # with MD5 and exact byte size on each item
+  agentio gdrive list --folder 1A2bCdEf... --fields md5,bytes,modified
+
+  # everything below a folder, with paths, as JSON (md5Checksum is null for native Docs/Sheets/Slides)
+  agentio gdrive list --folder 1A2bCdEf... --recursive --json
+
+  # two levels deep, only PDFs, also walking folder shortcuts
+  agentio gdrive list --folder 1A2bCdEf... --recursive --max-depth 2 --follow-shortcuts --query "mimeType = 'application/pdf'"
+
 Query syntax: name contains '...', mimeType = '...', 'me' in owners,
 modifiedTime > 'YYYY-MM-DD', starred = true, shared = true.
-Combine with 'and'/'or'.
+Combine with 'and'/'or'. With --recursive, --query filters what is listed;
+every subfolder is still walked.
 ```
 
 ## agentio gdrive folders
@@ -69,11 +84,12 @@ Examples:
 
 ## agentio gdrive get <file-id-or-url>
 
-Get file metadata
+Get file metadata (including MD5 and exact size)
 
 Options:
 
 - `--profile <name>`: Profile name
+- `--json`: Output JSON for programs to read
 
 ```
 Examples:
@@ -83,6 +99,9 @@ Examples:
 
   # metadata from a full Drive URL
   agentio gdrive get https://drive.google.com/file/d/1A2bCdEf.../view
+
+  # as JSON, e.g. to compare md5Checksum with a local file
+  agentio gdrive get 1A2bCdEf... --json
 ```
 
 ## agentio gdrive search
@@ -96,6 +115,8 @@ Options:
 - `--limit <n>`: Number of results (default: 20)
 - `--type <mime>`: Filter by MIME type
 - `--folder <id>`: Search within folder
+- `--fields <list>`: Extra fields on each item's second text line: md5,bytes,modified,created,mime,owners,parents,path,link,target
+- `--json`: Output JSON for programs to read
 
 ```
 Examples:
@@ -108,6 +129,10 @@ Examples:
 
   # restrict to a folder, return more results
   agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50
+
+  # with MD5 and byte size, or as JSON
+  agentio gdrive search --query "invoice" --fields md5,bytes
+  agentio gdrive search --query "invoice" --json
 ```
 
 ## agentio gdrive download <file-id-or-url>

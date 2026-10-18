@@ -22,7 +22,9 @@ import type {
   GDriveShareResult,
   GDriveCopyOptions,
   GDriveCopyResult,
+  GDriveRecursiveOptions,
 } from './types';
+import { FILE_FIELDS, PAGE_SIZE, walkFolder } from './recursive';
 import { batchMove, type BatchDeps, type BatchMoveOptions, type MoveItem, type MoveResult, type MoveSummary } from './batch';
 import { batchShortcut, type BatchShortcutOptions, type ShortcutItem, type ShortcutResult, type ShortcutSummary } from './shortcut';
 
@@ -147,10 +149,10 @@ export class GDriveClient implements ServiceClient {
       // Paginate through results until we have enough or no more pages
       do {
         const response = await this.drive.files.list({
-          pageSize: Math.min(limit - allFiles.length, 100),
+          pageSize: Math.min(limit - allFiles.length, PAGE_SIZE),
           pageToken,
           q,
-          fields: 'nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description)',
+          fields: `nextPageToken,files(${FILE_FIELDS})`,
           orderBy,
         });
 
@@ -162,6 +164,43 @@ export class GDriveClient implements ServiceClient {
       return allFiles.slice(0, limit);
     } catch (err) {
       this.throwApiError(err, 'list files');
+    }
+  }
+
+  /**
+   * Every item below a folder (default My Drive root), breadth-first, with its
+   * path and depth. See walkFolder for cycles, shortcuts and --query.
+   */
+  async listRecursive(options: GDriveRecursiveOptions = {}, onFile?: (file: GDriveFile) => void): Promise<{ files: GDriveFile[]; truncated: boolean; folders: number }> {
+    const startId = options.folderId ? this.extractFileId(options.folderId) : 'root';
+    const orderBy = options.orderBy || 'folder,name';
+    const files: GDriveFile[] = [];
+    try {
+      const { truncated, folders } = await walkFolder(
+        async (q, pageToken, fields) => {
+          const res = await this.drive.files.list({
+            q,
+            pageToken,
+            pageSize: PAGE_SIZE,
+            fields,
+            orderBy,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          });
+          return { files: res.data.files || [], nextPageToken: res.data.nextPageToken || undefined };
+        },
+        startId,
+        options,
+        (raw, path, depth) => {
+          const file = { ...this.parseFile(raw), path, depth };
+          files.push(file);
+          onFile?.(file);
+        },
+      );
+      return { files, truncated, folders };
+    } catch (err) {
+      if (err instanceof CliError) throw err;
+      this.throwApiError(err, 'list files recursively');
     }
   }
 
@@ -194,7 +233,8 @@ export class GDriveClient implements ServiceClient {
     try {
       const response = await this.drive.files.get({
         fileId,
-        fields: 'id,name,mimeType,size,createdTime,modifiedTime,owners,parents,webViewLink,webContentLink,starred,trashed,shared,description',
+        supportsAllDrives: true,
+        fields: FILE_FIELDS,
       });
 
       return this.parseFile(response.data);
@@ -641,6 +681,10 @@ export class GDriveClient implements ServiceClient {
       trashed: file.trashed || false,
       shared: file.shared || false,
       description: file.description || undefined,
+      md5Checksum: file.md5Checksum || undefined,
+      shortcutDetails: file.shortcutDetails?.targetId
+        ? { targetId: file.shortcutDetails.targetId, ...(file.shortcutDetails.targetMimeType ? { targetMimeType: file.shortcutDetails.targetMimeType } : {}) }
+        : undefined,
     };
   }
 

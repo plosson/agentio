@@ -25,6 +25,29 @@ export interface GDriveFile {
   trashed: boolean;
   shared: boolean;
   description?: string;
+  /** Hex MD5 of the content; Drive has none for native Docs, Sheets, Slides and folders. */
+  md5Checksum?: string;
+  /** For a shortcut: what it points at. */
+  shortcutDetails?: { targetId: string; targetMimeType?: string };
+  /** `--recursive` only: the path below the folder listed, e.g. `2026/Q1/report.pdf`. */
+  path?: string;
+  /** `--recursive` only: 1 for a direct child of the folder listed. */
+  depth?: number;
+}
+
+export interface GDriveRecursiveOptions {
+  /** Folder to walk (default: My Drive root). */
+  folderId?: string;
+  /** Extra Drive query for the items listed; folders are still walked whatever it says. */
+  query?: string;
+  orderBy?: string;
+  includeTrash?: boolean;
+  /** Stop after this many items. */
+  limit?: number;
+  /** Deepest level listed; 1 is the folder's direct children. */
+  maxDepth?: number;
+  /** Walk into folders that shortcuts point at (cycles are still cut). */
+  followShortcuts?: boolean;
 }
 
 export interface GDriveListOptions {
