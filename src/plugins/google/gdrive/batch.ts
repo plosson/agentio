@@ -35,7 +35,7 @@ export interface MoveSummary {
 }
 
 export interface BatchSubRequest {
-  method: 'GET' | 'PATCH';
+  method: 'GET' | 'PATCH' | 'POST';
   /** Path and query only, e.g. `/drive/v3/files/abc?fields=parents`. Full URLs are not allowed. */
   path: string;
   body?: unknown;
@@ -63,9 +63,66 @@ export interface RetryOptions {
 // Input parsing
 // ---------------------------------------------------------------------------
 
-function unquote(field: string): string {
-  const t = field.trim();
-  return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1).replace(/""/g, '"').trim() : t;
+/** Splits one CSV line on commas, honouring "quoted, fields" and "" escapes; fields are trimmed. */
+export function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+      } else {
+        cur += c;
+      }
+    } else if (c === '"' && !cur.trim()) {
+      quoted = true;
+      cur = '';
+    } else if (c === ',') {
+      fields.push(cur.trim());
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  fields.push(cur.trim());
+  return fields;
+}
+
+/**
+ * The data rows of a small CSV: blank lines and `#` comments are skipped, and
+ * so is a first line whose first field matches `header`. Each row must have
+ * `min`..`max` fields with the first `min` non-empty, or the call throws with
+ * the offending line numbers.
+ */
+export function parseCsvRows(text: string, spec: { min: number; max: number; header: RegExp; usage: string }): string[][] {
+  const rows: string[][] = [];
+  const bad: number[] = [];
+  let sawData = false;
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.replace(/^\uFEFF/, '').trim();
+    if (!line || line.startsWith('#')) return;
+    const fields = splitCsvLine(line);
+    if (!sawData && spec.header.test(fields[0])) {
+      sawData = true;
+      return;
+    }
+    sawData = true;
+    if (fields.length < spec.min || fields.length > spec.max || fields.slice(0, spec.min).some((f) => !f)) {
+      bad.push(i + 1);
+      return;
+    }
+    rows.push(fields);
+  });
+  if (bad.length) {
+    const shown = bad.slice(0, 10).join(', ') + (bad.length > 10 ? ', ...' : '');
+    throw new CliError('INVALID_PARAMS', `Invalid batch line(s): ${shown}`, spec.usage);
+  }
+  return rows;
 }
 
 /**
@@ -73,29 +130,8 @@ function unquote(field: string): string {
  * `#` comments are skipped. Any other line without exactly two values is an error.
  */
 export function parseMoveCsv(text: string): MoveItem[] {
-  const items: MoveItem[] = [];
-  const bad: number[] = [];
-  let sawData = false;
-  text.split(/\r?\n/).forEach((raw, i) => {
-    const line = raw.replace(/^\uFEFF/, '').trim();
-    if (!line || line.startsWith('#')) return;
-    const fields = line.split(',').map(unquote);
-    if (!sawData && /^(file[_ -]?id|id)$/i.test(fields[0])) {
-      sawData = true;
-      return;
-    }
-    sawData = true;
-    if (fields.length !== 2 || !fields[0] || !fields[1]) {
-      bad.push(i + 1);
-      return;
-    }
-    items.push({ fileId: fields[0], dest: fields[1] });
-  });
-  if (bad.length) {
-    const shown = bad.slice(0, 10).join(', ') + (bad.length > 10 ? ', ...' : '');
-    throw new CliError('INVALID_PARAMS', `Invalid batch line(s): ${shown}`, 'Each line must be fileId,destFolderId');
-  }
-  return items;
+  return parseCsvRows(text, { min: 2, max: 2, header: /^(file[_ -]?id|id)$/i, usage: 'Each line must be fileId,destFolderId' })
+    .map(([fileId, dest]) => ({ fileId, dest }));
 }
 
 export function parseChunkSize(value: string | number | undefined): number {
@@ -287,6 +323,20 @@ export async function sendBatchWithRetry(
   }
   return results;
 }
+
+/** Like sendBatchWithRetry, for any number of requests: `size` calls per batch. */
+export async function sendAllWithRetry(
+  requests: BatchSubRequest[],
+  deps: BatchDeps,
+  size: number,
+  opts: RetryOptions = {}
+): Promise<BatchSubResponse[]> {
+  const out: BatchSubResponse[] = [];
+  for (const group of chunk(requests, size)) out.push(...(await sendBatchWithRetry(group, deps, opts)));
+  return out;
+}
+
+export const isSuccess = (res: BatchSubResponse) => res.status >= 200 && res.status < 300;
 
 // ---------------------------------------------------------------------------
 // Move
