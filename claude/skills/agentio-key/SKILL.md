@@ -18,6 +18,7 @@ Options:
 - `--all`: Allow every profile
 - `--read-only`: Force read-only on every profile the key can see (default: false)
 - `--can-manage-profiles`: Let the agent add, replace, rename and delete profiles from its machine (default: false)
+- `--requests-per-minute <n>`: Hub requests a minute this key may make (default 120); "unlimited" or 0 for no limit
 
 ```
 Examples:
@@ -30,6 +31,9 @@ Examples:
 
   # a laptop that manages its own profiles in the vault
   agentio key create laptop --url https://vault.example.com --all --can-manage-profiles
+
+  # one key shared by every agent on a busy machine, with no request cap
+  agentio key create box --url https://vault.example.com --all --requests-per-minute unlimited
 
   # capture the token for a deploy script
   AGENTIO_TOKEN=$(agentio key create ci --url https://vault.example.com --all)
@@ -47,7 +51,7 @@ Examples:
 
 ## agentio key update <id>
 
-Rename a key or change its scope
+Rename a key or change its scope, flags or request limit
 
 Options:
 
@@ -58,6 +62,7 @@ Options:
 - `--no-read-only`: Lift the key-level read-only restriction
 - `--can-manage-profiles`: Let the agent add, replace, rename and delete profiles from its machine
 - `--no-can-manage-profiles`: Stop the agent from managing profiles
+- `--requests-per-minute <n>`: Hub requests a minute this key may make (default 120); "unlimited" or 0 for no limit
 
 ```
 Examples:
@@ -65,6 +70,8 @@ Examples:
   agentio key update a1b2c3d4 --profiles gdrive/docunit
   agentio key update a1b2c3d4 --no-read-only
   agentio key update a1b2c3d4 --can-manage-profiles
+  agentio key update a1b2c3d4 --requests-per-minute 600
+  agentio key update a1b2c3d4 --requests-per-minute unlimited
 ```
 
 ## agentio key rotate <id>
@@ -90,3 +97,4 @@ Examples:
 
   agentio key revoke a1b2c3d4
 ```
+

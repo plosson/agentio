@@ -306,6 +306,15 @@ describe('daemon HTTP surface', () => {
     });
     expect(await patched.json()).toMatchObject({ id: key.id, name: 'renamed', readOnly: false, canManageProfiles: false });
 
+    expect(key.requestsPerMinute).toBe(120);
+    const unlimited = await call(`/ui/api/keys/${key.id}`, { method: 'PATCH', headers: { cookie }, body: JSON.stringify({ requestsPerMinute: null }) });
+    expect(await unlimited.json()).toMatchObject({ id: key.id, requestsPerMinute: null });
+    const limited = await call(`/ui/api/keys/${key.id}`, { method: 'PATCH', headers: { cookie }, body: JSON.stringify({ requestsPerMinute: 900 }) });
+    expect(await limited.json()).toMatchObject({ requestsPerMinute: 900 });
+    const invalid = await call(`/ui/api/keys/${key.id}`, { method: 'PATCH', headers: { cookie }, body: JSON.stringify({ requestsPerMinute: 2.5 }) });
+    expect(invalid.status).toBe(400);
+    expect((await (await call('/ui/api/keys', { headers: { cookie } })).json()).keys[0].requestsPerMinute).toBe(900);
+
     const rotated = await call(`/ui/api/keys/${key.id}/rotate`, {
       method: 'POST', headers: { cookie }, body: JSON.stringify({ url: 'https://hub.example.com' }),
     });

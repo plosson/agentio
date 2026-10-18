@@ -287,14 +287,14 @@ ACTIONS.retry = () => location.reload();
 
 /**
  * True while the owner is filling a form that a redraw would clobber: step 2
- * of a sign-in, a machine's "Connect a machine" panel, or its scope editor.
+ * of a sign-in, a machine's "Connect a machine" panel, or its scope or request-limit editor.
  */
 function formOpen() {
   if (state.ui.renaming) return true;
   const route = currentRoute();
   if (route.view === 'authorize') return true;
   if (route.view === 'connect' && state.ui.byHand) return true;
-  if (route.view === 'machine' && state.ui.editScope) return true;
+  if (route.view === 'machine' && (state.ui.editScope || state.ui.editRate)) return true;
   return false;
 }
 

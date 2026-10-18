@@ -86,6 +86,8 @@ docker exec agentio agentio key create workstation --url https://<domain> --all 
 
 The token is printed once. Scope each key to what that agent needs: a read-only key cannot write through any profile it sees, and only a `--can-manage-profiles` key may change which profiles the vault holds.
 
+Each key may make 120 requests a minute to the hub by default, which only stops a leaked token from hammering it. A key shared by several agents on one machine can be given its own limit, or none: on the machine's page in the UI (Settings → Requests per minute → Change, or tick No limit), or on the host with `agentio key update <id> --requests-per-minute 600` (`unlimited` or `0` for no limit; at most 100000). The change applies to the next request, no restart. Bad tokens stay limited per address (5 a minute) and logins (40 a minute) whatever a key allows.
+
 ### The agent machine
 
 Install the binary, then:
@@ -102,6 +104,7 @@ agentio gdrive list     # any service command, credentials served by the hub
 ### Day-to-day
 
 - **Lock state after a restart** follows `AGENTIO_PASSPHRASE`, see the Environment table.
+- **A key hits its request limit** (`More than N requests a minute for this key`): raise it or lift it for that key, see One token per agent.
 - **Rotate or revoke** from the UI or with `agentio key rotate|revoke` on the host. The old token stops working at once.
 - **Reauth** happens on the host with the CLI (`docker exec agentio agentio profile reauth <service> [name]`); the paste-back OAuth flow works without a browser there.
 - **Profiles** are added, renamed and removed on the host (`profile add <service>`, `profile rename <service> <old> <new>`, `profile remove <service> <name>`), or from an agent machine whose key has `--can-manage-profiles`: the OAuth or token dance runs there and the result is stored here. Such a key reaches exactly the profiles its allow-list names, plus any new name it creates; anything else answers "not found" and is left alone.

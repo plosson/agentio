@@ -3,7 +3,7 @@ import { withTempVault } from '../helpers/vault';
 import { loadVault } from '../../src/vault/vault';
 import { updateConfig } from '../../src/config/config-manager';
 import { deleteProfile } from '../../src/config/profile-store';
-import { authenticateToken, createApiKey, describeScope, grantProfileToKey, keyAllows, keyProvenBy, listApiKeys, revokeApiKey, rotateApiKey, tokenProof, touchApiKey, updateApiKey, newKeyId } from '../../src/auth/api-keys';
+import { authenticateToken, createApiKey, DEFAULT_REQUESTS_PER_MINUTE, describeScope, MAX_REQUESTS_PER_MINUTE, validateRequestsPerMinute, grantProfileToKey, keyAllows, keyProvenBy, listApiKeys, revokeApiKey, rotateApiKey, tokenProof, touchApiKey, updateApiKey, newKeyId } from '../../src/auth/api-keys';
 import { decodeToken, encodeToken } from '../../src/auth/token';
 
 const HUB = 'https://vault.example.com';
@@ -193,5 +193,60 @@ describe('api keys', () => {
     const old = await createApiKey({ name: 'laptop', allowedProfiles: '*', readOnly: false }, HUB);
     await expect(createApiKey({ name: 'laptop', allowedProfiles: ['nope/x'], readOnly: false }, HUB, tokenProof(old.token))).rejects.toThrow('Unknown profile');
     expect(await authenticateToken(old.token)).toEqual(old.key);
+  });
+});
+
+describe('api key request limits', () => {
+  test('a key that sets nothing has the default, and stores nothing', async () => {
+    const { key } = await createApiKey({ name: 'agent', allowedProfiles: '*', readOnly: false }, HUB);
+    expect(key.requestsPerMinute).toBe(DEFAULT_REQUESTS_PER_MINUTE);
+    expect((await loadVault()).config.apiKeys![0]).not.toHaveProperty('requestsPerMinute');
+    expect(describeScope(key)).toBe('all profiles');
+  });
+
+  test('a key stored before the setting existed reads as the default', async () => {
+    const { key } = await createApiKey({ name: 'old', allowedProfiles: '*', readOnly: false }, HUB);
+    await updateConfig((config) => {
+      delete (config.apiKeys![0] as { requestsPerMinute?: unknown }).requestsPerMinute;
+    });
+    expect((await listApiKeys()).find((k) => k.id === key.id)!.requestsPerMinute).toBe(120);
+  });
+
+  test('create and update persist a limit, unlimited as null, 0 as unlimited', async () => {
+    const { key, token } = await createApiKey({ name: 'busy', allowedProfiles: '*', readOnly: false, requestsPerMinute: 600 }, HUB);
+    expect(key.requestsPerMinute).toBe(600);
+    expect(describeScope(key)).toBe('all profiles, 600/min requests');
+    expect((await authenticateToken(token))!.requestsPerMinute).toBe(600);
+
+    expect((await updateApiKey(key.id, { requestsPerMinute: null })).requestsPerMinute).toBeNull();
+    expect((await loadVault()).config.apiKeys!.find((k) => k.id === key.id)!.requestsPerMinute).toBeNull();
+    expect(describeScope((await listApiKeys())[0])).toBe('all profiles, unlimited requests');
+    expect((await authenticateToken(token))!.requestsPerMinute).toBeNull();
+
+    expect((await updateApiKey(key.id, { requestsPerMinute: 0 })).requestsPerMinute).toBeNull();
+    expect((await updateApiKey(key.id, { requestsPerMinute: 30 })).requestsPerMinute).toBe(30);
+    // A patch that does not mention it leaves it alone.
+    expect((await updateApiKey(key.id, { name: 'renamed' })).requestsPerMinute).toBe(30);
+  });
+
+  test('a stored 0 reads as unlimited', async () => {
+    const { key } = await createApiKey({ name: 'zero', allowedProfiles: '*', readOnly: false }, HUB);
+    await updateConfig((config) => { config.apiKeys![0].requestsPerMinute = 0; });
+    expect((await listApiKeys()).find((k) => k.id === key.id)!.requestsPerMinute).toBeNull();
+  });
+
+  test('only whole numbers from 1 to the max, or null / 0, are accepted', async () => {
+    expect(validateRequestsPerMinute(1)).toBe(1);
+    expect(validateRequestsPerMinute(MAX_REQUESTS_PER_MINUTE)).toBe(MAX_REQUESTS_PER_MINUTE);
+    expect(validateRequestsPerMinute(null)).toBeNull();
+    expect(validateRequestsPerMinute(0)).toBeNull();
+    for (const bad of [-1, 1.5, MAX_REQUESTS_PER_MINUTE + 1, '60', true, NaN, Infinity, {}]) {
+      expect(() => validateRequestsPerMinute(bad)).toThrow('requestsPerMinute must be a whole number');
+    }
+    await expect(createApiKey({ name: 'x', allowedProfiles: '*', readOnly: false, requestsPerMinute: -5 }, HUB)).rejects.toThrow('requestsPerMinute');
+    expect(await listApiKeys()).toEqual([]);
+    const { key } = await createApiKey({ name: 'y', allowedProfiles: '*', readOnly: false }, HUB);
+    await expect(updateApiKey(key.id, { requestsPerMinute: '600' })).rejects.toThrow('requestsPerMinute');
+    expect((await listApiKeys())[0].requestsPerMinute).toBe(120);
   });
 });

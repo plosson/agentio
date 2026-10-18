@@ -7,7 +7,7 @@ function machineItem(k, now, current = false) {
     current,
     dot: seenToday(k, now),
     title: k.name,
-    message: `Can use ${machineCanUse(k, allRefs())}${k.readOnly ? ' · read-only' : ''}`,
+    message: `Can use ${machineCanUse(k, allRefs())}${k.readOnly ? ' · read-only' : ''}${k.requestsPerMinute === null ? ' · no request limit' : k.requestsPerMinute && k.requestsPerMinute !== DEFAULT_RATE ? ` · ${k.requestsPerMinute}/min` : ''}`,
     meta: html`${statusMarkup(machineSeen(k, now))}<span>created ${shortDate(Date.parse(k.createdAt), now)}</span>`,
   });
 }
@@ -72,6 +72,7 @@ VIEWS.machine = (route) => {
             <span class="switch"><input type="checkbox" data-change="machine-ro" data-id="${k.id}" ${k.readOnly ? raw('checked') : ''}><span></span></span></label>
           <label class="setting"><span class="text">Can add and delete profiles</span>
             <span class="switch"><input type="checkbox" data-change="machine-manage" data-id="${k.id}" ${k.canManageProfiles ? raw('checked') : ''}><span></span></span></label>
+          ${rateSetting(k)}
         </div>
         <p class="note">${k.hint ? html`Key <span class="mono">…${k.hint}</span> · ` : ''}created ${shortDate(Date.parse(k.createdAt), now)}</p>
         <h2>Danger zone</h2>
@@ -81,6 +82,67 @@ VIEWS.machine = (route) => {
         </div>
       </section>
     </div>`;
+};
+
+/** The request limit row: its value and Change, or the form that edits it. */
+function rateSetting(k) {
+  if (state.ui.editRate !== k.id) {
+    return html`<div class="setting"><span class="text">Requests per minute</span>
+      <span class="mono" id="rate-${k.id}">${rateLabel(k.requestsPerMinute)}</span>
+      <button type="button" class="button link" data-action="edit-rate" data-id="${k.id}">Change</button></div>`;
+  }
+  // After a refused save the form shows what was typed, not the stored value.
+  const draft = state.ui.rateDraft;
+  const unlimited = draft ? draft.unlimited : k.requestsPerMinute === null;
+  const text = draft ? draft.text : unlimited ? '' : String(k.requestsPerMinute ?? DEFAULT_RATE);
+  const error = state.ui.rateError;
+  return html`<form class="setting rate-edit" data-submit="save-rate" data-id="${k.id}" novalidate>
+    <label class="text" for="rate-input">Requests per minute</label>
+    <input class="input mono" id="rate-input" name="rate" type="number" inputmode="numeric" min="1" max="${MAX_RATE}" step="1"
+      value="${text}" ${unlimited ? raw('disabled') : ''}
+      ${error ? raw('aria-invalid="true" aria-describedby="rate-error"') : ''}>
+    <label class="check"><input type="checkbox" name="unlimited" data-change="rate-unlimited" ${unlimited ? raw('checked') : ''}> No limit</label>
+    <button class="button primary">Save</button>
+    <button type="button" class="button link" data-action="cancel-rate">Cancel</button>
+    ${error ? html`<span class="field-error" id="rate-error" role="alert">✗ ${error}</span>` : ''}
+  </form>`;
+}
+
+ACTIONS['edit-rate'] = (el) => {
+  state.ui.editRate = el.dataset.id;
+  state.ui.rateError = '';
+  state.ui.rateDraft = null;
+  render();
+  const input = $('rate-input');
+  if (input && !input.disabled) { input.focus(); input.select(); }
+};
+ACTIONS['cancel-rate'] = () => { state.ui.editRate = null; state.ui.rateError = ''; state.ui.rateDraft = null; render(); };
+
+CHANGES['rate-unlimited'] = (input) => {
+  const field = input.form.elements.rate;
+  field.disabled = input.checked;
+  if (!input.checked) { if (!field.value) field.value = String(DEFAULT_RATE); field.focus(); }
+};
+
+SUBMITS['save-rate'] = async (form) => {
+  const text = form.elements.rate.value;
+  const unlimited = form.elements.unlimited.checked;
+  const read = readRate(text, unlimited);
+  if ('error' in read) {
+    state.ui.rateError = read.error;
+    state.ui.rateDraft = { text, unlimited };
+    render();
+    const input = $('rate-input');
+    if (input) input.focus();
+    return;
+  }
+  const key = await patchKey(form.dataset.id, { requestsPerMinute: read.value });
+  if (!key) return;
+  state.ui.editRate = null;
+  state.ui.rateError = '';
+  state.ui.rateDraft = null;
+  toast(`${key.name}: ${read.value === null ? 'no request limit' : `${read.value} requests a minute`}`);
+  render();
 };
 
 /** After a revoke: the credentials it already fetched still work until reauthorised. */

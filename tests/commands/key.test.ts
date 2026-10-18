@@ -46,6 +46,31 @@ describe('agentio key', () => {
     expect((await runCli(['key', 'list'])).stdout).toContain('No API keys');
   });
 
+  test('--requests-per-minute sets a limit or unlimited, and refuses junk', async () => {
+    const created = await runCli(['key', 'create', 'box', '--url', 'https://vault.example.com', '--all', '--requests-per-minute', 'unlimited']);
+    expect(created.exitCode).toBe(0);
+    expect(created.stderr).toContain('all profiles, unlimited requests');
+    const { kid } = decodeToken(created.stdout.trim());
+
+    const limited = await runCli(['key', 'update', kid, '--requests-per-minute', '600']);
+    expect(limited.stdout).toContain('all profiles, 600/min requests');
+    expect((await runCli(['key', 'list'])).stdout).toContain('all profiles, 600/min requests');
+
+    const backToDefault = await runCli(['key', 'update', kid, '--requests-per-minute', '120']);
+    expect(backToDefault.stdout).toContain(`(${kid}): all profiles`);
+    expect(backToDefault.stdout).not.toContain('requests');
+
+    const zero = await runCli(['key', 'update', kid, '--requests-per-minute', '0']);
+    expect(zero.stdout).toContain('unlimited requests');
+
+    const junk = await runCli(['key', 'update', kid, '--requests-per-minute', 'fast']);
+    expect(junk.exitCode).not.toBe(0);
+    expect(junk.stderr).toContain('Invalid --requests-per-minute');
+    const huge = await runCli(['key', 'update', kid, '--requests-per-minute', '1000000']);
+    expect(huge.exitCode).not.toBe(0);
+    expect(huge.stderr).toContain('requestsPerMinute must be a whole number');
+  });
+
   test('create refuses a missing scope and --all with --profiles', async () => {
     const missing = await runCli(['key', 'create', 'x', '--url', 'https://h']);
     expect(missing.exitCode).not.toBe(0);

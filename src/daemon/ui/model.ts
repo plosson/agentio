@@ -258,6 +258,8 @@ export interface Key {
   allowedProfiles: '*' | string[];
   readOnly: boolean;
   canManageProfiles: boolean;
+  /** Hub requests a minute; null is unlimited. Absent only from a hub older than the setting. */
+  requestsPerMinute?: number | null;
   createdAt: string;
   lastUsedAt?: string;
 }
@@ -268,6 +270,7 @@ export interface KeyInput {
   allowedProfiles: '*' | string[];
   readOnly: boolean;
   canManageProfiles: boolean;
+  requestsPerMinute?: number | null;
 }
 
 // ---------- Who can use what ----------
@@ -358,6 +361,32 @@ export function machineCanUse(key: Key, allRefs: string[]): string {
   return plural(refs.length, 'profile');
 }
 
+// ---------- Request limit ----------
+
+/** The hub's limit for a key that sets none, and the highest finite one (mirrors src/auth/api-keys.ts). */
+export const DEFAULT_RATE = 120;
+export const MAX_RATE = 100_000;
+
+/** "Unlimited" or "120/min"; a hub that predates the setting means the default. */
+export function rateLabel(limit: number | null | undefined): string {
+  if (limit === undefined) return `${DEFAULT_RATE}/min`;
+  return limit === null ? 'Unlimited' : `${limit}/min`;
+}
+
+/**
+ * What the rate form sends: null when "No limit" is ticked, else the whole
+ * number typed, or an error to show under the field.
+ */
+export function readRate(text: string, unlimited: boolean): { value: number | null } | { error: string } {
+  if (unlimited) return { value: null };
+  const t = text.trim();
+  if (!/^\d+$/.test(t)) return { error: 'Type a whole number, or tick No limit.' };
+  const n = Number(t);
+  if (n === 0) return { value: null };
+  if (n > MAX_RATE) return { error: `At most ${MAX_RATE.toLocaleString('en')} a minute; tick No limit for more.` };
+  return { value: n };
+}
+
 // ---------- Access presets (sign-in step 2, connect a machine) ----------
 
 export type Preset =
@@ -375,6 +404,7 @@ export function presetInput(preset: Preset, name: string): KeyInput {
         allowedProfiles: preset.key.allowedProfiles === '*' ? '*' : [...preset.key.allowedProfiles],
         readOnly: preset.key.readOnly,
         canManageProfiles: preset.key.canManageProfiles,
+        ...(preset.key.requestsPerMinute !== undefined ? { requestsPerMinute: preset.key.requestsPerMinute } : {}),
       };
     case 'choose':
       if (preset.refs.length === 0) throw new Error('Choose at least one profile');

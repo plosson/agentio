@@ -33,6 +33,43 @@ describe('RateLimiter', () => {
   });
 });
 
+describe('RateLimiter per-caller limits', () => {
+  test('a limit passed to allow overrides the default for that call', () => {
+    const rl = new RateLimiter(1, 1000);
+    expect(rl.allow('a', 0, 3)).toBe(true);
+    expect(rl.allow('a', 1, 3)).toBe(true);
+    expect(rl.allow('a', 2, 3)).toBe(true);
+    expect(rl.allow('a', 3, 3)).toBe(false);
+    // The default still applies to callers that pass none.
+    expect(rl.allow('b', 0)).toBe(true);
+    expect(rl.allow('b', 1)).toBe(false);
+  });
+
+  test('null or 0 is unlimited, and is not counted', () => {
+    const rl = new RateLimiter(2, 1000);
+    for (let i = 0; i < 10_000; i++) expect(rl.allow('a', i % 999, null)).toBe(true);
+    for (let i = 0; i < 100; i++) expect(rl.allow('z', 0, 0)).toBe(true);
+    // Back to a finite limit: the uncounted hits do not count against it.
+    expect(rl.allow('a', 0, 2)).toBe(true);
+    expect(rl.allow('a', 1, 2)).toBe(true);
+    expect(rl.allow('a', 2, 2)).toBe(false);
+  });
+
+  test('lowering a limit applies inside the current window', () => {
+    const rl = new RateLimiter(100, 1000);
+    for (let i = 0; i < 5; i++) expect(rl.allow('a', i, 100)).toBe(true);
+    expect(rl.allow('a', 6, 5)).toBe(false);
+    expect(rl.allow('a', 7, 100)).toBe(true);
+  });
+
+  test('check names the limit that was hit', () => {
+    const rl = new RateLimiter(1, 1000, (limit) => `More than ${limit} a minute`);
+    rl.check('a', 0, 2);
+    rl.check('a', 1, 2);
+    expect(() => rl.check('a', 2, 2)).toThrow('More than 2 a minute');
+  });
+});
+
 describe('clientIp', () => {
   const req = (headers: Record<string, string> = {}) => new Request('http://x/', { headers });
 

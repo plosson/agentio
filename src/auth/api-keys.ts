@@ -5,7 +5,11 @@ import type { ApiKey, ApiKeyScope, Config, ServiceName } from '../types/config';
 import { decodeToken, encodeToken } from './token';
 
 /** What callers may see: everything but the hash, with every flag a plain boolean. */
-export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canManageProfiles' | 'canAddProfiles'> & { canManageProfiles: boolean };
+export type ApiKeyView = Omit<ApiKey, 'secretHash' | 'canManageProfiles' | 'canAddProfiles' | 'requestsPerMinute'> & {
+  canManageProfiles: boolean;
+  /** The effective limit: a number of /v1 requests a minute, or null for unlimited. */
+  requestsPerMinute: number | null;
+};
 
 /** Raw caller input; every field is validated here, so routes pass JSON through untouched. */
 export interface ApiKeyInput {
@@ -13,6 +17,8 @@ export interface ApiKeyInput {
   allowedProfiles?: unknown;
   readOnly?: unknown;
   canManageProfiles?: unknown;
+  /** A positive whole number, or null / 0 for unlimited. */
+  requestsPerMinute?: unknown;
 }
 
 export interface IssuedKey {
@@ -29,8 +35,36 @@ export const TOUCH_INTERVAL_MS = 60_000;
  * existed has no field and reads as no, and one minted by v2.4.0 carries the
  * older `canAddProfiles` spelling.
  */
-function view({ secretHash: _hash, canAddProfiles, canManageProfiles = canAddProfiles ?? false, ...rest }: ApiKey): ApiKeyView {
-  return { ...rest, canManageProfiles };
+function view({ secretHash: _hash, canAddProfiles, canManageProfiles = canAddProfiles ?? false, requestsPerMinute, ...rest }: ApiKey): ApiKeyView {
+  return { ...rest, canManageProfiles, requestsPerMinute: effectiveRequestsPerMinute(requestsPerMinute) };
+}
+
+/** /v1 requests a minute for a key that sets nothing; keys from before the setting read as this. */
+export const DEFAULT_REQUESTS_PER_MINUTE = 120;
+/** The highest finite limit a key may have; anything above is a typo, and "unlimited" says it plainly. */
+export const MAX_REQUESTS_PER_MINUTE = 100_000;
+
+/** Stored value to effective limit: absent is the default, null or 0 is unlimited (null). */
+export function effectiveRequestsPerMinute(stored: number | null | undefined): number | null {
+  if (stored === undefined) return DEFAULT_REQUESTS_PER_MINUTE;
+  return stored === null || stored === 0 ? null : stored;
+}
+
+/** Caller input to the stored value: null for unlimited, else a whole number in 1..MAX. */
+export function validateRequestsPerMinute(value: unknown): number | null {
+  if (value === null || value === 0) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > MAX_REQUESTS_PER_MINUTE) {
+    throw new CliError(
+      'INVALID_PARAMS',
+      `requestsPerMinute must be a whole number from 1 to ${MAX_REQUESTS_PER_MINUTE}, or null for unlimited`,
+    );
+  }
+  return value;
+}
+
+/** "120/min" or "unlimited", for lists and confirmations. */
+export function describeRateLimit(limit: number | null): string {
+  return limit === null ? 'unlimited' : `${limit}/min`;
 }
 
 function hashSecret(secret: string): string {
@@ -105,6 +139,7 @@ export const LOCAL_OWNER: ApiKeyView = Object.freeze({
   allowedProfiles: '*',
   readOnly: false,
   canManageProfiles: true,
+  requestsPerMinute: DEFAULT_REQUESTS_PER_MINUTE,
   createdAt: new Date(0).toISOString(),
 });
 
@@ -138,7 +173,8 @@ export function validateName(name: unknown): string {
 /** "all profiles" or the list, plus the flags: the one-line summary the CLI prints. */
 export function describeScope(key: ApiKeyView): string {
   const scope = key.allowedProfiles === '*' ? 'all profiles' : key.allowedProfiles.join(', ') || 'no profiles';
-  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canManageProfiles ? ', can manage profiles' : ''}`;
+  const rate = key.requestsPerMinute === DEFAULT_REQUESTS_PER_MINUTE ? '' : `, ${describeRateLimit(key.requestsPerMinute)} requests`;
+  return `${scope}${key.readOnly ? ', read-only' : ''}${key.canManageProfiles ? ', can manage profiles' : ''}${rate}`;
 }
 
 export function validateFlag(field: string, value: unknown): boolean {
@@ -209,6 +245,7 @@ export async function createApiKey(
   const name = validateName(input.name);
   const readOnly = validateFlag('readOnly', input.readOnly ?? false);
   const canManageProfiles = validateFlag('canManageProfiles', input.canManageProfiles ?? false);
+  const requestsPerMinute = input.requestsPerMinute === undefined ? undefined : validateRequestsPerMinute(input.requestsPerMinute);
   const url = validateHubUrl(hubUrl);
   const allowedProfiles = await validateScope(input.allowedProfiles);
 
@@ -219,6 +256,7 @@ export async function createApiKey(
     let id = newKeyId();
     while (id === old?.id || keys.some((k) => k.id === id)) id = newKeyId();
     const created: ApiKey = { id, name, secretHash: hashSecret(secret), hint: hintOf(secret), allowedProfiles, readOnly, canManageProfiles, createdAt: new Date().toISOString() };
+    if (requestsPerMinute !== undefined) created.requestsPerMinute = requestsPerMinute;
     keys.push(created);
     return { key: created, replaced: old ? view(old) : null };
   });
@@ -232,6 +270,7 @@ export function updateApiKey(id: string, patch: ApiKeyInput): Promise<ApiKeyView
     if (patch.allowedProfiles !== undefined) key.allowedProfiles = await validateScope(patch.allowedProfiles);
     if (patch.readOnly !== undefined) key.readOnly = validateFlag('readOnly', patch.readOnly);
     if (patch.canManageProfiles !== undefined) key.canManageProfiles = validateFlag('canManageProfiles', patch.canManageProfiles);
+    if (patch.requestsPerMinute !== undefined) key.requestsPerMinute = validateRequestsPerMinute(patch.requestsPerMinute);
     return view(key);
   });
 }

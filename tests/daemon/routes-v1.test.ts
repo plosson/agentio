@@ -9,7 +9,7 @@ const realJira = await import('../../src/plugins/jira/oauth');
 mock.module('../../src/plugins/jira/oauth', () => ({ ...realJira, refreshJiraToken: jiraRefresh }));
 
 const { createRequestHandler } = await import('../../src/daemon/api');
-const { createApiKey, issueLocalToken, listApiKeys, LOCAL_OWNER } = await import('../../src/auth/api-keys');
+const { createApiKey, issueLocalToken, listApiKeys, LOCAL_OWNER, updateApiKey } = await import('../../src/auth/api-keys');
 const { v1AuthLimiter, v1KeyLimiter, V1_REQUESTS_PER_MINUTE } = await import('../../src/daemon/routes-v1');
 
 // Tests inject the client IP via X-Forwarded-For; trust it here as a fronting proxy would.
@@ -98,6 +98,42 @@ describe('/v1 credential API', () => {
     expect(over.status).toBe(429);
     expect(await over.json()).toMatchObject({ code: 'RATE_LIMITED', error: expect.stringContaining(String(V1_REQUESTS_PER_MINUTE)) });
     expect((await call('/v1/profiles', { token: allToken })).status).toBe(200);
+  });
+
+  test('a key with its own limit is capped there, and a change applies at once', async () => {
+    const { key, token } = await createApiKey({ name: 'tight', allowedProfiles: '*', readOnly: true, requestsPerMinute: 3 }, 'https://hub');
+    for (let i = 0; i < 3; i++) expect((await call('/v1/profiles', { token })).status).toBe(200);
+    const over = await call('/v1/profiles', { token });
+    expect(over.status).toBe(429);
+    expect((await over.json()).error).toContain('More than 3 requests');
+
+    // Raised on the hub: the very next request is allowed, no restart.
+    await updateApiKey(key.id, { requestsPerMinute: 5 });
+    expect((await call('/v1/profiles', { token })).status).toBe(200);
+    // Lowered again: the hits already counted in this window apply.
+    await updateApiKey(key.id, { requestsPerMinute: 2 });
+    expect((await call('/v1/profiles', { token })).status).toBe(429);
+  });
+
+  test('an unlimited key is never capped, and others keep theirs', async () => {
+    const { key, token } = await createApiKey({ name: 'box', allowedProfiles: '*', readOnly: true, requestsPerMinute: null }, 'https://hub');
+    for (let i = 0; i < V1_REQUESTS_PER_MINUTE + 30; i++) expect((await call('/v1/profiles', { token })).status).toBe(200);
+    for (let i = 0; i < V1_REQUESTS_PER_MINUTE; i++) expect((await call('/v1/profiles', { token: scopedToken })).status).toBe(200);
+    expect((await call('/v1/profiles', { token: scopedToken })).status).toBe(429);
+
+    // Back to a limit: counting starts from now, since unlimited hits were never counted.
+    await updateApiKey(key.id, { requestsPerMinute: 2 });
+    expect((await call('/v1/profiles', { token })).status).toBe(200);
+    expect((await call('/v1/profiles', { token })).status).toBe(200);
+    expect((await call('/v1/profiles', { token })).status).toBe(429);
+  });
+
+  test('bad tokens stay limited per address whatever a key allows', async () => {
+    const { token } = await createApiKey({ name: 'free', allowedProfiles: '*', readOnly: true, requestsPerMinute: null }, 'https://hub');
+    const parts = token.split('.');
+    const wrong = `${parts[0]}.${parts[1]}.${'y'.repeat(43)}`;
+    for (let i = 0; i < 5; i++) expect((await call('/v1/profiles', { token: wrong, ip: '198.51.100.7' })).status).toBe(401);
+    expect((await call('/v1/profiles', { token: wrong, ip: '198.51.100.7' })).status).toBe(429);
   });
 
   test('profiles lists only what the key may use, with the effective read-only flag', async () => {
