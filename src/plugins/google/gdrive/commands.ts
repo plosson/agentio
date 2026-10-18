@@ -13,6 +13,7 @@ import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GDriveCredentials, GDriveAccessLevel } from './types';
 import { DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, parseChunkSize, parseMoveCsv, type MoveItem } from './batch';
+import { parseShortcutCsv, type ShortcutItem } from './shortcut';
 import { readStdinRaw } from '../../../utils/stdin';
 import { writeJson } from '../../../utils/output';
 import { readFile } from 'fs/promises';
@@ -425,6 +426,56 @@ rate-limit (403/429) and 5xx answers are retried with exponential backoff.`,
 
   addExamples(
     gdrive
+      .command('shortcut')
+      .argument('[target-id-or-url]', 'File or folder to point at (yours or shared with you)')
+      .description('Create Drive shortcuts to files or folders')
+      .option('--profile <name>', 'Profile name')
+      .option('--parent <folder-id>', 'Folder to put the shortcut in (use "root" for My Drive root)')
+      .option('--name <name>', "Shortcut name (default: the target's name)")
+      .option('--batch <file>', 'CSV of targetId,parentId[,name] lines ("-" for stdin; header, blank and # lines skipped)')
+      .option('--chunk <n>', `Calls per Drive batch request (1-${MAX_BATCH_SIZE})`, String(DEFAULT_BATCH_SIZE))
+      .option('--allow-duplicates', 'Create even if a shortcut to the same target is already in the parent')
+      .option('--dry-run', 'Check that targets and parents are accessible, without creating anything')
+      .action(async (target: string | undefined, options) => {
+        try {
+          const items = await resolveShortcutItems(target, options);
+          const chunkSize = parseChunkSize(options.chunk);
+          const { client, profile } = await getGDriveClient(options.profile);
+          if (!options.dryRun) await enforceWriteAccess('gdrive', profile, 'create shortcut');
+          const { summary } = await client.createShortcuts(items, {
+            chunkSize,
+            dryRun: !!options.dryRun,
+            allowDuplicates: !!options.allowDuplicates,
+            onResult: (result) => writeJson(result),
+          });
+          writeJson({ summary });
+          if (summary.error > 0) process.exit(5);
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # shortcut to a file shared with you, in one of your folders (named like the target)
+  agentio gdrive shortcut https://docs.google.com/document/d/1A2bCdEf.../edit --parent 1XyZaBc...
+
+  # with a custom name, in My Drive root
+  agentio gdrive shortcut 1A2bCdEf... --parent root --name "Team budget"
+
+  # many at once from a CSV of targetId,parentId[,name] lines
+  agentio gdrive shortcut --batch shortcuts.csv
+
+  # check first, from stdin
+  cat shortcuts.csv | agentio gdrive shortcut --batch - --dry-run
+
+Prints one JSON line per shortcut ({targetId, parent, status: ok|error,
+name, shortcutId?, existing?, error?}) and a final {summary} line; exits 5
+if any failed. A shortcut to the same target already in the parent is
+reported (existing: true) instead of created, unless --allow-duplicates.`,
+  );
+
+  addExamples(
+    gdrive
       .command('trash')
       .argument('<file-id-or-url>', 'File ID or URL')
       .description('Move a file to the trash')
@@ -651,6 +702,28 @@ export async function resolveMoveItems(
     'INVALID_PARAMS',
     'Specify <file-id> <folder-id>, <ids...> --to <folder-id>, or --batch <file|->',
   );
+}
+
+/** The shortcut list from `<target> --parent <id> [--name]` or `--batch <file|->`. */
+export async function resolveShortcutItems(
+  target: string | undefined,
+  options: { parent?: string; name?: string; batch?: string },
+  readInput: (source: string) => Promise<string | null> = readMoveInput,
+): Promise<ShortcutItem[]> {
+  if (options.batch) {
+    if (target || options.parent || options.name) {
+      throw new CliError('INVALID_PARAMS', '--batch cannot be combined with a target, --parent or --name', 'Put every shortcut in the CSV');
+    }
+    const text = await readInput(options.batch);
+    if (text === null) throw new CliError('INVALID_PARAMS', 'No input on stdin', 'Pipe targetId,parentId[,name] lines, or pass a file path');
+    const items = parseShortcutCsv(text);
+    if (!items.length) throw new CliError('INVALID_PARAMS', 'The batch input holds no shortcuts');
+    return items;
+  }
+  if (!target) throw new CliError('INVALID_PARAMS', 'Specify <target-id-or-url> --parent <folder-id>, or --batch <file|->');
+  if (!options.parent) throw new CliError('INVALID_PARAMS', '--parent is required', 'Use "root" for My Drive root');
+  const name = options.name?.trim();
+  return [{ targetId: target, parent: options.parent, ...(name ? { name } : {}) }];
 }
 
 async function readMoveInput(source: string): Promise<string | null> {

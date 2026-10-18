@@ -23,7 +23,8 @@ import type {
   GDriveCopyOptions,
   GDriveCopyResult,
 } from './types';
-import { batchMove, type BatchMoveOptions, type MoveItem, type MoveResult, type MoveSummary } from './batch';
+import { batchMove, type BatchDeps, type BatchMoveOptions, type MoveItem, type MoveResult, type MoveSummary } from './batch';
+import { batchShortcut, type BatchShortcutOptions, type ShortcutItem, type ShortcutResult, type ShortcutSummary } from './shortcut';
 
 // Export MIME types for Google Workspace files
 const EXPORT_MIME_TYPES: Record<string, Record<GDriveExportFormat, string | undefined>> = {
@@ -457,14 +458,28 @@ export class GDriveClient implements ServiceClient {
   async moveMany(items: MoveItem[], options: BatchMoveOptions = {}): Promise<{ results: MoveResult[]; summary: MoveSummary }> {
     if (!options.dryRun) this.assertWriteAccess();
     const normalized = items.map((item) => ({ fileId: this.extractFileId(item.fileId), dest: this.extractFileId(item.dest) }));
-    return batchMove(normalized, {
+    return batchMove(normalized, this.batchDeps(), options);
+  }
+
+  /**
+   * Creates shortcuts (to files the user owns or that are shared with them)
+   * through Drive's batch endpoint; see shortcut.ts.
+   */
+  async createShortcuts(items: ShortcutItem[], options: BatchShortcutOptions = {}): Promise<{ results: ShortcutResult[]; summary: ShortcutSummary }> {
+    if (!options.dryRun) this.assertWriteAccess();
+    const normalized = items.map((item) => ({ ...item, targetId: this.extractFileId(item.targetId), parent: this.extractFileId(item.parent) }));
+    return batchShortcut(normalized, this.batchDeps(), options);
+  }
+
+  private batchDeps(): BatchDeps {
+    return {
       fetch: (url, init) => fetch(url, init),
       getAccessToken: async () => {
         const token = await this.auth.getAccessToken();
         if (!token.token) throw new CliError('AUTH_FAILED', 'Failed to obtain access token');
         return token.token;
       },
-    }, options);
+    };
   }
 
   async mkdir(name: string, parentIdOrUrl?: string): Promise<GDriveFile> {
@@ -582,6 +597,7 @@ export class GDriveClient implements ServiceClient {
   private extractFileId(fileIdOrUrl: string): string {
     const patterns = [
       /\/file\/d\/([a-zA-Z0-9_-]+)/,
+      /\/(?:document|spreadsheets|presentation|drawings|forms)\/d\/([a-zA-Z0-9_-]+)/,
       /\/folders\/([a-zA-Z0-9_-]+)/,
       /id=([a-zA-Z0-9_-]+)/,
     ];

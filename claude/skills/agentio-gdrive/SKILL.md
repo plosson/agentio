@@ -280,6 +280,41 @@ Calls are sent through Drive's batch endpoint (--chunk per request, max 100);
 rate-limit (403/429) and 5xx answers are retried with exponential backoff.
 ```
 
+## agentio gdrive shortcut [target-id-or-url]
+
+Create Drive shortcuts to files or folders
+
+Options:
+
+- `--profile <name>`: Profile name
+- `--parent <folder-id>`: Folder to put the shortcut in (use "root" for My Drive root)
+- `--name <name>`: Shortcut name (default: the target's name)
+- `--batch <file>`: CSV of targetId,parentId[,name] lines ("-" for stdin; header, blank and # lines skipped)
+- `--chunk <n>`: Calls per Drive batch request (1-100) (default: 50)
+- `--allow-duplicates`: Create even if a shortcut to the same target is already in the parent
+- `--dry-run`: Check that targets and parents are accessible, without creating anything
+
+```
+Examples:
+
+  # shortcut to a file shared with you, in one of your folders (named like the target)
+  agentio gdrive shortcut https://docs.google.com/document/d/1A2bCdEf.../edit --parent 1XyZaBc...
+
+  # with a custom name, in My Drive root
+  agentio gdrive shortcut 1A2bCdEf... --parent root --name "Team budget"
+
+  # many at once from a CSV of targetId,parentId[,name] lines
+  agentio gdrive shortcut --batch shortcuts.csv
+
+  # check first, from stdin
+  cat shortcuts.csv | agentio gdrive shortcut --batch - --dry-run
+
+Prints one JSON line per shortcut ({targetId, parent, status: ok|error,
+name, shortcutId?, existing?, error?}) and a final {summary} line; exits 5
+if any failed. A shortcut to the same target already in the parent is
+reported (existing: true) instead of created, unless --allow-duplicates.
+```
+
 ## agentio gdrive trash <file-id-or-url>
 
 Move a file to the trash
