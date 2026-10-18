@@ -12,6 +12,10 @@ import { CliError, handleError } from '../../../utils/errors';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type { GDriveCredentials, GDriveAccessLevel } from './types';
+import { DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, parseChunkSize, parseMoveCsv, type MoveItem } from './batch';
+import { readStdinRaw } from '../../../utils/stdin';
+import { writeJson } from '../../../utils/output';
+import { readFile } from 'fs/promises';
 
 export const GDRIVE_ACCESS_INPUT: InputSpec = {
   label: 'Access', kind: 'choice', default: 'readonly',
@@ -359,17 +363,36 @@ exactly — no re-rendering. Comments are not carried over.`,
   addExamples(
     gdrive
       .command('move')
-      .argument('<file-id-or-url>', 'File or folder ID or URL')
-      .argument('<folder-id-or-url>', 'Destination folder ID or URL (use "root" for My Drive root)')
-      .description('Move a file or folder to another folder')
+      .argument('[ids...]', 'File/folder IDs or URLs; with two and no --to, the second is the destination')
+      .description('Move one or many files or folders to another folder')
       .option('--profile <name>', 'Profile name')
-      .action(async (fileIdOrUrl: string, folderIdOrUrl: string, options) => {
+      .option('--to <folder-id>', 'Destination folder ID or URL for every ID given (use "root" for My Drive root)')
+      .option('--batch <file>', 'CSV of fileId,destFolderId lines ("-" for stdin; header, blank and # lines skipped)')
+      .option('--chunk <n>', `Calls per Drive batch request (1-${MAX_BATCH_SIZE})`, String(DEFAULT_BATCH_SIZE))
+      .option('--dry-run', 'Look up current parents and report what would move, without moving')
+      .action(async (ids: string[], options) => {
         try {
+          const legacy = !options.to && !options.batch && !options.dryRun && ids.length === 2;
+          if (legacy) {
+            const { client, profile } = await getGDriveClient(options.profile);
+            await enforceWriteAccess('gdrive', profile, 'move file');
+            const file = await client.move(ids[0], ids[1]);
+            console.log(`Moved: ${file.name} (${file.id})`);
+            if (file.parents && file.parents.length > 0) console.log(`  Folder: ${file.parents[0]}`);
+            return;
+          }
+
+          const items = await resolveMoveItems(ids, options);
+          const chunkSize = parseChunkSize(options.chunk);
           const { client, profile } = await getGDriveClient(options.profile);
-          await enforceWriteAccess('gdrive', profile, 'move file');
-          const file = await client.move(fileIdOrUrl, folderIdOrUrl);
-          console.log(`Moved: ${file.name} (${file.id})`);
-          if (file.parents && file.parents.length > 0) console.log(`  Folder: ${file.parents[0]}`);
+          if (!options.dryRun) await enforceWriteAccess('gdrive', profile, 'move file');
+          const { summary } = await client.moveMany(items, {
+            chunkSize,
+            dryRun: !!options.dryRun,
+            onResult: (result) => writeJson(result),
+          });
+          writeJson({ summary });
+          if (summary.error > 0) process.exit(5);
         } catch (error) {
           handleError(error);
         }
@@ -383,7 +406,21 @@ exactly — no re-rendering. Comments are not carried over.`,
   agentio gdrive move https://drive.google.com/drive/folders/1A2bCdEf... 1XyZaBc...
 
   # move a file back to My Drive root
-  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz root`,
+  agentio gdrive move 1A2bCdEfGhIjKlMnOpQrStUvWxYz root
+
+  # move several files into one folder (batched)
+  agentio gdrive move 1AaA... 1BbB... 1CcC... --to 1XyZaBc...
+
+  # move from a CSV of fileId,destFolderId lines
+  agentio gdrive move --batch moves.csv
+
+  # same, from stdin, checking first without moving anything
+  cat moves.csv | agentio gdrive move --batch - --dry-run
+
+Batch moves print one JSON line per file ({fileId, dest, status: ok|error,
+error?}) and a final {summary} line, and exit 5 if any file failed.
+Calls are sent through Drive's batch endpoint (--chunk per request, max 100);
+rate-limit (403/429) and 5xx answers are retried with exponential backoff.`,
   );
 
   addExamples(
@@ -587,6 +624,42 @@ before Google deletes them permanently.`,
         handleError(error);
       }
     });
+}
+
+/** The move list from `<ids...> --to <dest>`, `<id> <dest>` (with --dry-run) or `--batch <file|->`. */
+export async function resolveMoveItems(
+  ids: string[],
+  options: { to?: string; batch?: string },
+  readInput: (source: string) => Promise<string | null> = readMoveInput,
+): Promise<MoveItem[]> {
+  if (options.batch) {
+    if (ids.length || options.to) {
+      throw new CliError('INVALID_PARAMS', '--batch cannot be combined with IDs or --to', 'Put every move in the CSV');
+    }
+    const text = await readInput(options.batch);
+    if (text === null) throw new CliError('INVALID_PARAMS', 'No input on stdin', 'Pipe fileId,destFolderId lines, or pass a file path');
+    const items = parseMoveCsv(text);
+    if (!items.length) throw new CliError('INVALID_PARAMS', 'The batch input holds no moves');
+    return items;
+  }
+  if (options.to) {
+    if (!ids.length) throw new CliError('INVALID_PARAMS', 'Give at least one file ID to move with --to');
+    return ids.map((fileId) => ({ fileId, dest: options.to! }));
+  }
+  if (ids.length === 2) return [{ fileId: ids[0], dest: ids[1] }];
+  throw new CliError(
+    'INVALID_PARAMS',
+    'Specify <file-id> <folder-id>, <ids...> --to <folder-id>, or --batch <file|->',
+  );
+}
+
+async function readMoveInput(source: string): Promise<string | null> {
+  if (source === '-') return readStdinRaw();
+  try {
+    return await readFile(source, 'utf8');
+  } catch (err) {
+    throw new CliError('INVALID_PARAMS', `Cannot read ${source}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function gdriveProfileAdd(

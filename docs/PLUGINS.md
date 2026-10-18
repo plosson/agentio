@@ -62,7 +62,7 @@ The **"Create your own app"** steps below were checked against each provider's o
 |---|---|
 | gmail | gmail.readonly **R**, gmail.compose **R**, gmail.modify **R**, gmail.settings.basic **R**, gmail.send **S**, userinfo.email NS |
 | gdrive (read-only) | drive.readonly **R**, userinfo.email NS |
-| gdrive (full) | drive **R**, userinfo.email NS |
+| gdrive (full) | drive **R**, userinfo.email NS. `gdrive move` with several files (`--to`, `--batch`) sends its calls through the Drive batch endpoint (`/batch/drive/v3`) with this same scope; each call in a batch still counts against the Drive quota |
 | gdocs | documents **S**, drive **R**, userinfo.email NS. Full drive because `gdocs update` rewrites docs agentio did not create; profiles signed in with the older drive.file scopes must sign in again (`agentio profile reauth gdocs`) |
 | gsheets | spreadsheets **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |
 | gslides | presentations **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |

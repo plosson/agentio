@@ -23,6 +23,7 @@ import type {
   GDriveCopyOptions,
   GDriveCopyResult,
 } from './types';
+import { batchMove, type BatchMoveOptions, type MoveItem, type MoveResult, type MoveSummary } from './batch';
 
 // Export MIME types for Google Workspace files
 const EXPORT_MIME_TYPES: Record<string, Record<GDriveExportFormat, string | undefined>> = {
@@ -98,12 +99,13 @@ const EXT_TO_MIME: Record<string, string> = {
 
 export class GDriveClient implements ServiceClient {
   private credentials: GDriveCredentials;
+  private auth: OAuth2Client;
   private drive: drive_v3.Drive;
 
   constructor(credentials: GDriveCredentials) {
     this.credentials = credentials;
-    const auth = this.createOAuthClient();
-    this.drive = drive({ version: 'v3', auth: auth as any });
+    this.auth = this.createOAuthClient();
+    this.drive = drive({ version: 'v3', auth: this.auth as any });
   }
 
   async validate(): Promise<ValidationResult> {
@@ -446,6 +448,23 @@ export class GDriveClient implements ServiceClient {
     } catch (err) {
       this.throwApiError(err, 'move file');
     }
+  }
+
+  /**
+   * Moves many files through Drive's batch endpoint: parents are fetched in
+   * one batch, then moved in another, up to `chunkSize` calls per batch.
+   */
+  async moveMany(items: MoveItem[], options: BatchMoveOptions = {}): Promise<{ results: MoveResult[]; summary: MoveSummary }> {
+    if (!options.dryRun) this.assertWriteAccess();
+    const normalized = items.map((item) => ({ fileId: this.extractFileId(item.fileId), dest: this.extractFileId(item.dest) }));
+    return batchMove(normalized, {
+      fetch: (url, init) => fetch(url, init),
+      getAccessToken: async () => {
+        const token = await this.auth.getAccessToken();
+        if (!token.token) throw new CliError('AUTH_FAILED', 'Failed to obtain access token');
+        return token.token;
+      },
+    }, options);
   }
 
   async mkdir(name: string, parentIdOrUrl?: string): Promise<GDriveFile> {
