@@ -15,7 +15,8 @@ import type { GDriveCredentials, GDriveAccessLevel } from './types';
 import { DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, parseChunkSize, parseMoveCsv, type MoveItem } from './batch';
 import { parseShortcutCsv, type ShortcutItem } from './shortcut';
 import { readStdinRaw } from '../../../utils/stdin';
-import { writeJson } from '../../../utils/output';
+import { addJsonOption, writeJson } from '../../../utils/output';
+import { fileJson, parseMaxDepth, parseTextFields, TEXT_FIELDS } from './recursive';
 import { readFile } from 'fs/promises';
 
 export const GDRIVE_ACCESS_INPUT: InputSpec = {
@@ -37,26 +38,55 @@ export function registerGDriveCommands(program: Command): void {
     .description('Google Drive operations');
 
   addExamples(
-    gdrive
-      .command('list')
-      .description('List files')
-      .option('--profile <name>', 'Profile name')
-      .option('--limit <n>', 'Number of files', '20')
-      .option('--folder <id>', 'Folder ID to list (use "root" for root folder)')
-      .option('--query <query>', 'Drive API query filter')
-      .option('--order <field>', 'Order by field', 'modifiedTime desc')
-      .option('--trash', 'Include trashed files')
-      .action(async (options) => {
+    addJsonOption(
+      gdrive
+        .command('list')
+        .description('List files')
+        .option('--profile <name>', 'Profile name')
+        .option('--limit <n>', 'Number of files (default: 20; no limit with --recursive)')
+        .option('--folder <id>', 'Folder ID or URL to list (use "root" for root folder)')
+        .option('--query <query>', 'Drive API query filter')
+        .option('--order <field>', 'Order by field (default: modifiedTime desc; folder,name with --recursive)')
+        .option('--trash', 'Include trashed files')
+        .option('--recursive', 'Walk every subfolder too, printing each item with its path')
+        .option('--max-depth <n>', 'With --recursive: deepest level to list (1 = direct children only)')
+        .option('--follow-shortcuts', 'With --recursive: also walk folders that shortcuts point at (cycles are cut)')
+        .option('--fields <list>', `Extra fields on each item's second text line: ${TEXT_FIELDS.join(',')}`),
+    ).action(async (options) => {
         try {
+          const extra = parseTextFields(options.fields);
+          const limit = options.limit === undefined ? undefined : parsePositiveInt('--limit', options.limit);
+          if (!options.recursive && (options.maxDepth !== undefined || options.followShortcuts)) {
+            throw new CliError('INVALID_PARAMS', '--max-depth and --follow-shortcuts need --recursive');
+          }
           const { client } = await getGDriveClient(options.profile);
+          if (options.recursive) {
+            const { files, truncated, folders } = await client.listRecursive({
+              folderId: options.folder,
+              query: options.query,
+              orderBy: options.order,
+              includeTrash: options.trash,
+              limit,
+              maxDepth: parseMaxDepth(options.maxDepth),
+              followShortcuts: !!options.followShortcuts,
+            });
+            if (options.json) {
+              writeJson(files.map(fileJson), 2);
+            } else {
+              printGDriveFileList(files, `Files below ${options.folder ?? 'My Drive'}, ${folders} folder${folders === 1 ? '' : 's'} walked`, extra);
+            }
+            if (truncated) console.error(`Stopped at --limit ${limit}; there are more.`);
+            return;
+          }
           const files = await client.list({
-            limit: parseInt(options.limit, 10),
+            limit: limit ?? 20,
             folderId: options.folder,
             query: options.query,
-            orderBy: options.order,
+            orderBy: options.order || 'modifiedTime desc',
             includeTrash: options.trash,
           });
-          printGDriveFileList(files);
+          if (options.json) writeJson(files.map(fileJson), 2);
+          else printGDriveFileList(files, 'Files', extra);
         } catch (error) {
           handleError(error);
         }
@@ -75,9 +105,19 @@ export function registerGDriveCommands(program: Command): void {
   # files you own, sorted by name
   agentio gdrive list --query "'me' in owners" --order "name"
 
+  # with MD5 and exact byte size on each item
+  agentio gdrive list --folder 1A2bCdEf... --fields md5,bytes,modified
+
+  # everything below a folder, with paths, as JSON (md5Checksum is null for native Docs/Sheets/Slides)
+  agentio gdrive list --folder 1A2bCdEf... --recursive --json
+
+  # two levels deep, only PDFs, also walking folder shortcuts
+  agentio gdrive list --folder 1A2bCdEf... --recursive --max-depth 2 --follow-shortcuts --query "mimeType = 'application/pdf'"
+
 Query syntax: name contains '...', mimeType = '...', 'me' in owners,
 modifiedTime > 'YYYY-MM-DD', starred = true, shared = true.
-Combine with 'and'/'or'.`,
+Combine with 'and'/'or'. With --recursive, --query filters what is listed;
+every subfolder is still walked.`,
   );
 
   addExamples(
@@ -117,16 +157,17 @@ Combine with 'and'/'or'.`,
   );
 
   addExamples(
-    gdrive
+    addJsonOption(gdrive
       .command('get')
       .argument('<file-id-or-url>', 'File ID or URL')
-      .description('Get file metadata')
+      .description('Get file metadata (including MD5 and exact size)')
       .option('--profile <name>', 'Profile name')
-      .action(async (fileIdOrUrl: string, options) => {
+    ).action(async (fileIdOrUrl: string, options) => {
         try {
           const { client } = await getGDriveClient(options.profile);
           const file = await client.get(fileIdOrUrl);
-          printGDriveFile(file);
+          if (options.json) writeJson(fileJson(file), 2);
+          else printGDriveFile(file);
         } catch (error) {
           handleError(error);
         }
@@ -137,11 +178,14 @@ Combine with 'and'/'or'.`,
   agentio gdrive get 1A2bCdEfGhIjKlMnOpQrStUvWxYz0123456789
 
   # metadata from a full Drive URL
-  agentio gdrive get https://drive.google.com/file/d/1A2bCdEf.../view`,
+  agentio gdrive get https://drive.google.com/file/d/1A2bCdEf.../view
+
+  # as JSON, e.g. to compare md5Checksum with a local file
+  agentio gdrive get 1A2bCdEf... --json`,
   );
 
   addExamples(
-    gdrive
+    addJsonOption(gdrive
       .command('search')
       .description('Search for files')
       .requiredOption('--query <text>', 'Search text (searches name and content)')
@@ -149,16 +193,19 @@ Combine with 'and'/'or'.`,
       .option('--limit <n>', 'Number of results', '20')
       .option('--type <mime>', 'Filter by MIME type')
       .option('--folder <id>', 'Search within folder')
-      .action(async (options) => {
+      .option('--fields <list>', `Extra fields on each item's second text line: ${TEXT_FIELDS.join(',')}`)
+    ).action(async (options) => {
         try {
+          const extra = parseTextFields(options.fields);
           const { client } = await getGDriveClient(options.profile);
           const files = await client.search({
             query: options.query,
             mimeType: options.type,
-            limit: parseInt(options.limit, 10),
+            limit: parsePositiveInt('--limit', options.limit),
             folderId: options.folder,
           });
-          printGDriveFileList(files, 'Search Results');
+          if (options.json) writeJson(files.map(fileJson), 2);
+          else printGDriveFileList(files, 'Search Results', extra);
         } catch (error) {
           handleError(error);
         }
@@ -172,7 +219,11 @@ Combine with 'and'/'or'.`,
   agentio gdrive search --query "invoice" --type application/pdf
 
   # restrict to a folder, return more results
-  agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50`,
+  agentio gdrive search --query "design" --folder 1A2bCdEf... --limit 50
+
+  # with MD5 and byte size, or as JSON
+  agentio gdrive search --query "invoice" --fields md5,bytes
+  agentio gdrive search --query "invoice" --json`,
   );
 
   addExamples(
@@ -675,6 +726,12 @@ before Google deletes them permanently.`,
         handleError(error);
       }
     });
+}
+
+function parsePositiveInt(flag: string, value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) throw new CliError('INVALID_PARAMS', `Invalid ${flag}: ${value}`, 'Use a whole number from 1');
+  return n;
 }
 
 /** The move list from `<ids...> --to <dest>`, `<id> <dest>` (with --dry-run) or `--batch <file|->`. */

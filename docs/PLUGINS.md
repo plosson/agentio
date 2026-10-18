@@ -61,7 +61,7 @@ The **"Create your own app"** steps below were checked against each provider's o
 | Plugin | Scopes |
 |---|---|
 | gmail | gmail.readonly **R**, gmail.compose **R**, gmail.modify **R**, gmail.settings.basic **R**, gmail.send **S**, userinfo.email NS |
-| gdrive (read-only) | drive.readonly **R**, userinfo.email NS |
+| gdrive (read-only) | drive.readonly **R**, userinfo.email NS. Enough for `gdrive list`/`search`/`get` with `md5Checksum`, exact size and `modifiedTime` (`--json`, `--fields`), and for `gdrive list --recursive`, which pages 1000 items at a time and lists shared-drive folders too (`supportsAllDrives`) |
 | gdrive (full) | drive **R**, userinfo.email NS. `gdrive move` with several files (`--to`, `--batch`) and `gdrive shortcut` send their calls through the Drive batch endpoint (`/batch/drive/v3`) with this same scope; each call in a batch still counts against the Drive quota. `gdrive shortcut` needs only read access to the target (it may belong to another account) and write access to the parent |
 | gdocs | documents **S**, drive **R**, userinfo.email NS. Full drive because `gdocs update` rewrites docs agentio did not create; profiles signed in with the older drive.file scopes must sign in again (`agentio profile reauth gdocs`) |
 | gsheets | spreadsheets **S**, drive.file NS, drive.readonly **R**, userinfo.email NS |

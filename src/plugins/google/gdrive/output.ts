@@ -1,5 +1,6 @@
 import type { GDriveFile, GDriveDownloadResult, GDriveUploadResult, GDrivePermission, GDriveShareResult, GDriveCopyResult } from './types';
 import { formatBytes } from '../format';
+import { textFieldValue, type TextField } from './recursive';
 
 // Google Drive specific formatters
 function getShortMimeType(mimeType: string): string {
@@ -22,7 +23,7 @@ function getShortMimeType(mimeType: string): string {
   return 'file';
 }
 
-export function printGDriveFileList(files: GDriveFile[], title: string = 'Files'): void {
+export function printGDriveFileList(files: GDriveFile[], title: string = 'Files', extra: TextField[] = []): void {
   if (files.length === 0) {
     console.log('No files found');
     return;
@@ -36,9 +37,11 @@ export function printGDriveFileList(files: GDriveFile[], title: string = 'Files'
     const size = file.size ? formatBytes(file.size).padStart(8) : '       -';
     const date = file.modifiedTime ? file.modifiedTime.slice(0, 10) : '          ';
     const flags = (file.starred ? '*' : '') + (file.shared ? '⇄' : '');
-    const name = isFolder ? `${file.name}/` : file.name;
+    const label = file.path ?? file.name;
+    const name = isFolder ? `${label}/` : label;
     console.log(`${type} ${size}  ${date}  ${flags.padEnd(2)} ${name}`);
-    console.log(`  ${file.id}`);
+    const fields = extra.map((f) => `${f}=${textFieldValue(file, f)}`);
+    console.log(`  ${[file.id, ...fields].join('  ')}`);
   }
 }
 
@@ -46,7 +49,9 @@ export function printGDriveFile(file: GDriveFile): void {
   console.log(`ID: ${file.id}`);
   console.log(`Name: ${file.name}`);
   console.log(`Type: ${file.mimeType}`);
-  if (file.size) console.log(`Size: ${formatBytes(file.size)}`);
+  if (file.size !== undefined) console.log(`Size: ${formatBytes(file.size)} (${file.size} bytes)`);
+  console.log(`MD5: ${file.md5Checksum ?? '-'}`);
+  if (file.shortcutDetails) console.log(`Shortcut to: ${file.shortcutDetails.targetId}${file.shortcutDetails.targetMimeType ? ` (${file.shortcutDetails.targetMimeType})` : ''}`);
   if (file.description) console.log(`Description: ${file.description}`);
   if (file.owners?.length) console.log(`Owners: ${file.owners.join(', ')}`);
   if (file.parents?.length) console.log(`Parents: ${file.parents.join(', ')}`);
