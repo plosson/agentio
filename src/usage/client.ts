@@ -1,6 +1,6 @@
 import { hostname } from 'os';
 import { agentioVersion } from '../utils/version';
-import { LOCAL_KEY, USAGE_HEADERS } from './event';
+import { COMMAND, HOST, LOCAL_KEY, USAGE_HEADERS } from './event';
 import { firstUse, usageCommand } from './context';
 import { recordUsage, warnOnce } from './store';
 
@@ -33,9 +33,12 @@ export async function recordLocalUse(service: string, profile: string, found: bo
 export function usageHeaders(): Record<string, string> {
   try {
     const command = usageCommand();
+    const host = hostname();
+    // A value fetch refuses (a newline, a non-Latin-1 character) would fail the whole request:
+    // send only what the hub would accept, and the hub records the rest as unknown.
     return {
-      ...(command !== null ? { [USAGE_HEADERS.command]: command } : {}),
-      [USAGE_HEADERS.host]: hostname(),
+      ...(command !== null && COMMAND.test(command) ? { [USAGE_HEADERS.command]: command } : {}),
+      ...(HOST.test(host) ? { [USAGE_HEADERS.host]: host } : {}),
       [USAGE_HEADERS.version]: agentioVersion(),
     };
   } catch (err) {

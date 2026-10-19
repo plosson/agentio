@@ -44,6 +44,15 @@ describe('normalizeEvent', () => {
     expect(normalizeEvent(base({ host: 'h'.repeat(65) })).host).toBe(INVALID);
   });
 
+  test('owner-chosen names may hold accents and Unicode, but no control characters', () => {
+    expect(normalizeEvent(base({ keyName: 'ünïcødé' })).keyName).toBe('ünïcødé');
+    expect(normalizeEvent(base({ profile: 'Pascal’s laptop', keyName: 'Bureau – iMac' }))).toMatchObject({ profile: 'Pascal’s laptop', keyName: 'Bureau – iMac' });
+    for (const bad of ['ünïcødé\nname', 'work\u0000', 'a\u2028b', 'x'.repeat(129), '\x7f']) {
+      expect(normalizeEvent(base({ service: bad, profile: bad, keyId: bad, keyName: bad }))).toMatchObject({ service: INVALID, profile: INVALID, keyId: INVALID, keyName: INVALID });
+    }
+    expect(normalizeEvent(base({ profile: 'x'.repeat(128) })).profile).toBe('x'.repeat(128));
+  });
+
   test('a version that is not semver is unknown, not invalid', () => {
     expect(normalizeEvent(base({ version: 'latest' })).version).toBe(UNKNOWN);
     expect(normalizeEvent(base({ version: '3.23.1-beta.2' })).version).toBe('3.23.1-beta.2');

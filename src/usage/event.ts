@@ -43,11 +43,12 @@ export interface UsageInput {
   version?: string | null;
 }
 
-const COMMAND = /^[a-z0-9 -]{1,100}$/;
-const HOST = /^[A-Za-z0-9.-]{1,64}$/;
+export const COMMAND = /^[a-z0-9 -]{1,100}$/;
+export const HOST = /^[A-Za-z0-9.-]{1,64}$/;
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-// Profile and key names are the owner's: anything printable, bounded.
-const LABEL = /^[\x20-\x7e]{1,128}$/;
+// Service, profile and key names are the owner's: any text without control
+// characters (or line/paragraph separators), bounded.
+const LABEL = /^[^\p{Cc}\u2028\u2029]{1,128}$/u;
 const OUTCOME = /^[a-z_]{1,40}$/;
 
 function field(value: string | null | undefined, valid: (v: string) => boolean, otherwise: string): string {
