@@ -4,6 +4,7 @@ import { grantProfileToKey, keyAllows, keyInConfig, pruneDanglingScopes, renameP
 import { updateVault, type VaultContents } from '../vault/vault';
 import { hub, isRemoteMode, remoteDeleteProfile, remoteRenameProfile, remoteSaveProfile } from '../auth/remote';
 import { CliError, profileNotFoundError } from '../utils/errors';
+import { renameUsageProfile } from '../usage/store';
 import type { Config, ServiceName } from '../types/config';
 
 /**
@@ -181,24 +182,29 @@ export function deleteProfileForKey(keyId: string, service: ServiceName, profile
 }
 
 /** Rename a profile for a remote key, when the key reaches it and the new name is free. */
-export function renameProfileForKey(keyId: string, service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
-  return updateVault((vault) => {
+export async function renameProfileForKey(keyId: string, service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
+  const outcome = await updateVault((vault): WriteOutcome => {
     if (!hasProfile(vault.config, service, from)) return 'absent';
     if (!reaches(vault.config, keyId, service, from)) return 'denied';
     return moveProfile(vault, service, from, to);
   });
+  if (outcome === 'ok') await renameUsageProfile(service, from, to);
+  return outcome;
 }
 
 /**
  * Move a profile to a new name: its entry keeps its flag, its credentials
  * follow, and every key that named it is updated, all in one vault write.
  */
-export function renameProfile(service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
+export async function renameProfile(service: ServiceName, from: string, to: string): Promise<WriteOutcome> {
   if (isRemoteMode()) {
     validateProfileName(to);
     return remoteRenameProfile(service, from, to);
   }
-  return updateVault((vault) => moveProfile(vault, service, from, to));
+  const outcome = await updateVault((vault) => moveProfile(vault, service, from, to));
+  // On a hub the remote branch above lands in renameProfileForKey, which moves the usage there.
+  if (outcome === 'ok') await renameUsageProfile(service, from, to);
+  return outcome;
 }
 
 /** The move itself, in place; validation included so no caller can skip it. */

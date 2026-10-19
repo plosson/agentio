@@ -145,6 +145,20 @@ export async function recordUsage(input: UsageInput): Promise<void> {
   }
 }
 
+/**
+ * After a profile is renamed, its past uses follow it: a profile has no id, its name is its
+ * identity. Best effort, like recording: never throws, and a store that does not exist stays so.
+ */
+export async function renameUsageProfile(service: string, from: string, to: string): Promise<void> {
+  try {
+    const path = await usageDbPath();
+    if (!path || !existsSync(path) || from === to) return;
+    open(path).query('UPDATE events SET profile = ? WHERE service = ? AND profile = ?').run(to, service, from);
+  } catch (err) {
+    warnOnce(err);
+  }
+}
+
 /** Rows of `sql` (one `?`: the window's start) over the last `since` ms; none, and no file, while no store exists. */
 async function inWindow<T>(sql: string, since: number, now: number): Promise<T[]> {
   const path = await usageDbPath();

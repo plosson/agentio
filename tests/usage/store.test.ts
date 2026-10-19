@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { withTempVault } from '../helpers/vault';
-import { closeUsageStore, DAY_MS, queryDailyByService, queryMachines, queryUsage, recordUsage, usageDbPath } from '../../src/usage/store';
+import { closeUsageStore, DAY_MS, queryDailyByService, queryMachines, queryUsage, recordUsage, renameUsageProfile, usageDbPath } from '../../src/usage/store';
 import { INVALID, UNKNOWN, normalizeEvent, type UsageInput } from '../../src/usage/event';
 
 withTempVault('agentio-usage-store-', () => ({}));
@@ -243,5 +243,28 @@ describe('queryMachines', () => {
   test('a missing store is an empty answer and creates no file', async () => {
     expect(await queryMachines({ since: DAY_MS })).toEqual([]);
     expect(existsSync((await usageDbPath())!)).toBe(false);
+  });
+});
+
+describe('renameUsageProfile', () => {
+  test('a store that cannot be written is left as is, and the rename never throws', async () => {
+    await recordUsage(base());
+    closeUsageStore();
+    const path = (await usageDbPath())!;
+    chmodSync(path, 0o400);
+    try {
+      await expect(renameUsageProfile('gmail', 'work', 'home')).resolves.toBeUndefined();
+    } finally {
+      chmodSync(path, 0o600);
+    }
+    expect((await queryUsage({ by: 'profile', since: DAY_MS })).map((r) => r.group)).toEqual(['gmail/work']);
+  });
+
+  test('hostile names are values, never SQL, and touch only an exact match', async () => {
+    await recordUsage(base({ profile: 'work' }));
+    await recordUsage(base({ profile: 'work2' }));
+    await renameUsageProfile('gmail', "work' OR '1'='1", 'x');
+    await renameUsageProfile('gmail', 'work%', 'x');
+    expect((await queryUsage({ by: 'profile', since: DAY_MS })).map((r) => r.group)).toEqual(['gmail/work', 'gmail/work2']);
   });
 });

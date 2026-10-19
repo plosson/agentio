@@ -145,15 +145,16 @@ function usageRow({ href, lead, title, sub, r, total, colour, now }) {
   return html`<li>${href ? html`<a href="${href}">${inner}</a>` : html`<div class="row">${inner}</div>`}</li>`;
 }
 
+/** A machine by its name in the Machines list, which a rename changes at once; the hostname it reported below. */
 function machineRow(r, total, now) {
   const local = r.keyId === 'local';
-  // The key's name now, so a rename shows at once, not only after the machine's next request.
   const key = keyById(r.keyId);
+  const host = r.host === 'unknown' || r.host === 'invalid' ? 'Hostname not reported' : r.host;
   return usageRow({
     href: key ? routeHash({ view: 'machine', id: r.keyId }) : '',
     lead: html`<span class="machine-icon">${MACHINE_GLYPH}</span>`,
-    title: r.host,
-    sub: local ? 'Commands run on this hub' : `Key ${key ? key.name : r.keyName}`,
+    title: local ? 'This hub' : key ? key.name : r.keyName,
+    sub: local ? `${host} · commands run here` : key ? host : `${host} · key removed`,
     r, total, now,
   });
 }
