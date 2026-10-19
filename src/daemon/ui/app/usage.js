@@ -41,13 +41,17 @@ function dayChart(days, now) {
   const keys = Array.from({ length: USAGE_DAYS }, (_, i) => new Date(now - (USAGE_DAYS - 1 - i) * 86_400_000).toISOString().slice(0, 10));
   const max = Math.max(1, ...keys.map((k) => counts.get(k) || 0));
   const W = 8, GAP = 2, H = 60;
-  return html`<svg class="usage-chart" viewBox="0 0 ${USAGE_DAYS * (W + GAP)} ${H}" role="img" aria-label="Credential uses per day">
-    ${keys.map((k, i) => {
-      const n = counts.get(k) || 0;
-      const h = n ? Math.max(2, Math.round((n / max) * H)) : 0;
-      return html`<rect x="${i * (W + GAP)}" y="${H - h}" width="${W}" height="${h}" rx="1"><title>${k}: ${n}</title></rect>`;
-    })}
-  </svg>`;
+  return html`<div class="usage-box">
+    <svg class="usage-chart" viewBox="0 0 ${USAGE_DAYS * (W + GAP)} ${H}" preserveAspectRatio="none" role="img" aria-label="Credential uses per day">
+      ${keys.map((k, i) => {
+        const n = counts.get(k) || 0;
+        const h = n ? Math.max(2, Math.round((n / max) * H)) : 0;
+        return html`<rect x="${i * (W + GAP)}" y="${H - h}" width="${W}" height="${h}"><title>${k}: ${n}</title></rect>`;
+      })}
+      <line class="baseline" x1="0" x2="${USAGE_DAYS * (W + GAP)}" y1="${H}" y2="${H}"></line>
+    </svg>
+    <div class="usage-axis"><span>${keys[0]}</span><span>max ${max}/day</span><span>Today</span></div>
+  </div>`;
 }
 
 function usageTable(title, label, rows, now) {
