@@ -7,6 +7,7 @@ import type { ServiceName } from '../types/config';
 import type { ProfileRef } from '../config/config-manager';
 import type { SaveProfileOptions, WriteOutcome } from '../config/profile-store';
 import { decodeToken, type TokenParts } from './token';
+import { usageHeaders } from '../usage/client';
 
 /**
  * Remote mode: this machine has no vault. A token names a hub and a key, and
@@ -187,6 +188,8 @@ export interface HubCallOptions {
   body?: unknown;
   /** Bearer token; omitted for the public login routes. */
   token?: string;
+  /** Extra request headers, such as the usage headers on a credential request. */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -194,7 +197,7 @@ export interface HubCallOptions {
  * answer keeps the hub's own code and suggestion (see hubError). Shared by
  * the authenticated credential and profile calls and the pre-token login flow.
  */
-export async function hubCall<T>(url: string, path: string, { method = 'GET', body, token }: HubCallOptions = {}): Promise<T> {
+export async function hubCall<T>(url: string, path: string, { method = 'GET', body, token, headers: extra }: HubCallOptions = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${url}${path}`, {
@@ -202,6 +205,7 @@ export async function hubCall<T>(url: string, path: string, { method = 'GET', bo
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...extra,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -320,7 +324,8 @@ export async function remoteCredentials<T = Record<string, unknown>>(
 ): Promise<T | null> {
   try {
     const query = options.refresh === false ? '?refresh=false' : '';
-    return (await hubRequest<{ credentials: T }>(`${profileRoute(service, name)}/credentials${query}`, 'POST')).credentials;
+    const path = `${profileRoute(service, name)}/credentials${query}`;
+    return (await hubCall<{ credentials: T }>(hub().url, path, { method: 'POST', token: remoteToken()!, headers: usageHeaders() })).credentials;
   } catch (err) {
     // NOT_FOUND is "nothing to hand out"; an unknown profile stays PROFILE_NOT_FOUND.
     if (!(err instanceof CliError) || err.code !== 'NOT_FOUND') throw err;

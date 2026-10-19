@@ -6,6 +6,8 @@ import { getCredentials, setCredentials } from '../../src/auth/token-store';
 import { isProfileReadOnly, listProfileRefs, loadConfig, resolveProfile } from '../../src/config/config-manager';
 import { enforceWriteAccess } from '../../src/utils/read-only';
 import { getFreshCredentials } from '../../src/auth/refresh';
+import { resetUsageContext, setUsageCommand } from '../../src/usage/context';
+import { USAGE_HEADERS } from '../../src/usage/event';
 
 /**
  * The client side of remote mode against a scripted hub. The real hub is
@@ -17,6 +19,7 @@ import { getFreshCredentials } from '../../src/auth/refresh';
 type Scripted = { status: number; body: unknown };
 let script: Record<string, Scripted> = {};
 let hits: string[] = [];
+let headersSeen: Headers[] = [];
 let server: ReturnType<typeof Bun.serve>;
 let url = '';
 // Remote mode falls back to ~/.config/agentio/token, so the real HOME must stay out of reach.
@@ -38,6 +41,7 @@ beforeAll(async () => {
   server = Bun.serve({
     port: 0,
     fetch(req) {
+      headersSeen.push(req.headers);
       const key = `${req.method} ${new URL(req.url).pathname}`;
       hits.push(key);
       if (!req.headers.get('authorization')?.startsWith('Bearer agio1.')) {
@@ -59,6 +63,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   hits = [];
+  headersSeen = [];
+  resetUsageContext();
   script = { 'GET /v1/profiles': { status: 200, body: { profiles: PROFILES } } };
   process.env.AGENTIO_TOKEN = encodeToken({ url, kid: 'kid', secret: 'secret' });
   resetRemoteCache();
@@ -255,5 +261,28 @@ describe('remote mode', () => {
     });
     await expect(loadConfig()).rejects.toMatchObject({ code: 'CONFIG_ERROR' });
     expect(hits).toHaveLength(0);
+  });
+});
+
+describe('usage headers', () => {
+  test('a credential request names the command, host and version, never the arguments', async () => {
+    script['POST /v1/profiles/gmail/work/credentials'] = { status: 200, body: { credentials: { access_token: 'x' } } };
+    setUsageCommand(['gmail', 'send']);
+    await getCredentials('gmail', 'work');
+    const sent = headersSeen.at(-1)!;
+    expect(sent.get(USAGE_HEADERS.command)).toBe('gmail send');
+    expect(sent.get(USAGE_HEADERS.host)).toBeTruthy();
+    expect(sent.get(USAGE_HEADERS.version)).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('outside a command the command header is left out, not sent empty', async () => {
+    script['POST /v1/profiles/gmail/work/credentials'] = { status: 200, body: { credentials: { access_token: 'x' } } };
+    await getCredentials('gmail', 'work');
+    expect(headersSeen.at(-1)!.has(USAGE_HEADERS.command)).toBe(false);
+  });
+
+  test('the listing request carries no usage headers', async () => {
+    await remoteProfiles();
+    expect(headersSeen.at(-1)!.has(USAGE_HEADERS.host)).toBe(false);
   });
 });

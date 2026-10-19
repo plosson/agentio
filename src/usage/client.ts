@@ -26,12 +26,20 @@ export async function recordLocalUse(service: string, profile: string, found: bo
   }
 }
 
-/** What a remote CLI tells the hub about itself with a credential request. The hub validates all of it. */
+/**
+ * What a remote CLI tells the hub about itself with a credential request. The hub validates all of it.
+ * Best effort: on failure it sends nothing, which the hub records as unknown, and never fails the request.
+ */
 export function usageHeaders(): Record<string, string> {
-  const command = usageCommand();
-  return {
-    ...(command !== null ? { [USAGE_HEADERS.command]: command } : {}),
-    [USAGE_HEADERS.host]: hostname(),
-    [USAGE_HEADERS.version]: agentioVersion(),
-  };
+  try {
+    const command = usageCommand();
+    return {
+      ...(command !== null ? { [USAGE_HEADERS.command]: command } : {}),
+      [USAGE_HEADERS.host]: hostname(),
+      [USAGE_HEADERS.version]: agentioVersion(),
+    };
+  } catch (err) {
+    warnOnce(err);
+    return {};
+  }
 }
