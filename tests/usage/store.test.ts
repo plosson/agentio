@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { withTempVault } from '../helpers/vault';
-import { closeUsageStore, DAY_MS, queryDailyByService, queryMachines, queryUsage, recordUsage, usageDbPath } from '../../src/usage/store';
+import { closeUsageStore, DAY_MS, queryDailyByService, queryMachines, queryUsage, recordUsage, renameUsageProfile, usageDbPath } from '../../src/usage/store';
 import { INVALID, UNKNOWN, normalizeEvent, type UsageInput } from '../../src/usage/event';
 
 withTempVault('agentio-usage-store-', () => ({}));
@@ -149,6 +149,30 @@ describe('queryUsage', () => {
     expect((await queryUsage({ by: 'machine', since: 7 * DAY_MS, now }))[0]!.group).toBe('box.lan · local');
   });
 
+  test('a renamed key stays one row under its latest name; two keys sharing a name stay two', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 50, keyId: 'k1', keyName: 'cursor-box' }));
+    await recordUsage(base({ ts: now - 40, keyId: 'k1', keyName: 'cursor-box', outcome: 'auth_expired' }));
+    await recordUsage(base({ ts: now - 30, keyId: 'k1', keyName: 'Grok Bot' }));
+    await recordUsage(base({ ts: now - 20, keyId: 'k2', keyName: 'Grok Bot' }));
+
+    expect(await queryUsage({ by: 'key', since: DAY_MS, now })).toEqual([
+      { group: 'Grok Bot', count: 3, failures: 1, lastSeen: now - 30 },
+      { group: 'Grok Bot', count: 1, failures: 0, lastSeen: now - 20 },
+    ]);
+    expect((await queryUsage({ by: 'machine', since: DAY_MS, now })).map((r) => [r.group, r.count])).toEqual([
+      ['box.lan · Grok Bot', 3], ['box.lan · Grok Bot', 1],
+    ]);
+  });
+
+  test('the latest name comes from any time, so a rename before the window still shows', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 2 * DAY_MS, keyId: 'k1', keyName: 'old' }));
+    await recordUsage(base({ ts: now - 10 * DAY_MS, keyId: 'k1', keyName: 'older' }));
+    await recordUsage(base({ ts: now - 1000, keyId: 'k1', keyName: 'new' }));
+    expect(await queryUsage({ by: 'key', since: 3 * DAY_MS, now })).toEqual([{ group: 'new', count: 2, failures: 0, lastSeen: now - 1000 }]);
+  });
+
   test('an unknown grouping is refused before any SQL is built', async () => {
     await recordUsage(base());
     await expect(queryUsage({ by: 'command; DROP TABLE events' as never, since: DAY_MS })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
@@ -198,6 +222,16 @@ describe('queryMachines', () => {
     ]);
   });
 
+  test('a renamed key is one machine row, named as last used', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 30, host: 'grok-vm', keyId: 'k1', keyName: 'cursor-box' }));
+    await recordUsage(base({ ts: now - 10, host: 'grok-vm', keyId: 'k1', keyName: 'Grok Bot' }));
+    await recordUsage(base({ ts: now - 5, host: 'unknown', keyId: 'k1', keyName: 'Grok Bot' }));
+    expect((await queryMachines({ since: DAY_MS, now })).map((r) => [r.host, r.keyId, r.keyName, r.count])).toEqual([
+      ['grok-vm', 'k1', 'Grok Bot', 2], ['unknown', 'k1', 'Grok Bot', 1],
+    ]);
+  });
+
   test('hostile values come back as stored text, never as SQL', async () => {
     const now = Date.now();
     await recordUsage(base({ ts: now, host: "x'); DROP TABLE events; --", keyId: "k' OR 1=1", keyName: '<script>' }));
@@ -209,5 +243,28 @@ describe('queryMachines', () => {
   test('a missing store is an empty answer and creates no file', async () => {
     expect(await queryMachines({ since: DAY_MS })).toEqual([]);
     expect(existsSync((await usageDbPath())!)).toBe(false);
+  });
+});
+
+describe('renameUsageProfile', () => {
+  test('a store that cannot be written is left as is, and the rename never throws', async () => {
+    await recordUsage(base());
+    closeUsageStore();
+    const path = (await usageDbPath())!;
+    chmodSync(path, 0o400);
+    try {
+      await expect(renameUsageProfile('gmail', 'work', 'home')).resolves.toBeUndefined();
+    } finally {
+      chmodSync(path, 0o600);
+    }
+    expect((await queryUsage({ by: 'profile', since: DAY_MS })).map((r) => r.group)).toEqual(['gmail/work']);
+  });
+
+  test('hostile names are values, never SQL, and touch only an exact match', async () => {
+    await recordUsage(base({ profile: 'work' }));
+    await recordUsage(base({ profile: 'work2' }));
+    await renameUsageProfile('gmail', "work' OR '1'='1", 'x');
+    await renameUsageProfile('gmail', 'work%', 'x');
+    expect((await queryUsage({ by: 'profile', since: DAY_MS })).map((r) => r.group)).toEqual(['gmail/work', 'gmail/work2']);
   });
 });

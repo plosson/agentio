@@ -3,6 +3,7 @@ import { withTempVault } from '../helpers/vault';
 import { loadVault, updateVault } from '../../src/vault/vault';
 import { setProfileReadOnly } from '../../src/config/config-manager';
 import { createApiKey, listApiKeys, revokeApiKey } from '../../src/auth/api-keys';
+import { DAY_MS, queryUsage, recordUsage } from '../../src/usage/store';
 import { chooseProfileName, deleteProfile, deleteProfileForKey, renameProfile, renameProfileForKey, saveProfile, saveProfileForKey } from '../../src/config/profile-store';
 
 withTempVault('agentio-profile-store-test-', () => ({
@@ -271,5 +272,48 @@ describe('entries keep their stored form', () => {
       { name: 'locked', readOnly: true },
       { name: 'open' },
     ]));
+  });
+});
+
+describe('a rename moves the profile\'s usage', () => {
+  const use = (service: string, profile: string, outcome = 'ok') => recordUsage({
+    service, profile, command: `${service} list`, host: 'box', keyId: 'k1', keyName: 'laptop', outcome, version: '3.26.1',
+  });
+  const profiles = async () => (await queryUsage({ by: 'profile', since: DAY_MS })).map((r) => [r.group, r.count, r.failures]);
+
+  test('the owner\'s rename moves every use, failures included, and only that service\'s', async () => {
+    await saveProfile('gmail', 'me@example.com', { access_token: 'a' });
+    await use('gmail', 'me@example.com');
+    await use('gmail', 'me@example.com', 'auth_expired');
+    await use('gdrive', 'me@example.com');
+    expect(await renameProfile('gmail', 'me@example.com', 'work')).toBe('ok');
+    expect(await profiles()).toEqual([['gmail/work', 2, 1], ['gdrive/me@example.com', 1, 0]]);
+  });
+
+  test('a key\'s rename on the hub moves the usage too', async () => {
+    const { key } = await createApiKey({ name: 'k', allowedProfiles: '*' }, 'https://hub');
+    await use('gmail', 'me@example.com');
+    expect(await renameProfileForKey(key.id, 'gmail', 'me@example.com', 'work')).toBe('ok');
+    expect(await profiles()).toEqual([['gmail/work', 1, 0]]);
+  });
+
+  test('a rename that fails moves nothing', async () => {
+    await saveProfile('gmail', 'other@example.com', { access_token: 'b' });
+    await use('gmail', 'other@example.com');
+    await use('gmail', 'nope');
+    expect(await renameProfile('gmail', 'nope', 'work')).toBe('absent');
+    expect(await renameProfile('gmail', 'other@example.com', 'me@example.com')).toBe('taken');
+    const { key } = await createApiKey({ name: 'narrow', allowedProfiles: ['github/octocat'] }, 'https://hub');
+    expect(await renameProfileForKey(key.id, 'gmail', 'other@example.com', 'work')).toBe('denied');
+    expect(await profiles()).toEqual([['gmail/nope', 1, 0], ['gmail/other@example.com', 1, 0]]);
+  });
+
+  test('a rename onto a name with old uses merges them; with no usage store, none is created', async () => {
+    expect(await renameProfile('github', 'octocat', 'hubber')).toBe('ok');
+    expect(await profiles()).toEqual([]);
+    await use('github', 'old-name');
+    await use('github', 'hubber');
+    expect(await renameProfile('github', 'hubber', 'old-name')).toBe('ok');
+    expect(await profiles()).toEqual([['github/old-name', 2, 0]]);
   });
 });
