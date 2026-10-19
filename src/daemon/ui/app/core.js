@@ -30,6 +30,8 @@ const SUBMITS = {};
 const INPUTS = {};
 
 const displayName = (service) => PLUGIN_METADATA[service]?.displayName || ICONS[service]?.[0] || service;
+/** A service's brand colour, or '' for one drawn in the text colour or in several colours. */
+const serviceColour = (service) => PLUGIN_METADATA[service]?.color || ICONS[service]?.[1] || '';
 const isSession = (service) => Boolean(PLUGIN_METADATA[service]?.session);
 /** The services `agentio <service> profile add` exists for on this hub. */
 function addableServices() {
@@ -74,8 +76,8 @@ const refPath = (ref) => {
 function icon(service, cls = '') {
   const entry = ICONS[service];
   if (!entry) return html`<span class="ico letter ${cls}" aria-hidden="true">${(displayName(service)[0] || '?').toUpperCase()}</span>`;
-  const [, fallbackColour, path] = entry;
-  const colour = PLUGIN_METADATA[service]?.color || fallbackColour || 'currentColor';
+  const path = entry[2];
+  const colour = serviceColour(service) || 'currentColor';
   const shapes = Array.isArray(path)
     ? path.map(([fill, d]) => `<path fill="${escapeHtml(fill)}" d="${escapeHtml(d)}"/>`).join('')
     : `<path d="${escapeHtml(path)}"/>`;
@@ -85,7 +87,7 @@ function icon(service, cls = '') {
 /** A service's logo in white on its colour, as a rounded square: the lead of a profile row, and the top of its page. */
 function tile(service, cls = '') {
   const entry = ICONS[service];
-  const colour = PLUGIN_METADATA[service]?.color || entry?.[1] || '';
+  const colour = serviceColour(service);
   const rect = `<rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/>`;
   // A multi-colour entry is full-colour art at 24 units: each path keeps its own fill, full size, on the tile.
   // Its corners are clipped in admin.css (an SVG clip path would repeat its id on every tile).

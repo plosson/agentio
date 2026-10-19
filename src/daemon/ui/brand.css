@@ -37,6 +37,9 @@
   --dot-bad: #FF3B30;
   --dot-warn: #FF9500;
   --shadow: 0 0.5px 1.5px #0000002E;
+  /* The Usage chart's colours for services without a brand colour of their own: the system's. */
+  --chart-0: #AF52DE; --chart-1: #FF9500; --chart-2: #30B0C7;
+  --chart-3: #FF2D55; --chart-4: #5856D6; --chart-5: #00C7BE;
 
   --size-title: 1.25rem; --size-section: 0.9375rem; --size-body: 0.8125rem;
   --size-small: 0.71875rem; --size-mono: 0.75rem;
@@ -73,6 +76,8 @@
     --dot-bad: #FF453A;
     --dot-warn: #FF9F0A;
     --shadow: 0 0.5px 1.5px #00000099;
+    --chart-0: #BF5AF2; --chart-1: #FF9F0A; --chart-2: #40C8E0;
+    --chart-3: #FF375F; --chart-4: #5E5CE6; --chart-5: #63E6E2;
   }
 }
 @media (pointer: coarse) {

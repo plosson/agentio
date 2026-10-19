@@ -599,3 +599,101 @@ export function overviewStatus(s: HubSummary, now: number): StatusWord {
   if (s.working === s.profiles) return { symbol: '✓', word: `All ${s.profiles} working · ${when}`, tone: 'ok' };
   return { symbol: '✓', word: `${s.working} of ${s.profiles} working · ${when}`, tone: 'ok' };
 }
+
+// ---------- Usage ----------
+
+export interface UsageDay {
+  day: string;
+  service: string;
+  count: number;
+}
+
+export interface UsageStack {
+  day: string;
+  total: number;
+  parts: Array<{ service: string; count: number }>;
+}
+
+/** The part of a bar that holds every service past the chart's top ones. */
+export const OTHER_SERVICES = '';
+
+/** The last `n` days in UTC, oldest first, named as the usage store names them. */
+export function usageDays(now: number, n: number): string[] {
+  return Array.from({ length: n }, (_, i) => new Date(now - (n - 1 - i) * DAY_MS).toISOString().slice(0, 10));
+}
+
+/**
+ * The chart's bars: one for each of `days`, split by service. The `top` services by total keep a
+ * part of their own, in that order; the rest share one last part, OTHER_SERVICES, so a long tail of
+ * services stays readable. Counts for days outside `days` are left out.
+ */
+export function usageStacks(rows: UsageDay[], days: string[], top: number): { stacks: UsageStack[]; services: string[]; other: boolean; max: number } {
+  const inWindow = rows.filter((r) => days.includes(r.day) && r.count > 0);
+  const totals = new Map<string, number>();
+  for (const r of inWindow) totals.set(r.service, (totals.get(r.service) ?? 0) + r.count);
+  const services = [...totals.keys()]
+    .sort((a, b) => totals.get(b)! - totals.get(a)! || a.localeCompare(b))
+    .slice(0, Math.max(0, top));
+  const order = [...services, OTHER_SERVICES];
+  const stacks = days.map((day) => {
+    const byPart = new Map<string, number>();
+    for (const r of inWindow) {
+      if (r.day !== day) continue;
+      const part = services.includes(r.service) ? r.service : OTHER_SERVICES;
+      byPart.set(part, (byPart.get(part) ?? 0) + r.count);
+    }
+    const parts = order.filter((s) => byPart.has(s)).map((service) => ({ service, count: byPart.get(service)! }));
+    return { day, total: parts.reduce((n, p) => n + p.count, 0), parts };
+  });
+  return {
+    stacks,
+    services,
+    other: totals.size > services.length,
+    max: Math.max(0, ...stacks.map((s) => s.total)),
+  };
+}
+
+/** `service/profile` split in two; the profile may hold a "/", a service id never does. */
+export function splitRef(ref: string): { service: string; profile: string } {
+  const i = ref.indexOf('/');
+  return i > 0 ? { service: ref.slice(0, i), profile: ref.slice(i + 1) } : { service: '', profile: ref };
+}
+
+/** The service a command path such as `gmail send` belongs to: its first word, when that is one of `services`. */
+export function commandService(command: string, services: readonly string[]): string | null {
+  const first = command.split(' ', 1)[0] ?? '';
+  return services.includes(first) ? first : null;
+}
+
+/** A row's part of all uses, in percent, for its bar; a row with any use shows at least a sliver. */
+export function usageShare(count: number, total: number): number {
+  if (!(count > 0) || !(total > 0)) return 0;
+  return Math.min(100, Math.max(2, Math.round((count / total) * 100)));
+}
+
+/** How a row's failures read. A few among many read "<1%", not a reassuring 0%. */
+export function failureChip(failures: number, count: number): { tone: 'quiet' | 'bad'; word: string; percent: string } {
+  if (!(failures > 0) || !(count > 0)) return { tone: 'quiet', word: 'No failures', percent: '0%' };
+  const rounded = Math.round((failures / count) * 100);
+  const percent = `${rounded === 0 ? '<1' : rounded}%`;
+  return { tone: 'bad', word: `${failures} failed · ${percent}`, percent };
+}
+
+/**
+ * A colour for each of the chart's services, in rank order: its brand colour, unless it has none or a
+ * higher-ranked service already took it (Drive and Calendar share Google blue); then the next of the
+ * page's `paletteSize` chart colours, by slot, wrapping round when there are more services than slots.
+ */
+export function chartColours(services: readonly string[], brand: (service: string) => string, paletteSize: number): Array<{ colour: string } | { slot: number }> {
+  const taken = new Set<string>();
+  let next = 0;
+  return services.map((service) => {
+    const colour = brand(service).toLowerCase();
+    if (colour && !taken.has(colour)) {
+      taken.add(colour);
+      return { colour };
+    }
+    const slot = paletteSize > 0 ? next++ % paletteSize : 0;
+    return { slot };
+  });
+}
