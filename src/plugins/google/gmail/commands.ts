@@ -469,9 +469,12 @@ Combine with spaces (AND), OR, or - to negate.`,
       .argument('<draft-id...>', 'Draft ID(s) to delete')
       .description('Delete (discard) one or more drafts')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .action(async (draftIds: string[], options) => {
+      .action(async (draftIds: string[], _options, cmd: Command) => {
         try {
-          const { client, profile } = await getGmailClient(options.profile);
+          // The parent `draft` command also defines --profile (via
+          // addComposeOptions), and Commander hands a shared option to the
+          // parent, so read it from the merged parent+child options.
+          const { client, profile } = await getGmailClient(cmd.optsWithGlobals().profile);
           await enforceWriteAccess('gmail', profile, 'delete draft');
 
           let failures = 0;

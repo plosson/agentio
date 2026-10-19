@@ -1436,9 +1436,11 @@ function registerPlayerCommands(spotify: Command): void {
       .argument('<items...>', 'URIs/URLs, or - to read from stdin')
       .option('--device <name-or-id>', 'Target device');
     addProfileOption(addCmd);
-    addCmd.action(async (items: string[], options) => {
+    addCmd.action(async (items: string[], options, cmd: Command) => {
       try {
-        const { client } = await getSpotifyClient(options.profile);
+        // The parent `queue` command also defines --profile, and Commander
+        // hands a shared option to the parent, so read the merged options.
+        const { client } = await getSpotifyClient(cmd.optsWithGlobals().profile);
         await enforceWritable(client, 'control playback');
         const uris = await resolveItemArgs(items, ['track', 'episode']);
         const devices = await client.devices();
