@@ -1,6 +1,6 @@
 {
   "name": "@plosson/agentio",
-  "version": "3.25.1",
+  "version": "3.26.0",
   "description": "CLI for LLM agents to interact with communication and tracking services",
   "type": "module",
   "license": "MIT",
