@@ -2,6 +2,7 @@ import { loadVault, updateVault } from '../vault/vault';
 import { isRemoteMode, remoteCredentials, type CredentialReadOptions } from './remote';
 import type { StoredCredentials } from '../types/tokens';
 import type { ServiceName } from '../types/config';
+import { recordLocalUse } from '../usage/client';
 
 /** A profile's credentials. Locally they are read as stored; a hub refreshes them unless `refresh: false`. */
 export async function getCredentials<T = Record<string, unknown>>(
@@ -11,7 +12,9 @@ export async function getCredentials<T = Record<string, unknown>>(
 ): Promise<T | null> {
   if (isRemoteMode()) return remoteCredentials<T>(service, profile, options);
   const { credentials } = await loadVault();
-  return (credentials[service]?.[profile] as T) || null;
+  const found = (credentials[service]?.[profile] as T) || null;
+  await recordLocalUse(service, profile, found !== null);
+  return found;
 }
 
 /** Add or replace a profile's credentials in `store`, in place. */

@@ -21,16 +21,8 @@ import { vaultExists } from './vault/vault';
 import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
 import { CliError, handleError } from './utils/errors';
 import { enterJsonMode } from './utils/output';
-
-declare const BUILD_VERSION: string | undefined;
-
-function getVersion(): string {
-  if (typeof BUILD_VERSION !== 'undefined') {
-    return BUILD_VERSION;
-  }
-  // Fallback for development mode
-  return require('../package.json').version;
-}
+import { agentioVersion } from './utils/version';
+import { setUsageCommand } from './usage/context';
 
 export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): Command {
   activatePluginRegistry(registry);
@@ -44,7 +36,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   program
     .name('agentio')
     .description('CLI for LLM agents to interact with communication and tracking services')
-    .version(getVersion());
+    .version(agentioVersion());
 
   registerServiceCommands(program, registry);
   registerGitHubVaultSecretCommands(program);
@@ -90,6 +82,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   program.hook('preAction', async (_thisCommand, actionCommand) => {
     const commandPath: string[] = [];
     for (let cmd: Command | null = actionCommand; cmd?.parent; cmd = cmd.parent) commandPath.unshift(cmd.name());
+    setUsageCommand(commandPath);
     await maybeAutoUpdate(commandPath);
     enterJsonMode(actionCommand);
     const name = actionCommand.name();
