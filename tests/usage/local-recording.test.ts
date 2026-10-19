@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { chmodSync } from 'fs';
+import { chmodSync, existsSync } from 'fs';
 import { dirname } from 'path';
 import { withTempVault } from '../helpers/vault';
 import { getCredentials } from '../../src/auth/token-store';
-import { closeUsageStore, usageDbPath } from '../../src/usage/store';
+import { closeUsageStore, recordUsage, usageDbPath } from '../../src/usage/store';
 import { resetUsageContext, setUsageCommand, usageCommand } from '../../src/usage/context';
 
 withTempVault('agentio-usage-local-', () => ({
@@ -17,9 +17,9 @@ afterEach(() => { resetUsageContext(); closeUsageStore(); });
 
 async function events(): Promise<Array<Record<string, unknown>>> {
   const path = (await usageDbPath())!;
-  const db = new Database(path, { create: true });
+  if (!existsSync(path)) return [];
+  const db = new Database(path, { readonly: true });
   try {
-    db.exec('CREATE TABLE IF NOT EXISTS events (ts INTEGER)');
     return db.query('SELECT * FROM events').all() as Array<Record<string, unknown>>;
   } finally { db.close(); }
 }
@@ -50,14 +50,22 @@ describe('local recording', () => {
   });
 
   test('a store that cannot be written does not change the credentials returned', async () => {
-    setUsageCommand(['gmail', 'list']);
+    await recordUsage({ service: 'gmail', profile: 'seed', command: 'seed', host: 'h', keyId: 'local', keyName: 'local', outcome: 'ok', refreshed: null, version: '1' });
     closeUsageStore();
-    const dir = dirname((await usageDbPath())!);
+    const before = (await events()).length;
+    expect(before).toBe(1);
+    setUsageCommand(['gmail', 'list']);
+    const file = (await usageDbPath())!;
+    const dir = dirname(file);
     chmodSync(dir, 0o500);
+    chmodSync(file, 0o400);
     try {
       expect(await getCredentials<{ access_token: string }>('gmail', 'work')).toEqual({ access_token: 'at' });
     } finally {
       chmodSync(dir, 0o700);
+      chmodSync(file, 0o600);
     }
+    closeUsageStore();
+    expect((await events()).length).toBe(before);
   });
 });
