@@ -2,7 +2,7 @@ import { hostname } from 'os';
 import { agentioVersion } from '../utils/version';
 import { LOCAL_KEY, USAGE_HEADERS } from './event';
 import { firstUse, usageCommand } from './context';
-import { recordUsage } from './store';
+import { recordUsage, warnOnce } from './store';
 
 /** A local CLI read its own vault for a profile: record it once per run, inside a command only. */
 export async function recordLocalUse(service: string, profile: string, found: boolean): Promise<void> {
@@ -20,8 +20,9 @@ export async function recordLocalUse(service: string, profile: string, found: bo
       refreshed: null,
       version: agentioVersion(),
     });
-  } catch {
+  } catch (err) {
     // Best effort: building the event must never fail the credential read.
+    warnOnce(err);
   }
 }
 

@@ -1,10 +1,14 @@
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { withTempVault } from '../helpers/vault';
 
-// Process-wide module mock: this file stays separate so it cannot affect others.
+// Module mocks last for the whole process: keep the real exports and put them
+// back in afterAll, so files that import cli.ts later still get a version.
+const real = { ...(await import('../../src/utils/version')) };
 mock.module('../../src/utils/version', () => ({
   agentioVersion: () => { throw new Error('package.json unreadable'); },
 }));
+
+afterAll(() => { mock.module('../../src/utils/version', () => real); });
 
 const { getCredentials } = await import('../../src/auth/token-store');
 const { closeUsageStore } = await import('../../src/usage/store');

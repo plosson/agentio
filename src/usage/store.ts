@@ -96,7 +96,8 @@ function prune(d: Database, now: number): void {
   d.query("INSERT INTO meta (name, value) VALUES ('pruned', ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value").run(now);
 }
 
-function warnOnce(err: unknown): void {
+/** With AGENTIO_DEBUG set, say once per process why an event was lost. */
+export function warnOnce(err: unknown): void {
   if (warned || !process.env.AGENTIO_DEBUG) return;
   warned = true;
   console.error(`agentio: usage not recorded: ${err instanceof Error ? err.message : String(err)}`);
