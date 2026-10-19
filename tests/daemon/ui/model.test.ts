@@ -88,6 +88,11 @@ describe('escaping', () => {
 });
 
 describe('routes', () => {
+  test('#usage is a tab of its own', () => {
+    expect(parseRoute('#usage')).toEqual({ view: 'usage' });
+    expect(tabOf({ view: 'usage' })).toBe('usage');
+  });
+
   test('known screens and the default', () => {
     for (const view of ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'] as const) {
       expect(parseRoute(`#${view}`)).toEqual({ view });

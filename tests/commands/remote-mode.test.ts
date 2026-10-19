@@ -54,6 +54,12 @@ async function cli(args: string[], extraEnv: Record<string, string> = {}, stdin 
 }
 
 describe('remote mode end to end', () => {
+  test('usage is refused: a key must not read the hub owner usage', async () => {
+    const res = await cli(['usage']);
+    expect(res.exitCode).toBe(3);
+    expect(res.stderr).toContain('agentio usage');
+  });
+
   test('doctor still prints its report when the hub cannot be reached', async () => {
     const dead = encodeToken({ url: 'http://127.0.0.1:1', kid: 'kid', secret: 'secret' });
     const res = await cli(['doctor'], { AGENTIO_TOKEN: dead });

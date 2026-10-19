@@ -9,6 +9,8 @@ import { NO_STORED_CREDENTIALS, type RemoteAddBody, type RemoteRenameBody } from
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
 import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
+import { recordUsage } from '../usage/store';
+import { USAGE_HEADERS } from '../usage/event';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 import { findServicePlugin, findSessionPlugin } from '../plugins/registry';
 import {
@@ -90,6 +92,21 @@ function audit(key: ApiKeyView, action: string, service: string, name: string, o
   daemonLog('v1', { action, key: `${key.id} (${key.name})`, profile: `${service}/${name}`, outcome, refreshed });
 }
 
+/** A remote agent's credential request, for the usage store: the key from the token, the rest as the client says. */
+function recordRemoteUse(request: Request, key: ApiKeyView, service: string, name: string, outcome: string, refreshed: boolean | null): Promise<void> {
+  return recordUsage({
+    service,
+    profile: name,
+    command: request.headers.get(USAGE_HEADERS.command),
+    host: request.headers.get(USAGE_HEADERS.host),
+    version: request.headers.get(USAGE_HEADERS.version),
+    keyId: key.id,
+    keyName: key.name,
+    outcome,
+    refreshed,
+  });
+}
+
 /** Run `work` and write its outcome to the audit log, the error code when it is a CliError. */
 async function audited<T>(
   key: ApiKeyView, action: string, service: string, name: string,
@@ -155,22 +172,28 @@ function refuseSessionCredentials(service: ServiceName): void {
 }
 
 /** `refresh: false` hands out the stored credentials as they are, for a re-sign-in that replaces them. */
-async function handleCredentials(key: ApiKeyView, service: ServiceName, name: string, refresh: boolean): Promise<Response> {
-  const readOnly = await allowedProfile(key, service, name);
-  refuseSessionCredentials(service);
-  await requireStoredCredentials(service, name);
-  if (!findServicePlugin(service)?.profile) {
-    throw new CliError(
-      'NOT_FOUND',
-      `Plugin "${service}" is not installed on this hub`,
-      'Update the hub to an agentio version that includes this plugin',
-    );
+async function handleCredentials(request: Request, key: ApiKeyView, service: ServiceName, name: string, refresh: boolean): Promise<Response> {
+  try {
+    const readOnly = await allowedProfile(key, service, name);
+    refuseSessionCredentials(service);
+    await requireStoredCredentials(service, name);
+    if (!findServicePlugin(service)?.profile) {
+      throw new CliError(
+        'NOT_FOUND',
+        `Plugin "${service}" is not installed on this hub`,
+        'Update the hub to an agentio version that includes this plugin',
+      );
+    }
+    const read = refresh
+      ? () => hubCredentials(service, name)
+      : async () => ({ credentials: (await getCredentials<Record<string, unknown>>(service, name))!, refreshed: false });
+    const { credentials, refreshed } = await audited(key, 'credentials', service, name, read, (r) => r.refreshed);
+    await recordRemoteUse(request, key, service, name, 'ok', refreshed);
+    return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
+  } catch (err) {
+    await recordRemoteUse(request, key, service, name, err instanceof CliError ? err.code.toLowerCase() : 'error', null);
+    throw err;
   }
-  const read = refresh
-    ? () => hubCredentials(service, name)
-    : async () => ({ credentials: (await getCredentials<Record<string, unknown>>(service, name))!, refreshed: false });
-  const { credentials, refreshed } = await audited(key, 'credentials', service, name, read, (r) => r.refreshed);
-  return json({ service, name, readOnly, refreshed, credentials: redactForRemote(service, credentials) });
 }
 
 /** Every profile write asks the same first question. */
@@ -338,7 +361,7 @@ export async function handleV1Request(request: Request, ip: string): Promise<Res
     const ref = profilePath(pathname, '/v1/profiles');
     if (ref && ref.action === null && method === 'GET') return await handleStatus(key, ref.service, ref.name);
     if (ref && ref.action === 'credentials' && method === 'POST') {
-      return await handleCredentials(key, ref.service, ref.name, new URL(request.url).searchParams.get('refresh') !== 'false');
+      return await handleCredentials(request, key, ref.service, ref.name, new URL(request.url).searchParams.get('refresh') !== 'false');
     }
     if (ref && ref.action === null && method === 'PUT') return await handleSave(request, key, ref.service, ref.name);
     if (ref && ref.action === null && method === 'PATCH') return await handleRename(request, key, ref.service, ref.name);

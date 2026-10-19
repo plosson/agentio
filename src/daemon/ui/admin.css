@@ -207,6 +207,11 @@ table.grid td.cell button { min-width: 64px; min-height: var(--tap); border: 1px
 table.grid td.cell button:hover { border-color: var(--line); background: var(--hover); }
 table.grid td.cell.none button { color: var(--muted); }
 
+.usage-box { margin: 8px 0 16px; padding: 12px 12px 8px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.usage-chart { display: block; width: 100%; height: 80px; fill: var(--brand); }
+.usage-chart .baseline { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.usage-axis { display: flex; justify-content: space-between; gap: var(--s2); margin-top: 4px; color: var(--muted); font-size: var(--size-small); }
+
 .svc { display: inline-flex; align-items: center; gap: var(--s1); min-width: 0; }
 .ico { width: 20px; height: 20px; flex: none; }
 .ico.lg { width: 28px; height: 28px; }

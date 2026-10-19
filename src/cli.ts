@@ -15,22 +15,15 @@ import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
+import { registerUsageCommand } from './commands/usage';
 import { maybeAutoUpdate } from './commands/auto-update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
 import { hubTooOldToManageError, isRemoteMode, remoteCanManageProfiles, remoteCannotManageError, remoteModeError } from './auth/remote';
 import { CliError, handleError } from './utils/errors';
 import { enterJsonMode } from './utils/output';
-
-declare const BUILD_VERSION: string | undefined;
-
-function getVersion(): string {
-  if (typeof BUILD_VERSION !== 'undefined') {
-    return BUILD_VERSION;
-  }
-  // Fallback for development mode
-  return require('../package.json').version;
-}
+import { agentioVersion } from './utils/version';
+import { setUsageCommand } from './usage/context';
 
 export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY): Command {
   activatePluginRegistry(registry);
@@ -44,7 +37,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   program
     .name('agentio')
     .description('CLI for LLM agents to interact with communication and tracking services')
-    .version(getVersion());
+    .version(agentioVersion());
 
   registerServiceCommands(program, registry);
   registerGitHubVaultSecretCommands(program);
@@ -61,6 +54,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   registerSkillCommand(program);
   registerStatusCommand(program);
   registerUpdateCommand(program);
+  registerUsageCommand(program);
   registerVaultCommands(program);
 
   // `setup` and `config` were folded into `vault` in 2.0. Keep hidden stubs so
@@ -85,11 +79,12 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
   const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove', 'reauth']);
   // Owner-only on the hub host: they touch the vault or the daemon. The top-level `reauth` is the bulk one.
-  const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
+  const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth', 'usage']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
     const commandPath: string[] = [];
     for (let cmd: Command | null = actionCommand; cmd?.parent; cmd = cmd.parent) commandPath.unshift(cmd.name());
+    setUsageCommand(commandPath);
     await maybeAutoUpdate(commandPath);
     enterJsonMode(actionCommand);
     const name = actionCommand.name();
@@ -153,7 +148,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   registry.plugins.forEach(({ id }) => setGroup(id, 'Services'));
 
   // Advanced
-  ['daemon', 'key', 'plugin', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['daemon', 'key', 'plugin', 'profile', 'usage'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {

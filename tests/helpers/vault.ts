@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { writePointer } from '../../src/vault/pointer';
+import { resetUsageContext } from '../../src/usage/context';
+import { closeUsageStore } from '../../src/usage/store';
 import { resetRemoteCache } from '../../src/auth/remote';
 import { saveVault, clearVaultCache, CURRENT_VAULT_VERSION } from '../../src/vault/vault';
 import { setPassphraseProvider, memoryOnlyProvider, clearPassphraseCache, resetPassphraseProvider } from '../../src/vault/passphrase';
@@ -95,6 +97,9 @@ export function withTempVault(
       else process.env[name] = saved[name];
     }
     resetRemoteCache();
+    // A test that ran a command in-process must not leak its context or SQLite handles into later files.
+    resetUsageContext();
+    closeUsageStore();
     delete process.env.AGENTIO_PASSPHRASE;
     resetPassphraseProvider();
     clearPassphraseCache();

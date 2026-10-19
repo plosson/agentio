@@ -158,6 +158,20 @@ describe('vault', () => {
     expect(await mem.get('vault')).toBeNull();
   });
 
+  test('resetVault also removes the usage store and its journal files', async () => {
+    await writePointer(vaultFile);
+    await writeFile(vaultFile, 'anything');
+    const files = ['usage.db', 'usage.db-wal', 'usage.db-shm'].map((f) => join(tempHome, f));
+    for (const f of files) await writeFile(f, 'x');
+    const other = join(tempHome, 'keep.txt');
+    await writeFile(other, 'x');
+
+    await resetVault();
+
+    for (const f of files) expect(existsSync(f)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+  });
+
   test('loadVault serves the cache while the file is untouched', async () => {
     process.env.AGENTIO_PASSPHRASE = 'pw';
     await writePointer(vaultFile);
