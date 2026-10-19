@@ -32,6 +32,22 @@ describe('parseBy', () => {
 });
 
 describe('formatUsage', () => {
+  test('the time column says it is UTC', () => {
+    expect(formatUsage([{ group: 'a', count: 1, failures: 0, lastSeen: 0 }], 'command').split('\n')[0]).toContain('LAST SEEN (UTC)');
+  });
+
+  test('a small failure rate reads <1%, a real zero stays 0%', () => {
+    const [, small, none, half] = formatUsage([
+      { group: 'small', count: 1000, failures: 1, lastSeen: 0 },
+      { group: 'none', count: 1000, failures: 0, lastSeen: 0 },
+      { group: 'half', count: 2, failures: 1, lastSeen: 0 },
+    ], 'command').split('\n');
+    expect(small).toContain('<1%');
+    expect(none).toContain(' 0%');
+    expect(none).not.toContain('<1%');
+    expect(half).toContain('50%');
+  });
+
   test('a group name with a newline cannot break the table', () => {
     const out = formatUsage([{ group: 'a\nb', count: 1, failures: 0, lastSeen: 0 }], 'command');
     expect(out.split('\n').length).toBe(2);

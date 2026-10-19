@@ -7,6 +7,7 @@ import type { StoredCredentials } from '../types/tokens';
 import { encryptVault, decryptVault } from './crypto';
 import { assertLocalMode } from '../auth/remote';
 import { readPointer, pointerExists, deletePointer, assertTestWritable } from './pointer';
+import { closeUsageStore, usageDbPath } from '../usage/store';
 import {
   getPassphrase,
   clearPassphrase,
@@ -273,6 +274,16 @@ export function isVaultUnlocked(): boolean {
 }
 
 export async function resetVault(): Promise<void> {
+  // The usage log lives next to the vault and goes with it.
+  const usage = await usageDbPath();
+  if (usage) {
+    closeUsageStore();
+    for (const file of [usage, `${usage}-wal`, `${usage}-shm`]) {
+      if (!existsSync(file)) continue;
+      assertTestWritable(file, 'usage store');
+      await unlink(file).catch(() => {});
+    }
+  }
   if (await pointerExists()) {
     const path = await readPointer();
     if (path && existsSync(path)) {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { chmodSync, existsSync, readdirSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { withTempVault } from '../helpers/vault';
 import { closeUsageStore, DAY_MS, queryUsage, recordUsage, usageDbPath } from '../../src/usage/store';
@@ -73,6 +73,15 @@ describe('recordUsage', () => {
     expect(dirname(path)).toBe(dirname((await readPointer())!));
     expect(existsSync(path)).toBe(true);
     expect((await rows()).map((r) => r.command)).toEqual([INVALID, 'gmail list']);
+  });
+
+  test('the store and its journal files are private to the user', async () => {
+    await recordUsage(base());
+    const path = (await usageDbPath())!;
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    for (const suffix of ['-wal', '-shm']) {
+      if (existsSync(path + suffix)) expect(statSync(path + suffix).mode & 0o777).toBe(0o600);
+    }
   });
 
   test('never throws when the store cannot be written', async () => {

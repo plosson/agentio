@@ -24,13 +24,17 @@ export function parseBy(value: string): UsageGroup {
   return value as UsageGroup;
 }
 
-const percent = (r: UsageRow) => `${Math.round((r.failures / r.count) * 100)}%`;
+/** The failure rate; a few failures among many uses read `<1%`, not a reassuring 0%. */
+const percent = (r: UsageRow) => {
+  const rounded = Math.round((r.failures / r.count) * 100);
+  return r.failures > 0 && rounded === 0 ? '<1%' : `${rounded}%`;
+};
 const minute = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
 // Group names come from the store; keep each row on one line whatever they hold.
 const oneLine = (s: string) => s.replace(/[\r\n\t]/g, ' ');
 
 export function formatUsage(rows: UsageRow[], by: UsageGroup): string {
-  const header = `${'USES'.padStart(6)}  ${'FAILED'.padStart(6)}  ${'LAST SEEN'.padEnd(16)}  ${by.toUpperCase()}`;
+  const header = `${'USES'.padStart(6)}  ${'FAILED'.padStart(6)}  ${'LAST SEEN (UTC)'.padEnd(16)}  ${by.toUpperCase()}`;
   const lines = rows.map((r) => `${String(r.count).padStart(6)}  ${percent(r).padStart(6)}  ${minute(r.lastSeen).padEnd(16)}  ${oneLine(r.group)}`);
   return [header, ...lines].join('\n');
 }

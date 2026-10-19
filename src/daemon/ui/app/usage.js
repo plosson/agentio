@@ -54,10 +54,16 @@ function dayChart(days, now) {
   </div>`;
 }
 
+/** The failure rate; a few failures among many uses read "<1%", not a reassuring 0%. */
+function failureRate(r) {
+  const rounded = Math.round((r.failures / r.count) * 100);
+  return r.failures > 0 && rounded === 0 ? '<1%' : `${rounded}%`;
+}
+
 function usageTable(title, label, rows, now) {
   return html`<h2>${title}</h2>
     <div class="table-box"><table class="grid">
       <thead><tr><th>${label}</th><th>Uses</th><th>Failed</th><th>Last seen</th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr><td>${r.group}</td><td>${r.count}</td><td>${Math.round((r.failures / r.count) * 100)}%</td><td>${relativeTime(r.lastSeen, now)}</td></tr>`)}</tbody>
+      <tbody>${rows.map((r) => html`<tr><td>${r.group}</td><td>${r.count}</td><td>${failureRate(r)}</td><td>${relativeTime(r.lastSeen, now)}</td></tr>`)}</tbody>
     </table></div>`;
 }

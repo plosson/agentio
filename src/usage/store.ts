@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { existsSync, renameSync } from 'fs';
+import { existsSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { assertTestWritable, readPointer } from '../vault/pointer';
 import { CliError } from '../utils/errors';
@@ -47,10 +47,14 @@ export async function usageDbPath(): Promise<string | null> {
 }
 
 function init(path: string): Database {
+  // SQLite gives its WAL files the database file's mode, so creating it 0600 covers them too.
+  if (!existsSync(path)) writeFileSync(path, '', { mode: 0o600 });
   const d = new Database(path, { create: true });
   try {
     d.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     d.exec('PRAGMA journal_mode = WAL');
+    // Safe in WAL mode, and spares an fsync per recorded credential request.
+    d.exec('PRAGMA synchronous = NORMAL');
     d.exec(`CREATE TABLE IF NOT EXISTS events (
       ts INTEGER NOT NULL, service TEXT NOT NULL, profile TEXT NOT NULL, command TEXT NOT NULL,
       host TEXT NOT NULL, key_id TEXT NOT NULL, key_name TEXT NOT NULL, outcome TEXT NOT NULL,
