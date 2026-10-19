@@ -4,6 +4,8 @@ import { lockVault } from '../../src/vault/vault';
 import { createRequestHandler, type PeerSource } from '../../src/daemon/api';
 import { clearSessions } from '../../src/daemon/session';
 import { unlockLimiter } from '../../src/daemon/routes-ui';
+import { stopKeepalive } from '../../src/daemon/keepalive';
+import { stopSessions } from '../../src/daemon/sessions';
 import { closeUsageStore, recordUsage } from '../../src/usage/store';
 
 // Tests inject the client IP via X-Forwarded-For; trust it here as a fronting proxy would.
@@ -21,7 +23,10 @@ beforeEach(() => {
   clearSessions();
   unlockLimiter.reset();
 });
-afterEach(() => {
+// Unlocking through the UI starts the keepalive and the session supervisor; leave neither running for later files.
+afterEach(async () => {
+  stopKeepalive();
+  await stopSessions();
   clearSessions();
   closeUsageStore();
 });
