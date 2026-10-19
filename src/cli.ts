@@ -15,6 +15,7 @@ import { registerReauthCommand } from './commands/reauth';
 import { registerSkillCommand } from './commands/skill';
 import { registerStatusCommand } from './commands/status';
 import { registerUpdateCommand } from './commands/update';
+import { registerUsageCommand } from './commands/usage';
 import { maybeAutoUpdate } from './commands/auto-update';
 import { registerVaultCommands } from './commands/vault';
 import { vaultExists } from './vault/vault';
@@ -53,6 +54,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   registerSkillCommand(program);
   registerStatusCommand(program);
   registerUpdateCommand(program);
+  registerUsageCommand(program);
   registerVaultCommands(program);
 
   // `setup` and `config` were folded into `vault` in 2.0. Keep hidden stubs so
@@ -77,7 +79,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   // Profile subcommands an agent may run, given a key the owner marked canManageProfiles.
   const MANAGED_PROFILE_COMMANDS = new Set(['add', 'rename', 'remove', 'reauth']);
   // Owner-only on the hub host: they touch the vault or the daemon. The top-level `reauth` is the bulk one.
-  const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth']);
+  const LOCAL_ONLY_COMMANDS = new Set(['vault', 'key', 'daemon', 'reauth', 'usage']);
 
   program.hook('preAction', async (_thisCommand, actionCommand) => {
     const commandPath: string[] = [];
@@ -146,7 +148,7 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
   registry.plugins.forEach(({ id }) => setGroup(id, 'Services'));
 
   // Advanced
-  ['daemon', 'key', 'plugin', 'profile'].forEach((n) => setGroup(n, 'Advanced'));
+  ['daemon', 'key', 'plugin', 'profile', 'usage'].forEach((n) => setGroup(n, 'Advanced'));
 
   // Show help (exit 0) when no command is provided
   program.action(() => {
