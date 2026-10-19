@@ -591,8 +591,8 @@ describe('the assembled admin page', () => {
       multi: ['Multi', null, [['#123456', 'M0 0h24v24H0z'], ['"><script>', 'M1 1h2']]],
       single: ['Single', '#abcdef', 'M2 2h4'],
     };
-    const tile = new Function('escapeHtml', 'raw', 'ICONS', 'PLUGIN_METADATA', 'displayName', `${t}; return tile;`)(
-      escapeHtml, raw, ICONS, {}, (s: string) => (ICONS as any)[s]?.[0] || s);
+    const tile = new Function('escapeHtml', 'raw', 'ICONS', 'PLUGIN_METADATA', 'displayName', 'serviceColour', `${t}; return tile;`)(
+      escapeHtml, raw, ICONS, {}, (s: string) => (ICONS as any)[s]?.[0] || s, (s: string) => (ICONS as any)[s]?.[1] || '');
     const multi: string = tile('multi').__html;
     expect(multi).toContain('<rect width="24" height="24" rx="5.5"/>');
     expect(multi).not.toContain('<g fill="white"');

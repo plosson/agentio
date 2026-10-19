@@ -57,20 +57,21 @@ describe('GET /ui/api/usage', () => {
     expect((await call('/ui/api/usage')).status).toBe(401);
   });
 
-  test('returns the four groupings for the last 30 days', async () => {
+  test('returns the day-by-service counts and the three groupings for the last 30 days', async () => {
     await recordUsage({ service: 'gmail', profile: 'work', command: 'gmail list', host: 'box', keyId: 'k1', keyName: 'laptop', outcome: 'ok', version: '3.23.1' });
     const cookie = await cookieFrom(await unlock());
     const res = await call('/ui/api/usage', { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(['commands', 'days', 'machines', 'profiles']);
-    expect(body.machines[0]).toMatchObject({ group: 'box · laptop', count: 1 });
+    expect(Object.keys(body).sort()).toEqual(['commands', 'daily', 'machines', 'profiles']);
+    expect(body.daily).toEqual([{ day: new Date().toISOString().slice(0, 10), service: 'gmail', count: 1 }]);
+    expect(body.machines[0]).toMatchObject({ host: 'box', keyId: 'k1', keyName: 'laptop', count: 1 });
     expect(body.profiles[0].group).toBe('gmail/work');
   });
 
   test('an empty store is four empty lists, not an error', async () => {
     const cookie = await cookieFrom(await unlock());
     const body = await (await call('/ui/api/usage', { headers: { cookie } })).json();
-    expect(body).toEqual({ days: [], machines: [], profiles: [], commands: [] });
+    expect(body).toEqual({ daily: [], machines: [], profiles: [], commands: [] });
   });
 });

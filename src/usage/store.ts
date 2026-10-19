@@ -27,6 +27,20 @@ export interface UsageRow {
   lastSeen: number;
 }
 
+/** Uses of one service on one UTC day, for the admin page's chart. */
+export interface DailyServiceRow {
+  day: string;
+  service: string;
+  count: number;
+}
+
+/** A machine's row, with the key it used, so the admin page can link to it. */
+export interface MachineRow extends UsageRow {
+  host: string;
+  keyId: string;
+  keyName: string;
+}
+
 /** The SQL each grouping selects; only these fixed strings ever reach a query. */
 const GROUP_SQL: Record<UsageGroup, string> = {
   machine: "host || ' · ' || key_name",
@@ -124,16 +138,32 @@ export async function recordUsage(input: UsageInput): Promise<void> {
   }
 }
 
+/** Rows of `sql` (one `?`: the window's start) over the last `since` ms; none, and no file, while no store exists. */
+async function inWindow<T>(sql: string, since: number, now: number): Promise<T[]> {
+  const path = await usageDbPath();
+  if (!path || !existsSync(path)) return [];
+  return open(path).query(sql).all(now - since) as T[];
+}
+
+const COUNTS = "COUNT(*) AS count, SUM(outcome <> 'ok') AS failures, MAX(ts) AS lastSeen";
+
 /** Counts per group over the last `since` ms, most used first (by day: oldest first). */
 export async function queryUsage({ by, since, now = Date.now() }: { by: UsageGroup; since: number; now?: number }): Promise<UsageRow[]> {
   if (!Object.hasOwn(GROUP_SQL, by)) {
     throw new CliError('INVALID_PARAMS', `Unknown grouping: ${String(by)}`, `Use one of: ${USAGE_GROUPS.join(', ')}`);
   }
-  const path = await usageDbPath();
-  if (!path || !existsSync(path)) return [];
   const order = by === 'day' ? '1 ASC' : 'count DESC, 1 ASC';
-  return open(path)
-    .query(`SELECT ${GROUP_SQL[by]} AS "group", COUNT(*) AS count, SUM(outcome <> 'ok') AS failures, MAX(ts) AS lastSeen
-      FROM events WHERE ts >= ? GROUP BY 1 ORDER BY ${order}`)
-    .all(now - since) as UsageRow[];
+  return inWindow(`SELECT ${GROUP_SQL[by]} AS "group", ${COUNTS} FROM events WHERE ts >= ? GROUP BY 1 ORDER BY ${order}`, since, now);
+}
+
+/** Uses per UTC day and service over the last `since` ms, oldest day first. */
+export function queryDailyByService({ since, now = Date.now() }: { since: number; now?: number }): Promise<DailyServiceRow[]> {
+  return inWindow(`SELECT ${GROUP_SQL.day} AS day, service, COUNT(*) AS count
+    FROM events WHERE ts >= ? GROUP BY 1, 2 ORDER BY 1 ASC, 3 DESC, 2 ASC`, since, now);
+}
+
+/** Counts per machine and key over the last `since` ms, most used first. Two keys with one name stay apart. */
+export function queryMachines({ since, now = Date.now() }: { since: number; now?: number }): Promise<MachineRow[]> {
+  return inWindow(`SELECT ${GROUP_SQL.machine} AS "group", host, key_id AS keyId, key_name AS keyName, ${COUNTS}
+    FROM events WHERE ts >= ? GROUP BY host, key_id, key_name ORDER BY count DESC, 1 ASC, keyId ASC`, since, now);
 }

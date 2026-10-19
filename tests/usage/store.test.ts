@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
 import { withTempVault } from '../helpers/vault';
-import { closeUsageStore, DAY_MS, queryUsage, recordUsage, usageDbPath } from '../../src/usage/store';
+import { closeUsageStore, DAY_MS, queryDailyByService, queryMachines, queryUsage, recordUsage, usageDbPath } from '../../src/usage/store';
 import { INVALID, UNKNOWN, normalizeEvent, type UsageInput } from '../../src/usage/event';
 
 withTempVault('agentio-usage-store-', () => ({}));
@@ -156,6 +156,58 @@ describe('queryUsage', () => {
 
   test('a missing store is an empty answer and creates no file', async () => {
     expect(await queryUsage({ by: 'command', since: DAY_MS })).toEqual([]);
+    expect(existsSync((await usageDbPath())!)).toBe(false);
+  });
+});
+
+describe('queryDailyByService', () => {
+  test('splits each UTC day by service, oldest day first, and leaves out older days', async () => {
+    const midnight = Date.UTC(2026, 9, 19);
+    const now = midnight + 12 * 3_600_000;
+    await recordUsage(base({ ts: midnight - 1 }));
+    await recordUsage(base({ ts: midnight - 2, service: 'slack' }));
+    await recordUsage(base({ ts: midnight }));
+    await recordUsage(base({ ts: midnight + 1, outcome: 'not_found' }));
+    await recordUsage(base({ ts: midnight + 2, service: 'slack' }));
+    await recordUsage(base({ ts: now - 40 * DAY_MS }));
+
+    expect(await queryDailyByService({ since: 30 * DAY_MS, now })).toEqual([
+      { day: '2026-10-18', service: 'gmail', count: 1 },
+      { day: '2026-10-18', service: 'slack', count: 1 },
+      { day: '2026-10-19', service: 'gmail', count: 2 },
+      { day: '2026-10-19', service: 'slack', count: 1 },
+    ]);
+  });
+
+  test('a missing store is an empty answer and creates no file', async () => {
+    expect(await queryDailyByService({ since: DAY_MS })).toEqual([]);
+    expect(existsSync((await usageDbPath())!)).toBe(false);
+  });
+});
+
+describe('queryMachines', () => {
+  test('carries the key id, and two keys with one name on one host stay apart', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 30, keyId: 'k1', keyName: 'laptop' }));
+    await recordUsage(base({ ts: now - 20, keyId: 'k1', keyName: 'laptop', outcome: 'auth_expired' }));
+    await recordUsage(base({ ts: now - 10, keyId: 'k2', keyName: 'laptop' }));
+
+    expect(await queryMachines({ since: DAY_MS, now })).toEqual([
+      { group: 'box.lan · laptop', host: 'box.lan', keyId: 'k1', keyName: 'laptop', count: 2, failures: 1, lastSeen: now - 20 },
+      { group: 'box.lan · laptop', host: 'box.lan', keyId: 'k2', keyName: 'laptop', count: 1, failures: 0, lastSeen: now - 10 },
+    ]);
+  });
+
+  test('hostile values come back as stored text, never as SQL', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now, host: "x'); DROP TABLE events; --", keyId: "k' OR 1=1", keyName: '<script>' }));
+    const [row] = await queryMachines({ since: DAY_MS, now });
+    expect(row).toMatchObject({ host: 'invalid', keyId: "k' OR 1=1", keyName: '<script>', count: 1 });
+    expect(await queryMachines({ since: DAY_MS, now })).toHaveLength(1);
+  });
+
+  test('a missing store is an empty answer and creates no file', async () => {
+    expect(await queryMachines({ since: DAY_MS })).toEqual([]);
     expect(existsSync((await usageDbPath())!)).toBe(false);
   });
 });

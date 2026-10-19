@@ -53,6 +53,14 @@ import {
   statusWord,
   tabOf,
   toggleScope,
+  chartColours,
+  commandService,
+  failureChip,
+  OTHER_SERVICES,
+  splitRef,
+  usageDays,
+  usageShare,
+  usageStacks,
   type Key,
   type ProfileRow,
   type TestResult,
@@ -698,5 +706,84 @@ describe('request limit', () => {
     expect(readRate('-3', false)).toHaveProperty('error');
     expect(readRate('100001', false)).toHaveProperty('error');
     expect(readRate('100000', false)).toEqual({ value: 100000 });
+  });
+});
+
+describe('usage', () => {
+  const NOW = Date.UTC(2026, 9, 19, 12);
+
+  test('usageDays names the last days in UTC, oldest first, even just after midnight UTC', () => {
+    expect(usageDays(NOW, 3)).toEqual(['2026-10-17', '2026-10-18', '2026-10-19']);
+    expect(usageDays(Date.UTC(2026, 9, 19, 0, 0, 0, 1), 1)).toEqual(['2026-10-19']);
+    expect(usageDays(NOW, 0)).toEqual([]);
+  });
+
+  test('usageStacks keeps the top services, folds the rest into one part, and ignores days outside the window', () => {
+    const days = ['2026-10-18', '2026-10-19'];
+    const { stacks, services, other, max } = usageStacks([
+      { day: '2026-10-18', service: 'slack', count: 1 },
+      { day: '2026-10-18', service: 'gmail', count: 4 },
+      { day: '2026-10-19', service: 'jira', count: 1 },
+      { day: '2026-10-19', service: 'github', count: 1 },
+      { day: '2026-10-19', service: 'gmail', count: 2 },
+      { day: '2026-09-01', service: 'dropbox', count: 99 },
+    ], days, 2);
+    expect(services).toEqual(['gmail', 'github']);
+    expect(other).toBe(true);
+    expect(stacks).toEqual([
+      { day: '2026-10-18', total: 5, parts: [{ service: 'gmail', count: 4 }, { service: OTHER_SERVICES, count: 1 }] },
+      { day: '2026-10-19', total: 4, parts: [{ service: 'gmail', count: 2 }, { service: 'github', count: 1 }, { service: OTHER_SERVICES, count: 1 }] },
+    ]);
+    expect(max).toBe(5);
+  });
+
+  test('usageStacks with nothing in the window is flat, and a negative top shows no service of its own', () => {
+    const empty = usageStacks([], ['2026-10-19'], 6);
+    expect(empty).toEqual({ stacks: [{ day: '2026-10-19', total: 0, parts: [] }], services: [], other: false, max: 0 });
+    const none = usageStacks([{ day: '2026-10-19', service: 'gmail', count: 3 }], ['2026-10-19'], -1);
+    expect(none.services).toEqual([]);
+    expect(none.stacks[0]!.parts).toEqual([{ service: OTHER_SERVICES, count: 3 }]);
+  });
+
+  test('splitRef splits at the first slash only, and a ref with none is a bare profile', () => {
+    expect(splitRef('gmail/work')).toEqual({ service: 'gmail', profile: 'work' });
+    expect(splitRef('sql/db/prod')).toEqual({ service: 'sql', profile: 'db/prod' });
+    expect(splitRef('/x')).toEqual({ service: '', profile: '/x' });
+    expect(splitRef('unknown')).toEqual({ service: '', profile: 'unknown' });
+  });
+
+  test('commandService is the first word only when it names a known service', () => {
+    const known = ['gmail', 'gdrive'];
+    expect(commandService('gmail send', known)).toBe('gmail');
+    expect(commandService('gdrive', known)).toBe('gdrive');
+    expect(commandService('status', known)).toBeNull();
+    expect(commandService('unknown', known)).toBeNull();
+    expect(commandService('', known)).toBeNull();
+    expect(commandService('constructor', known)).toBeNull();
+  });
+
+  test('usageShare never hides a use, never passes 100, and survives empty totals', () => {
+    expect(usageShare(1, 1000)).toBe(2);
+    expect(usageShare(5, 10)).toBe(50);
+    expect(usageShare(20, 10)).toBe(100);
+    expect(usageShare(0, 10)).toBe(0);
+    expect(usageShare(3, 0)).toBe(0);
+    expect(usageShare(Number.NaN, 10)).toBe(0);
+  });
+
+  test('failureChip reads <1% for a few failures among many, and stays quiet for none or bad input', () => {
+    expect(failureChip(0, 10)).toEqual({ tone: 'quiet', word: 'No failures', percent: '0%' });
+    expect(failureChip(1, 1000)).toEqual({ tone: 'bad', word: '1 failed · <1%', percent: '<1%' });
+    expect(failureChip(3, 3)).toEqual({ tone: 'bad', word: '3 failed · 100%', percent: '100%' });
+    expect(failureChip(1, 0)).toEqual({ tone: 'quiet', word: 'No failures', percent: '0%' });
+  });
+
+  test('chartColours keeps brand colours apart, and gives a palette slot to a repeat or to none', () => {
+    const brand: Record<string, string> = { gmail: '#EA4335', gdrive: '#4285F4', gcal: '#4285f4', github: '' };
+    expect(chartColours(['gdrive', 'gmail', 'gcal', 'github', 'mystery'], (s) => brand[s] ?? '', 2)).toEqual([
+      { colour: '#4285f4' }, { colour: '#ea4335' }, { slot: 0 }, { slot: 1 }, { slot: 0 },
+    ]);
+    expect(chartColours(['github'], () => '', 0)).toEqual([{ slot: 0 }]);
+    expect(chartColours([], () => '#000000', 6)).toEqual([]);
   });
 });

@@ -8,7 +8,7 @@ import { deleteProfile, renameProfile, writeFailure } from '../config/profile-st
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
-import { DAY_MS, queryUsage } from '../usage/store';
+import { DAY_MS, queryDailyByService, queryMachines, queryUsage } from '../usage/store';
 import { RateLimiter } from './rate-limit';
 import {
   clearSessions,
@@ -184,12 +184,16 @@ const inDaemon = async (service: ServiceName, name: string) => sessionStatus(ser
 
 const USAGE_WINDOW_MS = 30 * DAY_MS;
 
-/** The Usage page's four views of the last 30 days. */
+/** The Usage page's four views of the last 30 days, all over the same window. */
 async function handleUsage(): Promise<Response> {
-  const [days, machines, profiles, commands] = await Promise.all(
-    (['day', 'machine', 'profile', 'command'] as const).map((by) => queryUsage({ by, since: USAGE_WINDOW_MS })),
-  );
-  return json({ days, machines, profiles, commands });
+  const window = { since: USAGE_WINDOW_MS, now: Date.now() };
+  const [daily, machines, profiles, commands] = await Promise.all([
+    queryDailyByService(window),
+    queryMachines(window),
+    queryUsage({ by: 'profile', ...window }),
+    queryUsage({ by: 'command', ...window }),
+  ]);
+  return json({ daily, machines, profiles, commands });
 }
 
 /** Same payload as `agentio status --json`. */
