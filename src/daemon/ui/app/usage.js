@@ -147,11 +147,13 @@ function usageRow({ href, lead, title, sub, r, total, colour, now }) {
 
 function machineRow(r, total, now) {
   const local = r.keyId === 'local';
+  // The key's name now, so a rename shows at once, not only after the machine's next request.
+  const key = keyById(r.keyId);
   return usageRow({
-    href: keyById(r.keyId) ? routeHash({ view: 'machine', id: r.keyId }) : '',
+    href: key ? routeHash({ view: 'machine', id: r.keyId }) : '',
     lead: html`<span class="machine-icon">${MACHINE_GLYPH}</span>`,
     title: r.host,
-    sub: local ? 'Commands run on this hub' : `Key ${r.keyName}`,
+    sub: local ? 'Commands run on this hub' : `Key ${key ? key.name : r.keyName}`,
     r, total, now,
   });
 }

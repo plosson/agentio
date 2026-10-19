@@ -149,6 +149,30 @@ describe('queryUsage', () => {
     expect((await queryUsage({ by: 'machine', since: 7 * DAY_MS, now }))[0]!.group).toBe('box.lan · local');
   });
 
+  test('a renamed key stays one row under its latest name; two keys sharing a name stay two', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 50, keyId: 'k1', keyName: 'cursor-box' }));
+    await recordUsage(base({ ts: now - 40, keyId: 'k1', keyName: 'cursor-box', outcome: 'auth_expired' }));
+    await recordUsage(base({ ts: now - 30, keyId: 'k1', keyName: 'Grok Bot' }));
+    await recordUsage(base({ ts: now - 20, keyId: 'k2', keyName: 'Grok Bot' }));
+
+    expect(await queryUsage({ by: 'key', since: DAY_MS, now })).toEqual([
+      { group: 'Grok Bot', count: 3, failures: 1, lastSeen: now - 30 },
+      { group: 'Grok Bot', count: 1, failures: 0, lastSeen: now - 20 },
+    ]);
+    expect((await queryUsage({ by: 'machine', since: DAY_MS, now })).map((r) => [r.group, r.count])).toEqual([
+      ['box.lan · Grok Bot', 3], ['box.lan · Grok Bot', 1],
+    ]);
+  });
+
+  test('the latest name comes from any time, so a rename before the window still shows', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 2 * DAY_MS, keyId: 'k1', keyName: 'old' }));
+    await recordUsage(base({ ts: now - 10 * DAY_MS, keyId: 'k1', keyName: 'older' }));
+    await recordUsage(base({ ts: now - 1000, keyId: 'k1', keyName: 'new' }));
+    expect(await queryUsage({ by: 'key', since: 3 * DAY_MS, now })).toEqual([{ group: 'new', count: 2, failures: 0, lastSeen: now - 1000 }]);
+  });
+
   test('an unknown grouping is refused before any SQL is built', async () => {
     await recordUsage(base());
     await expect(queryUsage({ by: 'command; DROP TABLE events' as never, since: DAY_MS })).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
@@ -195,6 +219,16 @@ describe('queryMachines', () => {
     expect(await queryMachines({ since: DAY_MS, now })).toEqual([
       { group: 'box.lan · laptop', host: 'box.lan', keyId: 'k1', keyName: 'laptop', count: 2, failures: 1, lastSeen: now - 20 },
       { group: 'box.lan · laptop', host: 'box.lan', keyId: 'k2', keyName: 'laptop', count: 1, failures: 0, lastSeen: now - 10 },
+    ]);
+  });
+
+  test('a renamed key is one machine row, named as last used', async () => {
+    const now = Date.now();
+    await recordUsage(base({ ts: now - 30, host: 'grok-vm', keyId: 'k1', keyName: 'cursor-box' }));
+    await recordUsage(base({ ts: now - 10, host: 'grok-vm', keyId: 'k1', keyName: 'Grok Bot' }));
+    await recordUsage(base({ ts: now - 5, host: 'unknown', keyId: 'k1', keyName: 'Grok Bot' }));
+    expect((await queryMachines({ since: DAY_MS, now })).map((r) => [r.host, r.keyId, r.keyName, r.count])).toEqual([
+      ['grok-vm', 'k1', 'Grok Bot', 2], ['unknown', 'k1', 'Grok Bot', 1],
     ]);
   });
 

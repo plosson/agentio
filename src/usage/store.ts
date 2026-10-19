@@ -41,14 +41,21 @@ export interface MachineRow extends UsageRow {
   keyName: string;
 }
 
-/** The SQL each grouping selects; only these fixed strings ever reach a query. */
-const GROUP_SQL: Record<UsageGroup, string> = {
-  machine: "host || ' · ' || key_name",
-  key: 'key_name',
-  service: 'service',
-  profile: "service || '/' || profile",
-  command: 'command',
-  day: "strftime('%Y-%m-%d', ts / 1000, 'unixepoch')",
+/** A key's name at its latest use: a renamed key shows its new name on every row, old ones included. */
+const KEY_NAME = '(SELECT n.key_name FROM events n WHERE n.key_id = events.key_id ORDER BY n.ts DESC LIMIT 1)';
+const DAY_SQL = "strftime('%Y-%m-%d', ts / 1000, 'unixepoch')";
+
+/**
+ * The SQL each grouping selects as its label, and the columns it groups by; only these fixed
+ * strings ever reach a query. Keys group by id, never by name, so a rename never splits a key.
+ */
+const GROUP_SQL: Record<UsageGroup, { label: string; by: string }> = {
+  machine: { label: `host || ' · ' || ${KEY_NAME}`, by: 'host, key_id' },
+  key: { label: KEY_NAME, by: 'key_id' },
+  service: { label: 'service', by: '1' },
+  profile: { label: "service || '/' || profile", by: '1' },
+  command: { label: 'command', by: '1' },
+  day: { label: DAY_SQL, by: '1' },
 };
 
 let db: Database | null = null;
@@ -153,17 +160,18 @@ export async function queryUsage({ by, since, now = Date.now() }: { by: UsageGro
     throw new CliError('INVALID_PARAMS', `Unknown grouping: ${String(by)}`, `Use one of: ${USAGE_GROUPS.join(', ')}`);
   }
   const order = by === 'day' ? '1 ASC' : 'count DESC, 1 ASC';
-  return inWindow(`SELECT ${GROUP_SQL[by]} AS "group", ${COUNTS} FROM events WHERE ts >= ? GROUP BY 1 ORDER BY ${order}`, since, now);
+  const { label, by: columns } = GROUP_SQL[by];
+  return inWindow(`SELECT ${label} AS "group", ${COUNTS} FROM events WHERE ts >= ? GROUP BY ${columns} ORDER BY ${order}`, since, now);
 }
 
 /** Uses per UTC day and service over the last `since` ms, oldest day first. */
 export function queryDailyByService({ since, now = Date.now() }: { since: number; now?: number }): Promise<DailyServiceRow[]> {
-  return inWindow(`SELECT ${GROUP_SQL.day} AS day, service, COUNT(*) AS count
+  return inWindow(`SELECT ${DAY_SQL} AS day, service, COUNT(*) AS count
     FROM events WHERE ts >= ? GROUP BY 1, 2 ORDER BY 1 ASC, 3 DESC, 2 ASC`, since, now);
 }
 
-/** Counts per machine and key over the last `since` ms, most used first. Two keys with one name stay apart. */
+/** Counts per machine and key over the last `since` ms, most used first. Two keys with one name stay apart; a renamed key stays one. */
 export function queryMachines({ since, now = Date.now() }: { since: number; now?: number }): Promise<MachineRow[]> {
-  return inWindow(`SELECT ${GROUP_SQL.machine} AS "group", host, key_id AS keyId, key_name AS keyName, ${COUNTS}
-    FROM events WHERE ts >= ? GROUP BY host, key_id, key_name ORDER BY count DESC, 1 ASC, keyId ASC`, since, now);
+  return inWindow(`SELECT ${GROUP_SQL.machine.label} AS "group", host, key_id AS keyId, ${KEY_NAME} AS keyName, ${COUNTS}
+    FROM events WHERE ts >= ? GROUP BY ${GROUP_SQL.machine.by} ORDER BY count DESC, 1 ASC, keyId ASC`, since, now);
 }
