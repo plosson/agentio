@@ -6,6 +6,8 @@ const USAGE_STALE_MS = 60_000;
 const CHART_SERVICES = 6;
 /** Chart colours for services without a brand colour of their own: .usage-chart .c0 to .c5 in admin.css. */
 const CHART_PALETTE = 6;
+/** Rows a card shows until "Show more" is pressed, so the cards side by side stay short and level. */
+const USAGE_ROWS = 5;
 let usageLoading = false;
 
 const USAGE_GLYPHS = {
@@ -40,11 +42,11 @@ VIEWS.usage = () => {
           : usageStat('ok', 'ok', '0%', 'failed')}
       </div>
       ${chartCard(u.daily, now)}
-      <div class="overview-cards">
-        ${usageCard('Machines', 'Who asked for credentials.', u.machines.map((r) => machineRow(r, total, now)))}
-        ${usageCard('Profiles', 'Which credentials they used.', u.profiles.map((r) => profileRow(r, total, now)))}
+      <div class="overview-cards usage-cards${['machines', 'profiles'].some((id) => state.ui.usageAll?.has(id)) ? ' open' : ''}">
+        ${usageCard('machines', 'Machines', 'Who asked for credentials.', u.machines, (r) => machineRow(r, total, now))}
+        ${usageCard('profiles', 'Profiles', 'Which credentials they used.', u.profiles, (r) => profileRow(r, total, now))}
       </div>
-      ${usageCard('Commands', 'What they ran with them.', u.commands.map((r) => commandRow(r, total, now)))}
+      ${usageCard('commands', 'Commands', 'What they ran with them.', u.commands, (r) => commandRow(r, total, now))}
     </div>`;
 };
 
@@ -110,12 +112,22 @@ function swatch(paint) {
   return html`<svg class="swatch" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="3" ${fillAttrs(paint)}></rect></svg>`;
 }
 
-function usageCard(title, lede, rows) {
-  return html`<section class="card">
+/** A card of rows, the first USAGE_ROWS of them until the owner asks for all. */
+function usageCard(id, title, lede, rows, row) {
+  const all = Boolean(state.ui.usageAll?.has(id));
+  const hidden = rows.length - USAGE_ROWS;
+  return html`<section class="card usage-card">
     <div class="card-head"><div><h2>${title} <span class="count">${rows.length}</span></h2><p>${lede}</p></div></div>
-    <ul class="rows usage-rows">${rows}</ul>
+    <ul class="rows usage-rows">${(all ? rows : rows.slice(0, USAGE_ROWS)).map(row)}</ul>
+    ${hidden > 0 ? html`<div class="card-foot"><button type="button" class="button link" data-action="usage-more" data-card="${id}">${all ? 'Show fewer' : `Show ${hidden} more`}</button></div>` : ''}
   </section>`;
 }
+
+ACTIONS['usage-more'] = (el) => {
+  const all = state.ui.usageAll || (state.ui.usageAll = new Set());
+  if (!all.delete(el.dataset.card)) all.add(el.dataset.card);
+  render();
+};
 
 /** A row's share of all uses, as a thin bar in its colour. */
 function shareBar(count, total, colour) {
