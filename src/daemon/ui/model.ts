@@ -45,14 +45,14 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): Raw {
 
 // ---------- Routes ----------
 
-export type TabView = 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | 'add' | 'connect' | 'key';
+export type TabView = 'overview' | 'machines' | 'profiles' | 'access' | 'settings' | 'usage' | 'add' | 'connect' | 'key';
 export type Route =
   | { view: TabView }
   | { view: 'machine'; id: string }
   | { view: 'profile'; ref: string }
   | { view: 'authorize'; code: string };
 
-const TAB_VIEWS: readonly string[] = ['overview', 'machines', 'profiles', 'access', 'settings', 'add', 'connect', 'key'];
+const TAB_VIEWS: readonly string[] = ['overview', 'machines', 'profiles', 'access', 'settings', 'usage', 'add', 'connect', 'key'];
 
 /** `#machines`, `#machine=<id>`, `#profile=<service>/<name>`, `#authorize=<code>`; anything else is the Overview. */
 export function parseRoute(hash: string): Route {
@@ -86,7 +86,7 @@ export function routeHash(route: Route): string {
 }
 
 /** The navigation tab to highlight; the sign-in page has none. */
-export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'settings' | null {
+export function tabOf(route: Route): 'overview' | 'machines' | 'profiles' | 'settings' | 'usage' | null {
   switch (route.view) {
     case 'machine':
     case 'access':

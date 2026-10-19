@@ -8,6 +8,7 @@ import { deleteProfile, renameProfile, writeFailure } from '../config/profile-st
 import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey, updateApiKey, type ApiKeyInput, validateFlag } from '../auth/api-keys';
 import type { ServiceName } from '../types/config';
 import { getProfileStatus, getProfileStatuses, type ProfileStatus } from '../commands/status';
+import { DAY_MS, queryUsage } from '../usage/store';
 import { RateLimiter } from './rate-limit';
 import {
   clearSessions,
@@ -181,6 +182,16 @@ async function handleAuthorize(request: Request, code: string): Promise<Response
 /** Sessions run in this very process, so their state is read here rather than over HTTP. */
 const inDaemon = async (service: ServiceName, name: string) => sessionStatus(service, name);
 
+const USAGE_WINDOW_MS = 30 * DAY_MS;
+
+/** The Usage page's four views of the last 30 days. */
+async function handleUsage(): Promise<Response> {
+  const [days, machines, profiles, commands] = await Promise.all(
+    (['day', 'machine', 'profile', 'command'] as const).map((by) => queryUsage({ by, since: USAGE_WINDOW_MS })),
+  );
+  return json({ days, machines, profiles, commands });
+}
+
 /** Same payload as `agentio status --json`. */
 async function handleStatus(request: Request, ctx: UiContext): Promise<Response> {
   const test = new URL(request.url).searchParams.get('test') !== 'false';
@@ -235,6 +246,7 @@ export async function handleUiRequest(request: Request, ip: string, ctx: UiConte
 
     if (method === 'GET' && pathname === '/ui/api/profiles') return await handleProfiles();
     if (method === 'GET' && pathname === '/ui/api/status') return await handleStatus(request, ctx);
+    if (method === 'GET' && pathname === '/ui/api/usage') return await handleUsage();
 
     const ref = profilePath(pathname, '/ui/api/profiles');
     if (ref?.action === 'status' && method === 'GET') {
