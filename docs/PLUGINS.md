@@ -194,6 +194,7 @@ Sources: [creating an OAuth app](https://docs.github.com/en/apps/oauth-apps/buil
 - **The personal data reporting API:** apps that store personal data must report stored accounts every 7 days and delete the data of closed accounts. ([guide](https://developer.atlassian.com/cloud/jira/platform/user-privacy-developer-guide/))
 
 **Known problems**
+- `agentio jira users search` and `users get` call `/rest/api/3/user/search` and `/rest/api/3/user`, which Atlassian documents under the classic `read:jira-user` scope. agentio does not request it yet: adding it to `JIRA_SCOPES` before it is enabled on agentio's shared Atlassian app in the developer console would break every Jira sign-in. Until both are done, those commands may fail with a message saying so; assignee and reporter account ids are in `jira search --json`.
 - The client secret is in the public code. Atlassian's guidance says never to distribute it.
 - Atlassian has no device flow and no sign-in method without a secret: PKCE for public apps is still a feature request, [ECO-283](https://jira.atlassian.com/browse/ECO-283).
 - **Fix options:**

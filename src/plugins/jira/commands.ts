@@ -8,16 +8,37 @@ import { CliError, handleError } from '../../utils/errors';
 import { readStdin } from '../../utils/stdin';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { addExamples } from '../../utils/command-tree';
+import { addJsonOption } from '../../utils/output';
 import {
   printJiraProjectList,
   printJiraIssueList,
   printJiraIssue,
+  printJiraUsers,
+  printJiraUser,
   printJiraTransitions,
   printJiraCommentResult,
   printJiraTransitionResult,
 } from './output';
 import type { JiraCredentials } from './types';
 import type { SetupContext, SetupResult } from '../../plugin-sdk';
+
+/** `--limit`: a positive whole number, or `all` for every match. */
+export function parseLimit(input: string, option = '--limit'): number {
+  const value = input.trim().toLowerCase();
+  if (value === 'all') return Number.POSITIVE_INFINITY;
+  if (/^\d+$/.test(value) && Number(value) > 0) return Number(value);
+  throw new CliError('INVALID_PARAMS', `${option} must be a positive whole number or "all", not "${input}"`);
+}
+
+/** `--fields a,b c`: the extra Jira field ids to fetch. */
+export function parseFields(input: string | undefined): string[] | undefined {
+  if (input === undefined) return undefined;
+  const ids = input.split(/[\s,]+/).map((f) => f.trim()).filter(Boolean);
+  if (ids.length === 0) throw new CliError('INVALID_PARAMS', '--fields needs at least one field id, e.g. --fields customfield_10016,duedate');
+  return ids;
+}
+
+const FIELDS_HELP = 'Extra field ids to include, comma-separated (e.g. customfield_10016,duedate); raw values appear under extraFields';
 
 const getJiraClient = createClientGetter<JiraCredentials, JiraClient>({
   service: 'jira',
@@ -58,30 +79,37 @@ export function registerJiraCommands(program: Command): void {
 
   // Search issues
   addExamples(
-    jira
-      .command('search')
-      .description('Search JIRA issues')
-      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .option('--jql <query>', 'JQL query')
-      .option('--project <key>', 'Project key')
-      .option('--status <status>', 'Issue status')
-      .option('--assignee <name>', 'Assignee name')
-      .option('--limit <number>', 'Maximum number of issues', '50')
-      .action(async (options) => {
-        try {
-          const { client } = await getJiraClient(options.profile);
-          const issues = await client.searchIssues({
-            jql: options.jql,
-            project: options.project,
-            status: options.status,
-            assignee: options.assignee,
-            maxResults: parseInt(options.limit, 10),
-          });
-          printJiraIssueList(issues);
-        } catch (error) {
-          handleError(error);
-        }
-      }),
+    addJsonOption(
+      jira
+        .command('search')
+        .description('Search JIRA issues (pages through every match up to --limit)')
+        .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+        .option('--jql <query>', 'JQL query')
+        .option('--project <key>', 'Project key')
+        .option('--status <status>', 'Issue status')
+        .option('--assignee <name>', 'Assignee name')
+        .option('--limit <number>', 'Maximum number of issues, or "all" (fetched page by page)', '50')
+        .option('--page-token <token>', 'Continue a truncated search from the token it printed')
+        .option('--fields <ids>', FIELDS_HELP),
+    ).action(async (options) => {
+      try {
+        const maxResults = parseLimit(options.limit);
+        const fields = parseFields(options.fields);
+        const { client } = await getJiraClient(options.profile);
+        const result = await client.searchIssues({
+          jql: options.jql,
+          project: options.project,
+          status: options.status,
+          assignee: options.assignee,
+          maxResults,
+          nextPageToken: options.pageToken,
+          fields,
+        });
+        printJiraIssueList(result, options.json);
+      } catch (error) {
+        handleError(error);
+      }
+    }),
     `Examples:
 
   # everything assigned to you across all projects
@@ -96,6 +124,16 @@ export function registerJiraCommands(program: Command): void {
   # high-priority items updated today, capped to 10
   agentio jira search --jql "priority = High AND updated >= -1d" --limit 10
 
+  # backfill: every match since July as JSON (accountIds, created, resolutionDate, parent...)
+  agentio jira search --jql "updated >= 2026-07-01 ORDER BY key" --limit all --json > issues.json
+
+  # add custom fields such as story points
+  agentio jira search --project PROJ --fields customfield_10016 --json
+
+Results are fetched page by page until --limit is reached. When more issues
+match, stderr says so and prints a --page-token to continue from; --json output
+carries "truncated" and "nextPageToken". Use a stable ORDER BY for long runs.
+
 JQL syntax: project = KEY, assignee = currentUser(), status = "In Progress",
 created >= -7d, updated >= -1d, priority = High, labels = bug, resolution = Unresolved.
 Combine with AND / OR / NOT. Quote multi-word values.`,
@@ -103,24 +141,96 @@ Combine with AND / OR / NOT. Quote multi-word values.`,
 
   // Get issue details
   addExamples(
-    jira
-      .command('get')
-      .description('Get JIRA issue details')
-      .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
-      .option('--profile <name>', 'Profile name (optional if only one profile exists)')
-      .action(async (issueKey: string, options) => {
-        try {
-          const { client } = await getJiraClient(options.profile);
-          const issue = await client.getIssue(issueKey);
-          printJiraIssue(issue);
-        } catch (error) {
-          handleError(error);
-        }
-      }),
+    addJsonOption(
+      jira
+        .command('get')
+        .description('Get JIRA issue details')
+        .argument('<issue-key>', 'Issue key (e.g., PROJ-123)')
+        .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+        .option('--comments', 'Include every comment')
+        .option('--changelog', 'Include the full change history (status changes with dates, for time in status)')
+        .option('--fields <ids>', FIELDS_HELP),
+    ).action(async (issueKey: string, options) => {
+      try {
+        const fields = parseFields(options.fields);
+        const { client } = await getJiraClient(options.profile);
+        const issue = await client.getIssue(issueKey, {
+          fields,
+          comments: options.comments === true,
+          changelog: options.changelog === true,
+        });
+        printJiraIssue(issue, options.json);
+      } catch (error) {
+        handleError(error);
+      }
+    }),
     `Examples:
 
-  # full issue (summary, status, description, comments)
-  agentio jira get PROJ-123`,
+  # summary, status, parent/epic, labels, components, fix versions, dates, description
+  agentio jira get PROJ-123
+
+  # with comments and the full status history, as JSON
+  agentio jira get PROJ-123 --comments --changelog --json
+
+  # status changes only, for time in status
+  agentio jira get PROJ-123 --changelog --json | jq '.changelog[] | {created, items: [.items[] | select(.fieldId == "status")]}'`,
+  );
+
+  // Users
+  const users = jira
+    .command('users')
+    .description('Look up Jira users and their account ids');
+
+  addExamples(
+    addJsonOption(
+      users
+        .command('search')
+        .description('Find users by name or email')
+        .argument('<query>', 'Name, email or part of either')
+        .option('--profile <name>', 'Profile name (optional if only one profile exists)')
+        .option('--limit <number>', 'Maximum number of users (Jira looks at the first 1000 only)', '50'),
+    ).action(async (query: string, options) => {
+      try {
+        if (!query.trim()) throw new CliError('INVALID_PARAMS', 'The search query cannot be empty');
+        const limit = parseLimit(options.limit);
+        const { client } = await getJiraClient(options.profile);
+        const found = await client.searchUsers(query, { maxResults: limit });
+        printJiraUsers(found, options.json);
+      } catch (error) {
+        handleError(error);
+      }
+    }),
+    `Examples:
+
+  # map an email to an accountId
+  agentio jira users search alice@example.com --json
+
+  # everyone whose name starts with "ali"
+  agentio jira users search ali
+
+Email addresses appear only when the user's profile visibility allows it.
+Jira needs the read:jira-user scope for user lookup. Without it the command
+says so; assignee and reporter account ids are also in jira search --json.`,
+  );
+
+  addExamples(
+    addJsonOption(
+      users
+        .command('get')
+        .description('Get one user by account id')
+        .argument('<account-id>', 'Atlassian account id')
+        .option('--profile <name>', 'Profile name (optional if only one profile exists)'),
+    ).action(async (accountId: string, options) => {
+      try {
+        const { client } = await getJiraClient(options.profile);
+        printJiraUser(await client.getUser(accountId), options.json);
+      } catch (error) {
+        handleError(error);
+      }
+    }),
+    `Examples:
+
+  agentio jira users get 5b10a2844c20165700ede21g --json`,
   );
 
   // Add comment

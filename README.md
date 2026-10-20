@@ -175,7 +175,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **Slack** | Webhook | `send` |
 | **WhatsApp** | Linked device, through the daemon | `status`, `conversations`, `send`, `read`, `contacts` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
-| **JIRA** | OAuth | `projects`, `search`, `get`, `comment`, `transitions`, `transition` |
+| **JIRA** | OAuth | `projects`, `search`, `get`, `users search`, `users get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
 | **Discourse** | API Key | `list`, `get`, `categories` |
 | **Kite** | Browser sign-in | `publish`, `get`, `list`, `delete`, `share show/add/remove/public/private/expiry`, `comments list/add/reply/resolve/reopen` |
@@ -260,8 +260,15 @@ agentio jira projects
 agentio jira search --project MYPROJ --status "In Progress"
 agentio jira search --jql "assignee = currentUser() AND status != Done"
 
-# Get issue details
+# Backfill: every match, page by page, as JSON (accountIds, created, resolutionDate, parent, ...)
+agentio jira search --jql "updated >= 2026-07-01 ORDER BY key" --limit all --json > issues.json
+
+# Get issue details (add --changelog for status history, --comments, --fields customfield_10016)
 agentio jira get PROJ-123
+agentio jira get PROJ-123 --changelog --json
+
+# Find a user's accountId
+agentio jira users search alice@example.com --json
 
 # Add comment
 agentio jira comment PROJ-123 "Automated update from CI"

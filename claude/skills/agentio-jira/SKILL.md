@@ -1,6 +1,6 @@
 ---
 name: agentio-jira
-description: Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.
+description: Use when interacting with JIRA via the agentio CLI - search issues (paged, JSON), issue history, users, comment, transition.
 ---
 
 # Jira via agentio
@@ -28,7 +28,7 @@ Examples:
 
 ## agentio jira search
 
-Search JIRA issues
+Search JIRA issues (pages through every match up to --limit)
 
 Options:
 
@@ -37,7 +37,10 @@ Options:
 - `--project <key>`: Project key
 - `--status <status>`: Issue status
 - `--assignee <name>`: Assignee name
-- `--limit <number>`: Maximum number of issues (default: 50)
+- `--limit <number>`: Maximum number of issues, or "all" (fetched page by page) (default: 50)
+- `--page-token <token>`: Continue a truncated search from the token it printed
+- `--fields <ids>`: Extra field ids to include, comma-separated (e.g. customfield_10016,duedate); raw values appear under extraFields
+- `--json`: Output JSON for programs to read
 
 ```
 Examples:
@@ -54,6 +57,16 @@ Examples:
   # high-priority items updated today, capped to 10
   agentio jira search --jql "priority = High AND updated >= -1d" --limit 10
 
+  # backfill: every match since July as JSON (accountIds, created, resolutionDate, parent...)
+  agentio jira search --jql "updated >= 2026-07-01 ORDER BY key" --limit all --json > issues.json
+
+  # add custom fields such as story points
+  agentio jira search --project PROJ --fields customfield_10016 --json
+
+Results are fetched page by page until --limit is reached. When more issues
+match, stderr says so and prints a --page-token to continue from; --json output
+carries "truncated" and "nextPageToken". Use a stable ORDER BY for long runs.
+
 JQL syntax: project = KEY, assignee = currentUser(), status = "In Progress",
 created >= -7d, updated >= -1d, priority = High, labels = bug, resolution = Unresolved.
 Combine with AND / OR / NOT. Quote multi-word values.
@@ -66,12 +79,61 @@ Get JIRA issue details
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
+- `--comments`: Include every comment
+- `--changelog`: Include the full change history (status changes with dates, for time in status)
+- `--fields <ids>`: Extra field ids to include, comma-separated (e.g. customfield_10016,duedate); raw values appear under extraFields
+- `--json`: Output JSON for programs to read
 
 ```
 Examples:
 
-  # full issue (summary, status, description, comments)
+  # summary, status, parent/epic, labels, components, fix versions, dates, description
   agentio jira get PROJ-123
+
+  # with comments and the full status history, as JSON
+  agentio jira get PROJ-123 --comments --changelog --json
+
+  # status changes only, for time in status
+  agentio jira get PROJ-123 --changelog --json | jq '.changelog[] | {created, items: [.items[] | select(.fieldId == "status")]}'
+```
+
+## agentio jira users search <query>
+
+Find users by name or email
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--limit <number>`: Maximum number of users (Jira looks at the first 1000 only) (default: 50)
+- `--json`: Output JSON for programs to read
+
+```
+Examples:
+
+  # map an email to an accountId
+  agentio jira users search alice@example.com --json
+
+  # everyone whose name starts with "ali"
+  agentio jira users search ali
+
+Email addresses appear only when the user's profile visibility allows it.
+Jira needs the read:jira-user scope for user lookup. Without it the command
+says so; assignee and reporter account ids are also in jira search --json.
+```
+
+## agentio jira users get <account-id>
+
+Get one user by account id
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+
+```
+Examples:
+
+  agentio jira users get 5b10a2844c20165700ede21g --json
 ```
 
 ## agentio jira comment <issue-key> [body]
@@ -125,3 +187,4 @@ Examples:
   agentio jira transitions PROJ-123
   agentio jira transition PROJ-123 41
 ```
+
