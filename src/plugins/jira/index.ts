@@ -8,7 +8,7 @@ const jira = defineServicePlugin<JiraCredentials>()({
   apiVersion: 1,
   id: 'jira',
   displayName: 'JIRA',
-  description: 'Use when interacting with JIRA via the agentio CLI - search issues, comment, transition.',
+  description: 'Use when interacting with JIRA via the agentio CLI - search issues (paged, JSON), issue history, users, comment, transition.',
   registerCommands: registerJiraCommands,
   profile: {
     setup: jiraProfileAdd,

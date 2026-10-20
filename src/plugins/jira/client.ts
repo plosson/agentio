@@ -10,14 +10,91 @@ import type {
   JiraProjectListOptions,
   JiraCommentResult,
   JiraTransitionResult,
+  JiraChangelogEntry,
+  JiraGetOptions,
+  JiraSearchResult,
+  JiraUser,
+  JiraUserSearchOptions,
 } from './types';
+
+/** The most issues /search/jql takes as maxResults; it may still answer with fewer per page (often 100). */
+export const SEARCH_PAGE_MAX = 5000;
+/** The most changelog entries or comments one page can hold. */
+export const CHANGELOG_PAGE_MAX = 100;
+export const COMMENT_PAGE_MAX = 100;
+/** User search only ever looks at the first 1000 users. */
+export const USER_SEARCH_MAX = 1000;
+/** Retries of a request Jira answers with 429 or 503, waiting Retry-After (capped) between them. */
+const MAX_RETRIES = 4;
+const MAX_RETRY_WAIT_MS = 30_000;
+
+/** The fields every issue is read with; `--fields` adds to them. */
+export const ISSUE_FIELDS = [
+  'summary', 'status', 'priority', 'assignee', 'reporter', 'created', 'updated',
+  'resolution', 'resolutiondate', 'project', 'issuetype', 'parent', 'labels',
+  'components', 'fixVersions', 'description',
+];
+
+interface RawUser {
+  accountId: string;
+  displayName?: string;
+  emailAddress?: string;
+  active?: boolean;
+  accountType?: string;
+}
+
+interface RawIssue {
+  id: string;
+  key: string;
+  fields: {
+    summary: string;
+    status: { name: string; statusCategory: { key: string } };
+    priority?: { name: string } | null;
+    assignee?: RawUser | null;
+    reporter?: RawUser | null;
+    created: string;
+    updated: string;
+    resolution?: { name: string } | null;
+    resolutiondate?: string | null;
+    project: { key: string };
+    issuetype: { name: string };
+    parent?: { id: string; key: string; fields?: { summary?: string; issuetype?: { name: string } } } | null;
+    labels?: string[];
+    components?: Array<{ name: string }>;
+    fixVersions?: Array<{ name: string }>;
+    description?: unknown;
+    [field: string]: unknown;
+  };
+}
+
+export function mapUser(user: RawUser | null | undefined): JiraUser | undefined {
+  if (!user || !user.accountId) return undefined;
+  return {
+    accountId: user.accountId,
+    displayName: user.displayName ?? '',
+    ...(user.emailAddress ? { emailAddress: user.emailAddress } : {}),
+    ...(user.active !== undefined ? { active: user.active } : {}),
+    ...(user.accountType ? { accountType: user.accountType } : {}),
+  };
+}
+
+/** Field ids from a `--fields` list, without blanks or the ones every issue already carries. */
+export function extraFieldIds(fields: string[] | undefined): string[] {
+  const ids = (fields ?? []).map((f) => f.trim()).filter((f) => f !== '');
+  return [...new Set(ids)];
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export class JiraClient implements ServiceClient {
   private credentials: JiraCredentials;
   private baseUrl: string;
 
-  constructor(credentials: JiraCredentials) {
+  private wait: (ms: number) => Promise<void>;
+
+  constructor(credentials: JiraCredentials, options: { wait?: (ms: number) => Promise<void> } = {}) {
     this.credentials = credentials;
+    this.wait = options.wait ?? sleep;
     this.baseUrl = `https://api.atlassian.com/ex/jira/${credentials.cloudId}/rest/api/3`;
   }
 
@@ -78,11 +155,25 @@ export class JiraClient implements ServiceClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    for (let attempt = 0; ; attempt++) {
+      response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      // A long backfill hits Jira's rate limit; wait as told and try again rather than lose the run.
+      if ((response.status === 429 || response.status === 503) && attempt < MAX_RETRIES) {
+        const retryAfter = Number(response.headers.get('Retry-After'));
+        const waitMs = Number.isFinite(retryAfter) && retryAfter >= 0 && response.headers.has('Retry-After')
+          ? retryAfter * 1000
+          : 1000 * 2 ** attempt;
+        await response.text().catch(() => '');
+        await this.wait(Math.min(waitMs, MAX_RETRY_WAIT_MS));
+        continue;
+      }
+      break;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -134,7 +225,11 @@ export class JiraClient implements ServiceClient {
     }));
   }
 
-  async searchIssues(options: JiraSearchOptions = {}): Promise<JiraIssue[]> {
+  /**
+   * Search with JQL through /search/jql, following nextPageToken until `maxResults` issues are
+   * read or none are left. Each page asks for at most SEARCH_PAGE_MAX, the API's own limit.
+   */
+  async searchIssues(options: JiraSearchOptions = {}): Promise<JiraSearchResult> {
     // Build JQL query
     const jqlParts: string[] = [];
 
@@ -152,92 +247,186 @@ export class JiraClient implements ServiceClient {
     }
 
     const jql = jqlParts.join(' AND ') || 'ORDER BY created DESC';
-    const maxResults = options.maxResults || 50;
-
-    const params = new URLSearchParams();
-    params.set('jql', jql);
-    params.set('maxResults', String(maxResults));
-    params.set('fields', 'summary,status,priority,assignee,reporter,created,updated,project,issuetype,description');
+    const limit = options.maxResults ?? 50;
+    const extras = extraFieldIds(options.fields);
+    const fields = [...new Set([...ISSUE_FIELDS, ...extras])].join(',');
 
     interface SearchResponse {
-      issues: Array<{
-        id: string;
-        key: string;
-        fields: {
-          summary: string;
-          status: {
-            name: string;
-            statusCategory: { key: string };
-          };
-          priority?: { name: string };
-          assignee?: { displayName: string };
-          reporter?: { displayName: string };
-          created: string;
-          updated: string;
-          project: { key: string };
-          issuetype: { name: string };
-          description?: unknown;
-        };
-      }>;
+      issues: RawIssue[];
+      nextPageToken?: string;
+      isLast?: boolean;
     }
 
-    const response = await this.request<SearchResponse>('GET', `/search/jql?${params.toString()}`);
+    const issues: JiraIssue[] = [];
+    let pageToken = options.nextPageToken;
+    let more = false;
 
-    return response.issues.map((issue) => ({
-      id: issue.id,
-      key: issue.key,
-      summary: issue.fields.summary,
-      status: issue.fields.status.name,
-      statusCategoryKey: issue.fields.status.statusCategory.key,
-      priority: issue.fields.priority?.name,
-      assignee: issue.fields.assignee?.displayName,
-      reporter: issue.fields.reporter?.displayName,
-      created: issue.fields.created,
-      updated: issue.fields.updated,
-      projectKey: issue.fields.project.key,
-      issueType: issue.fields.issuetype.name,
-      description: this.extractTextFromAdf(issue.fields.description),
-    }));
-  }
+    while (issues.length < limit) {
+      const params = new URLSearchParams();
+      params.set('jql', jql);
+      params.set('maxResults', String(Math.min(limit - issues.length, SEARCH_PAGE_MAX)));
+      params.set('fields', fields);
+      if (pageToken) params.set('nextPageToken', pageToken);
 
-  async getIssue(issueKey: string): Promise<JiraIssue> {
-    interface IssueResponse {
-      id: string;
-      key: string;
-      fields: {
-        summary: string;
-        status: {
-          name: string;
-          statusCategory: { key: string };
-        };
-        priority?: { name: string };
-        assignee?: { displayName: string };
-        reporter?: { displayName: string };
-        created: string;
-        updated: string;
-        project: { key: string };
-        issuetype: { name: string };
-        description?: unknown;
-      };
+      const response = await this.request<SearchResponse>('GET', `/search/jql?${params.toString()}`);
+      const page = response.issues ?? [];
+      issues.push(...page.map((issue) => this.mapIssue(issue, extras)));
+
+      pageToken = response.nextPageToken;
+      more = !!pageToken && response.isLast !== true;
+      if (!more || page.length === 0) break;
     }
-
-    const response = await this.request<IssueResponse>('GET', `/issue/${issueKey}`);
 
     return {
-      id: response.id,
-      key: response.key,
-      summary: response.fields.summary,
-      status: response.fields.status.name,
-      statusCategoryKey: response.fields.status.statusCategory.key,
-      priority: response.fields.priority?.name,
-      assignee: response.fields.assignee?.displayName,
-      reporter: response.fields.reporter?.displayName,
-      created: response.fields.created,
-      updated: response.fields.updated,
-      projectKey: response.fields.project.key,
-      issueType: response.fields.issuetype.name,
-      description: this.extractTextFromAdf(response.fields.description),
+      issues,
+      truncated: more,
+      ...(more && pageToken ? { nextPageToken: pageToken } : {}),
     };
+  }
+
+  async getIssue(issueKey: string, options: JiraGetOptions = {}): Promise<JiraIssue> {
+    const extras = extraFieldIds(options.fields);
+    const params = new URLSearchParams();
+    params.set('fields', [...new Set([...ISSUE_FIELDS, ...extras])].join(','));
+
+    const response = await this.request<RawIssue>('GET', `/issue/${encodeURIComponent(issueKey)}?${params.toString()}`);
+    const issue = this.mapIssue(response, extras);
+
+    if (options.comments) issue.comments = await this.getComments(issueKey);
+    if (options.changelog) issue.changelog = await this.getChangelog(issueKey);
+    return issue;
+  }
+
+  /** Every change to an issue, oldest first, read 100 at a time. */
+  async getChangelog(issueKey: string): Promise<JiraChangelogEntry[]> {
+    interface ChangelogResponse {
+      values: Array<{
+        id: string;
+        created: string;
+        author?: RawUser;
+        items: Array<{
+          field: string;
+          fieldId?: string;
+          from?: string | null;
+          fromString?: string | null;
+          to?: string | null;
+          toString?: string | null;
+        }>;
+      }>;
+      startAt?: number;
+      total?: number;
+      isLast?: boolean;
+    }
+
+    const entries: JiraChangelogEntry[] = [];
+    for (let startAt = 0; ;) {
+      const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(CHANGELOG_PAGE_MAX) });
+      const response = await this.request<ChangelogResponse>('GET', `/issue/${encodeURIComponent(issueKey)}/changelog?${params.toString()}`);
+      const page = response.values ?? [];
+      for (const entry of page) {
+        entries.push({
+          id: entry.id,
+          created: entry.created,
+          ...(mapUser(entry.author) ? { author: mapUser(entry.author) } : {}),
+          items: (entry.items ?? []).map((item) => ({
+            field: item.field,
+            ...(item.fieldId ? { fieldId: item.fieldId } : {}),
+            from: item.from ?? null,
+            fromString: item.fromString ?? null,
+            to: item.to ?? null,
+            toString: item.toString ?? null,
+          })),
+        });
+      }
+      startAt += page.length;
+      const done = response.isLast === true
+        || page.length === 0
+        || (response.total !== undefined && startAt >= response.total);
+      if (done) break;
+    }
+    return entries;
+  }
+
+  /**
+   * Users whose name or email matches `query`, with their accountId. Needs the
+   * read:jira-user scope; a profile without it is told how to get it.
+   */
+  async searchUsers(query: string, options: JiraUserSearchOptions = {}): Promise<JiraUser[]> {
+    const limit = Math.min(options.maxResults ?? 50, USER_SEARCH_MAX);
+    const users: JiraUser[] = [];
+    for (let startAt = 0; users.length < limit;) {
+      const want = limit - users.length;
+      const params = new URLSearchParams({ query, startAt: String(startAt), maxResults: String(want) });
+      const page = await this.userRequest<RawUser[]>(`/user/search?${params.toString()}`);
+      for (const raw of page) {
+        const user = mapUser(raw);
+        if (user) users.push(user);
+      }
+      startAt += page.length;
+      if (page.length < want || startAt >= USER_SEARCH_MAX) break;
+    }
+    return users.slice(0, limit);
+  }
+
+  async getUser(accountId: string): Promise<JiraUser> {
+    const raw = await this.userRequest<RawUser>(`/user?${new URLSearchParams({ accountId }).toString()}`);
+    const user = mapUser(raw);
+    if (!user) throw new CliError('NOT_FOUND', `No Jira user with accountId "${accountId}"`);
+    return user;
+  }
+
+  private async userRequest<T>(path: string): Promise<T> {
+    try {
+      return await this.request<T>('GET', path);
+    } catch (error) {
+      if (error instanceof CliError && (error.code === 'AUTH_FAILED' || error.code === 'PERMISSION_DENIED')) {
+        throw new CliError(
+          error.code,
+          error.message,
+          'User lookup needs the read:jira-user scope, which agentio\'s Atlassian sign-in does not request yet, '
+            + 'and the "Browse users and groups" permission. Assignee and reporter account ids (and emails, when visible) '
+            + 'are in: agentio jira search --json',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private mapIssue(issue: RawIssue, extras: string[] = []): JiraIssue {
+    const f = issue.fields;
+    const mapped: JiraIssue = {
+      id: issue.id,
+      key: issue.key,
+      summary: f.summary,
+      status: f.status.name,
+      statusCategoryKey: f.status.statusCategory.key,
+      priority: f.priority?.name,
+      assignee: mapUser(f.assignee),
+      reporter: mapUser(f.reporter),
+      created: f.created,
+      updated: f.updated,
+      resolution: f.resolution?.name,
+      resolutionDate: f.resolutiondate ?? undefined,
+      projectKey: f.project.key,
+      issueType: f.issuetype.name,
+      parent: f.parent
+        ? {
+            id: f.parent.id,
+            key: f.parent.key,
+            summary: f.parent.fields?.summary,
+            issueType: f.parent.fields?.issuetype?.name,
+          }
+        : undefined,
+      labels: f.labels ?? [],
+      components: (f.components ?? []).map((c) => c.name),
+      fixVersions: (f.fixVersions ?? []).map((v) => v.name),
+      description: this.extractTextFromAdf(f.description),
+    };
+    const wanted = extras.filter((id) => !ISSUE_FIELDS.includes(id));
+    if (wanted.length > 0) {
+      mapped.extraFields = Object.fromEntries(wanted.map((id) => [id, f[id] ?? null]));
+    }
+    return mapped;
   }
 
   async getTransitions(issueKey: string): Promise<JiraTransition[]> {
@@ -314,22 +503,33 @@ export class JiraClient implements ServiceClient {
     interface CommentsResponse {
       comments: Array<{
         id: string;
-        author: { displayName: string };
+        author?: RawUser;
         body: unknown;
         created: string;
         updated: string;
       }>;
+      total?: number;
     }
 
-    const response = await this.request<CommentsResponse>('GET', `/issue/${issueKey}/comment`);
-
-    return response.comments.map((c) => ({
-      id: c.id,
-      author: c.author.displayName,
-      body: this.extractTextFromAdf(c.body),
-      created: c.created,
-      updated: c.updated,
-    }));
+    const comments: JiraComment[] = [];
+    for (let startAt = 0; ;) {
+      const params = new URLSearchParams({ startAt: String(startAt), maxResults: String(COMMENT_PAGE_MAX) });
+      const response = await this.request<CommentsResponse>('GET', `/issue/${encodeURIComponent(issueKey)}/comment?${params.toString()}`);
+      const page = response.comments ?? [];
+      for (const c of page) {
+        comments.push({
+          id: c.id,
+          author: c.author?.displayName ?? '',
+          ...(c.author?.accountId ? { authorAccountId: c.author.accountId } : {}),
+          body: this.extractTextFromAdf(c.body),
+          created: c.created,
+          updated: c.updated,
+        });
+      }
+      startAt += page.length;
+      if (page.length === 0 || response.total === undefined || startAt >= response.total) break;
+    }
+    return comments;
   }
 
   // Convert plain text to Atlassian Document Format (ADF)
