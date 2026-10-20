@@ -18,6 +18,7 @@ import gtasks from './google/gtasks';
 import jev from './jev';
 import jira from './jira';
 import kite from './kite';
+import memory from './memory';
 import notes from './notes';
 import pagerio from './pagerio';
 import pocketalert from './pocketalert';
@@ -53,6 +54,7 @@ export const SERVICE_PLUGINS = [
   jev,
   jira,
   kite,
+  memory,
   notes,
   pagerio,
   pocketalert,
