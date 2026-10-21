@@ -87,6 +87,7 @@ describe('what each service shows about a profile', () => {
     ['falco', { refreshToken: 'SECRETr', userEmail: 'me@x.com', organizationName: 'Docunit' }, { account: 'me@x.com · Docunit' }],
     ['discourse', { apiKey: 'SECRETk', baseUrl: 'https://forum.example.com', username: 'pal' }, { account: 'pal', url: 'https://forum.example.com' }],
     ['kite', { token: 'SECRETt', baseUrl: 'https://kite.example.com', email: 'me@x.com' }, { account: 'me@x.com', url: 'https://kite.example.com' }],
+    ['memory', { token: 'SECRETt', baseUrl: 'https://graphiti.example.com', defaultGroup: 'famille' }, { url: 'https://graphiti.example.com' }],
     ['notes', { apiKey: 'SECRETk', baseUrl: 'https://mac.example.ts.net' }, { url: 'https://mac.example.ts.net' }],
     ['jev', { apiKey: 'SECRETk', model: 'jev-preview' }, { account: 'jev-preview', url: 'https://console.typesafe.ai', serviceUrl: true }],
     ['jev', { apiKey: 'SECRETk' }, { url: 'https://console.typesafe.ai', serviceUrl: true }],

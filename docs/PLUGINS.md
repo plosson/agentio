@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-11. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-20. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -18,6 +18,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | whatsapp | A linked device (QR code or 8-character code), through the unofficial Baileys library; the daemon holds the connection | **The user's own WhatsApp account**, no app | No | **Meta may ban the number.** Use a dedicated one. |
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
+| memory | Bearer token of the proxy in front of the user's own Graphiti REST server; the URL is a profile value | **The user's own server and token**, no app | No | The server needs its own LLM key (OpenAI) to extract facts |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
@@ -446,6 +447,42 @@ Kite is a fork of Open Artifact. The plugin talks to its REST API, never to its 
 **Remote mode:** agents with a key that covers the profile receive the whole credential, token included, as with the other static-token plugins.
 
 **What's needed:** an account on the Kite server. There is no app to create and no key to copy.
+
+---
+
+## Graphiti memory
+
+**Code:** `src/plugins/memory/`
+
+Stores facts linked to a document id, and searches them, in the user's own [Graphiti](https://github.com/getzep/graphiti) REST server (`server/graph_service`, the FastAPI server, not the MCP server). Graphiti extracts entities and facts from each text with its own LLM; agentio only sends text and reads facts back.
+
+**Sign-in:** a bearer token, sent as `Authorization: Bearer <token>`. Graphiti's server has no auth of its own, so the token is checked by a proxy in front of it (Caddy, for example).
+- The server URL is never built in. Each profile names one server: `agentio memory profile add <name> --url <server>`. Several profiles are several servers; commands pick one with `--profile`.
+- The token is never a command-line flag. `profile add` takes it from `--token-stdin`, else from `AGENTIO_MEMORY_TOKEN`, else asks for it with hidden input.
+- Setup calls `GET /healthcheck` with the token, which checks both the proxy and that the URL is a Graphiti server. With `--group`, it also lists that group's latest episode.
+- No expiry and no refresh. A new token on the proxy breaks the profiles that use it; run `profile add` again.
+
+**What the vault stores:** server URL, token, optional default group.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, token included, as with the other static-token plugins.
+
+### How documents are traced
+
+`add` sends one message to `POST /messages`. The episode's `source_description` is `ref:<id>` followed by ` url:<url>` when there is a link, with the id percent-encoded, and its name defaults to `ref:<id>`. agentio picks the episode uuid, so it can report it. `search` and `entity` read each fact's `episodes` and resolve them to refs by listing the group's recent episodes (`--scan`, default 1000). The server has no route to read one episode or filter by source.
+
+### Limits of the REST server
+
+- `POST /messages` answers 202 and extracts facts in a background queue: facts reach search later, and a failure there (no LLM key, for example) is only in the server's logs.
+- No entity lookup by name. `entity` searches for the name, takes the graph node most matching facts share, and reads the facts around it with `POST /get-memory`.
+- `DELETE /episode/{uuid}` removes the episode node only. `forget` therefore also deletes the facts (`DELETE /entity-edge/{uuid}`) whose every source episode is being forgotten, and keeps those another document supports. Entity nodes stay: there is no route to delete them.
+- Episodes are listed per group (`GET /episodes/{group_id}?last_n=N`), newest first, so `add`, `episodes`, `entity` and `forget` need a group: `--group` or the profile's default. `search` without any group covers every group but cannot resolve refs.
+- `POST /clear` and `DELETE /group/{group_id}` are not exposed: they wipe the whole graph or a whole group.
+
+### Set up the server (required)
+
+1. Run Graphiti's REST server with a graph database (FalkorDB or Neo4j) and an `OPENAI_API_KEY` for extraction and embeddings.
+2. Put a proxy in front of it that refuses any request without `Authorization: Bearer <token>`. Don't expose the server without it.
+3. Run `agentio memory profile add <name> --url <server URL> [--group <id>]` and paste the token.
 
 ---
 

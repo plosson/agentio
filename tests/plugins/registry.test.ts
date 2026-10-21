@@ -33,6 +33,7 @@ const SERVICE_ORDER = [
   'jev',
   'jira',
   'kite',
+  'memory',
   'notes',
   'pagerio',
   'pocketalert',
