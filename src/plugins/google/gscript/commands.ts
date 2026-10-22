@@ -15,6 +15,7 @@ import {
   printGScriptPushResult,
 } from './output';
 import { CliError, handleError } from '../../../utils/errors';
+import { resolveInside } from '../../../utils/safe-path';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
 import type {
@@ -205,7 +206,8 @@ The --parent ID is the container's Drive file ID (Sheet/Doc/Form/Slides).`,
           for (const file of files) {
             const localName = localFilenameForApiFile(file);
             const localPath = join(targetDir, localName);
-            await writeFile(localPath, file.source, 'utf8');
+            // File names come from the (possibly shared) script project: never write outside targetDir.
+            await writeFile(resolveInside(targetDir, localName), file.source, 'utf8');
             written.push({ localPath, type: file.type });
           }
           await writeFile(claspPath, JSON.stringify({ scriptId: id, rootDir: '.' }, null, 2) + '\n', 'utf8');

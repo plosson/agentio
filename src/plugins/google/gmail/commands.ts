@@ -7,6 +7,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { googleSnakeSetup } from '../shared';
 import { GmailClient } from './client';
+import { attachmentOutputPaths } from './attachment-path';
 import { printMessageList, printMessage, printSendResult, printDraftResult, printDraftDeleted, printArchived, printMarked, printAttachmentList, printAttachmentDownloaded, printLabelList, printLabelCreated, printLabelDeleted, printLabelRenamed, printLabelModified, printBatchProgress, printBatchSummary, printBatchDryRun, printFilterList, printFilter, printFilterCreated, printFilterDeleted, raw } from './output';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
@@ -1016,8 +1017,10 @@ Combine with spaces (AND), OR, or - to negate.`,
             console.log(`Downloading ${toDownload.length} attachment(s)...\n`);
           }
 
-          for (const { data, attachment } of toDownload) {
-            const outputPath = join(outputDir, attachment.filename);
+          // Attachment names are chosen by the sender: sanitise, dedupe and keep them inside outputDir.
+          const outputPaths = attachmentOutputPaths(outputDir, toDownload.map(({ attachment }) => attachment.filename));
+          for (const [i, { data, attachment }] of toDownload.entries()) {
+            const outputPath = outputPaths[i]!;
             await Bun.write(outputPath, data);
             printAttachmentDownloaded(attachment.filename, outputPath, data.length);
             if (toDownload.length > 1) console.log('');
