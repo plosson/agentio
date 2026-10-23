@@ -5,24 +5,91 @@ import { addExamples } from '../../utils/command-tree';
 import { createClientGetter } from '../../utils/client-factory';
 import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
+import { addJsonOption } from '../../utils/output';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
-import { SlackClient } from './client';
+import { checkUserToken, SlackClient } from './client';
 import { checkWebhookUrl } from '../webhook-check';
-import { printSlackSendResult } from './output';
-import type { SlackCredentials, SlackWebhookCredentials } from './types';
+import { answerOrAsk } from '../setup-inputs';
+import {
+  printSlackArchive,
+  printSlackLeave,
+  printSlackChannel,
+  printSlackChannelList,
+  printSlackChannelMembers,
+  printSlackMembership,
+  printSlackSendResult,
+  printSlackUser,
+  printSlackUserList,
+} from './output';
+import type { SlackCredentials, SlackTokenCredentials, SlackWebhookCredentials } from './types';
 import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
+import type { ProfileAddOptions } from '../types';
 
 const SLACK_WEBHOOK_INPUT: InputSpec = {
   label: 'Webhook URL', kind: 'secret',
   help: 'From your Slack app: Incoming Webhooks, Add New Webhook to Workspace (https://api.slack.com/apps)',
 };
 const SLACK_CHANNEL_INPUT: InputSpec = { label: 'Channel name', kind: 'text', required: false, help: 'Only for display; also the default profile name' };
+const SLACK_KIND_INPUT: InputSpec = {
+  label: 'Profile type', kind: 'choice', default: 'webhook',
+  choices: [
+    { value: 'webhook', label: 'Incoming webhook (send messages to one channel)' },
+    { value: 'token', label: 'User token (manage users and channels as you)' },
+  ],
+};
+const SLACK_TOKEN_INPUT: InputSpec = {
+  label: 'User OAuth Token', kind: 'secret',
+  help: 'From your Slack app: OAuth & Permissions, User OAuth Token (starts with xoxp-)',
+};
+
+/** The User Token Scopes the admin commands need. */
+export const SLACK_USER_SCOPES = [
+  'users:read', 'users:read.email',
+  'channels:read', 'groups:read',
+  'channels:manage', 'groups:write',
+  'channels:write.invites', 'groups:write.invites',
+  'channels:write',
+];
+
+export interface SlackProfileAddOptions extends ProfileAddOptions {
+  /** Skips the profile type question. */
+  kind?: 'webhook' | 'token';
+  /** A user token given by the caller instead of asked for; implies kind token. */
+  token?: string;
+}
 
 const getSlackClient = createClientGetter<SlackCredentials, SlackClient>({
   service: 'slack',
   createClient: (credentials) => new SlackClient(credentials),
 });
+
+/** A leaf command with the options every token command takes. */
+function leaf(parent: Command, name: string, description: string): Command {
+  return addJsonOption(
+    parent
+      .command(name)
+      .description(description)
+      .option('--profile <name>', 'Profile name (optional if only one profile exists)'),
+  );
+}
+
+/** Run a command's action, turning any failure into the standard error output. */
+function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      await action(...args);
+    } catch (error) {
+      handleError(error);
+    }
+  };
+}
+
+async function getWritableClient(profileName: string | undefined, operation: string): Promise<SlackClient> {
+  const { client, profile } = await getSlackClient(profileName);
+  await enforceWriteAccess('slack', profile, operation);
+  return client;
+}
 
 export function registerSlackCommands(program: Command): void {
   const slack = program
@@ -116,27 +183,261 @@ export function registerSlackCommands(program: Command): void {
   agentio slack send --profile alerts "incident opened"`,
   );
 
+  const users = slack.command('users').description('Workspace members (needs a user token profile)');
+
+  addExamples(
+    leaf(users, 'list', 'List workspace members, with their display names')
+      .option('--include-deleted', 'Also list deactivated accounts')
+      .option('--include-bots', 'Also list bots and Slackbot')
+      .action(run(async (options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackUserList(await client.listUsers({
+          includeDeleted: !!options.includeDeleted,
+          includeBots: !!options.includeBots,
+        }), options.json);
+      })),
+    `Examples:
+
+  agentio slack users list
+
+  # members without a display name
+  agentio slack users list --json | jq '.users[] | select(.displayName == null) | .email'`,
+  );
+
+  addExamples(
+    leaf(users, 'get', 'Show one member, by user id or email address')
+      .argument('<user>', 'User id (U…) or email address')
+      .action(run(async (user: string, options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackUser(await client.getUser(user), options.json);
+      })),
+    `Examples:
+
+  agentio slack users get jane@example.com
+  agentio slack users get U012AB3CD --json`,
+  );
+
+  const channels = slack.command('channels').description('Channels: create, change, archive, and invite or uninvite members (needs a user token profile)');
+
+  addExamples(
+    leaf(channels, 'list', 'List channels: every public one, and the private ones you belong to')
+      .option('--private-only', 'Only private channels')
+      .option('--include-archived', 'Also list archived channels')
+      .action(run(async (options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackChannelList(await client.listChannels({
+          privateOnly: !!options.privateOnly,
+          includeArchived: !!options.includeArchived,
+        }), options.json);
+      })),
+    `Examples:
+
+  agentio slack channels list
+  agentio slack channels list --private-only --json`,
+  );
+
+  addExamples(
+    leaf(channels, 'get', 'Show one channel, by id or name')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .action(run(async (channel: string, options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackChannel(await client.getChannel(channel), options.json);
+      })),
+    `Examples:
+
+  agentio slack channels get general
+  agentio slack channels get C012AB3CD --json`,
+  );
+
+  addExamples(
+    leaf(channels, 'create', 'Create a channel; you become its first member')
+      .argument('<name>', 'Lowercase letters, digits, hyphens and underscores, at most 80')
+      .option('--private', 'Create a private channel')
+      .option('--topic <text>', 'Channel topic, shown in the header')
+      .option('--purpose <text>', 'Channel description')
+      .action(run(async (name: string, options) => {
+        const client = await getWritableClient(options.profile, 'create a channel');
+        const channel = await client.createChannel(name, { isPrivate: !!options.private, topic: options.topic, purpose: options.purpose });
+        printSlackChannel(channel, options.json, 'Created');
+      })),
+    `Examples:
+
+  agentio slack channels create team-design --topic "Design reviews" --purpose "Where the design team works"
+  agentio slack channels create hr-private --private`,
+  );
+
+  addExamples(
+    leaf(channels, 'set', 'Change a channel\'s name, topic or purpose')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .option('--name <name>', 'New name')
+      .option('--topic <text>', 'New topic; "" clears it')
+      .option('--purpose <text>', 'New description; "" clears it')
+      .action(run(async (channel: string, options) => {
+        const client = await getWritableClient(options.profile, 'change a channel');
+        const updated = await client.updateChannel(channel, { name: options.name, topic: options.topic, purpose: options.purpose });
+        printSlackChannel(updated, options.json, 'Updated');
+      })),
+    `Examples:
+
+  agentio slack channels set team-design --topic "Reviews on Thursdays"
+  agentio slack channels set C012AB3CD --name design-team --purpose ""
+
+Only name, topic and purpose can be changed through the API on Business+.
+Posting permissions and other settings are in the Slack app.`,
+  );
+
+  addExamples(
+    leaf(channels, 'archive', 'Archive a channel: read-only and out of the sidebar, history kept')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .action(run(async (channel: string, options) => {
+        const client = await getWritableClient(options.profile, 'archive a channel');
+        printSlackArchive(await client.archiveChannel(channel), 'Archived', options.json);
+      })),
+    `Examples:
+
+  agentio slack channels archive old-project
+
+Undo with: agentio slack channels unarchive old-project. Deleting a channel
+for good is not possible through the API on Business+; an admin does it in the
+Slack app (channel name, Settings, Delete this channel).`,
+  );
+
+  addExamples(
+    leaf(channels, 'unarchive', 'Bring an archived channel back')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .action(run(async (channel: string, options) => {
+        const client = await getWritableClient(options.profile, 'unarchive a channel');
+        printSlackArchive(await client.unarchiveChannel(channel), 'Unarchived', options.json);
+      })),
+    `Examples:
+
+  agentio slack channels unarchive old-project`,
+  );
+
+  addExamples(
+    leaf(channels, 'leave', 'Leave channels yourself')
+      .argument('<channels...>', 'Channel ids (C…) or names, with or without #')
+      .action(run(async (names: string[], options) => {
+        const client = await getWritableClient(options.profile, 'leave a channel');
+        printSlackLeave(await client.leaveChannels(names), options.json);
+      })),
+    `Examples:
+
+  agentio slack channels leave topic-apple topic-swift
+
+Every channel is looked up first: one wrong name leaves none. Channels you
+are not in are skipped. After leaving a private channel you no longer see it,
+so only another member can invite you back.`,
+  );
+
+  addExamples(
+    leaf(channels, 'members', 'List a channel\'s members')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .action(run(async (channel: string, options) => {
+        const { client } = await getSlackClient(options.profile);
+        const { channel: found, members } = await client.channelMembers(channel);
+        printSlackChannelMembers(found, members, options.json);
+      })),
+    `Examples:
+
+  agentio slack channels members team-design
+  agentio slack channels members C012AB3CD --json | jq -r '.members[].email'`,
+  );
+
+  addExamples(
+    leaf(channels, 'invite', 'Add people to a channel; Slack adds them at once, without asking them')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .argument('<users...>', 'User ids (U…) or email addresses')
+      .action(run(async (channel: string, users: string[], options) => {
+        const client = await getWritableClient(options.profile, 'invite to a channel');
+        printSlackMembership(await client.inviteToChannel(channel, users), 'Invited', options.json);
+      })),
+    `Examples:
+
+  agentio slack channels invite team-design jane@example.com U012AB3CD
+
+Every user is looked up first: one unknown email invites nobody. People
+already in the channel are skipped. You must be a member of the channel.`,
+  );
+
+  addExamples(
+    leaf(channels, 'uninvite', 'Remove people from a channel')
+      .argument('<channel>', 'Channel id (C…) or name, with or without #')
+      .argument('<users...>', 'User ids (U…) or email addresses')
+      .action(run(async (channel: string, users: string[], options) => {
+        const client = await getWritableClient(options.profile, 'uninvite from a channel');
+        printSlackMembership(await client.uninviteFromChannel(channel, users), 'Uninvited', options.json);
+      })),
+    `Examples:
+
+  agentio slack channels uninvite team-design jane@example.com
+
+Every user is looked up first: one unknown email removes nobody. People not
+in the channel are skipped.`,
+  );
+
   const profile = createProfileCommands<SlackCredentials>(slack, {
     service: 'slack',
     displayName: 'Slack',
-    getExtraInfo: (credentials) => credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook',
+    getExtraInfo: (credentials) => {
+      if (credentials?.type === 'token') return ` - ${credentials.teamName ?? 'user token'} (token)`;
+      return credentials?.channelName ? ` - #${credentials.channelName}` : ' - webhook';
+    },
   });
 
-  profile
-    .command('add')
-    .description('Add a new Slack profile (webhook)')
-    .option('--profile <name>', 'Profile name (default: the channel name, else "webhook")')
-    .option('--read-only', 'Create as read-only profile (blocks write operations)')
-    .action(async (options) => {
-        try {
-          await addProfileWithSetup('slack', slackProfileAdd, options);
-        } catch (error) {
-          handleError(error);
-        }
-      });
+  addExamples(
+    profile
+      .command('add')
+      .description('Add a Slack profile: an incoming webhook, or a user token for the admin commands')
+      .option('--token', 'Add a user token profile, without asking the profile type')
+      .option('--profile <name>', 'Profile name (default: the channel name or workspace name)')
+      .option('--read-only', 'Create as read-only profile (blocks write operations)')
+      .action(run(async (options: { token?: boolean; profile?: string; readOnly?: boolean }) => {
+        const { token, ...rest } = options;
+        // The token itself is always asked for, so it stays out of shell history.
+        await addProfileWithSetup('slack', (o, context) => slackProfileAdd({ ...o, ...(token ? { kind: 'token' as const } : {}) }, context), rest);
+      })),
+    `Examples:
+
+  # asks whether to add a webhook or a user token
+  agentio slack profile add
+
+  # a user token for the admin commands (users, channels)
+  agentio slack profile add --token --profile hexrays`,
+  );
 }
 
-export async function slackProfileAdd(_options: { profile?: string; readOnly?: boolean }, context: SetupContext): Promise<SetupResult<SlackCredentials>> {
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+}
+
+async function slackTokenProfileAdd(given: string | undefined, context: SetupContext): Promise<SetupResult<SlackTokenCredentials>> {
+  if (given === undefined) {
+    context.log('\nSlack User Token Setup\n');
+    context.log('1. Go to https://api.slack.com/apps?new_app=1, click "Create an app", then "Blank app"');
+    context.log('2. In OAuth & Permissions, add these User Token Scopes (not Bot Token Scopes):');
+    context.log(`   ${SLACK_USER_SCOPES.join(', ')}`);
+    context.log('3. Click "Install to Workspace", signed in as a workspace admin');
+    context.log('4. Copy the User OAuth Token (starts with xoxp-)\n');
+  }
+
+  const token = checkUserToken(await answerOrAsk(context, SLACK_TOKEN_INPUT, given));
+  const auth = await new SlackClient({ type: 'token', token }).authTest();
+
+  return {
+    credentials: { type: 'token', token, teamId: auth.teamId, teamName: auth.teamName, userName: auth.userName },
+    suggestedProfileName: slugify(auth.teamName),
+    info: `Signed in as ${auth.userName} in ${auth.teamName}. Test with: agentio slack users list`,
+  };
+}
+
+export async function slackProfileAdd(
+  options: SlackProfileAddOptions,
+  context: SetupContext,
+): Promise<SetupResult<SlackCredentials>> {
+  const kind = options.token !== undefined ? 'token' : options.kind ?? await context.ask(SLACK_KIND_INPUT);
+  if (kind === 'token') return slackTokenProfileAdd(options.token, context);
+
   context.log('\nSlack Webhook Setup\n');
   context.log('1. Go to https://api.slack.com/apps and create a new app (or use existing)');
   context.log('2. Enable "Incoming Webhooks" in Features');
