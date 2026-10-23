@@ -9,7 +9,7 @@ export interface KiteCredentials {
   expiresAt: string;
 }
 
-export type KiteDocumentType = 'markdown' | 'html';
+export type KiteDocumentType = 'markdown' | 'html' | 'canvas';
 
 /** A document as the server returns it (the server calls it an artifact). */
 export interface KiteRawDocument {

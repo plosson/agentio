@@ -104,6 +104,13 @@ describe('getVersion', () => {
     expect(now).toMatchObject({ content: '# Two', version: 2, current: true });
   });
 
+  test('is sent with record=false, so looking back is not a read', async () => {
+    const doc = fake.seedDoc(ME);
+    await client.getVersion(doc.id, 1);
+    expect(fake.requests('GET', `/api/artifacts/${doc.id}/versions/1`)[0].query).toEqual({ record: 'false' });
+    expect(doc.opens).toEqual([]);
+  });
+
   test('a version that does not exist says what the document is at', async () => {
     const doc = fake.seedDoc(ME);
     const e = await caught(client.getVersion(doc.id, 7));

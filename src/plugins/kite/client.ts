@@ -164,7 +164,7 @@ function requireBody(body: string | undefined): string {
   return body;
 }
 
-function toDocument(raw: KiteRawDocument): KiteDocument {
+export function toDocument(raw: KiteRawDocument): KiteDocument {
   return {
     id: raw.id,
     url: raw.url,
@@ -304,7 +304,7 @@ function toViewsSummary(raw: KiteRawViewsSummary): KiteViewsSummary {
 }
 
 /** What a server too old for a feature answers; Kite says "No such endpoint." for a route it does not have. */
-function isMissingRoute(res: RawResponse): boolean {
+export function isMissingRoute(res: RawResponse): boolean {
   if (res.status !== 404 && res.status !== 405) return false;
   const envelope = (res.data as ErrorEnvelope | null)?.error;
   if (!envelope) return true;
@@ -325,7 +325,7 @@ interface RequestOptions {
   auth?: boolean;
 }
 
-interface RawResponse {
+export interface RawResponse {
   status: number;
   headers: Headers;
   data: unknown;
@@ -484,6 +484,12 @@ export class KiteClient implements ServiceClient {
   }
 
   /** Title, description and summary only: the content is untouched and no version is written. */
+  /** PUT a whole new content for a document you own, against the version you read. */
+  async replaceContent(id: string, type: KiteDocumentType, content: string, baseVersion: number): Promise<KiteDocument> {
+    const docId = requireDocumentId(id);
+    return toDocument(await this.request<KiteRawDocument>('PUT', `/api/artifacts/${enc(docId)}`, { body: { type, content, baseVersion } }));
+  }
+
   async describe(id: string, input: DescriptionInput): Promise<KiteDocument> {
     const docId = requireDocumentId(id);
     const body = descriptionBody(input);
@@ -527,7 +533,7 @@ export class KiteClient implements ServiceClient {
   }
 
   /** The id of a document named by id or link; a link costs one lookup. */
-  private async documentId(reference: string): Promise<string> {
+  async documentId(reference: string): Promise<string> {
     const ref = resolveReference(reference);
     if (ref.kind === 'id') return requireDocumentId(ref.id);
     const raw = await this.request<KiteRawDocument>('GET', `/api/artifacts/by-slug/${enc(ref.slug)}`);
@@ -539,8 +545,14 @@ export class KiteClient implements ServiceClient {
    * "No such endpoint." (or a proxy's page), which becomes a message naming the
    * feature and the Kite version it needs, instead of "not found".
    */
-  private async newer<T>(path: string, feature: string, since: string, isShape: (data: unknown) => boolean): Promise<T> {
-    const res = await this.raw('GET', path);
+  async newer<T>(
+    path: string,
+    feature: string,
+    since: string,
+    isShape: (data: unknown) => boolean,
+    query?: Record<string, string | undefined>,
+  ): Promise<T> {
+    const res = await this.raw('GET', path, { query });
     const unsupported = () => new CliError('API_ERROR', `Kite at ${this.baseUrl} does not have ${feature} yet`,
       `It needs Kite ${since} or later; ask whoever runs the server to update it`);
     if (res.status >= 200 && res.status < 300) {
@@ -559,13 +571,17 @@ export class KiteClient implements ServiceClient {
     return toVersionList(raw);
   }
 
-  /** One version of a document you own, with its content as it was then (Kite 1.3.0+). */
+  /**
+   * One version of a document you own, with its content as it was then (Kite 1.3.0+).
+   * Sent with `record=false`: an agent looking back at a version is not somebody
+   * reading it, so it never shows in that version's reads.
+   */
   async getVersion(reference: string, version: string | number): Promise<KiteVersionDocument> {
     const n = parseVersion(version);
     const id = await this.documentId(reference);
     const raw = await this.newer<KiteRawDocument & { currentVersion: number; isCurrent: boolean }>(
       `/api/artifacts/${enc(id)}/versions/${n}`, 'version history', '1.3.0',
-      (d) => typeof (d as { content?: unknown } | null)?.content === 'string');
+      (d) => typeof (d as { content?: unknown } | null)?.content === 'string', { record: 'false' });
     return { ...toDocument(raw), content: raw.content ?? '', currentVersion: raw.currentVersion, current: raw.isCurrent };
   }
 
