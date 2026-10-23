@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-20. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-23. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -14,7 +14,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | dropbox | OAuth 2.0 with PKCE; the user pastes the code shown by Dropbox | **The user's own Dropbox app** | No | None |
 | spotify | OAuth 2.0 with PKCE, browser, `127.0.0.1` callback | **The user's own Spotify app** | No | 5-user Development Mode limit. Sign-in expires after 6 months. |
 | revolut | OAuth 2.0 with a signed JWT (private key); the user pastes the redirect URL | **The user's own Business API certificate** | No | None |
-| slack | Incoming webhook URL (send only) | **The user's own Slack app** | No | None |
+| slack | Incoming webhook URL (send only), or a user token (`xoxp-`) for the user and channel commands | **The user's own Slack app** | No | None |
 | whatsapp | A linked device (QR code or 8-character code), through the unofficial Baileys library; the daemon holds the connection | **The user's own WhatsApp account**, no app | No | **Meta may ban the number.** Use a dedicated one. |
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
@@ -340,11 +340,13 @@ Sources: [make your first API request](https://developer.revolut.com/docs/guides
 
 **Code:** `src/plugins/slack/`
 
-**Sign-in:** an incoming webhook URL. It can only **send** messages to one channel.
+**Sign-in:** one of two profile types, chosen by `agentio slack profile add` (or `--token` for the second):
+- **Incoming webhook URL.** It can only **send** messages to one channel.
+- **User token** (`xoxp-`). The `users` and `channels` commands act as the person who installed the app. Setup checks the token with `auth.test` and refuses bot tokens (`xoxb-`).
 
-**What the vault stores:** webhook URL, channel name.
+**What the vault stores:** webhook URL and channel name; or the user token, with the workspace id and name and the user name it acts as.
 
-**Profile name:** `--profile` is optional. The name defaults to the channel name, else `webhook`, and is made unique like every other service.
+**Profile name:** `--profile` is optional. The name defaults to the channel name, else `webhook`, for a webhook, and to the workspace name for a token. It is made unique like every other service.
 
 ### Create your Slack webhook (required)
 
@@ -358,6 +360,19 @@ Notes:
 - **Admin approval.** If your workspace requires admin approval for apps, step 4 becomes a request that an Owner or app manager must approve.
 - **What a webhook can't do:** it posts only to its own channel, and can't change the sender's name or icon, or delete messages.
 - **agentio's own setup text is outdated.** It says "create a new app"; Slack's current flow is "Create an app" then "Blank app".
+
+### Create your Slack user token (for the users and channels commands)
+
+1. Open https://api.slack.com/apps?new_app=1, click **Create an app**, then **Blank app**, choose the workspace, then **Create**.
+2. In **OAuth & Permissions**, under **User Token Scopes** (not Bot Token Scopes), add: `users:read`, `users:read.email`, `channels:read`, `groups:read`, `channels:manage`, `groups:write`, `channels:write.invites`, `groups:write.invites`, `channels:write`.
+3. Click **Install to Workspace**, signed in as a workspace admin, and copy the **User OAuth Token**.
+4. Run `agentio slack profile add --token` and paste it.
+
+Notes:
+- **Adding a scope later** needs **Reinstall to Workspace**; the token normally stays the same. A missing scope fails with an error that names it.
+- **Private channels** are visible to the token only while its user is a member.
+- **Business+ limits:** the API can change a channel's name, topic and purpose, and archive it. Deleting a channel and other channel settings need Enterprise Grid (`admin.*`), so they stay in the Slack app.
+- **Token rotation** must stay off: the profile has no refresh token.
 
 Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks), [app quickstart](https://docs.slack.dev/app-management/quickstart-app-settings), [app approval](https://slack.com/help/articles/222386767).
 

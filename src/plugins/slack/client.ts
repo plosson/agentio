@@ -1,20 +1,193 @@
 import type { ServiceClient, ValidationResult } from '../../types/service';
-import { CliError, httpStatusToErrorCode } from '../../utils/errors';
+import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type {
+  SlackChannelChange,
+  SlackAuthInfo,
+  SlackChannel,
+  SlackChannelCreateOptions,
+  SlackChannelListOptions,
+  SlackChannelUpdate,
   SlackCredentials,
+  SlackMembershipResult,
   SlackSendOptions,
   SlackSendResult,
+  SlackTokenCredentials,
+  SlackUser,
+  SlackUserListOptions,
   SlackWebhookCredentials,
 } from './types';
 
+export const SLACK_API_URL = 'https://slack.com/api';
+const REQUEST_TIMEOUT_MS = 30_000;
+const PAGE_SIZE = 200;
+/** Retries after a 429; Slack's Retry-After is honoured up to MAX_RETRY_WAIT_S each time. */
+const MAX_RETRIES = 3;
+const MAX_RETRY_WAIT_S = 60;
+/** From this many users, invite and uninvite read users.list once instead of looking each one up. */
+const BULK_LOOKUP_MIN = 3;
+
+interface SlackApiResponse {
+  ok: boolean;
+  error?: string;
+  needed?: string;
+  provided?: string;
+  response_metadata?: { next_cursor?: string };
+}
+
+interface RawUser {
+  id: string;
+  name: string;
+  real_name?: string;
+  deleted?: boolean;
+  is_admin?: boolean;
+  is_owner?: boolean;
+  is_bot?: boolean;
+  is_restricted?: boolean;
+  profile?: { real_name?: string; display_name?: string; email?: string; title?: string };
+}
+
+interface RawChannel {
+  id: string;
+  name: string;
+  is_private?: boolean;
+  is_archived?: boolean;
+  is_member?: boolean;
+  num_members?: number;
+  created?: number;
+  topic?: { value?: string };
+  purpose?: { value?: string };
+}
+
+/** The token-only Web API errors that have a clearer meaning than Slack's code. */
+const API_ERRORS: Record<string, { code: ErrorCode; message: string; suggestion?: string }> = {
+  not_authed: { code: 'AUTH_FAILED', message: 'Slack received no token' },
+  invalid_auth: { code: 'AUTH_FAILED', message: 'Slack refused the token', suggestion: 'Check the token, then run: agentio slack profile add' },
+  token_revoked: { code: 'AUTH_FAILED', message: 'The Slack token was revoked', suggestion: 'Reinstall the Slack app, then run: agentio slack profile add' },
+  token_expired: { code: 'AUTH_EXPIRED', message: 'The Slack token expired', suggestion: 'Turn off token rotation in the Slack app, reinstall it, then run: agentio slack profile add' },
+  account_inactive: { code: 'AUTH_FAILED', message: 'The Slack account behind the token is deactivated' },
+  not_allowed_token_type: { code: 'AUTH_FAILED', message: 'Slack does not accept this kind of token here', suggestion: 'Use the User OAuth Token (xoxp-), not the bot token' },
+  users_not_found: { code: 'NOT_FOUND', message: 'No Slack user has this email address' },
+  user_not_found: { code: 'NOT_FOUND', message: 'No Slack user has this id' },
+  ratelimited: { code: 'RATE_LIMITED', message: 'Slack rate limit reached', suggestion: 'Wait a minute and try again' },
+  channel_not_found: { code: 'NOT_FOUND', message: 'No channel with this id is visible to you', suggestion: 'Private channels are visible only to their members' },
+  name_taken: { code: 'INVALID_PARAMS', message: 'A channel with this name already exists, perhaps archived or private' },
+  restricted_action: { code: 'PERMISSION_DENIED', message: 'A workspace setting does not let you do this' },
+  is_archived: { code: 'INVALID_PARAMS', message: 'The channel is archived' },
+  not_in_channel: { code: 'PERMISSION_DENIED', message: 'You must be a member of the channel to do this' },
+  cant_invite_self: { code: 'INVALID_PARAMS', message: 'You cannot invite yourself' },
+  cant_kick_self: { code: 'INVALID_PARAMS', message: 'You cannot uninvite yourself; leave the channel in Slack instead' },
+  cant_archive_general: { code: 'INVALID_PARAMS', message: 'The workspace\'s general channel cannot be archived' },
+  cant_leave_general: { code: 'INVALID_PARAMS', message: 'Nobody can leave the workspace\'s general channel' },
+  last_member: { code: 'INVALID_PARAMS', message: 'You are the last member of this private channel, so you cannot leave it' },
+  cant_kick_from_general: { code: 'INVALID_PARAMS', message: 'Nobody can be removed from the workspace\'s general channel' },
+  ura_max_channels: { code: 'INVALID_PARAMS', message: 'A single-channel guest cannot join a second channel' },
+  user_is_restricted: { code: 'PERMISSION_DENIED', message: 'A guest cannot be invited here' },
+  user_is_ultra_restricted: { code: 'INVALID_PARAMS', message: 'A single-channel guest cannot join a second channel' },
+};
+
+export function isTokenCredentials(credentials: SlackCredentials): credentials is SlackTokenCredentials {
+  return credentials.type === 'token';
+}
+
+/** A user token as pasted: trimmed, and refused when it is not a user token. */
+export function checkUserToken(input: string): string {
+  const token = input.trim();
+  if (token.startsWith('xoxb-')) {
+    throw new CliError('INVALID_PARAMS', 'This is a bot token (xoxb-)',
+      'Admin commands act as you: copy the User OAuth Token (xoxp-) from OAuth & Permissions');
+  }
+  if (!/^xoxp-[A-Za-z0-9-]+$/.test(token)) {
+    throw new CliError('INVALID_PARAMS', 'A Slack user token starts with xoxp-',
+      'Copy the User OAuth Token from your Slack app, under OAuth & Permissions');
+  }
+  return token;
+}
+
+/** Whether `input` names a channel by id (C…, G…) rather than by name. */
+export function isChannelId(input: string): boolean {
+  return /^[CG][A-Z0-9]{2,}$/.test(input);
+}
+
+/**
+ * A channel name as Slack allows it: at most 80 lowercase letters, digits,
+ * hyphens and underscores. A leading # is dropped; anything else is refused
+ * rather than silently changed.
+ */
+export function checkChannelName(input: string): string {
+  const name = input.trim().replace(/^#/, '');
+  if (!name) throw new CliError('INVALID_PARAMS', 'A channel name is required');
+  if (name.length > 80) throw new CliError('INVALID_PARAMS', `A channel name has at most 80 characters, not ${name.length}`);
+  if (!/^[a-z0-9_-]+$/.test(name)) {
+    throw new CliError('INVALID_PARAMS', `"${name}" is not a valid channel name`,
+      'Use only lowercase letters, digits, hyphens and underscores, such as team-design');
+  }
+  return name;
+}
+
+/** Topic and purpose: Slack's limit is 250 characters. */
+function checkChannelText(label: string, value: string): string {
+  if (value.length > 250) throw new CliError('INVALID_PARAMS', `The ${label} has at most 250 characters, not ${value.length}`);
+  return value;
+}
+
+function isEmail(input: string): boolean {
+  return /^[^\s@]+@[^\s@]+$/.test(input);
+}
+
+/** Whether `input` names a user by id (U… or W…) rather than by email. */
+export function isUserId(input: string): boolean {
+  return /^[UW][A-Z0-9]{2,}$/.test(input);
+}
+
+function toChannel(raw: RawChannel): SlackChannel {
+  return {
+    id: raw.id,
+    name: raw.name,
+    isPrivate: !!raw.is_private,
+    isArchived: !!raw.is_archived,
+    isMember: !!raw.is_member,
+    topic: raw.topic?.value || undefined,
+    purpose: raw.purpose?.value || undefined,
+    numMembers: raw.num_members,
+    created: raw.created ? new Date(raw.created * 1000).toISOString() : undefined,
+  };
+}
+
+function toUser(raw: RawUser): SlackUser {
+  const profile = raw.profile ?? {};
+  return {
+    id: raw.id,
+    name: raw.name,
+    realName: profile.real_name || raw.real_name || undefined,
+    displayName: profile.display_name || undefined,
+    email: profile.email || undefined,
+    title: profile.title || undefined,
+    isAdmin: !!raw.is_admin,
+    isOwner: !!raw.is_owner,
+    isBot: !!raw.is_bot || raw.id === 'USLACKBOT',
+    deleted: !!raw.deleted,
+    isRestricted: !!raw.is_restricted,
+  };
+}
+
 export class SlackClient implements ServiceClient {
   private credentials: SlackCredentials;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(credentials: SlackCredentials) {
+  constructor(credentials: SlackCredentials, options: { sleep?: (ms: number) => Promise<void> } = {}) {
     this.credentials = credentials;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   async validate(): Promise<ValidationResult> {
+    if (isTokenCredentials(this.credentials)) {
+      try {
+        const auth = await this.authTest();
+        return { valid: true, info: `${auth.userName} @ ${auth.teamName}` };
+      } catch (error) {
+        return { valid: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      }
+    }
     const webhookCreds = this.credentials as SlackWebhookCredentials;
     const info = webhookCreds.channelName ? `#${webhookCreds.channelName}` : 'webhook';
     return { valid: true, info };
@@ -24,7 +197,330 @@ export class SlackClient implements ServiceClient {
     if (this.credentials.type === 'webhook') {
       return this.sendViaWebhook(options);
     }
-    throw new CliError('INVALID_PARAMS', 'Unknown credentials type');
+    throw new CliError('INVALID_PARAMS', 'This Slack profile holds a user token, which cannot send messages yet',
+      'Send with a webhook profile: agentio slack send --profile <webhook profile>');
+  }
+
+  async authTest(): Promise<SlackAuthInfo> {
+    const data = await this.call<SlackApiResponse & { team_id: string; team: string; user_id: string; user: string; url?: string }>('auth.test');
+    return { teamId: data.team_id, teamName: data.team, userId: data.user_id, userName: data.user, url: data.url };
+  }
+
+  /** Every member of the workspace, across pages; bots and deactivated accounts only when asked. */
+  async listUsers(options: SlackUserListOptions = {}): Promise<SlackUser[]> {
+    const users: SlackUser[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { members: RawUser[] }>('users.list', {
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      users.push(...(data.members ?? []).map(toUser));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return users.filter((u) => (options.includeDeleted || !u.deleted) && (options.includeBots || !u.isBot));
+  }
+
+  /** One user, by id (U…, W…) or by email address. */
+  async getUser(idOrEmail: string): Promise<SlackUser> {
+    const key = idOrEmail.trim();
+    if (!key) {
+      throw new CliError('INVALID_PARAMS', 'A user id or email address is required', 'See: agentio slack users list');
+    }
+    if (isUserId(key)) {
+      const data = await this.call<SlackApiResponse & { user: RawUser }>('users.info', { user: key });
+      return toUser(data.user);
+    }
+    if (!isEmail(key)) {
+      throw new CliError('INVALID_PARAMS', `"${key}" is neither a Slack user id (U…) nor an email address`);
+    }
+    const data = await this.call<SlackApiResponse & { user: RawUser }>('users.lookupByEmail', { email: key });
+    return toUser(data.user);
+  }
+
+  /** Channels visible to you: every public one, and the private ones you belong to. */
+  async listChannels(options: SlackChannelListOptions = {}): Promise<SlackChannel[]> {
+    const channels: SlackChannel[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { channels: RawChannel[] }>('conversations.list', {
+        types: options.privateOnly ? 'private_channel' : 'public_channel,private_channel',
+        exclude_archived: options.includeArchived ? 'false' : 'true',
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      channels.push(...(data.channels ?? []).map(toChannel));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return channels;
+  }
+
+  /** One channel, by id (C…, G…) or by name, with or without #. */
+  async getChannel(idOrName: string): Promise<SlackChannel> {
+    const key = idOrName.trim();
+    if (!key) throw new CliError('INVALID_PARAMS', 'A channel id or name is required', 'See: agentio slack channels list');
+    if (isChannelId(key)) {
+      const data = await this.call<SlackApiResponse & { channel: RawChannel }>('conversations.info', { channel: key, include_num_members: 'true' });
+      return toChannel(data.channel);
+    }
+    const name = checkChannelName(key);
+    const found = (await this.listChannels({ includeArchived: true })).find((c) => c.name === name);
+    if (!found) {
+      throw new CliError('NOT_FOUND', `No channel named #${name} is visible to you`,
+        'Private channels are visible only to their members; see: agentio slack channels list');
+    }
+    return found;
+  }
+
+  /** A new channel, with its topic and purpose; you are its first member. */
+  async createChannel(name: string, options: SlackChannelCreateOptions = {}): Promise<SlackChannel> {
+    const checked = checkChannelName(name);
+    const update = { topic: options.topic, purpose: options.purpose };
+    this.checkUpdate(update);
+    const data = await this.call<SlackApiResponse & { channel: RawChannel }>('conversations.create', {
+      name: checked,
+      is_private: options.isPrivate ? 'true' : 'false',
+    });
+    const channel = toChannel(data.channel);
+    try {
+      return await this.applyUpdate(channel, update);
+    } catch (error) {
+      if (!(error instanceof CliError)) throw error;
+      // The channel exists now; say so, or a retry would fail with name_taken.
+      throw new CliError(error.code, `Channel #${channel.name} (${channel.id}) was created, but ${error.message}`,
+        `Retry with: agentio slack channels set ${channel.id}${update.topic !== undefined ? ' --topic …' : ''}${update.purpose !== undefined ? ' --purpose …' : ''}`);
+    }
+  }
+
+  /** Change a channel's name, topic or purpose; what is not given is left alone. */
+  async updateChannel(idOrName: string, update: SlackChannelUpdate): Promise<SlackChannel> {
+    const checked = this.checkUpdate(update);
+    if (checked.name === undefined && update.topic === undefined && update.purpose === undefined) {
+      throw new CliError('INVALID_PARAMS', 'Nothing to change', 'Give at least one of --name, --topic or --purpose');
+    }
+    let channel = await this.getChannel(idOrName);
+    if (checked.name !== undefined && checked.name !== channel.name) {
+      const data = await this.call<SlackApiResponse & { channel: RawChannel }>('conversations.rename', { channel: channel.id, name: checked.name });
+      channel = toChannel(data.channel);
+    }
+    return this.applyUpdate(channel, update);
+  }
+
+  /** Archive a channel: read-only and out of the sidebar, with its history kept. */
+  async archiveChannel(idOrName: string): Promise<SlackChannelChange> {
+    return this.setArchived(idOrName, true);
+  }
+
+  /** Bring an archived channel back. */
+  async unarchiveChannel(idOrName: string): Promise<SlackChannelChange> {
+    return this.setArchived(idOrName, false);
+  }
+
+  /**
+   * Leave channels, one at a time. All are looked up first, so a wrong name
+   * leaves none; channels you are not in are reported unchanged. Leaving a
+   * private channel cannot be undone with this token: it no longer sees it.
+   */
+  async leaveChannels(idsOrNames: string[]): Promise<SlackChannelChange[]> {
+    const keys = [...new Set(idsOrNames.map((c) => c.trim()))];
+    if (keys.length === 0 || keys.includes('')) throw new CliError('INVALID_PARAMS', 'Give at least one channel id or name');
+    const channels: SlackChannel[] = [];
+    for (const key of keys) channels.push(await this.getChannel(key));
+    const results: SlackChannelChange[] = [];
+    for (const channel of [...new Map(channels.map((c) => [c.id, c])).values()]) {
+      if (!channel.isMember) {
+        results.push({ channel, changed: false });
+        continue;
+      }
+      try {
+        await this.call('conversations.leave', { channel: channel.id });
+      } catch (error) {
+        const left = results.filter((r) => r.changed).map((r) => `#${r.channel.name}`);
+        if (!(error instanceof CliError) || left.length === 0) throw error;
+        throw new CliError(error.code, `${error.message} (leaving #${channel.name}; already left: ${left.join(', ')})`, error.suggestion);
+      }
+      results.push({ channel: { ...channel, isMember: false }, changed: true });
+    }
+    return results;
+  }
+
+  private async setArchived(idOrName: string, archived: boolean): Promise<SlackChannelChange> {
+    const channel = await this.getChannel(idOrName);
+    if (channel.isArchived === archived) return { channel, changed: false };
+    await this.call(archived ? 'conversations.archive' : 'conversations.unarchive', { channel: channel.id });
+    return { channel: { ...channel, isArchived: archived }, changed: true };
+  }
+
+  /** The members of a channel, as users. */
+  async channelMembers(idOrName: string): Promise<{ channel: SlackChannel; members: SlackUser[] }> {
+    const channel = await this.getChannel(idOrName);
+    const ids = await this.memberIds(channel.id);
+    const known = new Map((await this.listUsers({ includeDeleted: true, includeBots: true })).map((u) => [u.id, u]));
+    const members = ids.map((id) => known.get(id) ?? { id, name: id, isAdmin: false, isOwner: false, isBot: false, deleted: false, isRestricted: false });
+    return { channel, members };
+  }
+
+  /**
+   * Add people to a channel at once; Slack asks nobody to accept. Every user is
+   * looked up first, so one unknown email invites nobody. Members are skipped.
+   */
+  async inviteToChannel(idOrName: string, users: string[]): Promise<SlackMembershipResult> {
+    const { channel, people, members } = await this.prepareMembership(idOrName, users);
+    const changed = people.filter((u) => !members.has(u.id));
+    const skipped = people.filter((u) => members.has(u.id));
+    if (changed.length > 0) {
+      await this.call('conversations.invite', { channel: channel.id, users: changed.map((u) => u.id).join(',') });
+    }
+    return { channel, changed, skipped };
+  }
+
+  /** Remove people from a channel. Every user is looked up first; non-members are skipped. */
+  async uninviteFromChannel(idOrName: string, users: string[]): Promise<SlackMembershipResult> {
+    const { channel, people, members } = await this.prepareMembership(idOrName, users);
+    const changed: SlackUser[] = [];
+    const skipped = people.filter((u) => !members.has(u.id));
+    for (const user of people.filter((u) => members.has(u.id))) {
+      try {
+        await this.call('conversations.kick', { channel: channel.id, user: user.id });
+      } catch (error) {
+        if (!(error instanceof CliError) || changed.length === 0) throw error;
+        // Slack removes one user per call; say who is already out.
+        throw new CliError(error.code, `${error.message} (removing ${user.email ?? user.id}; already removed: ${changed.map((u) => u.email ?? u.id).join(', ')})`, error.suggestion);
+      }
+      changed.push(user);
+    }
+    return { channel, changed, skipped };
+  }
+
+  private async prepareMembership(idOrName: string, users: string[]): Promise<{ channel: SlackChannel; people: SlackUser[]; members: Set<string> }> {
+    const keys = [...new Set(users.map((u) => u.trim()))];
+    if (keys.length === 0 || keys.includes('')) throw new CliError('INVALID_PARAMS', 'Give at least one user id or email address');
+    const malformed = keys.find((key) => !isUserId(key) && !isEmail(key));
+    if (malformed) {
+      throw new CliError('INVALID_PARAMS', `"${malformed}" is neither a Slack user id (U…) nor an email address. Nothing was changed`);
+    }
+    const channel = await this.getChannel(idOrName);
+    if (channel.isArchived) throw new CliError('INVALID_PARAMS', `#${channel.name} is archived`);
+    // Past a few users, one users.list costs fewer calls than a lookup each (Tier 3, ~50 a minute).
+    const directory = keys.length >= BULK_LOOKUP_MIN ? this.directoryOf(await this.listUsers({ includeDeleted: true, includeBots: true })) : null;
+    const people: SlackUser[] = [];
+    for (const key of keys) {
+      const listed = directory?.get(isUserId(key) ? key : key.toLowerCase());
+      if (listed) {
+        people.push(listed);
+        continue;
+      }
+      // Not in the list (or no list): ask Slack for this one, which also gives the precise error.
+      try {
+        people.push(await this.getUser(key));
+      } catch (error) {
+        if (error instanceof CliError && error.code === 'NOT_FOUND') {
+          throw new CliError('NOT_FOUND', `${error.message}: ${key}. Nothing was changed`);
+        }
+        throw error;
+      }
+    }
+    // The same person given by id and by email counts once.
+    const unique = [...new Map(people.map((u) => [u.id, u])).values()];
+    return { channel, people: unique, members: new Set(await this.memberIds(channel.id)) };
+  }
+
+  /** Users by id and by lowercase email. */
+  private directoryOf(users: SlackUser[]): Map<string, SlackUser> {
+    const directory = new Map<string, SlackUser>();
+    for (const user of users) {
+      directory.set(user.id, user);
+      if (user.email) directory.set(user.email.toLowerCase(), user);
+    }
+    return directory;
+  }
+
+  private async memberIds(channelId: string): Promise<string[]> {
+    const ids: string[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { members: string[] }>('conversations.members', {
+        channel: channelId,
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      ids.push(...(data.members ?? []));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return ids;
+  }
+
+  private checkUpdate(update: SlackChannelUpdate): SlackChannelUpdate {
+    if (update.topic !== undefined) checkChannelText('topic', update.topic);
+    if (update.purpose !== undefined) checkChannelText('purpose', update.purpose);
+    return { ...update, ...(update.name !== undefined ? { name: checkChannelName(update.name) } : {}) };
+  }
+
+  private async applyUpdate(channel: SlackChannel, update: SlackChannelUpdate): Promise<SlackChannel> {
+    let result = channel;
+    if (update.topic !== undefined && update.topic !== channel.topic) {
+      await this.call('conversations.setTopic', { channel: channel.id, topic: update.topic });
+      result = { ...result, topic: update.topic || undefined };
+    }
+    if (update.purpose !== undefined && update.purpose !== channel.purpose) {
+      await this.call('conversations.setPurpose', { channel: channel.id, purpose: update.purpose });
+      result = { ...result, purpose: update.purpose || undefined };
+    }
+    return result;
+  }
+
+  /** One Web API call: form-encoded POST with the user token, retried on 429. */
+  private async call<T extends SlackApiResponse>(method: string, params: Record<string, string> = {}): Promise<T> {
+    if (!isTokenCredentials(this.credentials)) {
+      throw new CliError('INVALID_PARAMS', 'This Slack profile is a webhook, which can only send messages',
+        'Add a profile with a user token: agentio slack profile add');
+    }
+    const token = this.credentials.token;
+
+    for (let attempt = 0; ; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(`${SLACK_API_URL}/${method}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(params).toString(),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+      } catch {
+        throw new CliError('NETWORK_ERROR', `Cannot reach Slack (${method})`, 'Check your network connection');
+      }
+
+      if (response.status === 429) {
+        const wait = Number(response.headers.get('Retry-After'));
+        const seconds = Number.isFinite(wait) && wait > 0 ? Math.min(wait, MAX_RETRY_WAIT_S) : 1;
+        if (attempt < MAX_RETRIES) {
+          await this.sleep(seconds * 1000);
+          continue;
+        }
+        throw new CliError('RATE_LIMITED', `Slack rate limit reached on ${method}`, 'Wait a minute and try again');
+      }
+
+      let data: T;
+      try {
+        data = (await response.json()) as T;
+      } catch {
+        throw new CliError(httpStatusToErrorCode(response.status), `Slack answered ${method} with HTTP ${response.status}, not JSON`);
+      }
+      if (!data || typeof data !== 'object' || data.ok !== true) throw this.errorFor(method, data);
+      return data;
+    }
+  }
+
+  private errorFor(method: string, data: SlackApiResponse | null): CliError {
+    const error = typeof data?.error === 'string' ? data.error : 'unknown_error';
+    if (error === 'missing_scope') {
+      const needed = typeof data?.needed === 'string' ? data.needed : 'unknown';
+      return new CliError('PERMISSION_DENIED', `The Slack token lacks the ${needed} scope for ${method}`,
+        `Add ${needed} under User Token Scopes in your Slack app, reinstall it, then run: agentio slack profile add`);
+    }
+    const known = API_ERRORS[error];
+    if (known) return new CliError(known.code, known.message, known.suggestion);
+    return new CliError('API_ERROR', `Slack ${method} failed: ${error}`);
   }
 
   private async sendViaWebhook(options: SlackSendOptions): Promise<SlackSendResult> {
