@@ -99,6 +99,8 @@ export class FakeKite {
   verificationOrigin?: string;
   /** False plays a Kite older than 1.3.0, which has no version history. */
   versionsApi = true;
+  /** False plays a Kite older than 1.4.0, which has no canvases. */
+  canvasApi = true;
   /** False plays a Kite older than 1.2.0, which has no view tracking. */
   viewsApi = true;
   /** Applied to the next device started. */
@@ -309,7 +311,11 @@ export class FakeKite {
       const v = /^\/versions(?:\/([^/]+))?$/.exec(rest);
       if (v && method === 'GET') {
         if (!this.versionsApi) return err(404, 'not_found', 'No such endpoint.');
-        return this.versions(doc, v[1]);
+        return this.versions(doc, v[1], r.query.record !== 'false');
+      }
+      if (rest.startsWith('/canvas')) {
+        if (!this.canvasApi) return err(404, 'not_found', 'No such endpoint.');
+        return this.canvas(doc, method, rest.slice('/canvas'.length), r, b);
       }
       if (rest.startsWith('/sharing')) return this.sharing(doc, method, rest.slice('/sharing'.length), b);
     }
@@ -372,7 +378,17 @@ export class FakeKite {
 
   /** The checks publish and update share; undefined when the body is acceptable. */
   private invalidDocument(b: Record<string, any>): Response | undefined {
-    if (b.type !== 'markdown' && b.type !== 'html') return err(400, 'unsupported_type', 'Only markdown and html artifacts are supported.');
+    if (b.type === 'canvas' && !this.canvasApi) return err(400, 'validation_failed', 'Artifacts can be "markdown" or "html". Got "canvas".');
+    if (b.type === 'canvas') {
+      try {
+        const c = JSON.parse(b.content);
+        if (!Array.isArray(c.nodes ?? []) || !Array.isArray(c.edges ?? [])) throw new Error('shape');
+      } catch {
+        return err(400, 'validation_failed', 'This is not a JSON Canvas document.');
+      }
+    } else if (b.type !== 'markdown' && b.type !== 'html') {
+      return err(400, 'unsupported_type', 'Only markdown and html artifacts are supported.');
+    }
     if (typeof b.content !== 'string' || b.content.length === 0) return err(400, 'validation_failed', 'Artifact content must not be empty.');
     if (Buffer.byteLength(b.content) > this.maxBytes) return err(413, 'payload_too_large', 'Artifact too large.', { maxBytes: this.maxBytes });
     return undefined;
@@ -557,8 +573,104 @@ export class FakeKite {
     return err(404, 'not_found', 'Not found.');
   }
 
+  /** The canvas a document holds, for the canvas routes. */
+  canvasOf(doc: Doc): { nodes: Array<Record<string, any>>; edges: Array<Record<string, any>> } {
+    const c = JSON.parse(doc.content);
+    return { nodes: c.nodes ?? [], edges: c.edges ?? [] };
+  }
+
+  /** Kite's three canvas routes, enough of them to drive the plugin: reads, the outline, and ops. */
+  private canvas(doc: Doc, method: string, rest: string, r: LoggedRequest, b: Record<string, any>): Response {
+    if (doc.type !== 'canvas') {
+      return err(400, 'validation_failed', `This is a ${doc.type} document, not a canvas. Read it with GET /api/artifacts/:id instead.`);
+    }
+    const c = this.canvasOf(doc);
+    const header = { 'X-Artifact-Version': String(doc.version) };
+    if (method === 'GET' && rest === '') {
+      if (r.query.format === 'jsoncanvas-strict') {
+        return json(200, { nodes: c.nodes.map(({ kite: _k, ...n }) => n), edges: c.edges.map(({ kite: _k, ...e }) => e) }, header);
+      }
+      return json(200, { ...c, kite: { format: 'kite-canvas', formatVersion: 1, docId: doc.id, version: doc.version } }, header);
+    }
+    if (method === 'GET' && rest === '/outline') {
+      let nodes = c.nodes;
+      if (r.query.frame) {
+        const frame = nodes.find((n) => n.id === r.query.frame && n.type === 'group');
+        if (!frame) return err(404, 'not_found', `No group "${r.query.frame}" on this canvas.`);
+        nodes = nodes.filter((n) => n !== frame && n.x >= frame.x && n.y >= frame.y);
+      }
+      const tree = nodes.map((n) => ({
+        id: n.id, type: n.type, summary: n.text ?? n.label ?? n.url ?? n.file ?? '', x: n.x, y: n.y, width: n.width, height: n.height,
+      }));
+      const right = Math.max(0, ...c.nodes.map((n) => n.x + n.width));
+      return json(200, {
+        docId: doc.id, version: doc.version,
+        counts: { nodes: c.nodes.length, edges: c.edges.length, groups: c.nodes.filter((n) => n.type === 'group').length },
+        bounds: c.nodes.length ? { x: 0, y: 0, width: right, height: 200 } : null,
+        tree, freeSlot: { x: c.nodes.length ? right + 40 : 0, y: 0 },
+      }, header);
+    }
+    if (method === 'POST' && rest === '/ops') {
+      if (typeof b.baseVersion !== 'number') return err(400, 'validation_failed', 'baseVersion is required.');
+      if (b.baseVersion !== doc.version) {
+        return err(409, 'version_conflict', 'This artifact changed since the version you sent.', { currentVersion: doc.version, baseVersion: b.baseVersion });
+      }
+      if (!Array.isArray(b.ops) || b.ops.length === 0) return err(400, 'validation_failed', 'ops must be a non-empty list.');
+      const ids: Record<string, string> = {};
+      const touched: string[] = [];
+      const resolve = (x: string) => ids[x] ?? x;
+      const node = (id: string) => c.nodes.find((n) => n.id === resolve(id));
+      for (const [i, op] of (b.ops as Array<Record<string, any>>).entries()) {
+        const bad = (why: string) => err(400, 'validation_failed', `Operation ${i + 1} (${op.op}): ${why}`);
+        if (op.op === 'add') {
+          const id = this.id('n');
+          const near = op.near ? node(op.near) : undefined;
+          if (op.near && !near) return bad(`no node "${op.near}".`);
+          c.nodes.push({ x: near ? near.x + near.width + 40 : 0, y: near?.y ?? 0, width: 260, height: 140, ...op.node, id });
+          if (op.tempId) ids[op.tempId] = id;
+          touched.push(id);
+        } else if (op.op === 'connect') {
+          if (!node(op.from) || !node(op.to)) return bad('both ends must be nodes on the canvas.');
+          const id = this.id('e');
+          const { op: _o, tempId, from, to, ...rest } = op;
+          c.edges.push({ id, fromNode: resolve(from), toNode: resolve(to), ...rest });
+          if (tempId) ids[tempId] = id;
+          touched.push(id);
+        } else if (op.op === 'disconnect') {
+          const at = c.edges.findIndex((e) => e.id === op.id);
+          if (at === -1) return bad(`no edge "${op.id}".`);
+          c.edges.splice(at, 1);
+          touched.push(op.id);
+        } else if (op.op === 'delete') {
+          const id = resolve(op.id);
+          const before = c.nodes.length + c.edges.length;
+          c.nodes = c.nodes.filter((n) => n.id !== id);
+          c.edges = c.edges.filter((e) => e.id !== id && e.fromNode !== id && e.toNode !== id);
+          if (c.nodes.length + c.edges.length === before) return bad(`no node or edge "${op.id}".`);
+          touched.push(id);
+        } else if (op.op === 'move' || op.op === 'resize' || op.op === 'update') {
+          const target = node(op.id) ?? c.edges.find((e) => e.id === op.id);
+          if (!target) return bad(`no node or edge "${op.id}".`);
+          if (op.op === 'move') Object.assign(target, { x: op.x, y: op.y });
+          if (op.op === 'resize') Object.assign(target, { width: op.width, height: op.height });
+          if (op.op === 'update') {
+            Object.assign(target, op.set ?? {});
+            for (const key of op.unset ?? []) delete target[key];
+          }
+          touched.push(target.id);
+        } else {
+          return bad('unknown operation.');
+        }
+      }
+      if (b.dryRun === true) return json(200, { id: doc.id, version: doc.version, dryRun: true, applied: b.ops.length, ids, touched });
+      this.seedEdit(doc, JSON.stringify(c));
+      return json(200, { id: doc.id, version: doc.version, dryRun: false, applied: b.ops.length, ids, touched });
+    }
+    return err(404, 'not_found', 'No such endpoint.');
+  }
+
   /** Kite 1.3.0's two version routes: the list, and one version shaped like the document. */
-  private versions(doc: Doc, wanted: string | undefined): Response {
+  private versions(doc: Doc, wanted: string | undefined, record = true): Response {
     const browserViews = (version: number) => {
       const opens = doc.opens.filter((o) => o.client === 'browser' && o.version === version);
       const ownerViews = opens.filter((o) => o.viewer === doc.owner).length;
@@ -579,7 +691,7 @@ export class FakeKite {
     if (!h) {
       return err(404, 'not_found', `This artifact has no version ${wanted}. It is at version ${doc.version}.`, { currentVersion: doc.version });
     }
-    doc.opens.push({ viewer: doc.owner, version: h.version, client: 'api', at: this.now() });
+    if (record) doc.opens.push({ viewer: doc.owner, version: h.version, client: 'api', at: this.now() });
     return json(200, {
       ...this.view(doc, true), type: h.type, title: h.title, content: h.content, version: h.version, updatedAt: h.createdAt,
       currentVersion: doc.version, isCurrent: h.version === doc.version,

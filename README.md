@@ -178,7 +178,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **JIRA** | OAuth | `projects`, `search`, `get`, `users search`, `users get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
 | **Discourse** | API Key | `list`, `get`, `categories` |
-| **Kite** | Browser sign-in | `publish`, `get`, `list`, `delete`, `versions list/get`, `views`, `share show/add/remove/public/private/expiry`, `comments list/add/reply/resolve/reopen` |
+| **Kite** | Browser sign-in | `publish`, `get`, `list`, `delete`, `versions list/get`, `canvas create/get/outline/ops/add/update/move/resize/delete/connect/disconnect/versions/restore`, `views`, `share show/add/remove/public/private/expiry`, `comments list/add/reply/resolve/reopen` |
 | **Apple Notes** | API Key | `folders`, `list`, `search`, `get`, `create`, `update`, `delete` |
 | **Graphiti memory** | Server URL + bearer token | `add`, `search`, `entity`, `episodes`, `forget` |
 | **Pocket Alert** | API Key | `send` |

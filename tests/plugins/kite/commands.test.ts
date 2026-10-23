@@ -436,3 +436,80 @@ describe('versions and views from the command line', () => {
     expect(allText.stdout).toContain('2 views (1 yours, 1 others)');
   }, 30_000);
 });
+
+describe('canvases from the command line', () => {
+  withProfiles(() => ({ main: { server: fake } }));
+
+  test('create, add, connect, outline, a stale version, versions get, restore', async () => {
+    const created = onlyJson((await cli('kite', 'canvas', 'create', '--title', 'Board', '--description', 'D.', '--summary', 'S.', '--json')).stdout);
+    expect(created).toMatchObject({ type: 'canvas', version: 1 });
+
+    const added = await cli('kite', 'canvas', 'add', created.id, '--text', 'Ship it', '--at', '0,-40', '--json');
+    expect(added.code).toBe(0);
+    const n1 = onlyJson(added.stdout).ids.new;
+    const second = onlyJson((await cli('kite', 'canvas', 'add', created.id, '--link', 'https://jsoncanvas.org', '--near', n1, '--json')).stdout);
+    expect(second.version).toBe(3);
+    const n2 = second.ids.new;
+    expect(fake.requests('POST', `/api/artifacts/${created.id}/canvas/ops`)[1].body).toEqual({
+      baseVersion: 2, ops: [{ op: 'add', tempId: 'new', near: n1, side: 'right', node: { type: 'link', url: 'https://jsoncanvas.org' } }],
+    });
+
+    const connected = await cli('kite', 'canvas', 'connect', created.id, n1, n2, '--label', 'then', '--base-version', '3');
+    expect(connected.code).toBe(0);
+    expect(connected.stdout).toContain(`${created.id} is at version 4 now.`);
+
+    const moved = await cli('kite', 'canvas', 'move', '--json', '--', created.id, n1, '-200', '-80');
+    expect(onlyJson(moved.stdout).version).toBe(5);
+
+    const outline = await cli('kite', 'canvas', 'outline', created.id);
+    expect(outline.stdout).toContain(`${created.id}, version 5: 2 nodes (0 groups), 1 edges`);
+    expect(outline.stdout).toContain(`- ${n1} [text] Ship it  (260×140 at -200,-80)`);
+
+    const stale = await cli('kite', 'canvas', 'delete', created.id, n2, '--base-version', '3');
+    expect(stale.code).not.toBe(0);
+    expect(stale.stderr).toContain('changed since version 3: it is at version 5 now');
+    expect(stale.stderr).toContain('--base-version 5');
+
+    const old = onlyJson((await cli('kite', 'canvas', 'versions', 'get', created.id, '2')).stdout);
+    expect(old).toMatchObject({ version: 2, currentVersion: 5 });
+    expect(old.nodes.length).toBe(1);
+    expect(fake.requests('GET', `/api/artifacts/${created.id}/versions/2`)[0].query).toEqual({ record: 'false' });
+
+    const restored = await cli('kite', 'canvas', 'restore', created.id, '2');
+    expect(restored.stdout).toContain(`${created.id} is at version 6 now, the same as version 2.`);
+  });
+
+  test('ops needs a version and reads it from the file when it has one', async () => {
+    const doc = fake.seedDoc(ME, { type: 'canvas', content: JSON.stringify({ nodes: [{ id: 'n1', type: 'text', text: 'A', x: 0, y: 0, width: 260, height: 140 }], edges: [] }) });
+    const missing = await cli('kite', 'canvas', 'ops', doc.id, '--ops', '[{"op":"delete","id":"n1"}]');
+    expect(missing.code).not.toBe(0);
+    expect(missing.stderr).toContain('--base-version');
+    expect(fake.requests('POST').length).toBe(0);
+
+    const path = file('ops.json', JSON.stringify({ baseVersion: 1, ops: [{ op: 'update', id: 'n1', set: { text: 'B' } }] }));
+    const dry = await cli('kite', 'canvas', 'ops', doc.id, path, '--dry-run');
+    expect(dry.stdout).toContain('Dry run');
+    expect(doc.version).toBe(1);
+    expect(onlyJson((await cli('kite', 'canvas', 'ops', doc.id, path, '--json')).stdout).version).toBe(2);
+  });
+
+  test('add needs exactly one kind of node, before any request', async () => {
+    const doc = fake.seedDoc(ME, { type: 'canvas', content: '{"nodes":[],"edges":[]}' });
+    const both = await cli('kite', 'canvas', 'add', doc.id, '--text', 'A', '--link', 'https://x.example');
+    expect(both.code).not.toBe(0);
+    expect(both.stderr).toContain('Give one of --text, --link, --doc or --group');
+    expect(fake.log.length).toBe(0);
+  });
+});
+
+describe('canvases on a read-only profile', () => {
+  withProfiles(() => ({ ro: { readOnly: true, server: fake } }));
+
+  test('reads work, changes are refused before any request', async () => {
+    const doc = fake.seedDoc(ME, { type: 'canvas', content: '{"nodes":[],"edges":[]}' });
+    expect((await cli('kite', 'canvas', 'outline', doc.id)).code).toBe(0);
+    const refused = await cli('kite', 'canvas', 'add', doc.id, '--text', 'A');
+    expect(refused.code).not.toBe(0);
+    expect(fake.requests('POST').length).toBe(0);
+  });
+});

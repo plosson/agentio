@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { KiteClient } from '../../../src/plugins/kite/client';
+import { KiteCanvas } from '../../../src/plugins/kite/canvas';
 import { kiteDeviceLogin } from '../../../src/plugins/kite/device-auth';
 import { CliError } from '../../../src/utils/errors';
 import { caught } from './fake-kite';
@@ -191,5 +192,58 @@ run('contract with a real Kite', () => {
     expect((await caught(client.get(doc.id))).code).toBe('NOT_FOUND');
     const dead = new KiteClient({ baseUrl: BASE!, token: 'not-a-token' });
     expect((await caught(dead.list())).code).toBe('AUTH_EXPIRED');
+  }, 120_000);
+
+  test('canvases (Kite 1.4.0+), over HTTP', async () => {
+    const client = new KiteClient({ baseUrl: BASE!, token: await deviceToken(`canvas-${ME}`) });
+    const other = new KiteClient({ baseUrl: BASE!, token: await deviceToken(`canvas-${OTHER}`) });
+    const canvas = new KiteCanvas(client);
+    const board = JSON.stringify({
+      nodes: [
+        { id: 'g1', type: 'group', label: 'Plan', x: 0, y: 0, width: 700, height: 300 },
+        { id: 'n1', type: 'text', text: 'Ship it', x: 40, y: 60, width: 260, height: 140 },
+      ],
+      edges: [],
+    });
+    const doc = await canvas.create({ content: board, title: 'Contract canvas', description: 'A contract check.', summary: 'Two nodes.' });
+    expect(doc).toMatchObject({ type: 'canvas', version: 1 });
+
+    const full = await canvas.get(doc.url);
+    expect(full).toMatchObject({ id: doc.id, version: 1 });
+    expect(full.nodes.map((n) => n.id)).toEqual(['g1', 'n1']);
+    expect((await canvas.get(doc.id, { strict: true })).version).toBe(1);
+    const outline = await canvas.outline(doc.id);
+    expect(outline).toMatchObject({ id: doc.id, version: 1, counts: { nodes: 2, edges: 0, groups: 1 } });
+    expect(outline.tree[0].children?.map((c) => c.id)).toEqual(['n1']);
+
+    const dry = await canvas.ops(doc.id, [{ op: 'delete', id: 'n1' }], { baseVersion: 1, dryRun: true });
+    expect(dry).toMatchObject({ version: 1, dryRun: true });
+    const added = await canvas.ops(doc.id, [
+      { op: 'add', tempId: 'q', near: 'n1', side: 'right', node: { type: 'text', text: 'Open question' } },
+      { op: 'connect', from: 'n1', to: 'q', label: 'asks' },
+    ], { baseVersion: 1 });
+    expect(added.version).toBe(2);
+    expect(Object.keys(added.ids)).toContain('q');
+
+    const stale = await caught(canvas.ops(doc.id, [{ op: 'move', id: 'n1', x: 0, y: 0 }], { baseVersion: 1 }));
+    expect(stale.message).toBe(`The canvas ${doc.id} changed since version 1: it is at version 2 now`);
+    expect(stale.suggestion).toContain('--base-version 2');
+    expect((await caught(canvas.ops(doc.id, [{ op: 'disconnect', id: 'nope' }], { baseVersion: 2 }))).code).toBe('INVALID_PARAMS');
+
+    const readsBefore = (await client.views(doc.id)).agentReads;
+    const first = await canvas.version(doc.id, 1);
+    expect(first.nodes.map((n) => n.id)).toEqual(['g1', 'n1']);
+    expect((await client.views(doc.id)).agentReads).toBe(readsBefore);
+
+    const restored = await canvas.restore(doc.id, 1);
+    expect(restored).toMatchObject({ version: 3, restoredFrom: 1 });
+    expect((await canvas.get(doc.id)).nodes.map((n) => n.id)).toEqual(['g1', 'n1']);
+
+    const markdown = await client.publish({ type: 'markdown', content: '# Not a canvas', description: 'D.', summary: 'S.' });
+    expect((await caught(canvas.outline(markdown.id))).message).toContain('not a canvas');
+    expect((await caught(new KiteCanvas(other).get(doc.id))).code).toBe('NOT_FOUND');
+    expect((await caught(new KiteCanvas(other).ops(doc.id, [{ op: 'delete', id: 'n1' }], { baseVersion: 3 }))).code).toBe('NOT_FOUND');
+    await client.delete(doc.id);
+    await client.delete(markdown.id);
   }, 120_000);
 });

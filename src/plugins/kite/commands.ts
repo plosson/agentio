@@ -12,6 +12,7 @@ import { createSetupContext } from '../host-context';
 import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
 import { KiteClient, normaliseBaseUrl, parseVersion, readDocumentFile } from './client';
+import { registerCanvasCommands } from './canvas-commands';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
 import {
   printDeleted,
@@ -35,20 +36,20 @@ import type { KiteCredentials } from './types';
 
 const URL_INPUT: InputSpec = { label: 'Kite server URL', kind: 'url', help: 'For example https://kite.example.com' };
 
-const getKiteClient = createClientGetter<KiteCredentials, KiteClient>({
+export const getKiteClient = createClientGetter<KiteCredentials, KiteClient>({
   service: 'kite',
   createClient: (credentials) => new KiteClient(credentials),
 });
 
 /** The client for a command that changes something; a read-only profile is refused before any request. */
-async function getWritableClient(profileName: string | undefined, operation: string): Promise<KiteClient> {
+export async function getWritableClient(profileName: string | undefined, operation: string): Promise<KiteClient> {
   const { client, profile } = await getKiteClient(profileName);
   await enforceWriteAccess('kite', profile, operation);
   return client;
 }
 
 /** A leaf command with the options every Kite command takes. */
-function leaf(parent: Command, name: string, description: string, opts?: { isDefault?: boolean }): Command {
+export function leaf(parent: Command, name: string, description: string, opts?: { isDefault?: boolean }): Command {
   return addJsonOption(
     parent
       .command(name, opts)
@@ -58,7 +59,7 @@ function leaf(parent: Command, name: string, description: string, opts?: { isDef
 }
 
 /** Run a command's action, turning any failure into the standard error output. */
-function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
+export function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...args: A) => Promise<void> {
   return async (...args: A) => {
     try {
       await action(...args);
@@ -69,7 +70,7 @@ function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...ar
 }
 
 /** Refuse an `--out` path that cannot take a file, before anything is fetched. */
-async function checkOutPath(path: string): Promise<string> {
+export async function checkOutPath(path: string): Promise<string> {
   const target = resolve(path);
   const info = await stat(target).catch(() => null);
   if (info?.isDirectory()) throw new CliError('INVALID_PARAMS', `--out is a directory: ${path}`, 'Name a file');
@@ -99,7 +100,7 @@ description only when the purpose or scope changed, and the summary only when th
 main points changed. A wording fix or a small edit changes none of them.`;
 
 /** The summary from --summary or --summary-file; both at once is refused. */
-async function summaryFrom(options: { summary?: string; summaryFile?: string }): Promise<string | undefined> {
+export async function summaryFrom(options: { summary?: string; summaryFile?: string }): Promise<string | undefined> {
   if (options.summary !== undefined && options.summaryFile !== undefined) {
     throw new CliError('INVALID_PARAMS', 'Pass --summary or --summary-file, not both');
   }
@@ -112,7 +113,7 @@ async function summaryFrom(options: { summary?: string; summaryFile?: string }):
 }
 
 /** The options that say what a document is, shared by `publish` and `describe`. */
-function withDescriptionOptions(command: Command): Command {
+export function withDescriptionOptions(command: Command): Command {
   return command
     .option('--title <title>', 'Document title')
     .option('--description <text>', 'One line, at most 160 characters, on what the document is and what it is for')
@@ -246,6 +247,7 @@ read it again with \`agentio kite get\` and re-apply your change.`,
   );
 
   registerVersionCommands(kite);
+  registerCanvasCommands(kite);
 
   addExamples(
     leaf(kite, 'views', 'Who opened one of your documents, or how all of them have been read')
@@ -425,7 +427,7 @@ the current one. Needs Kite 1.3.0 or later.`,
   agentio kite versions get art_abc123 1 --out v1.md --json
 
 The description and summary are not versioned: they are always the current
-ones. Reading a version counts as an agent read of it, never as a view.
+ones. Reading a version is not recorded: it is neither a view nor an agent read.
 Needs Kite 1.3.0 or later.`,
   );
 }
