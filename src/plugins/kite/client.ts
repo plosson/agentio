@@ -8,16 +8,23 @@ import type {
   KiteCredentials,
   KiteDocument,
   KiteDocumentType,
+  KiteDocumentViews,
   KiteLibrary,
   KiteMe,
   KiteRawComment,
   KiteRawDocument,
+  KiteRawDocumentViews,
+  KiteRawVersions,
+  KiteRawViewsSummary,
   KiteRawSharingState,
   KiteRawThread,
   KiteRawWorkspace,
   KiteSharing,
   KiteReply,
   KiteThread,
+  KiteVersionDocument,
+  KiteVersionList,
+  KiteViewsSummary,
   KiteWorkspace,
 } from './types';
 
@@ -210,6 +217,98 @@ function toThread(raw: KiteRawThread): KiteThread {
     anchorDrifted: raw.anchorDrifted,
     comments: raw.comments.map((c) => ({ author: c.author?.email ?? null, body: c.body, createdAt: c.createdAt })),
   };
+}
+
+/** A version number as the server takes it: a whole number from 1 up. */
+export function parseVersion(input: string | number): number {
+  const text = String(input).trim();
+  if (!/^\d+$/.test(text) || Number(text) < 1 || !Number.isSafeInteger(Number(text))) {
+    throw new CliError('INVALID_PARAMS', `Not a version number: "${input}"`, 'Use a whole number from 1 up; see: agentio kite versions <id>');
+  }
+  return Number(text);
+}
+
+function viewerName(viewer: { kind: 'user'; email: string } | { kind: 'anonymous'; id: string }): string {
+  return viewer.kind === 'user' ? viewer.email : `anonymous ${viewer.id}`;
+}
+
+function toVersionList(raw: KiteRawVersions): KiteVersionList {
+  return {
+    id: raw.artifactId,
+    url: raw.url,
+    currentVersion: raw.currentVersion,
+    retentionDays: raw.retentionDays,
+    versions: raw.versions.map((v) => ({
+      version: v.version,
+      kind: v.kind,
+      title: v.title,
+      type: v.type,
+      bytes: v.bytes,
+      created: v.createdAt,
+      current: v.isCurrent,
+      views: v.views.views,
+      ownerViews: v.views.ownerViews,
+      otherViews: v.views.otherViews,
+    })),
+  };
+}
+
+/** Kite 1.2.0 counted only other people; 1.2.1 counts the owner too and says how many were whose. */
+function toDocumentViews(raw: KiteRawDocumentViews): KiteDocumentViews {
+  const t = raw.totals;
+  return {
+    id: raw.artifactId,
+    version: raw.version,
+    retentionDays: raw.retentionDays,
+    views: t.views,
+    ownerViews: t.ownerViews ?? 0,
+    otherViews: t.otherViews ?? t.views,
+    uniqueViewers: t.uniqueViewers,
+    otherViewers: t.otherViewers ?? t.uniqueViewers,
+    agentReads: t.agentFetches,
+    lastViewedAt: raw.lastViewedAt,
+    lastViewedVersion: raw.lastViewedVersion,
+    openedSinceLatestVersion: raw.openedSinceLatestVersion,
+    viewers: raw.viewers.map((v) => ({
+      who: viewerName(v.viewer),
+      you: v.isOwner === true,
+      access: v.access,
+      views: v.views,
+      lastViewedAt: v.lastViewedAt,
+      lastVersion: v.lastVersion,
+    })),
+    recent: (raw.recent ?? []).map((e) => ({
+      at: e.viewedAt, version: e.version, who: viewerName(e.viewer), access: e.access, client: e.client,
+    })),
+  };
+}
+
+function toViewsSummary(raw: KiteRawViewsSummary): KiteViewsSummary {
+  return {
+    retentionDays: raw.retentionDays,
+    totals: raw.totals,
+    documents: raw.artifacts.map((a) => ({
+      id: a.artifactId,
+      title: a.title,
+      url: a.url,
+      version: a.version,
+      views: a.views,
+      ownerViews: a.ownerViews ?? 0,
+      otherViews: a.otherViews ?? a.views,
+      uniqueViewers: a.uniqueViewers,
+      agentReads: a.agentFetches,
+      lastViewedAt: a.lastViewedAt,
+      openedSinceLatestVersion: a.openedSinceLatestVersion,
+    })),
+  };
+}
+
+/** What a server too old for a feature answers; Kite says "No such endpoint." for a route it does not have. */
+function isMissingRoute(res: RawResponse): boolean {
+  if (res.status !== 404 && res.status !== 405) return false;
+  const envelope = (res.data as ErrorEnvelope | null)?.error;
+  if (!envelope) return true;
+  return typeof envelope.message === 'string' && /no such endpoint/i.test(envelope.message);
 }
 
 export interface CommentInput {
@@ -425,6 +524,64 @@ export class KiteClient implements ServiceClient {
 
   async delete(id: string): Promise<void> {
     await this.request('DELETE', `/api/artifacts/${enc(requireDocumentId(id))}`, { query: { confirm: 'true' } });
+  }
+
+  /** The id of a document named by id or link; a link costs one lookup. */
+  private async documentId(reference: string): Promise<string> {
+    const ref = resolveReference(reference);
+    if (ref.kind === 'id') return requireDocumentId(ref.id);
+    const raw = await this.request<KiteRawDocument>('GET', `/api/artifacts/by-slug/${enc(ref.slug)}`);
+    return raw.id;
+  }
+
+  /**
+   * A request to a route that only newer servers have. An old server answers
+   * "No such endpoint." (or a proxy's page), which becomes a message naming the
+   * feature and the Kite version it needs, instead of "not found".
+   */
+  private async newer<T>(path: string, feature: string, since: string, isShape: (data: unknown) => boolean): Promise<T> {
+    const res = await this.raw('GET', path);
+    const unsupported = () => new CliError('API_ERROR', `Kite at ${this.baseUrl} does not have ${feature} yet`,
+      `It needs Kite ${since} or later; ask whoever runs the server to update it`);
+    if (res.status >= 200 && res.status < 300) {
+      if (!isShape(res.data)) throw unsupported();
+      return res.data as T;
+    }
+    if (isMissingRoute(res)) throw unsupported();
+    throw this.errorFor(res);
+  }
+
+  /** Every version of a document you own, newest first, without content (Kite 1.3.0+). */
+  async versions(reference: string): Promise<KiteVersionList> {
+    const id = await this.documentId(reference);
+    const raw = await this.newer<KiteRawVersions>(`/api/artifacts/${enc(id)}/versions`, 'version history', '1.3.0',
+      (d) => Array.isArray((d as KiteRawVersions | null)?.versions));
+    return toVersionList(raw);
+  }
+
+  /** One version of a document you own, with its content as it was then (Kite 1.3.0+). */
+  async getVersion(reference: string, version: string | number): Promise<KiteVersionDocument> {
+    const n = parseVersion(version);
+    const id = await this.documentId(reference);
+    const raw = await this.newer<KiteRawDocument & { currentVersion: number; isCurrent: boolean }>(
+      `/api/artifacts/${enc(id)}/versions/${n}`, 'version history', '1.3.0',
+      (d) => typeof (d as { content?: unknown } | null)?.content === 'string');
+    return { ...toDocument(raw), content: raw.content ?? '', currentVersion: raw.currentVersion, current: raw.isCurrent };
+  }
+
+  /** Who opened one of your documents (Kite 1.2.0+). */
+  async views(reference: string): Promise<KiteDocumentViews> {
+    const id = await this.documentId(reference);
+    const raw = await this.newer<KiteRawDocumentViews>(`/api/artifacts/${enc(id)}/views`, 'view tracking', '1.2.0',
+      (d) => Array.isArray((d as KiteRawDocumentViews | null)?.viewers));
+    return toDocumentViews(raw);
+  }
+
+  /** How every document you own has been read (Kite 1.2.0+). */
+  async viewsSummary(): Promise<KiteViewsSummary> {
+    const raw = await this.newer<KiteRawViewsSummary>('/api/views', 'view tracking', '1.2.0',
+      (d) => Array.isArray((d as KiteRawViewsSummary | null)?.artifacts));
+    return toViewsSummary(raw);
   }
 
   private sharingPath(id: string, rest = ''): string {

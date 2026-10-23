@@ -165,6 +165,27 @@ run('contract with a real Kite', () => {
     const since = await client.comments(doc.id, { since: reply.createdAt });
     expect(since).toEqual([]);
 
+    // Versions and views (Kite 1.3.0+): owner only, and a shared reader gets not found.
+    const versions = await client.versions(doc.id);
+    expect(versions.currentVersion).toBe(2);
+    expect(versions.versions.map((v) => [v.version, v.kind, v.current])).toEqual([[2, 'edited', true], [1, 'published', false]]);
+    expect(Object.keys(versions.versions[0]).sort()).toEqual(
+      ['bytes', 'created', 'current', 'kind', 'otherViews', 'ownerViews', 'title', 'type', 'version', 'views'],
+    );
+    expect((await client.versions(doc.url)).id).toBe(doc.id);
+    const first = await client.getVersion(doc.id, 1);
+    expect(first).toMatchObject({ id: doc.id, version: 1, currentVersion: 2, current: false, content: '# Contract\n\nexact rendered text here' });
+    expect((await caught(client.getVersion(doc.id, 9))).message).toContain('has no version 9');
+    expect((await caught(client.getVersion(doc.id, 0))).code).toBe('INVALID_PARAMS');
+    expect((await caught(other.versions(doc.id))).code).toBe('NOT_FOUND');
+    expect((await caught(other.getVersion(doc.id, 1))).code).toBe('NOT_FOUND');
+    const views = await client.views(doc.id);
+    expect(views).toMatchObject({ id: doc.id, version: 2, views: 0 });
+    expect(views.agentReads).toBeGreaterThan(0);
+    expect(views.recent.some((e) => e.version === 1 && e.client === 'api')).toBe(true);
+    expect((await client.viewsSummary()).documents.map((d) => d.id)).toContain(doc.id);
+    expect((await caught(other.views(doc.id))).code).toBe('NOT_FOUND');
+
     // Delete, and a dead token.
     await client.delete(doc.id);
     expect((await caught(client.get(doc.id))).code).toBe('NOT_FOUND');

@@ -1,5 +1,16 @@
 import { writeJson } from '../../utils/output';
-import type { KiteDocument, KiteLibrary, KiteReply, KiteSharing, KiteThread, KiteWorkspace } from './types';
+import type {
+  KiteDocument,
+  KiteDocumentViews,
+  KiteLibrary,
+  KiteReply,
+  KiteSharing,
+  KiteThread,
+  KiteVersionDocument,
+  KiteVersionList,
+  KiteViewsSummary,
+  KiteWorkspace,
+} from './types';
 
 /** `--json` writes `data`; otherwise `text` prints for people. */
 function emit(json: boolean | undefined, data: unknown, text: () => void): void {
@@ -156,4 +167,75 @@ export function printThread(thread: KiteThread & { mentions?: unknown }, json?: 
 
 export function printReply(reply: KiteReply, json?: boolean): void {
   emit(json, reply, () => console.log(`Replied (${reply.id}) at ${reply.createdAt}`));
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** "3 views (1 yours, 2 others)", or just "0 views". */
+function viewCount(v: { views: number; ownerViews: number; otherViews: number }): string {
+  if (v.views === 0) return '0 views';
+  return `${plural(v.views, 'view')} (${v.ownerViews} yours, ${v.otherViews} others)`;
+}
+
+export function printVersions(list: KiteVersionList, json?: boolean): void {
+  emit(json, list, () => {
+    console.log(`Versions of ${list.id} (${list.versions.length}, current is version ${list.currentVersion})`);
+    console.log(`  URL: ${list.url}\n`);
+    for (const v of list.versions) {
+      console.log(`v${v.version}${v.current ? ' (current)' : ''}  ${v.title} (${v.type}, ${plural(v.bytes, 'byte')})`);
+      console.log(`  ${v.kind === 'published' ? 'Published' : 'Edited'}: ${v.created}`);
+      console.log(`  Views: ${viewCount(v)}`);
+    }
+    console.log(`\nView counts cover the last ${list.retentionDays} days. Read one with: agentio kite versions get ${list.id} <n>`);
+  });
+}
+
+/** `get --version`: like `get`, saying which version this is. */
+export function printVersionDocument(doc: Omit<KiteVersionDocument, 'content'> & ({ content: string } | { file: string }), json?: boolean): void {
+  emit(json, doc, () => {
+    console.log(`${doc.title} (${doc.type}, version ${doc.version} of ${doc.currentVersion}${doc.current ? ', the current one' : ''})`);
+    console.log(`  ID: ${doc.id}`);
+    console.log(`  URL: ${doc.url}`);
+    console.log(`  Written: ${doc.updated}`);
+    if ('file' in doc) {
+      console.log(`  Written to: ${doc.file}`);
+      return;
+    }
+    console.log('---');
+    console.log(doc.content);
+  });
+}
+
+export function printDocumentViews(views: KiteDocumentViews, json?: boolean): void {
+  emit(json, views, () => {
+    console.log(`Views of ${views.id} (version ${views.version}, last ${views.retentionDays} days)`);
+    console.log(`  Views: ${viewCount(views)}`);
+    console.log(`  People: ${views.uniqueViewers} (${views.otherViewers} besides you)`);
+    console.log(`  Agent reads: ${views.agentReads} (not counted as views)`);
+    console.log(`  Last opened: ${views.lastViewedAt ? `${views.lastViewedAt}, version ${views.lastViewedVersion}` : 'never'}`);
+    console.log(`  Current version opened: ${views.openedSinceLatestVersion ? 'yes' : 'not yet'}`);
+    if (views.viewers.length === 0) return;
+    console.log('\nReaders');
+    for (const v of views.viewers) {
+      console.log(`  ${v.you ? `you (${v.who})` : v.who}: ${plural(v.views, 'view')}, last ${v.lastViewedAt} (version ${v.lastVersion}), via ${v.access}`);
+    }
+  });
+}
+
+export function printViewsSummary(summary: KiteViewsSummary, json?: boolean): void {
+  emit(json, summary, () => {
+    const t = summary.totals;
+    console.log(`Views of your documents (last ${summary.retentionDays} days)`);
+    console.log(`  ${plural(t.documents, 'document')}, ${t.opened} opened, ${t.neverOpened} never opened, ${t.notOpenedSinceLatestVersion} with an unread current version`);
+    console.log(`  ${plural(t.views, 'view')} in all\n`);
+    for (const d of summary.documents) {
+      const unread = d.openedSinceLatestVersion ? '' : '  [current version unread]';
+      console.log(`${d.title} (version ${d.version})${unread}`);
+      console.log(`  ID: ${d.id}`);
+      console.log(`  Views: ${viewCount(d)}, ${d.uniqueViewers} ${d.uniqueViewers === 1 ? 'person' : 'people'}, ${d.agentReads} agent reads`);
+      console.log(`  Last opened: ${d.lastViewedAt ?? 'never'}`);
+    }
+  });
 }

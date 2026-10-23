@@ -56,6 +56,10 @@ interface Doc {
   domains: Array<{ id: string; domain: string; createdAt: string }>;
   /** Where each reader sorted it: email to workspace id. Absent means inbox. */
   placements: Map<string, string>;
+  /** Every version, oldest first, as Kite keeps them. */
+  history: Array<{ version: number; type: string; title: string; content: string; createdAt: string }>;
+  /** Opens, oldest first. A null viewer is a signed-out reader of a public link. */
+  opens: Array<{ viewer: string | null; version: number; client: 'browser' | 'api' | 'mcp'; at: string }>;
 }
 
 interface Workspace {
@@ -93,6 +97,10 @@ export class FakeKite {
   expiresInSeconds = 600;
   /** Where the start answer sends the browser; defaults to this server. */
   verificationOrigin?: string;
+  /** False plays a Kite older than 1.3.0, which has no version history. */
+  versionsApi = true;
+  /** False plays a Kite older than 1.2.0, which has no view tracking. */
+  viewsApi = true;
   /** Applied to the next device started. */
   nextDeviceApproval?: { afterPolls: number; email: string };
 
@@ -173,8 +181,21 @@ export class FakeKite {
   seedDoc(email: string, fields: Partial<Doc> = {}): Doc {
     const doc = this.newDoc(email, fields.type ?? 'markdown', fields.content ?? '# Hello', fields.title ?? 'Hello');
     Object.assign(doc, fields);
+    doc.history = [{ version: doc.version, type: doc.type, title: doc.title, content: doc.content, createdAt: doc.createdAt }];
     this.docs.set(doc.id, doc);
     return doc;
+  }
+
+  /** A new version of a seeded document, as an edit in the app would write it. */
+  seedEdit(doc: Doc, content: string, title = doc.title): void {
+    const at = this.now();
+    Object.assign(doc, { content, title, version: doc.version + 1, updatedAt: at });
+    doc.history.push({ version: doc.version, type: doc.type, title, content, createdAt: at });
+  }
+
+  /** Somebody opened a document; `viewer` null is a signed-out reader. */
+  seedOpen(doc: Doc, viewer: string | null, version = doc.version, client: 'browser' | 'api' | 'mcp' = 'browser'): void {
+    doc.opens.push({ viewer, version, client, at: this.now() });
   }
 
   /** Create a workspace directly, owned by `email`. */
@@ -205,6 +226,7 @@ export class FakeKite {
       id: this.id('art'), slug: this.id('s').replace('_', ''), owner, type, title, content, version: 1,
       description: 'Seeded.', summary: 'Seeded.', summaryVersion: 1,
       createdAt: at, updatedAt: at, isPublic: false, expiresAt: null, people: [], domains: [], placements: new Map(),
+      history: [{ version: 1, type, title, content, createdAt: at }], opens: [],
     };
   }
 
@@ -257,6 +279,10 @@ export class FakeKite {
       }
       if (method === 'POST') return this.publish(me, b);
     }
+    if (path === '/api/views' && method === 'GET') {
+      if (!this.viewsApi) return err(404, 'not_found', 'No such endpoint.');
+      return json(200, this.viewsSummary(me));
+    }
     if (path === '/api/workspaces') {
       if (method === 'GET') return json(200, { workspaces: this.workspaceList(me) });
       if (method === 'POST') return this.createWorkspace(me, b);
@@ -276,6 +302,15 @@ export class FakeKite {
       if (rest === '/workspace' && method === 'PUT') return this.place(doc, me, b);
       if (!doc || doc.owner !== me) return err(404, 'not_found', 'No such artifact.');
       if (rest === '') return this.document(doc, method, r, b);
+      if (rest === '/views' && method === 'GET') {
+        if (!this.viewsApi) return err(404, 'not_found', 'No such endpoint.');
+        return json(200, this.documentViews(doc));
+      }
+      const v = /^\/versions(?:\/([^/]+))?$/.exec(rest);
+      if (v && method === 'GET') {
+        if (!this.versionsApi) return err(404, 'not_found', 'No such endpoint.');
+        return this.versions(doc, v[1]);
+      }
       if (rest.startsWith('/sharing')) return this.sharing(doc, method, rest.slice('/sharing'.length), b);
     }
     m = /^\/api\/comments\/threads\/([^/]+)\/(replies|status)$/.exec(path);
@@ -419,6 +454,7 @@ export class FakeKite {
       }
       Object.assign(doc, { type: b.type, content: b.content, version: doc.version + 1, updatedAt: this.now() });
       if (typeof b.title === 'string') doc.title = b.title;
+      doc.history.push({ version: doc.version, type: doc.type, title: doc.title, content: doc.content, createdAt: doc.updatedAt });
       if (typeof b.description === 'string') doc.description = b.description.trim();
       if (typeof b.summary === 'string') Object.assign(doc, { summary: b.summary.trim(), summaryVersion: doc.version });
       return json(200, this.view(doc, true));
@@ -521,6 +557,89 @@ export class FakeKite {
     return err(404, 'not_found', 'Not found.');
   }
 
+  /** Kite 1.3.0's two version routes: the list, and one version shaped like the document. */
+  private versions(doc: Doc, wanted: string | undefined): Response {
+    const browserViews = (version: number) => {
+      const opens = doc.opens.filter((o) => o.client === 'browser' && o.version === version);
+      const ownerViews = opens.filter((o) => o.viewer === doc.owner).length;
+      return { views: opens.length, ownerViews, otherViews: opens.length - ownerViews };
+    };
+    if (wanted === undefined) {
+      return json(200, {
+        artifactId: doc.id, slug: doc.slug, url: `${this.url}/a/${doc.slug}`, currentVersion: doc.version,
+        publishedBy: { email: doc.owner, displayName: null }, retentionDays: 180,
+        versions: [...doc.history].reverse().map((h) => ({
+          version: h.version, createdAt: h.createdAt, kind: h.version === 1 ? 'published' : 'edited', type: h.type,
+          title: h.title, bytes: Buffer.byteLength(h.content), isCurrent: h.version === doc.version, views: browserViews(h.version),
+        })),
+      });
+    }
+    if (!/^\d+$/.test(wanted) || Number(wanted) < 1) return err(400, 'validation_failed', 'version must be a whole number from 1 up.');
+    const h = doc.history.find((x) => x.version === Number(wanted));
+    if (!h) {
+      return err(404, 'not_found', `This artifact has no version ${wanted}. It is at version ${doc.version}.`, { currentVersion: doc.version });
+    }
+    doc.opens.push({ viewer: doc.owner, version: h.version, client: 'api', at: this.now() });
+    return json(200, {
+      ...this.view(doc, true), type: h.type, title: h.title, content: h.content, version: h.version, updatedAt: h.createdAt,
+      currentVersion: doc.version, isCurrent: h.version === doc.version,
+    });
+  }
+
+  private viewer(email: string | null) {
+    return email === null ? { kind: 'anonymous', id: 'anon_1' } : { kind: 'user', email, displayName: null };
+  }
+
+  /** Kite 1.2.1's GET /api/artifacts/:id/views, from the seeded opens. */
+  private documentViews(doc: Doc) {
+    const browser = doc.opens.filter((o) => o.client === 'browser');
+    const ownerViews = browser.filter((o) => o.viewer === doc.owner).length;
+    const readers = [...new Set(browser.map((o) => o.viewer))];
+    const last = browser[browser.length - 1];
+    return {
+      artifactId: doc.id, version: doc.version, latestVersionAt: doc.updatedAt, retentionDays: 180,
+      totals: {
+        views: browser.length, uniqueViewers: readers.length, anonymousViewers: readers.filter((v) => v === null).length,
+        ownerViews, otherViews: browser.length - ownerViews, otherViewers: readers.filter((v) => v !== doc.owner).length,
+        agentFetches: doc.opens.length - browser.length,
+      },
+      lastViewedAt: last?.at ?? null, lastViewedVersion: last?.version ?? null,
+      openedSinceLatestVersion: browser.some((o) => o.version === doc.version),
+      viewers: readers.map((who) => {
+        const mine = browser.filter((o) => o.viewer === who);
+        return {
+          viewer: this.viewer(who), isOwner: who === doc.owner, access: who === doc.owner ? 'owner' : 'public', views: mine.length,
+          firstViewedAt: mine[0].at, lastViewedAt: mine[mine.length - 1].at, lastVersion: Math.max(...mine.map((o) => o.version)),
+        };
+      }),
+      recent: [...doc.opens].reverse().map((o) => ({
+        viewedAt: o.at, version: o.version, viewer: this.viewer(o.viewer), access: o.viewer === doc.owner ? 'owner' : 'public', client: o.client,
+      })),
+    };
+  }
+
+  private viewsSummary(me: string) {
+    const artifacts = [...this.docs.values()].filter((d) => d.owner === me).map((d) => {
+      const v = this.documentViews(d);
+      return {
+        artifactId: d.id, slug: d.slug, title: d.title, url: `${this.url}/a/${d.slug}`, version: d.version, latestVersionAt: d.updatedAt,
+        views: v.totals.views, uniqueViewers: v.totals.uniqueViewers, ownerViews: v.totals.ownerViews, otherViews: v.totals.otherViews,
+        lastViewedAt: v.lastViewedAt, lastViewedVersion: v.lastViewedVersion, openedSinceLatestVersion: v.openedSinceLatestVersion,
+        agentFetches: v.totals.agentFetches,
+      };
+    });
+    const opened = artifacts.filter((a) => a.views > 0).length;
+    return {
+      retentionDays: 180,
+      totals: {
+        documents: artifacts.length, opened, neverOpened: artifacts.length - opened,
+        notOpenedSinceLatestVersion: artifacts.filter((a) => !a.openedSinceLatestVersion).length,
+        views: artifacts.reduce((n, a) => n + a.views, 0),
+      },
+      artifacts,
+    };
+  }
+
   private canRead(doc: Doc, me: string): boolean {
     return doc.owner === me || doc.isPublic || doc.people.some((p) => p.email === me);
   }
@@ -530,7 +649,7 @@ export class FakeKite {
   }
 
   private view(doc: Doc, withContent: boolean) {
-    const { content, owner, people, domains, placements, ...rest } = doc;
+    const { content, owner, people, domains, placements, history, opens, ...rest } = doc;
     return {
       ...rest, ownerId: `usr_${owner}`, isPublic: doc.isPublic ? 1 : 0, url: `${this.url}/a/${doc.slug}`,
       ...(withContent ? { content } : {}),
