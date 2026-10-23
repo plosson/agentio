@@ -384,3 +384,55 @@ describe('describing and organizing from the command line', () => {
     expect(fake.log).toEqual([]);
   }, 30_000);
 });
+
+describe('versions and views from the command line', () => {
+  withProfiles(() => ({ main: { server: fake } }));
+
+  test('versions lists by default, versions get reads one, --out saves it', async () => {
+    const doc = fake.seedDoc(ME, { content: '# One', title: 'Plan' });
+    fake.seedEdit(doc, '# Two');
+    const out = join(home(), 'v1.md');
+    const [listed, explicit, text, got, saved] = await Promise.all([
+      cli('kite', 'versions', doc.id, '--json'),
+      cli('kite', 'versions', 'list', `${fake.url}/a/${doc.slug}`, '--json'),
+      cli('kite', 'versions', doc.id),
+      cli('kite', 'versions', 'get', doc.id, '1', '--json'),
+      cli('kite', 'versions', 'get', doc.id, '1', '--out', out, '--json'),
+    ]);
+    expect(listed.code).toBe(0);
+    expect(onlyJson(listed.stdout).versions.map((v: any) => [v.version, v.current])).toEqual([[2, true], [1, false]]);
+    expect(onlyJson(explicit.stdout).id).toBe(doc.id);
+    expect(text.stdout).toContain('v2 (current)  Plan');
+    expect(text.stdout).toContain(`agentio kite versions get ${doc.id} <n>`);
+    expect(onlyJson(got.stdout)).toMatchObject({ content: '# One', version: 1, currentVersion: 2, current: false });
+    const savedJson = onlyJson(saved.stdout);
+    expect(savedJson).toMatchObject({ file: out, version: 1 });
+    expect(savedJson).not.toHaveProperty('content');
+    expect(readFileSync(out, 'utf8')).toBe('# One');
+  }, 30_000);
+
+  test('against a Kite without version history, a clear error and a non-zero exit', async () => {
+    fake.versionsApi = false;
+    const doc = fake.seedDoc(ME);
+    const res = await cli('kite', 'versions', doc.id);
+    expect(res.code).not.toBe(0);
+    expect(res.stderr).toContain('does not have version history yet');
+    expect(res.stderr).toContain('Kite 1.3.0 or later');
+    expect(res.stdout).toBe('');
+  }, 30_000);
+
+  test('views with an id shows one document, without shows them all', async () => {
+    const doc = fake.seedDoc(ME, { title: 'Plan' });
+    fake.seedOpen(doc, ME);
+    fake.seedOpen(doc, 'p@x.com');
+    const [one, all, allText] = await Promise.all([
+      cli('kite', 'views', doc.id, '--json'),
+      cli('kite', 'views', '--json'),
+      cli('kite', 'views'),
+    ]);
+    expect(onlyJson(one.stdout)).toMatchObject({ id: doc.id, views: 2, ownerViews: 1, otherViews: 1 });
+    expect(onlyJson(all.stdout).documents).toEqual([expect.objectContaining({ id: doc.id, views: 2 })]);
+    expect(allText.stdout).toContain('Plan (version 1)');
+    expect(allText.stdout).toContain('2 views (1 yours, 1 others)');
+  }, 30_000);
+});

@@ -11,12 +11,13 @@ import { addProfileWithSetup } from '../profile-host';
 import { createSetupContext } from '../host-context';
 import type { InputSpec, SetupContext, SetupResult } from '../../plugin-sdk';
 import type { ProfileAddOptions } from '../types';
-import { KiteClient, normaliseBaseUrl, readDocumentFile } from './client';
+import { KiteClient, normaliseBaseUrl, parseVersion, readDocumentFile } from './client';
 import { deviceLabel, kiteDeviceLogin } from './device-auth';
 import {
   printDeleted,
   printDocument,
   printDocumentList,
+  printDocumentViews,
   printFetchedDocument,
   printLibrary,
   printMoved,
@@ -24,6 +25,9 @@ import {
   printSharing,
   printThread,
   printThreads,
+  printVersionDocument,
+  printVersions,
+  printViewsSummary,
   printWorkspace,
   printWorkspaces,
 } from './output';
@@ -44,10 +48,10 @@ async function getWritableClient(profileName: string | undefined, operation: str
 }
 
 /** A leaf command with the options every Kite command takes. */
-function leaf(parent: Command, name: string, description: string): Command {
+function leaf(parent: Command, name: string, description: string, opts?: { isDefault?: boolean }): Command {
   return addJsonOption(
     parent
-      .command(name)
+      .command(name, opts)
       .description(description)
       .option('--profile <name>', 'Profile name (optional if only one profile exists)'),
   );
@@ -74,6 +78,17 @@ async function checkOutPath(path: string): Promise<string> {
     if (!parent?.isDirectory()) throw new CliError('INVALID_PARAMS', `Cannot write ${path}: its folder does not exist`);
   }
   return target;
+}
+
+/** Write a fetched document's content to `target`; what to print instead of the content. */
+async function saveContent<T extends { content: string }>(document: T, target: string, given: string): Promise<Omit<T, 'content'> & { file: string }> {
+  const { content, ...rest } = document;
+  try {
+    await writeFile(target, content);
+  } catch {
+    throw new CliError('INVALID_PARAMS', `Cannot write ${given}`);
+  }
+  return { ...rest, file: target };
 }
 
 /** What `publish` and `describe` say about the steadiness of title, description and summary. */
@@ -216,17 +231,7 @@ read it again with \`agentio kite get\` and re-apply your change.`,
         const out = options.out !== undefined ? await checkOutPath(options.out) : undefined;
         const { client } = await getKiteClient(options.profile);
         const document = await client.get(reference);
-        if (!out) {
-          printFetchedDocument(document, options.json);
-          return;
-        }
-        const { content, ...rest } = document;
-        try {
-          await writeFile(out, content);
-        } catch {
-          throw new CliError('INVALID_PARAMS', `Cannot write ${options.out}`);
-        }
-        printFetchedDocument({ ...rest, file: out }, options.json);
+        printFetchedDocument(out ? await saveContent(document, out, options.out) : document, options.json);
       })),
     `Examples:
 
@@ -234,7 +239,32 @@ read it again with \`agentio kite get\` and re-apply your change.`,
   agentio kite get https://kite.example.com/a/Xy7fQ2
 
   # save your own document to a file, to edit and publish again
-  agentio kite get art_abc123 --out notes.md --json`,
+  agentio kite get art_abc123 --out notes.md --json
+
+  # an earlier version of your own document
+  agentio kite versions get art_abc123 2`,
+  );
+
+  registerVersionCommands(kite);
+
+  addExamples(
+    leaf(kite, 'views', 'Who opened one of your documents, or how all of them have been read')
+      .argument('[id-or-link]', 'A document id (art_…) or its link; leave out for every document you own')
+      .action(run(async (reference: string | undefined, options) => {
+        const { client } = await getKiteClient(options.profile);
+        if (reference === undefined) printViewsSummary(await client.viewsSummary(), options.json);
+        else printDocumentViews(await client.views(reference), options.json);
+      })),
+    `Examples:
+
+  # every document you own: views, readers, and which current versions nobody opened
+  agentio kite views
+
+  # one document: each reader, how they got in, and the last version they saw
+  agentio kite views art_abc123 --json
+
+A view is a browser open, yours included. Reads by agents, such as this
+command line, are counted apart as agent reads. Needs Kite 1.2.0 or later.`,
   );
 
   addExamples(
@@ -349,6 +379,54 @@ them with \`agentio kite describe\` and \`agentio kite move\`.`,
 
   # a second, read-only account under a chosen name
   agentio kite profile add --url https://kite.example.com --profile team --read-only`,
+  );
+}
+
+function registerVersionCommands(kite: Command): void {
+  const versions = kite.command('versions').description('The earlier versions of your own documents (Kite 1.3.0+)');
+
+  addExamples(
+    leaf(versions, 'list', 'List every version of one of your documents, newest first, with view counts', { isDefault: true })
+      .argument('<id-or-link>', 'A document id (art_…) or its link (https://…/a/<slug>)')
+      .action(run(async (reference: string, options) => {
+        const { client } = await getKiteClient(options.profile);
+        printVersions(await client.versions(reference), options.json);
+      })),
+    `Examples:
+
+  # every version, with when it was written and how often it was opened
+  agentio kite versions art_abc123
+
+  # the same; list is the default
+  agentio kite versions list https://kite.example.com/a/Xy7fQ2 --json
+
+Only the owner sees earlier versions; people the document is shared with see
+the current one. Needs Kite 1.3.0 or later.`,
+  );
+
+  addExamples(
+    leaf(versions, 'get', 'Read one version of one of your documents, as it was then')
+      .argument('<id-or-link>', 'A document id (art_…) or its link (https://…/a/<slug>)')
+      .argument('<version>', 'The version number, from agentio kite versions')
+      .option('--out <file>', 'Write the content to this file (replacing it if it exists) instead of printing it')
+      .action(run(async (reference: string, version: string, options) => {
+        const n = parseVersion(version);
+        const out = options.out !== undefined ? await checkOutPath(options.out) : undefined;
+        const { client } = await getKiteClient(options.profile);
+        const document = await client.getVersion(reference, n);
+        printVersionDocument(out ? await saveContent(document, out, options.out) : document, options.json);
+      })),
+    `Examples:
+
+  # version 2 as it was then
+  agentio kite versions get art_abc123 2
+
+  # save version 1, to compare it with the current one
+  agentio kite versions get art_abc123 1 --out v1.md --json
+
+The description and summary are not versioned: they are always the current
+ones. Reading a version counts as an agent read of it, never as a view.
+Needs Kite 1.3.0 or later.`,
   );
 }
 
