@@ -270,7 +270,8 @@ you give, nothing is applied: read it again and resend with the new version.`,
 
 The new node's id is printed (new → n_…); use it to connect or move it. With
 --icon-svg, Kite cleans the SVG and keeps it on the canvas (icon → a_…); other
-nodes can show it with --icon asset:a_….`,
+nodes can show it with --icon asset:a_…. The style and icon flags need Kite
+1.5.0 or later.`,
   );
 
   addExamples(
@@ -314,7 +315,8 @@ nodes can show it with --icon asset:a_….`,
   agentio kite canvas update art_abc123 n1 --unset style.fill icon
   agentio kite canvas update art_abc123 e2 --color "#8a5cf6" --dashed --curve step --arrow both
 
-Style changes merge with the style the node or edge already has.`,
+Style changes merge with the style the node or edge already has. The style and
+icon flags need Kite 1.5.0 or later.`,
   );
 
   addExamples(
@@ -388,12 +390,15 @@ It is one new version; agentio kite canvas restore brings the old one back.`,
     `Examples:
 
   agentio kite canvas connect art_abc123 n1 n2 --label "then"
-  agentio kite canvas connect art_abc123 n1 n2 --label "reads" --color 5 --dashed --curve step --line-width 2`,
+  agentio kite canvas connect art_abc123 n1 n2 --label "reads" --color 5 --dashed --curve step --line-width 2
+
+The style flags (--line-width, --dashed, --curve, --arrow, …) need Kite 1.5.0
+or later.`,
   );
 
   addExamples(
     changeOptions(themeFlags(
-      leaf(canvas, 'theme', 'Set the canvas theme: background, grid, and the default look of nodes, groups and edges')
+      leaf(canvas, 'theme', 'Set the canvas theme: background, grid, and the default look of nodes, groups and edges (Kite 1.5.0+)')
         .argument(...REF),
     )).action(run(async (reference: string, options) => {
       const fromFile = options.from === undefined ? undefined : await readText(options.from);
@@ -409,7 +414,8 @@ It is one new version; agentio kite canvas restore brings the old one back.`,
 
 The box and text flags (--fill, --font, …) set the default for cards; --group-*
 and the --label-* flags for groups; the line flags and --edge-color for edges.
-A theme merges with the one the canvas has; a node's own style wins over it.`,
+A theme merges with the one the canvas has; a node's own style wins over it.
+Needs Kite 1.5.0 or later.`,
   );
 
   addExamples(
