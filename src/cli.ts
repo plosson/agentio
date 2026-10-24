@@ -160,5 +160,11 @@ export function createProgram(registry: PluginRegistry = DEFAULT_PLUGIN_REGISTRY
     '\nFor agent/LLM usage: run `agentio skill <service>` to dump a full SKILL.md, or `agentio docs` for the machine-readable command index.\n',
   );
 
+  // agentio's own options (only --version) count only before the command, so
+  // a command can have a --version of its own: kite canvas image --version 3.
+  // Set last, on the program alone: the commands made above do not inherit it,
+  // so their options still work before or after their subcommands.
+  program.enablePositionalOptions();
+
   return program;
 }

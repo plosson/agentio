@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { KiteClient } from '../../../src/plugins/kite/client';
-import { KiteCanvas, parseOpsText } from '../../../src/plugins/kite/canvas';
+import { KiteCanvas, imageName, parseOpsText } from '../../../src/plugins/kite/canvas';
 import { FakeKite, caught } from './fake-kite';
 
 const ME = 'me@example.com';
@@ -183,5 +183,58 @@ describe('parseOpsText', () => {
     for (const bad of ['nope', '[]', '{"ops":[]}', '[{"id":"n1"}]', '{"baseVersion":0,"ops":[{"op":"delete"}]}']) {
       expect(() => parseOpsText(bad, 'f')).toThrow();
     }
+  });
+});
+
+describe('images (Kite 1.6.0+)', () => {
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  test('a PNG by default, named after the title, with the version and where it starts', async () => {
+    const doc = seedCanvas();
+    const image = await canvas.image(`${fake.url}/a/${doc.slug}`);
+    expect([...image.bytes.slice(0, 8)]).toEqual(PNG);
+    expect(image).toMatchObject({ id: doc.id, version: 1, format: 'png', name: 'Board.png', origin: { x: -32, y: -32 } });
+    const [req] = fake.requests('GET', `/api/artifacts/${doc.id}/canvas/image`);
+    expect(req.query).toEqual({ format: 'png' });
+    expect(req.headers.accept).toBe('image/png, application/json');
+  });
+
+  test('passes format, version, node, scale, padding and a transparent background', async () => {
+    const doc = seedCanvas();
+    fake.seedEdit(doc, BOARD);
+    const image = await canvas.image(doc.id, { format: 'svg', version: 1, node: 'n1', scale: 2.5, padding: 0, transparent: true });
+    expect(new TextDecoder().decode(image.bytes)).toStartWith('<svg');
+    expect(image).toMatchObject({ format: 'svg', version: 1, name: 'Board.svg' });
+    expect(fake.requests('GET', `/api/artifacts/${doc.id}/canvas/image`)[0].query)
+      .toEqual({ format: 'svg', version: '1', node: 'n1', scale: '2.5', padding: '0', background: 'transparent' });
+  });
+
+  test('what Kite refuses comes back as its message', async () => {
+    const doc = seedCanvas();
+    const e = await caught(canvas.image(doc.id, { node: 'n9' }));
+    expect(e.message).toContain('no node "n9"');
+    clean(`${e.message} ${e.suggestion ?? ''}`);
+  });
+
+  test('a Markdown document is not a canvas', async () => {
+    const doc = fake.seedDoc(ME);
+    const e = await caught(canvas.image(doc.id));
+    expect(e.message).toContain('not a canvas');
+  });
+
+  test('a Kite before 1.6.0 says images need 1.6.0', async () => {
+    fake.canvasImageApi = false;
+    const doc = seedCanvas();
+    const e = await caught(canvas.image(doc.id));
+    expect(e.message).toBe(`Kite at ${fake.url} cannot draw canvases as images yet`);
+    expect(e.suggestion).toContain('Kite 1.6.0 or later');
+  });
+
+  test('a file name from Kite is kept to one safe name in the folder', () => {
+    expect(imageName(`inline; filename="Plan_.png"; filename*=UTF-8''Plan%20%C3%A9t%C3%A9.png`, 'x.png')).toBe('Plan été.png');
+    expect(imageName('inline; filename="Board.svg"', 'x.svg')).toBe('Board.svg');
+    expect(imageName(`inline; filename*=UTF-8''..%2F..%2Fetc%2Fpasswd`, 'x.png')).toBe('.. .. etc passwd');
+    expect(imageName(`inline; filename*=UTF-8''..`, 'art_1.png')).toBe('art_1.png');
+    expect(imageName(null, 'art_1.png')).toBe('art_1.png');
   });
 });

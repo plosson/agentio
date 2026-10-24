@@ -354,17 +354,37 @@ export class KiteClient implements ServiceClient {
 
   /** One HTTP exchange; answers any status without throwing, except when the server cannot be reached. */
   async raw(method: string, path: string, options: RequestOptions = {}): Promise<RawResponse> {
+    return this.answer(await this.send(method, path, options, 'application/json'));
+  }
+
+  /**
+   * A GET whose answer is a file, such as an image, as bytes. A failed answer
+   * is read as JSON, as `raw` reads it, so `errorFor` and `isMissingRoute`
+   * work on it; `bytes` is there only for a 2xx.
+   */
+  async download(path: string, accept: string, options: Pick<RequestOptions, 'query'> = {}): Promise<RawResponse & { bytes?: Uint8Array }> {
+    const response = await this.send('GET', path, options, `${accept}, application/json`);
+    if (response.status < 200 || response.status >= 300) return this.answer(response);
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await response.arrayBuffer());
+    } catch {
+      throw new CliError('NETWORK_ERROR', `Kite at ${this.baseUrl} stopped before the whole file arrived`, 'Try again');
+    }
+    return { status: response.status, headers: response.headers, data: null, bytes };
+  }
+
+  private async send(method: string, path: string, options: RequestOptions, accept: string): Promise<Response> {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value);
     }
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { Accept: accept };
     if (options.auth !== false) headers.Authorization = `Bearer ${this.token}`;
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
-    let response: Response;
     try {
-      response = await fetch(url, {
+      return await fetch(url, {
         method,
         headers,
         body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -373,6 +393,9 @@ export class KiteClient implements ServiceClient {
     } catch {
       throw new CliError('NETWORK_ERROR', `Cannot reach Kite at ${this.baseUrl}`, 'Check the URL and your network connection');
     }
+  }
+
+  private async answer(response: Response): Promise<RawResponse> {
     const text = await response.text().catch(() => '');
     let data: unknown = null;
     if (text) {
