@@ -24,6 +24,19 @@ import {
   type CanvasOutlineNode,
   type CanvasVersion,
 } from './canvas';
+import {
+  anyStyle,
+  edgeEnds,
+  edgeStyle,
+  edgeStyleFlags,
+  iconFlags,
+  iconFromOptions,
+  nodeStyle,
+  nodeStyleFlags,
+  splitUnset,
+  themeFlags,
+  themeFromOptions,
+} from './canvas-style';
 import { checkOutPath, getKiteClient, getWritableClient, leaf, run, summaryFrom } from './commands';
 import { printDocument, printVersions } from './output';
 
@@ -194,7 +207,7 @@ you give, nothing is applied: read it again and resend with the new version.`,
   );
 
   addExamples(
-    changeOptions(
+    changeOptions(iconFlags(nodeStyleFlags(
       leaf(canvas, 'add', 'Add a text, link, Kite document or group; placed clear of the rest unless --at is given')
         .argument(...REF)
         .option('--text <text>', 'A text node (plain text)')
@@ -209,7 +222,7 @@ you give, nothing is applied: read it again and resend with the new version.`,
         .option('--width <n>', 'Width')
         .option('--height <n>', 'Height')
         .option('--color <color>', 'A JSON Canvas color: 1–6 or #rrggbb'),
-    ).action(run(async (reference: string, options) => {
+    ))).action(run(async (reference: string, options) => {
       const kinds = ['text', 'link', 'doc', 'group'].filter((k) => options[k] !== undefined);
       if (kinds.length !== 1) throw new CliError('INVALID_PARAMS', 'Give one of --text, --link, --doc or --group');
       if (options.view !== 'card' && options.view !== 'preview') throw new CliError('INVALID_PARAMS', `Not a view: ${options.view}`, 'Use card or preview.');
@@ -225,6 +238,9 @@ you give, nothing is applied: read it again and resend with the new version.`,
       if (options.width !== undefined) node.width = parseNumber(options.width, '--width', 1);
       if (options.height !== undefined) node.height = parseNumber(options.height, '--height', 1);
       if (options.color !== undefined) node.color = options.color;
+      const style = nodeStyle(options);
+      const { icon, ops: before } = await iconFromOptions(options, readText);
+      if (Object.keys(style).length || icon) node.kite = { ...(Object.keys(style).length ? { style } : {}), ...(icon ? { icon } : {}) };
       const op: CanvasOp = { op: 'add', tempId: 'new', node };
       if (options.in !== undefined) op.in = options.in;
       if (options.near !== undefined) Object.assign(op, { near: options.near, side: parseSide(options.side, '--side') });
@@ -233,12 +249,13 @@ you give, nothing is applied: read it again and resend with the new version.`,
         const doc = await client.get(options.doc);
         const preview = options.view === 'preview';
         Object.assign(node, {
-          type: 'link', url: doc.url, kite: { kind: 'kite', ref: doc.id, view: options.view },
+          type: 'link', url: doc.url, kite: { ...((node.kite as object | undefined) ?? {}), kind: 'kite', ref: doc.id, view: options.view },
           width: node.width ?? (preview ? 420 : 320), height: node.height ?? (preview ? 360 : 110),
         });
       }
-      const result = await new KiteCanvas(client).ops(reference, [op], { baseVersion: optionalVersion(options.baseVersion), dryRun: options.dryRun });
-      printOps(result, 1, options.json);
+      const ops = [...before, op];
+      const result = await new KiteCanvas(client).ops(reference, ops, { baseVersion: optionalVersion(options.baseVersion), dryRun: options.dryRun });
+      printOps(result, ops.length, options.json);
     })),
     `Examples:
 
@@ -247,12 +264,18 @@ you give, nothing is applied: read it again and resend with the new version.`,
   agentio kite canvas add art_abc123 --doc art_def456 --view preview --at 800,0
   agentio kite canvas add art_abc123 --group "Later" --json
 
-The new node's id is printed (new → n_…); use it to connect or move it.`,
+  # styled, with an icon
+  agentio kite canvas add art_abc123 --text "API server" --fill "#eef4ff" --border "#3b6fd8" --font grotesk --icon lucide:server
+  agentio kite canvas add art_abc123 --text "Acme" --icon-svg logo.svg --icon-position top --icon-size 48
+
+The new node's id is printed (new → n_…); use it to connect or move it. With
+--icon-svg, Kite cleans the SVG and keeps it on the canvas (icon → a_…); other
+nodes can show it with --icon asset:a_….`,
   );
 
   addExamples(
-    changeOptions(
-      leaf(canvas, 'update', 'Change a node\'s text, link, label or color, or an edge\'s label, color or sides')
+    changeOptions(edgeStyleFlags(iconFlags(nodeStyleFlags(
+      leaf(canvas, 'update', 'Change a node\'s text, link, label, color, style or icon, or an edge\'s label, color, sides or style')
         .argument(...REF)
         .argument('<node-or-edge-id>', 'What to change')
         .option('--text <text>', 'New text, for a text node')
@@ -261,23 +284,37 @@ The new node's id is printed (new → n_…); use it to connect or move it.`,
         .option('--color <color>', 'A JSON Canvas color: 1–6 or #rrggbb')
         .option('--from-side <side>', 'For an edge: the side it leaves from')
         .option('--to-side <side>', 'For an edge: the side it arrives at')
-        .option('--unset <field...>', 'Remove these fields, such as color or label'),
-    ).action(run(async (reference: string, id: string, options) => {
+        .option('--unset <field...>', 'Remove these fields, such as color or label; style or icon removes the whole style or icon, style.<key> one style key (style.fill)'),
+    )), { colour: false, labels: false })).action(run(async (reference: string, id: string, options) => {
       const set: Record<string, unknown> = {};
       for (const key of ['text', 'label', 'color'] as const) if (options[key] !== undefined) set[key] = options[key];
       if (options.link !== undefined) set.url = options.link;
       if (options.fromSide !== undefined) set.fromSide = parseSide(options.fromSide, '--from-side');
       if (options.toSide !== undefined) set.toSide = parseSide(options.toSide, '--to-side');
-      const unset = (options.unset as string[] | undefined) ?? [];
+      Object.assign(set, edgeEnds(options));
+      const cleared = splitUnset((options.unset as string[] | undefined) ?? []);
+      const unset = cleared.unset;
+      const style = cleared.style === null ? null : { ...(cleared.style ?? {}), ...anyStyle(options) };
+      const { icon, ops: before } = await iconFromOptions(options, readText);
+      const kite: Record<string, unknown> = {};
+      if (style === null || Object.keys(style).length) kite.style = style;
+      if (icon) kite.icon = icon;
+      else if (cleared.icon === null) kite.icon = null;
+      if (Object.keys(kite).length) set.kite = kite;
       if (Object.keys(set).length === 0 && unset.length === 0) {
-        throw new CliError('INVALID_PARAMS', 'Nothing to change', 'Give --text, --link, --label, --color, --from-side, --to-side or --unset');
+        throw new CliError('INVALID_PARAMS', 'Nothing to change', 'Give --text, --link, --label, --color, --from-side, --to-side, a style or icon flag, or --unset');
       }
-      await change(reference, [{ op: 'update', id, set, ...(unset.length ? { unset } : {}) }], options, 'change a canvas');
+      await change(reference, [...before, { op: 'update', id, set, ...(unset.length ? { unset } : {}) }], options, 'change a canvas');
     })),
     `Examples:
 
   agentio kite canvas update art_abc123 n1 --text "Ship on Friday"
-  agentio kite canvas update art_abc123 e2 --label "blocks" --unset color`,
+  agentio kite canvas update art_abc123 e2 --label "blocks" --unset color
+  agentio kite canvas update art_abc123 n1 --fill 2 --font serif --weight 600 --icon lucide:database
+  agentio kite canvas update art_abc123 n1 --unset style.fill icon
+  agentio kite canvas update art_abc123 e2 --color "#8a5cf6" --dashed --curve step --arrow both
+
+Style changes merge with the style the node or edge already has.`,
   );
 
   addExamples(
@@ -329,7 +366,7 @@ It is one new version; agentio kite canvas restore brings the old one back.`,
   );
 
   addExamples(
-    changeOptions(
+    changeOptions(edgeStyleFlags(
       leaf(canvas, 'connect', 'Join two nodes with an edge')
         .argument(...REF)
         .argument('<from>', 'The node it starts at')
@@ -337,16 +374,42 @@ It is one new version; agentio kite canvas restore brings the old one back.`,
         .option('--label <label>', 'Text on the edge')
         .option('--from-side <side>', 'The side it leaves from: top, right, bottom or left')
         .option('--to-side <side>', 'The side it arrives at'),
-    ).action(run(async (reference: string, from: string, to: string, options) => {
+      { colour: true, labels: true })).action(run(async (reference: string, from: string, to: string, options) => {
       const op: CanvasOp = { op: 'connect', from, to, tempId: 'edge' };
       if (options.label !== undefined) op.label = options.label;
       if (options.fromSide !== undefined) op.fromSide = parseSide(options.fromSide, '--from-side');
       if (options.toSide !== undefined) op.toSide = parseSide(options.toSide, '--to-side');
+      if (options.color !== undefined) op.color = options.color;
+      Object.assign(op, edgeEnds(options));
+      const style = edgeStyle(options);
+      if (Object.keys(style).length) op.kite = { style };
       await change(reference, [op], options, 'change a canvas');
     })),
     `Examples:
 
-  agentio kite canvas connect art_abc123 n1 n2 --label "then"`,
+  agentio kite canvas connect art_abc123 n1 n2 --label "then"
+  agentio kite canvas connect art_abc123 n1 n2 --label "reads" --color 5 --dashed --curve step --line-width 2`,
+  );
+
+  addExamples(
+    changeOptions(themeFlags(
+      leaf(canvas, 'theme', 'Set the canvas theme: background, grid, and the default look of nodes, groups and edges')
+        .argument(...REF),
+    )).action(run(async (reference: string, options) => {
+      const fromFile = options.from === undefined ? undefined : await readText(options.from);
+      const theme = themeFromOptions(options, fromFile);
+      await change(reference, [{ op: 'theme', set: theme }], options, 'change a canvas');
+    })),
+    `Examples:
+
+  agentio kite canvas theme art_abc123 --background "#f7f5ef" --grid dots --font inter --radius 12 --curve step
+  agentio kite canvas theme art_abc123 --group-fill "#ffffff80" --label-font grotesk --label-weight 700
+  agentio kite canvas theme art_abc123 --from theme.json
+  agentio kite canvas theme art_abc123 --reset
+
+The box and text flags (--fill, --font, …) set the default for cards; --group-*
+and the --label-* flags for groups; the line flags and --edge-color for edges.
+A theme merges with the one the canvas has; a node's own style wins over it.`,
   );
 
   addExamples(
