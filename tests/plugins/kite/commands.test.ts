@@ -502,6 +502,130 @@ describe('canvases from the command line', () => {
   });
 });
 
+describe('how a canvas looks, from the command line', () => {
+  withProfiles(() => ({ main: { server: fake } }));
+
+  const seed = () => fake.seedDoc(ME, {
+    type: 'canvas',
+    content: JSON.stringify({
+      nodes: [
+        { id: 'n1', type: 'text', text: 'A', x: 0, y: 0, width: 260, height: 140, kite: { style: { fill: '#ffffff', radius: 8 } } },
+        { id: 'n2', type: 'text', text: 'B', x: 400, y: 0, width: 260, height: 140 },
+      ],
+      edges: [{ id: 'e1', fromNode: 'n1', toNode: 'n2' }],
+    }),
+  });
+  const lastOps = (id: string) => (fake.requests('POST', `/api/artifacts/${id}/canvas/ops`).at(-1)!.body as { ops: unknown[] }).ops;
+
+  test('add takes style and a Lucide icon, in the node\'s kite', async () => {
+    const doc = seed();
+    const added = await cli('kite', 'canvas', 'add', doc.id, '--text', 'API', '--fill', '#eef4ff', '--border', '3', '--border-width', '2',
+      '--font', 'grotesk', '--weight', '600', '--align', 'center', '--shadow', 'md', '--icon', 'lucide:server', '--icon-position', 'top', '--icon-size', '40', '--json');
+    expect(added.code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{
+      op: 'add', tempId: 'new',
+      node: {
+        type: 'text', text: 'API',
+        kite: {
+          style: { fill: '#eef4ff', borderColor: '3', borderWidth: 2, font: 'grotesk', fontWeight: 600, textAlign: 'center', shadow: 'md' },
+          icon: { name: 'lucide:server', position: 'top', size: 40 },
+        },
+      },
+    }]);
+  });
+
+  test('--icon-svg sends the file as an asset first, and the node names it by its tempId', async () => {
+    const doc = seed();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>';
+    const path = file('logo.svg', svg);
+    const added = onlyJson((await cli('kite', 'canvas', 'add', doc.id, '--text', 'Acme', '--icon-svg', path, '--json')).stdout);
+    expect(lastOps(doc.id)).toEqual([
+      { op: 'addAsset', tempId: 'icon', svg, name: 'logo' },
+      { op: 'add', tempId: 'new', node: { type: 'text', text: 'Acme', kite: { icon: { name: 'asset:icon' } } } },
+    ]);
+    const asset = added.ids.icon;
+    expect(asset).toMatch(/^a/);
+    const got = onlyJson((await cli('kite', 'canvas', 'get', doc.id)).stdout);
+    expect(got.kite.assets[asset]).toMatchObject({ type: 'svg', name: 'logo' });
+    expect(got.nodes.find((n: { id: string }) => n.id === added.ids.new).kite.icon).toEqual({ name: `asset:${asset}` });
+    expect(got.kite).not.toHaveProperty('docId');
+
+    const reused = await cli('kite', 'canvas', 'update', doc.id, 'n2', '--icon', `asset:${asset}`);
+    expect(reused.code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{ op: 'update', id: 'n2', set: { kite: { icon: { name: `asset:${asset}` } } } }]);
+  });
+
+  test('update merges style, unsets keys, and styles edges', async () => {
+    const doc = seed();
+    expect((await cli('kite', 'canvas', 'update', doc.id, 'n1', '--text-color', '#111111', '--unset', 'style.fill', 'icon')).code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{ op: 'update', id: 'n1', set: { kite: { style: { fill: null, textColor: '#111111' }, icon: null } } }]);
+    const n1 = fake.canvasOf(doc).nodes[0];
+    expect(n1.kite.style).toEqual({ radius: 8, textColor: '#111111' });
+
+    expect((await cli('kite', 'canvas', 'update', doc.id, 'n1', '--unset', 'style')).code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{ op: 'update', id: 'n1', set: { kite: { style: null } } }]);
+
+    expect((await cli('kite', 'canvas', 'update', doc.id, 'e1', '--color', '5', '--dashed', '--curve', 'step', '--line-width', '3', '--arrow', 'both')).code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{
+      op: 'update', id: 'e1',
+      set: { color: '5', fromEnd: 'arrow', toEnd: 'arrow', kite: { style: { width: 3, line: 'dashed', curve: 'step' } } },
+    }]);
+  });
+
+  test('connect takes colour, line and label style', async () => {
+    const doc = seed();
+    expect((await cli('kite', 'canvas', 'connect', doc.id, 'n2', 'n1', '--label', 'reads', '--color', '#8a5cf6', '--dotted', '--curve', 'straight',
+      '--label-color', '#444444', '--arrow', 'none')).code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{
+      op: 'connect', from: 'n2', to: 'n1', tempId: 'edge', label: 'reads', color: '#8a5cf6', fromEnd: 'none', toEnd: 'none',
+      kite: { style: { line: 'dotted', curve: 'straight', labelColor: '#444444' } },
+    }]);
+  });
+
+  test('theme merges a file with flags, and --reset removes it', async () => {
+    const doc = seed();
+    const path = file('theme.json', JSON.stringify({ background: '#000000', node: { radius: 4, font: 'serif' }, group: { labelWeight: 700 } }));
+    const set = await cli('kite', 'canvas', 'theme', doc.id, '--from', path, '--background', '#f7f5ef', '--grid', 'dots', '--font', 'inter',
+      '--group-fill', '#ffffff80', '--curve', 'step', '--edge-color', '4');
+    expect(set.code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{
+      op: 'theme',
+      set: {
+        background: '#f7f5ef', grid: 'dots',
+        node: { radius: 4, font: 'inter' },
+        group: { labelWeight: 700, fill: '#ffffff80' },
+        edge: { curve: 'step', color: '4' },
+      },
+    }]);
+    expect(onlyJson((await cli('kite', 'canvas', 'get', doc.id)).stdout).kite.theme.grid).toBe('dots');
+
+    expect((await cli('kite', 'canvas', 'theme', doc.id, '--reset')).code).toBe(0);
+    expect(lastOps(doc.id)).toEqual([{ op: 'theme', set: null }]);
+    expect(onlyJson((await cli('kite', 'canvas', 'get', doc.id)).stdout)).not.toHaveProperty('kite');
+  });
+
+  test('a bad value is refused before any request, and says what fits', async () => {
+    const doc = seed();
+    const cases: Array<[string[], string]> = [
+      [['add', doc.id, '--text', 'A', '--fill', 'red'], 'Not a colour for --fill: red'],
+      [['add', doc.id, '--text', 'A', '--font', 'comic'], 'Not a value for --font: comic'],
+      [['add', doc.id, '--text', 'A', '--icon', 'server'], 'Not an icon: server'],
+      [['add', doc.id, '--text', 'A', '--icon-size', '400', '--icon', 'lucide:x'], 'Not a value for --icon-size: 400'],
+      [['add', doc.id, '--text', 'A', '--icon-position', 'top'], 'Which icon?'],
+      [['connect', doc.id, 'n1', 'n2', '--dashed', '--dotted'], 'Give one of --line, --dashed or --dotted'],
+      [['connect', doc.id, 'n1', 'n2', '--curve', 'wavy'], 'Not a value for --curve: wavy'],
+      [['theme', doc.id], 'Nothing to change'],
+      [['theme', doc.id, '--reset', '--grid', 'dots'], '--reset removes the theme'],
+    ];
+    for (const [args, said] of cases) {
+      const res = await cli('kite', 'canvas', ...args);
+      expect(res.code).not.toBe(0);
+      expect(res.stderr).toContain(said);
+    }
+    expect(fake.requests('POST').length).toBe(0);
+  });
+});
+
 describe('canvases on a read-only profile', () => {
   withProfiles(() => ({ ro: { readOnly: true, server: fake } }));
 

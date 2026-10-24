@@ -36,6 +36,8 @@ export interface Canvas {
   version: number;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
+  /** The canvas's theme and custom SVG icons, when it has them; never in a strict read. */
+  kite?: { theme?: Record<string, unknown>; assets?: Record<string, { type: 'svg'; svg: string; name?: string }> };
 }
 
 export interface CanvasOutlineNode {
@@ -157,7 +159,12 @@ export class KiteCanvas {
     return toDocument(res.data as KiteRawDocument);
   }
 
-  /** The whole canvas and the version it is at. `strict` leaves out Kite's own keys. */
+  /**
+   * The whole canvas and the version it is at. `strict` leaves out Kite's own
+   * keys. Otherwise the top-level `kite` keeps what belongs to the canvas (its
+   * theme and custom icons), so the result saved to a file makes the same
+   * canvas again; what Kite adds on read (docId, version) is dropped.
+   */
   async get(reference: string, options: { strict?: boolean } = {}): Promise<Canvas> {
     const id = await this.client.documentId(reference);
     const res = await this.read(`${this.base(id)}/canvas`, { format: options.strict ? 'jsoncanvas-strict' : undefined },
@@ -167,7 +174,10 @@ export class KiteCanvas {
     // Strict JSON Canvas has no room for the version; Kite sends it as a header too.
     const version = typeof kite.version === 'number' ? kite.version : Number(res.headers.get('x-artifact-version'));
     const { kite: _k, ...rest } = data;
-    return { id, version, nodes: [], edges: [], ...(rest as object) } as Canvas;
+    const own: Canvas['kite'] = {};
+    if (isObject(kite.theme)) own.theme = kite.theme;
+    if (isObject(kite.assets)) own.assets = kite.assets as NonNullable<Canvas['kite']>['assets'];
+    return { id, version, nodes: [], edges: [], ...(rest as object), ...(Object.keys(own).length ? { kite: own } : {}) } as Canvas;
   }
 
   /** What is on the canvas, as a short tree, without the whole JSON. */

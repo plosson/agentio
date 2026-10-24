@@ -246,4 +246,55 @@ run('contract with a real Kite', () => {
     await client.delete(doc.id);
     await client.delete(markdown.id);
   }, 120_000);
+
+  test('how a canvas looks: styles, icons, assets and the theme (Kite with canvas styles)', async () => {
+    const client = new KiteClient({ baseUrl: BASE!, token: await deviceToken(`look-${ME}`) });
+    const canvas = new KiteCanvas(client);
+    const board = JSON.stringify({
+      nodes: [
+        { id: 'n1', type: 'text', text: 'A', x: 0, y: 0, width: 260, height: 140 },
+        { id: 'n2', type: 'text', text: 'B', x: 400, y: 0, width: 260, height: 140 },
+      ],
+      edges: [{ id: 'e1', fromNode: 'n1', toNode: 'n2' }],
+    });
+    const doc = await canvas.create({ content: board, title: 'Look', description: 'A contract check.', summary: 'Two nodes.' });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>';
+    const done = await canvas.ops(doc.id, [
+      { op: 'addAsset', tempId: 'icon', svg, name: 'logo' },
+      { op: 'add', tempId: 'new', node: { type: 'text', text: 'Acme', kite: { icon: { name: 'asset:icon' } } } },
+      { op: 'update', id: 'n1', set: { kite: { style: { fill: '#eef4ff', font: 'grotesk' }, icon: { name: 'lucide:server', position: 'top', size: 40 } } } },
+      { op: 'update', id: 'e1', set: { color: '5', toEnd: 'arrow', kite: { style: { line: 'dashed', curve: 'step', width: 3 } } } },
+      { op: 'theme', set: { background: '#f7f5ef', grid: 'dots', node: { radius: 12 }, edge: { color: '4' } } },
+    ], { baseVersion: 1 });
+    const asset = done.ids.icon!;
+    const got = await canvas.get(doc.id);
+    expect(got.kite?.theme).toEqual({ background: '#f7f5ef', grid: 'dots', node: { radius: 12 }, edge: { color: '4' } });
+    expect(got.kite?.assets?.[asset]).toMatchObject({ type: 'svg', name: 'logo' });
+    expect(got.nodes.find((n) => n.id === done.ids.new)!.kite).toMatchObject({ icon: { name: `asset:${asset}` } });
+    expect(got.nodes.find((n) => n.id === 'n1')!.kite).toMatchObject({ style: { fill: '#eef4ff', font: 'grotesk' }, icon: { name: 'lucide:server', position: 'top', size: 40 } });
+    expect(got.edges[0]).toMatchObject({ color: '5', toEnd: 'arrow', kite: { style: { line: 'dashed', curve: 'step', width: 3 } } });
+
+    // Merged key by key, null going back to the default; the theme removed.
+    await canvas.ops(doc.id, [
+      { op: 'update', id: 'n1', set: { kite: { style: { fill: null, textColor: '#111111' }, icon: null } } },
+      { op: 'theme', set: null },
+    ], { baseVersion: done.version });
+    const after = await canvas.get(doc.id);
+    expect(after.nodes.find((n) => n.id === 'n1')!.kite).toMatchObject({ style: { font: 'grotesk', textColor: '#111111' } });
+    expect((after.nodes.find((n) => n.id === 'n1')!.kite as Record<string, unknown>).icon).toBeUndefined();
+    expect(after.kite?.theme).toBeUndefined();
+
+    // What Kite refuses, the fake does not need to know: the message comes back.
+    for (const ops of [
+      [{ op: 'update', id: 'n1', set: { kite: { icon: { name: 'lucide:no-such-icon-anywhere' } } } }],
+      [{ op: 'addAsset', svg: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' }],
+      [{ op: 'update', id: 'n1', set: { kite: { style: { fill: 'red' } } } }],
+    ]) {
+      expect((await caught(canvas.ops(doc.id, ops, { baseVersion: done.version + 1 }))).code).toBe('INVALID_PARAMS');
+    }
+    const strict = await canvas.get(doc.id, { strict: true });
+    expect(strict.kite).toBeUndefined();
+    expect(strict.edges[0]).toEqual({ id: 'e1', fromNode: 'n1', toNode: 'n2', color: '5', toEnd: 'arrow' });
+    await client.delete(doc.id);
+  }, 120_000);
 });

@@ -574,9 +574,9 @@ export class FakeKite {
   }
 
   /** The canvas a document holds, for the canvas routes. */
-  canvasOf(doc: Doc): { nodes: Array<Record<string, any>>; edges: Array<Record<string, any>> } {
+  canvasOf(doc: Doc): { nodes: Array<Record<string, any>>; edges: Array<Record<string, any>>; kite?: Record<string, any> } {
     const c = JSON.parse(doc.content);
-    return { nodes: c.nodes ?? [], edges: c.edges ?? [] };
+    return { nodes: c.nodes ?? [], edges: c.edges ?? [], ...(c.kite ? { kite: c.kite } : {}) };
   }
 
   /** Kite's three canvas routes, enough of them to drive the plugin: reads, the outline, and ops. */
@@ -590,7 +590,7 @@ export class FakeKite {
       if (r.query.format === 'jsoncanvas-strict') {
         return json(200, { nodes: c.nodes.map(({ kite: _k, ...n }) => n), edges: c.edges.map(({ kite: _k, ...e }) => e) }, header);
       }
-      return json(200, { ...c, kite: { format: 'kite-canvas', formatVersion: 1, docId: doc.id, version: doc.version } }, header);
+      return json(200, { ...c, kite: { ...(c.kite ?? {}), format: 'kite-canvas', formatVersion: 1, docId: doc.id, version: doc.version } }, header);
     }
     if (method === 'GET' && rest === '/outline') {
       let nodes = c.nodes;
@@ -626,7 +626,9 @@ export class FakeKite {
           const id = this.id('n');
           const near = op.near ? node(op.near) : undefined;
           if (op.near && !near) return bad(`no node "${op.near}".`);
-          c.nodes.push({ x: near ? near.x + near.width + 40 : 0, y: near?.y ?? 0, width: 260, height: 140, ...op.node, id });
+          const added = structuredClone({ x: near ? near.x + near.width + 40 : 0, y: near?.y ?? 0, width: 260, height: 140, ...op.node, id });
+          if (added.kite?.icon?.name?.startsWith('asset:')) added.kite.icon.name = `asset:${resolve(added.kite.icon.name.slice(6))}`;
+          c.nodes.push(added);
           if (op.tempId) ids[op.tempId] = id;
           touched.push(id);
         } else if (op.op === 'connect') {
@@ -654,10 +656,34 @@ export class FakeKite {
           if (op.op === 'move') Object.assign(target, { x: op.x, y: op.y });
           if (op.op === 'resize') Object.assign(target, { width: op.width, height: op.height });
           if (op.op === 'update') {
-            Object.assign(target, op.set ?? {});
+            const { kite, ...set } = op.set ?? {};
+            Object.assign(target, set);
             for (const key of op.unset ?? []) delete target[key];
+            if (kite) {
+              // Like Kite: a style merges key by key (null removes), an icon replaces.
+              const next = { ...(target.kite ?? {}) };
+              if (kite.style === null) delete next.style;
+              else if (kite.style) {
+                const style = { ...(next.style ?? {}), ...kite.style };
+                for (const [k, v] of Object.entries(style)) if (v === null) delete style[k];
+                next.style = style;
+              }
+              if (kite.icon === null) delete next.icon;
+              else if (kite.icon) next.icon = { ...kite.icon, name: kite.icon.name.replace(/^asset:(.*)$/, (_: string, ref: string) => `asset:${resolve(ref)}`) };
+              target.kite = next;
+            }
           }
           touched.push(target.id);
+        } else if (op.op === 'theme') {
+          c.kite = { ...(c.kite ?? {}) };
+          if (op.set === null) delete c.kite.theme;
+          else c.kite.theme = { ...(c.kite.theme ?? {}), ...op.set };
+        } else if (op.op === 'addAsset') {
+          if (typeof op.svg !== 'string' || !op.svg.includes('<svg')) return bad('that is not an SVG.');
+          const id = this.id('a');
+          // The real Kite sanitises here; the fake keeps it as sent.
+          c.kite = { ...(c.kite ?? {}), assets: { ...(c.kite?.assets ?? {}), [id]: { type: 'svg', svg: op.svg, ...(op.name ? { name: op.name } : {}) } } };
+          if (op.tempId) ids[op.tempId] = id;
         } else {
           return bad('unknown operation.');
         }
