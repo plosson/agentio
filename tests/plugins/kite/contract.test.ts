@@ -297,4 +297,38 @@ run('contract with a real Kite', () => {
     expect(strict.edges[0]).toEqual({ id: 'e1', fromNode: 'n1', toNode: 'n2', color: '5', toEnd: 'arrow' });
     await client.delete(doc.id);
   }, 120_000);
+
+  test('a canvas as an image (Kite 1.6.0+)', async () => {
+    const client = new KiteClient({ baseUrl: BASE!, token: await deviceToken(`image-${ME}`) });
+    const other = new KiteClient({ baseUrl: BASE!, token: await deviceToken(`image-${OTHER}`) });
+    const canvas = new KiteCanvas(client);
+    const board = JSON.stringify({
+      nodes: [
+        { id: 'g1', type: 'group', label: 'Plan', x: 0, y: 0, width: 400, height: 220 },
+        { id: 'n1', type: 'text', text: 'Ship it', x: 40, y: 60, width: 200, height: 100 },
+      ],
+      edges: [],
+    });
+    const doc = await canvas.create({ content: board, title: 'Plan / été', description: 'A contract check.', summary: 'Two nodes.' });
+
+    const png = await canvas.image(doc.url);
+    expect([...png.bytes.slice(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(png).toMatchObject({ id: doc.id, version: 1, format: 'png', name: 'Plan été.png', origin: { x: -32, y: -32 } });
+    // The PNG's own size, from its header: 400 + 2·32 canvas pixels, at scale 2.
+    const view = new DataView(png.bytes.buffer, png.bytes.byteOffset);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([928, 568]);
+
+    const svg = await canvas.image(doc.id, { format: 'svg', node: 'n1', scale: 1, padding: 0, transparent: true });
+    const text = new TextDecoder().decode(svg.bytes);
+    expect(text).toStartWith('<svg');
+    expect(text).toContain('>Ship it</text>');
+    expect(svg).toMatchObject({ format: 'svg', name: 'Plan été.svg', origin: { x: 40, y: 60 } });
+
+    await canvas.ops(doc.id, [{ op: 'delete', id: 'n1' }], { baseVersion: 1 });
+    expect((await canvas.image(doc.id, { version: 1, format: 'svg' })).version).toBe(1);
+    expect((await caught(canvas.image(doc.id, { node: 'n1' }))).message).toContain('no node "n1"');
+    expect((await caught(canvas.image(doc.id, { scale: 4 }))).code).toBe('INVALID_PARAMS');
+    expect((await caught(new KiteCanvas(other).image(doc.id))).code).toBe('NOT_FOUND');
+    await client.delete(doc.id);
+  }, 120_000);
 });
