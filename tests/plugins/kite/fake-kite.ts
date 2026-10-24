@@ -101,6 +101,8 @@ export class FakeKite {
   versionsApi = true;
   /** False plays a Kite older than 1.4.0, which has no canvases. */
   canvasApi = true;
+  /** False plays a Kite older than 1.6.0, which cannot draw a canvas as an image. */
+  canvasImageApi = true;
   /** False plays a Kite older than 1.2.0, which has no view tracking. */
   viewsApi = true;
   /** Applied to the next device started. */
@@ -579,6 +581,45 @@ export class FakeKite {
     return { nodes: c.nodes ?? [], edges: c.edges ?? [], ...(c.kite ? { kite: c.kite } : {}) };
   }
 
+  /**
+   * Kite's canvas image, with its checks and headers. The body is not a real
+   * drawing: it names what was asked for after the format's first bytes, so a
+   * test can see what reached the server and what was written.
+   */
+  private canvasImage(doc: Doc, r: LoggedRequest): Response {
+    if (!this.canvasImageApi) return err(404, 'not_found', 'No such endpoint.');
+    const q = r.query;
+    const format = q.format ?? 'png';
+    if (format !== 'png' && format !== 'svg') return err(400, 'validation_failed', 'format must be "png" or "svg".');
+    if (q.scale !== undefined && !(Number(q.scale) >= 1 && Number(q.scale) <= 3)) return err(400, 'validation_failed', 'scale must be a number from 1 to 3.');
+    let version = doc.version;
+    let content = doc.content;
+    if (q.version !== undefined) {
+      const old = doc.history.find((h) => h.version === Number(q.version));
+      if (!old) return err(404, 'not_found', `No version ${q.version} of this artifact.`);
+      version = old.version;
+      content = old.content;
+    }
+    if (q.node !== undefined && !(JSON.parse(content).nodes ?? []).some((n: { id: string }) => n.id === q.node)) {
+      return err(400, 'validation_failed', `This canvas has no node "${q.node}" at version ${version}.`);
+    }
+    const asked = JSON.stringify({ format, version, node: q.node, scale: q.scale, padding: q.padding, background: q.background });
+    const body = format === 'png'
+      ? new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new TextEncoder().encode(asked)])
+      : new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg"><!--${asked}--></svg>`);
+    const name = `${doc.title.replace(/[/\\:*?"<>|]/g, ' ').trim() || 'canvas'}.${format}`;
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': format === 'png' ? 'image/png' : 'image/svg+xml',
+        'Content-Disposition': `inline; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'X-Canvas-Origin': '-32,-32',
+        'X-Artifact-Version': String(version),
+        ETag: '"fake"',
+      },
+    });
+  }
+
   /** Kite's three canvas routes, enough of them to drive the plugin: reads, the outline, and ops. */
   private canvas(doc: Doc, method: string, rest: string, r: LoggedRequest, b: Record<string, any>): Response {
     if (doc.type !== 'canvas') {
@@ -592,6 +633,7 @@ export class FakeKite {
       }
       return json(200, { ...c, kite: { ...(c.kite ?? {}), format: 'kite-canvas', formatVersion: 1, docId: doc.id, version: doc.version } }, header);
     }
+    if (method === 'GET' && rest === '/image') return this.canvasImage(doc, r);
     if (method === 'GET' && rest === '/outline') {
       let nodes = c.nodes;
       if (r.query.frame) {

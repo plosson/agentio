@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { withTempVault } from '../../helpers/vault';
 import { getCredentials } from '../../../src/auth/token-store';
@@ -54,7 +54,13 @@ afterEach(() => {
 });
 
 async function cli(...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(['bun', 'run', 'src/index.ts', ...args], {
+  return cliIn(process.cwd(), ...args);
+}
+
+/** The CLI run from another folder, for what it writes there. */
+async function cliIn(cwd: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(['bun', 'run', join(import.meta.dir, '../../../src/index.ts'), ...args], {
+    cwd,
     stdout: 'pipe',
     stderr: 'pipe',
     env: { ...vault.env(), NO_COLOR: '1' },
@@ -635,5 +641,64 @@ describe('canvases on a read-only profile', () => {
     const refused = await cli('kite', 'canvas', 'add', doc.id, '--text', 'A');
     expect(refused.code).not.toBe(0);
     expect(fake.requests('POST').length).toBe(0);
+  });
+});
+
+describe('a canvas as an image, from the command line', () => {
+  withProfiles(() => ({ main: { server: fake } }));
+
+  const seed = () => fake.seedDoc(ME, {
+    type: 'canvas', title: 'Launch plan',
+    content: JSON.stringify({ nodes: [{ id: 'n1', type: 'text', text: 'A', x: 0, y: 0, width: 260, height: 140 }], edges: [] }),
+  });
+  const folder = (name: string) => {
+    const path = join(home(), name);
+    mkdirSync(path, { recursive: true });
+    return path;
+  };
+
+  test('writes <title>.png in the current folder and prints its path', async () => {
+    const doc = seed();
+    const here = folder('here');
+    const done = await cliIn(here, 'kite', 'canvas', 'image', doc.id);
+    expect(done.code).toBe(0);
+    expect(done.stdout.trim()).toBe(join(here, 'Launch plan.png'));
+    expect([...readFileSync(join(here, 'Launch plan.png')).subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  test('-o names the file, and its extension chooses the format; a folder takes the titled file', async () => {
+    const doc = seed();
+    const out = join(home(), 'board.svg');
+    const named = onlyJson((await cli('kite', 'canvas', 'image', doc.id, '-o', out, '--node', 'n1', '--scale', '3', '--transparent', '--json')).stdout);
+    expect(named).toMatchObject({ id: doc.id, version: 1, format: 'svg', file: out, origin: { x: -32, y: -32 } });
+    expect(readFileSync(out, 'utf8')).toStartWith('<svg');
+    expect(fake.requests('GET', `/api/artifacts/${doc.id}/canvas/image`)[0].query)
+      .toEqual({ format: 'svg', node: 'n1', scale: '3', background: 'transparent' });
+
+    const into = folder('images');
+    // --version is the command's own, not agentio's version, which comes before the command.
+    const inFolder = await cli('kite', 'canvas', 'image', doc.id, '--out', into, '--format', 'svg', '--version', '1');
+    expect(inFolder.stdout.trim()).toBe(join(into, 'Launch plan.svg'));
+    expect(fake.requests('GET', `/api/artifacts/${doc.id}/canvas/image`)[1].query).toEqual({ format: 'svg', version: '1' });
+    expect((await cli('--version')).stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('a format the file name contradicts, or an unknown one, is refused before asking Kite', async () => {
+    const doc = seed();
+    const clash = await cli('kite', 'canvas', 'image', doc.id, '-o', join(home(), 'a.png'), '--format', 'svg');
+    expect(clash.code).not.toBe(0);
+    expect(clash.stderr).toContain('--format svg does not match');
+    const unknown = await cli('kite', 'canvas', 'image', doc.id, '--format', 'jpg');
+    expect(unknown.stderr).toContain('Not an image format: jpg');
+    const nowhere = await cli('kite', 'canvas', 'image', doc.id, '-o', join(home(), 'missing', 'a.png'));
+    expect(nowhere.stderr).toContain('its folder does not exist');
+    expect(fake.requests('GET', `/api/artifacts/${doc.id}/canvas/image`).length).toBe(0);
+  });
+
+  test('says which Kite it needs', async () => {
+    const help = await cli('kite', 'canvas', 'image', '--help');
+    expect(help.stdout).toContain('Needs Kite 1.6.0 or later.');
+    const list = await cli('kite', 'canvas', '--help');
+    expect(list.stdout).toMatch(/image .*\(Kite 1\.6\.0\+\)/);
   });
 });

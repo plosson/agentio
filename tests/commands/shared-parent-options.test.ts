@@ -51,6 +51,23 @@ async function captureProfile(argv: string[]): Promise<string | undefined> {
   return captured;
 }
 
+describe('agentio\'s own options', () => {
+  test('count only before the command, and no command inherits that', () => {
+    const program = createProgram(DEFAULT_PLUGIN_REGISTRY) as unknown as { _enablePositionalOptions: boolean; commands: Command[] };
+    expect(program._enablePositionalOptions).toBe(true);
+    const inherited: string[] = [];
+    const walk = (cmd: Command, path: string) => {
+      for (const sub of cmd.commands) {
+        const subPath = `${path} ${sub.name()}`.trim();
+        if ((sub as unknown as { _enablePositionalOptions: boolean })._enablePositionalOptions) inherited.push(subPath);
+        walk(sub, subPath);
+      }
+    };
+    walk(program as unknown as Command, '');
+    expect(inherited).toEqual([]);
+  });
+});
+
 describe('subcommands whose parent defines the same option', () => {
   test('gmail draft delete honours --profile after the subcommand', async () => {
     expect(await captureProfile(['gmail', 'draft', 'delete', 'r-1', '--profile', 'a@example.com']))
@@ -84,9 +101,12 @@ describe('subcommands whose parent defines the same option', () => {
       }
     };
     walk(program, '', new Set(program.options.map((o) => o.long ?? o.short ?? '')));
-    // Each entry here must read the option via cmd.optsWithGlobals() and have a parse test above.
+    // Each entry here must read the option via cmd.optsWithGlobals() and have a parse test above,
+    // or collide only with agentio's own options, which are positional (before the command):
+    // kite canvas image --version has its parse test in tests/plugins/kite/commands.test.ts.
     expect(collisions.sort()).toEqual([
       'gmail draft delete --profile',
+      'kite canvas image --version',
       'spotify player queue add --profile',
     ]);
   });

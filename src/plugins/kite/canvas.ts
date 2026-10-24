@@ -138,6 +138,48 @@ export function parseSide(value: string, what: string): CanvasSide {
   return value as CanvasSide;
 }
 
+const IMAGE_SINCE = '1.6.0';
+const IMAGE_TYPES = { png: 'image/png', svg: 'image/svg+xml' } as const;
+
+export type CanvasImageFormat = keyof typeof IMAGE_TYPES;
+
+export interface CanvasImageOptions {
+  format?: CanvasImageFormat;
+  version?: number;
+  node?: string;
+  scale?: number;
+  padding?: number;
+  transparent?: boolean;
+}
+
+export interface CanvasImage {
+  id: string;
+  version: number;
+  format: CanvasImageFormat;
+  /** A file name for it, after the canvas title: safe to write in a folder. */
+  name: string;
+  /** The canvas point at the image's top left. */
+  origin: { x: number; y: number };
+  bytes: Uint8Array;
+}
+
+/**
+ * The file name in a Content-Disposition header, made safe to write in the
+ * current folder: no folders, no control characters. Kite always names the
+ * file after the canvas title; `otherwise` is for an answer with no name.
+ */
+export function imageName(header: string | null, otherwise: string): string {
+  let name: string | undefined;
+  const extended = header?.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (extended) {
+    try { name = decodeURIComponent(extended[1].trim()); } catch { name = undefined; }
+  }
+  name ??= header?.match(/filename\s*=\s*"([^"]*)"/i)?.[1];
+  const safe = [...(name ?? '')].map((ch) => (ch < ' ' || ch === '\u007f' || '/\\:*?"<>|'.includes(ch) ? ' ' : ch)).join('')
+    .replace(/\s+/g, ' ').trim();
+  return safe === '' || /^\.+$/.test(safe) ? otherwise : safe;
+}
+
 export class KiteCanvas {
   constructor(private readonly client: KiteClient) {}
 
@@ -250,6 +292,42 @@ export class KiteCanvas {
       }
       throw e;
     }
+  }
+
+  /**
+   * The canvas drawn by Kite as a PNG or an SVG (Kite 1.6.0+). The name is the
+   * one Kite gives it, after the canvas title.
+   */
+  async image(reference: string, options: CanvasImageOptions = {}): Promise<CanvasImage> {
+    const id = await this.client.documentId(reference);
+    const format = options.format ?? 'png';
+    const res = await this.client.download(`${this.base(id)}/canvas/image`, IMAGE_TYPES[format], {
+      query: {
+        format,
+        version: options.version === undefined ? undefined : String(options.version),
+        node: options.node,
+        scale: options.scale === undefined ? undefined : String(options.scale),
+        padding: options.padding === undefined ? undefined : String(options.padding),
+        background: options.transparent ? 'transparent' : undefined,
+      },
+    });
+    const tooOld = () => new CliError('API_ERROR', `Kite at ${this.client.baseUrl} cannot draw canvases as images yet`,
+      `Canvas images need Kite ${IMAGE_SINCE} or later. Ask whoever runs it to update.`);
+    if (res.bytes) {
+      const type = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+      if (type !== IMAGE_TYPES[format]) throw tooOld();
+      const [x, y] = (res.headers.get('x-canvas-origin') ?? '').split(',').map(Number);
+      return {
+        id,
+        version: Number(res.headers.get('x-artifact-version')),
+        format,
+        name: imageName(res.headers.get('content-disposition'), `${id}.${format}`),
+        origin: { x: x ?? 0, y: y ?? 0 },
+        bytes: res.bytes,
+      };
+    }
+    if (isMissingRoute(res)) throw tooOld();
+    throw this.client.errorFor(res);
   }
 
   private async read(path: string, query: Record<string, string | undefined>, isShape: (d: Record<string, unknown>) => boolean): Promise<RawResponse> {

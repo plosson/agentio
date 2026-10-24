@@ -5,7 +5,8 @@
  */
 
 import { Command } from 'commander';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, stat, writeFile } from 'fs/promises';
+import { extname, join, resolve } from 'path';
 import { addExamples } from '../../utils/command-tree';
 import { CliError } from '../../utils/errors';
 import { writeJson } from '../../utils/output';
@@ -18,6 +19,7 @@ import {
   parseOpsText,
   parseSide,
   type Canvas,
+  type CanvasImageFormat,
   type CanvasOp,
   type CanvasOpsResult,
   type CanvasOutline,
@@ -58,6 +60,28 @@ async function readText(path: string): Promise<string> {
 
 function optionalVersion(value: string | undefined): number | undefined {
   return value === undefined ? undefined : parseVersion(value);
+}
+
+const IMAGE_FORMATS: CanvasImageFormat[] = ['png', 'svg'];
+
+/** The format asked for, or the one the --out name says; refused when the two disagree. */
+function imageFormat(given: string | undefined, out: string | undefined): CanvasImageFormat {
+  if (given !== undefined && !IMAGE_FORMATS.includes(given as CanvasImageFormat)) {
+    throw new CliError('INVALID_PARAMS', `Not an image format: ${given}`, 'Use png or svg.');
+  }
+  const ext = out === undefined ? '' : extname(out).slice(1).toLowerCase();
+  const named = IMAGE_FORMATS.includes(ext as CanvasImageFormat) ? (ext as CanvasImageFormat) : undefined;
+  if (given !== undefined && named !== undefined && given !== named) {
+    throw new CliError('INVALID_PARAMS', `--format ${given} does not match ${out}`, `Name the file .${given}, or leave out --format.`);
+  }
+  return (given as CanvasImageFormat | undefined) ?? named ?? 'png';
+}
+
+/** Where --out points: a file to write, or a folder to write the titled file in. Checked before anything is fetched. */
+async function outTarget(out: string): Promise<{ file?: string; folder?: string }> {
+  const target = resolve(out);
+  if ((await stat(target).catch(() => null))?.isDirectory()) return { folder: target };
+  return { file: await checkOutPath(out) };
 }
 
 /** A batch's result: the new version, and the ids Kite chose. */
@@ -170,6 +194,50 @@ For a large canvas, start with outline: it is much shorter.`,
   agentio kite canvas outline art_abc123 --frame g1 --depth 1 --json
 
 The first line has the version; pass it to a change as --base-version.`,
+  );
+
+  addExamples(
+    leaf(canvas, 'image', 'Save the canvas as a PNG or SVG image, drawn by Kite the way the web app shows it (Kite 1.6.0+)')
+      .argument(...REF)
+      .option('-o, --out <file>', 'Write the image here, or into this folder; default: <title>.png in the current folder')
+      .option('--format <format>', 'png or svg; default: from the --out extension, else png')
+      .option('--version <n>', 'Draw this earlier version (yours only)')
+      .option('--node <id>', 'Draw only this node, or this group and what is inside it')
+      .option('--scale <n>', 'Image pixels per canvas pixel, from 1 to 3 (default 2)')
+      .option('--padding <n>', 'Canvas pixels of space around the drawing, from 0 to 400 (default 32)')
+      .option('--transparent', 'No background or grid behind the drawing')
+      .action(run(async (reference: string, options) => {
+        const format = imageFormat(options.format, options.out);
+        const target = options.out === undefined ? undefined : await outTarget(options.out);
+        const { client } = await getKiteClient(options.profile);
+        const image = await new KiteCanvas(client).image(reference, {
+          format,
+          version: optionalVersion(options.version),
+          node: options.node,
+          scale: options.scale === undefined ? undefined : parseNumber(options.scale, '--scale', 1),
+          padding: options.padding === undefined ? undefined : parseNumber(options.padding, '--padding', 0),
+          transparent: options.transparent,
+        });
+        const file = target?.file ?? join(target?.folder ?? process.cwd(), image.name);
+        try { await writeFile(file, image.bytes); } catch { throw new CliError('INVALID_PARAMS', `Cannot write ${file}`); }
+        emit(options.json, { id: image.id, version: image.version, format: image.format, file, origin: image.origin, bytes: image.bytes.length },
+          () => console.log(file));
+      })),
+    `Examples:
+
+  agentio kite canvas image art_abc123
+  agentio kite canvas image https://kite.example.com/a/launch-plan -o plan.svg
+  agentio kite canvas image art_abc123 --node g1 --scale 3 --transparent -o launch.png
+  agentio kite canvas image art_abc123 --version 4 --json
+
+It prints the path of the file it wrote, which it replaces if it is there.
+Without --out the file is named after the canvas title, in the current
+folder. A PNG is at most 8192 pixels on a side and 16.7 million in all: for
+a larger canvas, lower --scale, draw one group with --node, or ask for an
+SVG. Kite counts images against an hourly limit. With --json, origin is the
+canvas point at the image's top left.
+
+Needs Kite 1.6.0 or later.`,
   );
 
   addExamples(
