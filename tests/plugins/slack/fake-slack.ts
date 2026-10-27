@@ -59,8 +59,10 @@ export interface FakeChannel {
   is_mpim?: boolean;
   /** Direct messages: the other person. */
   user?: string;
-  /** The file id of the channel's canvas. */
+  /** The file id of the channel's canvas, as Slack's docs place it. */
   canvas?: string;
+  /** Tabs, as Slack really lists channel canvases: type canvas with a file id, or other kinds. */
+  tabs?: { type: string; file_id?: string }[];
   /** Top-level messages and thread replies alike; replies carry thread_ts. */
   messages: FakeMessage[];
 }
@@ -516,9 +518,11 @@ export class FakeSlack {
   }
 
   private view(c: FakeChannel): Record<string, unknown> {
-    const { members, messages, canvas, ...rest } = c;
-    return { ...rest, topic: { ...c.topic }, purpose: { ...c.purpose }, is_member: members.includes(this.self.id),
-      properties: canvas ? { canvas: { file_id: canvas } } : {} };
+    const { members, messages, canvas, tabs, ...rest } = c;
+    const properties: Record<string, unknown> = {};
+    if (canvas) properties.canvas = { file_id: canvas };
+    if (tabs) properties.tabs = tabs.map((t, i) => ({ id: `Ct0TAB${i}`, type: t.type, data: t.file_id ? { file_id: t.file_id } : {}, label: '' }));
+    return { ...rest, topic: { ...c.topic }, purpose: { ...c.purpose }, is_member: members.includes(this.self.id), properties };
   }
 
   private page(items: unknown[], cursor: string | undefined, key: string): Record<string, unknown> {

@@ -27,10 +27,10 @@ export function canvasIdFrom(input: string): string | undefined {
 
 const isChannelKey = (key: string) => key.startsWith('#') || isChannelId(key);
 
-/** A channel, by #name or id, and the id of its canvas if it has one. */
-async function channelCanvas(client: SlackClient, key: string): Promise<{ channel: SlackChannel; canvasId?: string }> {
+/** A channel, by #name or id, and the ids of its canvases. */
+async function channelCanvases(client: SlackClient, key: string): Promise<{ channel: SlackChannel; canvasIds: string[] }> {
   const channel = await client.getChannel(key);
-  return { channel, canvasId: await client.channelCanvasId(channel.id) };
+  return { channel, canvasIds: await client.channelCanvasIds(channel.id) };
 }
 
 /** The canvas `<canvas>` names: an id, a canvas link, or a channel for its canvas. */
@@ -42,11 +42,15 @@ export async function resolveCanvasId(client: SlackClient, input: string): Promi
     throw new CliError('INVALID_PARAMS', `"${key}" is not a canvas id, a canvas link or a #channel`,
       'Canvas ids start with F; see: agentio slack canvases list');
   }
-  const { channel, canvasId } = await channelCanvas(client, key);
-  if (!canvasId) {
+  const { channel, canvasIds } = await channelCanvases(client, key);
+  if (canvasIds.length === 0) {
     throw new CliError('NOT_FOUND', `#${channel.name} has no canvas`, `Create one with: agentio slack canvases create --channel ${channel.name}`);
   }
-  return canvasId;
+  if (canvasIds.length > 1) {
+    throw new CliError('INVALID_PARAMS', `#${channel.name} has ${canvasIds.length} canvases: ${canvasIds.join(', ')}`,
+      `Give one by id, or see them with: agentio slack canvases list --channel ${channel.name}`);
+  }
+  return canvasIds[0];
 }
 
 /** A canvas as Markdown, with the parts Markdown cannot carry back. */
@@ -63,10 +67,10 @@ export async function findCanvases(client: SlackClient, options: { channel?: str
   let canvases: SlackCanvas[];
   let truncated = false;
   if (options.channel) {
-    const { channel, canvasId } = await channelCanvas(client, options.channel);
+    const { channel, canvasIds } = await channelCanvases(client, options.channel);
     canvases = [];
-    if (canvasId) {
-      const canvas = await client.canvasInfo(canvasId);
+    for (const id of canvasIds) {
+      const canvas = await client.canvasInfo(id);
       if (!user || canvas.owner === user) canvases.push({ ...canvas, channelId: channel.id });
     }
   } else {

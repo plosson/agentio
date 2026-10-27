@@ -94,6 +94,11 @@ interface RawSearchMatch extends Partial<RawMessage> {
   permalink?: unknown;
 }
 
+interface RawChannelProperties {
+  canvas?: { file_id?: string };
+  tabs?: { type?: string; data?: { file_id?: string } }[];
+}
+
 interface RawFile {
   id: string;
   title?: string;
@@ -599,10 +604,15 @@ export class SlackClient implements ServiceClient {
       'Check that the token has files:read and that the canvas is shared with you');
   }
 
-  /** The file id of a channel's canvas; undefined when the channel has none. */
-  async channelCanvasId(channelId: string): Promise<string | undefined> {
-    const data = await this.call<SlackApiResponse & { channel: { properties?: { canvas?: { file_id?: string } } } }>('conversations.info', { channel: channelId });
-    return data.channel?.properties?.canvas?.file_id || undefined;
+  /**
+   * The file ids of a channel's canvases, each once. Slack lists them as canvas tabs; its docs
+   * name properties.canvas instead, so both are read.
+   */
+  async channelCanvasIds(channelId: string): Promise<string[]> {
+    const data = await this.call<SlackApiResponse & { channel: { properties?: RawChannelProperties } }>('conversations.info', { channel: channelId });
+    const properties = data.channel?.properties;
+    const ids = [properties?.canvas?.file_id, ...(properties?.tabs ?? []).filter((t) => t.type === 'canvas').map((t) => t.data?.file_id)];
+    return [...new Set(ids.filter((id): id is string => !!id))];
   }
 
   /** A new canvas, standalone with a title or a channel's; its id. */

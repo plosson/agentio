@@ -94,11 +94,17 @@ describe('listCanvases', () => {
   });
 });
 
-describe('channelCanvasId', () => {
-  test('a channel with a canvas gives its id; one without gives undefined', async () => {
-    fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: 'F0CANVAS09' }));
-    expect(await client.channelCanvasId('C0DOCS')).toBe('F0CANVAS09');
-    expect(await client.channelCanvasId('C0GENERAL')).toBeUndefined();
+describe('channelCanvasIds', () => {
+  test('a channel\'s canvases come from its canvas tabs, and from the documented field, each once', async () => {
+    fake.channels.push(
+      fakeChannel('C0DOCS', 'docs', { canvas: 'F0CANVAS09' }),
+      fakeChannel('C0TABS', 'tabs', { tabs: [{ type: 'canvas', file_id: 'F0CANVAS07' }, { type: 'list', file_id: 'F0LIST0001' }, { type: 'canvas' }] }),
+      fakeChannel('C0BOTH', 'both', { canvas: 'F0CANVAS05', tabs: [{ type: 'canvas', file_id: 'F0CANVAS05' }, { type: 'canvas', file_id: 'F0CANVAS06' }] }),
+    );
+    expect(await client.channelCanvasIds('C0DOCS')).toEqual(['F0CANVAS09']);
+    expect(await client.channelCanvasIds('C0TABS')).toEqual(['F0CANVAS07']);
+    expect(await client.channelCanvasIds('C0BOTH')).toEqual(['F0CANVAS05', 'F0CANVAS06']);
+    expect(await client.channelCanvasIds('C0GENERAL')).toEqual([]);
   });
 });
 

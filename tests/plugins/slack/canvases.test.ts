@@ -21,6 +21,7 @@ beforeEach(() => {
 afterEach(() => fake.stop());
 
 const methods = () => fake.log.map((c) => c.url.replace('https://slack.com/api/', ''));
+const channel = (id: string) => fake.channels.find((c) => c.id === id)!;
 
 describe('canvasIdFrom', () => {
   test('an id, a docs link and a files link give the id; extra query strings and slashes do not matter', () => {
@@ -50,6 +51,19 @@ describe('resolveCanvasId', () => {
     fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: 'F0CANVAS09' }));
     expect(await resolveCanvasId(client, '#docs')).toBe('F0CANVAS09');
     expect(await resolveCanvasId(client, 'C0DOCS')).toBe('F0CANVAS09');
+  });
+
+  test('a channel whose only canvas is a tab gives that canvas', async () => {
+    fake.channels.push(fakeChannel('C0TABS', 'tabs', { tabs: [{ type: 'canvas', file_id: 'F0CANVAS07' }] }));
+    expect(await resolveCanvasId(client, '#tabs')).toBe('F0CANVAS07');
+  });
+
+  test('a channel with several canvases is refused, listing their ids', async () => {
+    fake.channels.push(fakeChannel('C0MANY', 'many', { tabs: [{ type: 'canvas', file_id: 'F0CANVAS07' }, { type: 'canvas', file_id: 'F0CANVAS08' }] }));
+    const err = await caught(resolveCanvasId(client, '#many'));
+    expect(err.code).toBe('INVALID_PARAMS');
+    expect(`${err.message} ${err.suggestion}`).toContain('F0CANVAS07');
+    expect(`${err.message} ${err.suggestion}`).toContain('F0CANVAS08');
   });
 
   test('a channel without a canvas is NOT_FOUND, suggesting how to create one', async () => {
@@ -126,6 +140,9 @@ describe('findCanvases', () => {
     fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: canvas.id }));
     expect((await findCanvases(client, { channel: '#docs' })).canvases.map((c) => c.title)).toEqual(['Docs']);
     expect(await findCanvases(client, { channel: '#general' })).toEqual({ canvases: [], truncated: false });
+    const second = fake.addCanvas({ title: 'Notes', channel: 'C0DOCS' });
+    channel('C0DOCS').tabs = [{ type: 'canvas', file_id: second.id }];
+    expect((await findCanvases(client, { channel: '#docs' })).canvases.map((c) => c.title).sort()).toEqual(['Docs', 'Notes']);
     expect(methods()).not.toContain('files.list');
   });
 });
