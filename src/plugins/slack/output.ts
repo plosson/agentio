@@ -186,7 +186,7 @@ function canvasLines(c: SlackCanvas): void {
 }
 
 export function printSlackCanvasList({ canvases, truncated }: SlackCanvasList, json?: boolean): void {
-  if (truncated) console.error('Slack stopped listing at 10,000 files, so older canvases may be missing; --mine narrows the search');
+  if (truncated) console.error('Slack stopped listing at its page limit, so older canvases may be missing; --mine narrows the search');
   emit(json, { canvases, truncated }, () => {
     if (canvases.length === 0) {
       console.log('No canvases found');
@@ -201,8 +201,7 @@ export function printSlackCanvasList({ canvases, truncated }: SlackCanvasList, j
 export function printSlackCanvasContent(content: SlackCanvasContent, json?: boolean): void {
   emit(json, content, () => console.log(content.markdown));
   if (!json && content.unconverted.length > 0) {
-    const n = content.unconverted.length;
-    console.error(`${n} part${n === 1 ? '' : 's'} can't be written back as Markdown: ${content.unconverted.join(', ')}`);
+    console.error(`${plural(content.unconverted.length, 'part')} can't be written back as Markdown: ${content.unconverted.join(', ')}`);
   }
 }
 

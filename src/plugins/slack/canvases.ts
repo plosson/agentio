@@ -1,11 +1,13 @@
 import { CliError } from '../../utils/errors';
-import { isChannelId, isUserId, type SlackClient } from './client';
-import type { SlackCanvas, SlackCanvasAccessLevel, SlackCanvasContent, SlackCanvasList, SlackCanvasTargets } from './types';
+import { displayNameOf, isChannelId, isUserId, type SlackClient } from './client';
+import type { SlackCanvas, SlackCanvasAccessLevel, SlackCanvasContent, SlackCanvasList, SlackCanvasTargets, SlackChannel } from './types';
 
 export const CANVAS_ARGUMENT = 'Canvas id (F…), canvas link, or #channel for that channel\'s canvas';
 
 const CANVAS_ID = /^F[A-Z0-9]{6,}$/;
 const ACCESS_LEVELS: SlackCanvasAccessLevel[] = ['read', 'write', 'owner'];
+/** From this many owners, list reads users.list once instead of looking each one up. */
+const BULK_OWNERS_MIN = 3;
 
 /** The canvas id in an id or a canvas link on a Slack host; undefined for anything else. */
 export function canvasIdFrom(input: string): string | undefined {
@@ -25,6 +27,12 @@ export function canvasIdFrom(input: string): string | undefined {
 
 const isChannelKey = (key: string) => key.startsWith('#') || isChannelId(key);
 
+/** A channel, by #name or id, and the id of its canvas if it has one. */
+async function channelCanvas(client: SlackClient, key: string): Promise<{ channel: SlackChannel; canvasId?: string }> {
+  const channel = await client.getChannel(key);
+  return { channel, canvasId: await client.channelCanvasId(channel.id) };
+}
+
 /** The canvas `<canvas>` names: an id, a canvas link, or a channel for its canvas. */
 export async function resolveCanvasId(client: SlackClient, input: string): Promise<string> {
   const id = canvasIdFrom(input);
@@ -34,8 +42,7 @@ export async function resolveCanvasId(client: SlackClient, input: string): Promi
     throw new CliError('INVALID_PARAMS', `"${key}" is not a canvas id, a canvas link or a #channel`,
       'Canvas ids start with F; see: agentio slack canvases list');
   }
-  const channel = await client.getChannel(key);
-  const canvasId = await client.channelCanvasId(channel.id);
+  const { channel, canvasId } = await channelCanvas(client, key);
   if (!canvasId) {
     throw new CliError('NOT_FOUND', `#${channel.name} has no canvas`, `Create one with: agentio slack canvases create --channel ${channel.name}`);
   }
@@ -44,8 +51,7 @@ export async function resolveCanvasId(client: SlackClient, input: string): Promi
 
 /** A canvas as Markdown, with the parts Markdown cannot carry back. */
 export async function readCanvas(client: SlackClient, input: string): Promise<SlackCanvasContent> {
-  const { downloadUrl, ...canvas } = await client.canvasInfo(await resolveCanvasId(client, input));
-  const html = await client.downloadCanvasHtml(downloadUrl);
+  const { canvas, html } = await client.canvasHtml(await resolveCanvasId(client, input));
   // Loaded here, not at startup: turndown and its HTML parser are only needed to read a canvas.
   const { htmlToCanvasMarkdown } = await import('./canvas-markdown');
   return { ...canvas, ...htmlToCanvasMarkdown(html) };
@@ -57,31 +63,43 @@ export async function findCanvases(client: SlackClient, options: { channel?: str
   let canvases: SlackCanvas[];
   let truncated = false;
   if (options.channel) {
-    const channel = await client.getChannel(options.channel);
-    const id = await client.channelCanvasId(channel.id);
+    const { channel, canvasId } = await channelCanvas(client, options.channel);
     canvases = [];
-    if (id) {
-      const { downloadUrl: _, ...info } = await client.canvasInfo(id);
-      if (!user || info.owner === user) canvases.push({ ...info, channelId: channel.id });
+    if (canvasId) {
+      const canvas = await client.canvasInfo(canvasId);
+      if (!user || canvas.owner === user) canvases.push({ ...canvas, channelId: channel.id });
     }
   } else {
-    ({ canvases, truncated } = await client.listCanvases(user ? { user } : {}));
+    ({ canvases, truncated } = await client.listCanvases({ user }));
   }
-  const names = new Map<string, string>();
-  for (const owner of new Set(canvases.map((c) => c.owner).filter((o): o is string => !!o))) {
-    try {
-      const u = await client.getUser(owner);
-      names.set(owner, u.displayName || u.realName || u.name);
-    } catch (error) {
-      if (!(error instanceof CliError) || error.code !== 'NOT_FOUND') throw error;
-      names.set(owner, owner);
-    }
-  }
+  const names = await ownerNames(client, new Set(canvases.map((c) => c.owner).filter((o): o is string => !!o)));
   const named = canvases
     .map((c) => (c.owner ? { ...c, ownerName: names.get(c.owner) } : c))
     .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
   return { canvases: named, truncated };
 }
+
+/** Owners' names by id; an owner Slack no longer knows keeps their id. */
+async function ownerNames(client: SlackClient, owners: Set<string>): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (owners.size >= BULK_OWNERS_MIN) {
+    const users = new Map((await client.listUsers({ includeDeleted: true, includeBots: true })).map((u) => [u.id, displayNameOf(u)]));
+    for (const owner of owners) names.set(owner, users.get(owner) ?? owner);
+    return names;
+  }
+  for (const owner of owners) {
+    try {
+      names.set(owner, displayNameOf(await client.getUser(owner)));
+    } catch (error) {
+      if (!(error instanceof CliError) || error.code !== 'NOT_FOUND') throw error;
+      names.set(owner, owner);
+    }
+  }
+  return names;
+}
+
+/** Share targets, for messages. */
+export const describeTargets = (targets: SlackCanvasTargets) => [...targets.users, ...targets.channels].join(', ');
 
 /** Share targets as ids, split into users and channels, each once. Comma-separated values are allowed. */
 export async function resolveTargets(client: SlackClient, inputs: string[]): Promise<SlackCanvasTargets> {

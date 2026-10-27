@@ -10,7 +10,7 @@ import { enforceWriteAccess } from '../../utils/read-only';
 import { confirm, readStdin, readStdinRaw } from '../../utils/stdin';
 import { checkUserToken, SlackClient } from './client';
 import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
-import { CANVAS_ARGUMENT, checkAccessLevel, findCanvases, readCanvas, resolveCanvasId, resolveTargets } from './canvases';
+import { CANVAS_ARGUMENT, checkAccessLevel, describeTargets, findCanvases, readCanvas, resolveCanvasId, resolveTargets } from './canvases';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
@@ -105,6 +105,11 @@ async function readMarkdown(file: string | undefined): Promise<string> {
   } catch {
     throw new CliError('INVALID_PARAMS', `Cannot read ${file}`, 'Check that the file exists and is readable');
   }
+}
+
+/** After a change, the canvas as it is now. */
+async function reportCanvasChange(client: SlackClient, id: string, verb: string, json?: boolean): Promise<void> {
+  printSlackCanvasChange(await client.canvasInfo(id), verb, json);
 }
 
 /** Progress on one stderr line, only on a terminal. */
@@ -483,11 +488,10 @@ in the channel are skipped.`,
         }
         const markdown = await readMarkdown(options.channel ? title : file);
         const client = await getWritableClient(options.profile, 'create a canvas');
-        const id = options.channel
-          ? await client.createChannelCanvas((await client.getChannel(options.channel)).id, markdown)
-          : await client.createCanvas(title!.trim(), markdown);
-        const { downloadUrl: _, ...canvas } = await client.canvasInfo(id);
-        printSlackCanvasChange(canvas, 'Created', options.json);
+        const id = await client.createCanvas(markdown, options.channel
+          ? { channelId: (await client.getChannel(options.channel)).id }
+          : { title: title!.trim() });
+        await reportCanvasChange(client, id, 'Created', options.json);
       })),
     `Examples:
 
@@ -511,9 +515,8 @@ in the channel are skipped.`,
         }
         const client = await getWritableClient(options.profile, 'change a canvas');
         const id = await resolveCanvasId(client, canvas);
-        await client.editCanvas(id, { operation: 'replace', document_content: { type: 'markdown', markdown } });
-        const { downloadUrl: _, ...updated } = await client.canvasInfo(id);
-        printSlackCanvasChange(updated, 'Updated', options.json);
+        await client.replaceCanvas(id, markdown);
+        await reportCanvasChange(client, id, 'Updated', options.json);
       })),
     `Examples:
 
@@ -533,9 +536,8 @@ replaced by what the Markdown says.`,
         if (!title.trim()) throw new CliError('INVALID_PARAMS', 'The title cannot be empty');
         const client = await getWritableClient(options.profile, 'rename a canvas');
         const id = await resolveCanvasId(client, canvas);
-        await client.editCanvas(id, { operation: 'rename', title_content: { type: 'markdown', markdown: title.trim() } });
-        const { downloadUrl: _, ...updated } = await client.canvasInfo(id);
-        printSlackCanvasChange(updated, 'Renamed', options.json);
+        await client.renameCanvas(id, title.trim());
+        await reportCanvasChange(client, id, 'Renamed', options.json);
       })),
     `Examples:
 
@@ -553,8 +555,7 @@ replaced by what the Markdown says.`,
         const id = await resolveCanvasId(client, canvas);
         const targets = await resolveTargets(client, options.to);
         await client.setCanvasAccess(id, level, targets);
-        const { downloadUrl: _, ...shared } = await client.canvasInfo(id);
-        printSlackCanvasChange(shared, `Shared (${level}) with ${[...targets.users, ...targets.channels].join(', ')}:`, options.json);
+        await reportCanvasChange(client, id, `Shared (${level}) with ${describeTargets(targets)}:`, options.json);
       })),
     `Examples:
 
@@ -571,8 +572,7 @@ replaced by what the Markdown says.`,
         const id = await resolveCanvasId(client, canvas);
         const targets = await resolveTargets(client, options.from);
         await client.removeCanvasAccess(id, targets);
-        const { downloadUrl: _, ...unshared } = await client.canvasInfo(id);
-        printSlackCanvasChange(unshared, `Unshared from ${[...targets.users, ...targets.channels].join(', ')}:`, options.json);
+        await reportCanvasChange(client, id, `Unshared from ${describeTargets(targets)}:`, options.json);
       })),
     `Examples:
 
@@ -589,7 +589,7 @@ replaced by what the Markdown says.`,
         }
         const client = await getWritableClient(options.profile, 'delete a canvas');
         const id = await resolveCanvasId(client, canvas);
-        const { downloadUrl: _, ...target } = await client.canvasInfo(id);
+        const target = await client.canvasInfo(id);
         if (!options.yes && !(await confirm(`Delete canvas "${target.title || target.id}"? This cannot be undone`))) {
           console.error('Cancelled');
           return;

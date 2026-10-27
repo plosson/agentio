@@ -1,6 +1,6 @@
 import { CliError } from '../../utils/errors';
 import { parseDateOption } from '../../utils/options';
-import { compareTs, SlackApiError, type SlackClient } from './client';
+import { compareTs, displayNameOf, SlackApiError, type SlackClient } from './client';
 import type {
   SlackConversation,
   SlackConversationMessages,
@@ -102,7 +102,7 @@ const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
 
 /** User ids to names, in authors, mentions, older threads' parents, and direct messages' names. */
 export function resolveNames(conversations: SlackConversationMessages[], users: SlackUser[]): void {
-  const names = new Map(users.map((u) => [u.id, u.displayName || u.realName || u.name]));
+  const names = new Map(users.map((u) => [u.id, displayNameOf(u)]));
   const nameOf = (id: string | undefined, botName?: string) => (id ? names.get(id) ?? id : botName ?? 'unknown');
   const mentions = (text: string) => text.replace(MENTION, (_, id: string) => `@${names.get(id) ?? id}`);
   const fix = (m: SlackMessage) => {

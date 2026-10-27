@@ -138,22 +138,22 @@ describe('round trip', () => {
   test('what get prints is exactly what set sends back', async () => {
     const canvas = fake.addCanvas({ title: 'Test', html: FIXTURE });
     const { markdown } = await readCanvas(client, canvas.id);
-    await client.editCanvas(canvas.id, { operation: 'replace', document_content: { type: 'markdown', markdown } });
+    await client.replaceCanvas(canvas.id, markdown);
     expect(fake.edits.at(-1)).toEqual({ id: canvas.id, changes: [{ operation: 'replace', document_content: { type: 'markdown', markdown } }] });
     expect(canvas.markdown).toBe(markdown);
   });
 
   test('createCanvas without content sends no document_content; with it, the Markdown as is', async () => {
-    const empty = await client.createCanvas('Empty', '');
+    const empty = await client.createCanvas('', { title: 'Empty' });
     expect(fake.log.at(-1)!.params).toEqual({ title: 'Empty' });
-    const full = await client.createCanvas('Full', '# Hi\n- [ ] a');
+    const full = await client.createCanvas('# Hi\n- [ ] a', { title: 'Full' });
     expect(JSON.parse(fake.log.at(-1)!.params.document_content)).toEqual({ type: 'markdown', markdown: '# Hi\n- [ ] a' });
     expect(empty).not.toBe(full);
   });
 
   test('a channel that already has a canvas suggests set', async () => {
     fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: 'F0CANVAS09' }));
-    const err = await caught(client.createChannelCanvas('C0DOCS', '# x'));
+    const err = await caught(client.createCanvas('# x', { channelId: 'C0DOCS' }));
     expect(err.code).toBe('INVALID_PARAMS');
     expect(err.suggestion).toContain('canvases set');
   });

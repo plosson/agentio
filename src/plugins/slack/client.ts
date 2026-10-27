@@ -1,4 +1,5 @@
 import type { ServiceClient, ValidationResult } from '../../types/service';
+import { chunk } from '../../utils/batch';
 import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/errors';
 import type {
   SlackChannelChange,
@@ -107,7 +108,7 @@ interface RawFile {
 }
 
 /** Canvases are files of this type. */
-export const CANVAS_FILETYPE = 'quip';
+const CANVAS_FILETYPE = 'quip';
 /** files.list: at most 100 files per page; pages are read up to this many. */
 const FILES_PAGE_SIZE = 100;
 const FILES_MAX_PAGES = 100;
@@ -276,6 +277,14 @@ export function checkDownloadUrl(url: unknown): string {
   }
   return parsed.toString();
 }
+
+/** The name to show for a user: display name, else real name, else handle. */
+export function displayNameOf(user: SlackUser): string {
+  return user.displayName || user.realName || user.name;
+}
+
+/** Markdown as canvases.create and canvases.edit take it. */
+const markdownContent = (markdown: string) => ({ type: 'markdown', markdown });
 
 /** Slack timestamps have more digits than a Number holds, so they compare as strings. */
 export function compareTs(a: string, b: string): number {
@@ -542,23 +551,30 @@ export class SlackClient implements ServiceClient {
   }
 
   /** One canvas, with its download link; NOT_FOUND when the id is a file of another kind. */
-  async canvasInfo(id: string): Promise<SlackCanvas & { downloadUrl?: string }> {
+  async canvasInfo(id: string): Promise<SlackCanvas> {
+    return toCanvas(await this.canvasFile(id));
+  }
+
+  /** One canvas and its HTML. */
+  async canvasHtml(id: string): Promise<{ canvas: SlackCanvas; html: string }> {
+    const file = await this.canvasFile(id);
+    return { canvas: toCanvas(file), html: await this.downloadCanvasHtml(file.url_private_download) };
+  }
+
+  private async canvasFile(id: string): Promise<RawFile> {
     const data = await this.call<SlackApiResponse & { file: RawFile }>('files.info', { file: id });
     if (data.file?.filetype !== CANVAS_FILETYPE) throw new CliError('NOT_FOUND', `${id} is a file, not a canvas`);
-    return { ...toCanvas(data.file), downloadUrl: data.file.url_private_download };
+    return data.file;
   }
 
   /** A canvas's HTML, from files.slack.com only; a redirect is refused rather than followed with the token. */
   async downloadCanvasHtml(url: string | undefined): Promise<string> {
     const target = checkDownloadUrl(url);
-    if (!isTokenCredentials(this.credentials)) {
-      throw new CliError('INVALID_PARAMS', 'This Slack profile is a webhook, which can only send messages',
-        'Add a profile with a user token: agentio slack profile add');
-    }
+    const token = this.token();
     let response: Response;
     try {
       response = await fetch(target, {
-        headers: { Authorization: `Bearer ${this.credentials.token}` },
+        headers: { Authorization: `Bearer ${token}` },
         redirect: 'error',
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
@@ -589,27 +605,22 @@ export class SlackClient implements ServiceClient {
     return data.channel?.properties?.canvas?.file_id || undefined;
   }
 
-  /** A new standalone canvas; its id. */
-  async createCanvas(title: string, markdown: string): Promise<string> {
-    const data = await this.call<SlackApiResponse & { canvas_id: string }>('canvases.create', {
-      title,
-      ...(markdown ? { document_content: JSON.stringify({ type: 'markdown', markdown }) } : {}),
-    });
+  /** A new canvas, standalone with a title or a channel's; its id. */
+  async createCanvas(markdown: string, target: { title: string } | { channelId: string }): Promise<string> {
+    const content: Record<string, string> = markdown ? { document_content: JSON.stringify(markdownContent(markdown)) } : {};
+    const data = 'title' in target
+      ? await this.call<SlackApiResponse & { canvas_id: string }>('canvases.create', { title: target.title, ...content })
+      : await this.call<SlackApiResponse & { canvas_id: string }>('conversations.canvases.create', { channel_id: target.channelId, ...content });
     return data.canvas_id;
   }
 
-  /** A channel's canvas; its id. */
-  async createChannelCanvas(channelId: string, markdown: string): Promise<string> {
-    const data = await this.call<SlackApiResponse & { canvas_id: string }>('conversations.canvases.create', {
-      channel_id: channelId,
-      ...(markdown ? { document_content: JSON.stringify({ type: 'markdown', markdown }) } : {}),
-    });
-    return data.canvas_id;
+  /** Replaces a canvas's whole content. */
+  async replaceCanvas(id: string, markdown: string): Promise<void> {
+    await this.call('canvases.edit', { canvas_id: id, changes: JSON.stringify([{ operation: 'replace', document_content: markdownContent(markdown) }]) });
   }
 
-  /** One canvases.edit change, such as a whole-document replace or a rename. */
-  async editCanvas(id: string, change: Record<string, unknown>): Promise<void> {
-    await this.call('canvases.edit', { canvas_id: id, changes: JSON.stringify([change]) });
+  async renameCanvas(id: string, title: string): Promise<void> {
+    await this.call('canvases.edit', { canvas_id: id, changes: JSON.stringify([{ operation: 'rename', title_content: markdownContent(title) }]) });
   }
 
   /** Gives access; users and channels go in separate calls of at most 20 ids. */
@@ -626,7 +637,7 @@ export class SlackClient implements ServiceClient {
   private async changeAccess(method: string, params: Record<string, string>, targets: SlackCanvasTargets, done: string): Promise<void> {
     const batches: [string, string[]][] = [];
     for (const [field, ids] of [['user_ids', targets.users], ['channel_ids', targets.channels]] as const) {
-      for (let i = 0; i < ids.length; i += ACCESS_BATCH) batches.push([field, ids.slice(i, i + ACCESS_BATCH)]);
+      for (const batch of chunk(ids, ACCESS_BATCH)) batches.push([field, batch]);
     }
     const changed: string[] = [];
     for (const [field, ids] of batches) {
@@ -842,12 +853,17 @@ export class SlackClient implements ServiceClient {
   }
 
   /** One Web API call: form-encoded POST with the user token, retried on 429. */
-  private async call<T extends SlackApiResponse>(method: string, params: Record<string, string> = {}): Promise<T> {
+  /** The user token; a webhook profile has none. */
+  private token(): string {
     if (!isTokenCredentials(this.credentials)) {
       throw new CliError('INVALID_PARAMS', 'This Slack profile is a webhook, which can only send messages',
         'Add a profile with a user token: agentio slack profile add');
     }
-    const token = this.credentials.token;
+    return this.credentials.token;
+  }
+
+  private async call<T extends SlackApiResponse>(method: string, params: Record<string, string> = {}): Promise<T> {
+    const token = this.token();
 
     for (let attempt = 0; ; attempt++) {
       let response: Response;

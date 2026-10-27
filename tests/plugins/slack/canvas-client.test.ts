@@ -37,16 +37,16 @@ describe('checkDownloadUrl', () => {
 describe('canvasInfo and downloadCanvasHtml', () => {
   test('a canvas gives its title, owner, link and HTML', async () => {
     const canvas = fake.addCanvas({ title: 'Plan', html: '<div class="quip-canvas-content"><h1>Plan</h1></div>' });
-    const info = await client.canvasInfo(canvas.id);
+    const { canvas: info, html } = await client.canvasHtml(canvas.id);
     expect(info).toMatchObject({ id: canvas.id, title: 'Plan', owner: 'U0ADMIN', link: `https://example.slack.com/docs/T0001/${canvas.id}` });
-    expect(await client.downloadCanvasHtml(info.downloadUrl)).toContain('<h1>Plan</h1>');
+    expect(html).toContain('<h1>Plan</h1>');
+    expect(await client.canvasInfo(canvas.id)).toEqual(info);
   });
 
   test('a download link on another host never receives the token, and nothing is fetched', async () => {
     fake.downloadUrlFor = () => 'https://files.slack.com.evil.test/x';
     const canvas = fake.addCanvas({ title: 'Plan' });
-    const info = await client.canvasInfo(canvas.id);
-    const err = await caught(client.downloadCanvasHtml(info.downloadUrl));
+    const err = await caught(client.canvasHtml(canvas.id));
     expect(err.code).toBe('API_ERROR');
     expect(elsewhere()).toEqual([]);
   });
