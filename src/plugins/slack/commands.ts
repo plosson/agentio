@@ -7,14 +7,15 @@ import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addJsonOption } from '../../utils/output';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { readStdin } from '../../utils/stdin';
+import { readStdin, readStdinRaw } from '../../utils/stdin';
 import { checkUserToken, SlackClient } from './client';
 import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
-import { CANVAS_ARGUMENT, findCanvases, readCanvas } from './canvases';
+import { CANVAS_ARGUMENT, findCanvases, readCanvas, resolveCanvasId } from './canvases';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
   printSlackArchive,
+  printSlackCanvasChange,
   printSlackCanvasContent,
   printSlackCanvasList,
   printSlackLeave,
@@ -94,6 +95,16 @@ function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...ar
 
 /** A repeatable option's values, in order. */
 const repeatable = (value: string, previous: string[] = []) => [...previous, value];
+
+/** Markdown from a file, or from stdin when no file is given; '' when there is none. */
+async function readMarkdown(file: string | undefined): Promise<string> {
+  if (file === undefined) return (await readStdinRaw()) ?? '';
+  try {
+    return await readFile(file, 'utf-8');
+  } catch {
+    throw new CliError('INVALID_PARAMS', `Cannot read ${file}`, 'Check that the file exists and is readable');
+  }
+}
 
 /** Progress on one stderr line, only on a terminal. */
 function progress(done: number, total: number): void {
@@ -455,6 +466,76 @@ in the channel are skipped.`,
   agentio slack canvases get F07ABC1234 > plan.md
   agentio slack canvases get https://example.slack.com/docs/T0123/F07ABC1234
   agentio slack canvases get '#eng' --json`,
+  );
+
+  addExamples(
+    leaf(canvases, 'create', 'Create a canvas from Markdown (file or stdin)')
+      .argument('[title]', 'Title of a standalone canvas')
+      .argument('[file]', 'Markdown file; stdin when absent')
+      .option('--channel <channel>', 'Create this channel\'s canvas instead; then give no title')
+      .action(run(async (title: string | undefined, file: string | undefined, options) => {
+        if (options.channel && file !== undefined) {
+          throw new CliError('INVALID_PARAMS', 'A channel canvas takes no title', 'agentio slack canvases create --channel <channel> [file]');
+        }
+        if (!options.channel && !title?.trim()) {
+          throw new CliError('INVALID_PARAMS', 'A title is required', 'agentio slack canvases create "<title>" [file]');
+        }
+        const markdown = await readMarkdown(options.channel ? title : file);
+        const client = await getWritableClient(options.profile, 'create a canvas');
+        const id = options.channel
+          ? await client.createChannelCanvas((await client.getChannel(options.channel)).id, markdown)
+          : await client.createCanvas(title!.trim(), markdown);
+        const { downloadUrl: _, ...canvas } = await client.canvasInfo(id);
+        printSlackCanvasChange(canvas, 'Created', options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases create "Release notes" notes.md
+  echo "# Runbook" | agentio slack canvases create "Runbook"
+  agentio slack canvases create --channel '#eng' plan.md`,
+  );
+
+  addExamples(
+    leaf(canvases, 'set', 'Replace a canvas\'s whole content with Markdown (file or stdin)')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .argument('[file]', 'Markdown file; stdin when absent')
+      .option('--force', 'Allow empty content, which clears the canvas')
+      .action(run(async (canvas: string, file: string | undefined, options) => {
+        const markdown = await readMarkdown(file);
+        if (!markdown.trim() && !options.force) {
+          throw new CliError('INVALID_PARAMS', 'The Markdown is empty, which would clear the canvas', 'Pass --force to clear it');
+        }
+        const client = await getWritableClient(options.profile, 'change a canvas');
+        const id = await resolveCanvasId(client, canvas);
+        await client.editCanvas(id, { operation: 'replace', document_content: { type: 'markdown', markdown } });
+        const { downloadUrl: _, ...updated } = await client.canvasInfo(id);
+        printSlackCanvasChange(updated, 'Updated', options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases get F07ABC1234 > plan.md
+  # edit plan.md
+  agentio slack canvases set F07ABC1234 plan.md
+
+Parts listed by get as "can't be written back" (embedded files, layouts) are
+replaced by what the Markdown says.`,
+  );
+
+  addExamples(
+    leaf(canvases, 'rename', 'Change a canvas\'s title')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .argument('<title>', 'New title')
+      .action(run(async (canvas: string, title: string, options) => {
+        if (!title.trim()) throw new CliError('INVALID_PARAMS', 'The title cannot be empty');
+        const client = await getWritableClient(options.profile, 'rename a canvas');
+        const id = await resolveCanvasId(client, canvas);
+        await client.editCanvas(id, { operation: 'rename', title_content: { type: 'markdown', markdown: title.trim() } });
+        const { downloadUrl: _, ...updated } = await client.canvasInfo(id);
+        printSlackCanvasChange(updated, 'Renamed', options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases rename F07ABC1234 "Plan, v2"`,
   );
 
   const profile = createProfileCommands<SlackCredentials>(slack, {
