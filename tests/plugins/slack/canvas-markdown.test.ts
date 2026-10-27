@@ -47,7 +47,7 @@ describe('a real canvas', () => {
     expect(markdown).toContain('A layout');
     expect(markdown).toContain('[F0PDF00001](https://example.slack.com/files/U0ALICE01/F0PDF00001/report.pdf)');
     expect(markdown).not.toContain('_SLACK_FILE_ALT_PLACEHOLDER_');
-    expect([...unconverted].sort()).toEqual(['embedded file F0IMAGE001', 'embedded file F0PDF00001', 'layout columns', 'underline']);
+    expect([...unconverted].sort()).toEqual(['embedded file F0IMAGE001', 'embedded file F0PDF00001', 'layout columns', 'table header row', 'underline']);
   });
 
   test('no HTML and no ids of the HTML structure leak into the Markdown', () => {
@@ -120,8 +120,9 @@ describe('edge cases', () => {
   });
 
   test('a table with a pipe in a cell and ragged rows stays a valid table', () => {
-    const { markdown } = htmlToCanvasMarkdown(wrap('<table><tr><td>a|b</td><td>c</td></tr><tr><td>d</td></tr></table>'));
+    const { markdown, unconverted } = htmlToCanvasMarkdown(wrap('<table><tr><td>a|b</td><td>c</td></tr><tr><td>d</td></tr></table>'));
     expect(markdown).toBe('| a\\|b | c |\n| --- | --- |\n| d |  |');
+    expect(unconverted).toEqual(['table header row']);
   });
 
   test('a list style it does not know is a bulleted list, listed as unconverted', () => {

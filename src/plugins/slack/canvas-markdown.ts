@@ -159,6 +159,8 @@ export function htmlToCanvasMarkdown(html: string, title?: string): CanvasMarkdo
       const rows = Array.from((node as Element).querySelectorAll('tr')).map((tr) =>
         children(tr as Element).filter((c) => c.nodeName === 'TD' || c.nodeName === 'TH').map((cell) => inline(cell).replace(/\|/g, '\\|')));
       if (rows.length === 0) return '';
+      // Canvas tables have no header row; a Markdown table always does, so after a set the first row is one.
+      unconverted.add('table header row');
       const width = Math.max(...rows.map((r) => r.length));
       const line = (cells: string[]) => `| ${[...cells, ...Array(width - cells.length).fill('')].join(' | ')} |`;
       return `\n\n${[line(rows[0]), line(Array(width).fill('---')), ...rows.slice(1).map(line)].join('\n')}\n\n`;
