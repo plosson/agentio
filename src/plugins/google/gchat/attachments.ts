@@ -318,7 +318,7 @@ export const MANIFEST_COLUMNS: (keyof GChatManifestEntry)[] = [
   'contentName', 'contentType', 'source', 'savedPath', 'status', 'bytes', 'error',
 ];
 
-function csvCell(value: unknown): string {
+export function csvCell(value: unknown): string {
   if (value === undefined || value === null) return '';
   const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

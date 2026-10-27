@@ -142,7 +142,7 @@ describe('errors', () => {
 describe('rate limits', () => {
   test('a 429 is retried after Retry-After seconds, then succeeds', async () => {
     fake.queue.push({ status: 429, headers: { 'Retry-After': '3' } });
-    expect((await client.authTest()).teamName).toBe('Hex-Rays SA');
+    expect((await client.authTest()).teamName).toBe('Example Co');
     expect(slept).toEqual([3000]);
     expect(fake.log).toHaveLength(2);
   });

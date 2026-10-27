@@ -172,7 +172,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | Service | Auth | Commands |
 |---------|------|----------|
 | **Gmail** | OAuth | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
-| **Slack** | Webhook | `send` |
+| **Slack** | Webhook/User token | `send`, `messages`, `download`, `attachments`, `users`, `channels` |
 | **WhatsApp** | Linked device, through the daemon | `status`, `conversations`, `send`, `read`, `contacts` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
 | **JIRA** | OAuth | `projects`, `search`, `get`, `users search`, `users get`, `comment`, `transitions`, `transition` |
@@ -222,7 +222,20 @@ agentio slack send "Deployment complete ✓"
 
 # Send rich Block Kit message
 agentio slack send --json blocks.json
+
+# Read everything since Monday (user token), also from public channels you never
+# joined; read-only: nothing is joined or marked read
+agentio slack messages --since 2026-10-26 --include-public --json
+
+# Download one file, or every file shared in a channel, with a manifest
+agentio slack download F0123ABCDEF --out ./files/
+agentio slack attachments --channel eng --since 2026-10-01 --out ./eng-files
 ```
+
+In `slack messages --json`, each conversation has `isMember`; each message has a
+`permalink` and its author's `realName` and `displayName`; each file is
+`{id, name, mimetype, size, urlPrivateDownload, permalink}`. Links read
+`label (url)`; `--raw` keeps Slack's markup.
 
 </details>
 

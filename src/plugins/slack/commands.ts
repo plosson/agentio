@@ -8,12 +8,15 @@ import { createProfileCommands } from '../../utils/profile-commands';
 import { addJsonOption } from '../../utils/output';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
-import { checkUserToken, SlackClient } from './client';
+import { exportSlackAttachments, downloadTarget, saveFile } from './attachments';
+import { checkUserToken, fileIdFrom, SlackClient } from './client';
 import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
   printSlackArchive,
+  printSlackAttachments,
+  printSlackDownload,
   printSlackLeave,
   printSlackChannel,
   printSlackChannelList,
@@ -54,6 +57,7 @@ export const SLACK_USER_SCOPES = [
   'channels:write',
   'channels:history', 'groups:history', 'im:history', 'mpim:history',
   'search:read',
+  'files:read',
 ];
 
 export interface SlackProfileAddOptions extends ProfileAddOptions {
@@ -96,6 +100,19 @@ const repeatable = (value: string, previous: string[] = []) => [...previous, val
 function progress(done: number, total: number): void {
   if (!process.stderr.isTTY) return;
   process.stderr.write(`\rReading ${done}/${total} conversations…${done === total ? '\n' : ''}`);
+}
+
+/** The options messages and attachments share, checked. */
+function messagesOptions(options: { since?: string; until?: string; types?: string; channel?: string[]; includePublic?: boolean; raw?: boolean }) {
+  return {
+    range: checkRange(options.since, options.until),
+    types: checkTypes(options.types),
+    channels: options.channel,
+    includePublic: !!options.includePublic,
+    raw: !!options.raw,
+    onWarning: (message: string) => console.error(`Warning: ${message}`),
+    onProgress: progress,
+  };
 }
 
 async function getWritableClient(profileName: string | undefined, operation: string): Promise<SlackClient> {
@@ -197,22 +214,15 @@ export function registerSlackCommands(program: Command): void {
   );
 
   addExamples(
-    leaf(slack, 'messages', 'Read every message since a date in the conversations you are in, threads included (needs a user token profile)')
+    leaf(slack, 'messages', 'Read every message since a date in the conversations you are in (with --include-public, every public channel too), threads included (needs a user token profile)')
       .option('--since <date>', 'Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp')
       .option('--until <date>', 'End, included, same formats; a date alone means the end of that day (default: now)')
       .option('--channel <channel>', 'Only this conversation, by id or name; repeat for more', repeatable)
       .option('--types <list>', `Comma-separated: ${SLACK_CONVERSATION_TYPES.join(', ')} (default: all)`)
+      .option('--include-public', 'Also read public channels you are not in, without joining them')
+      .option('--raw', 'Keep Slack\'s text markup as sent: <@U…> mentions, <url|label> links')
       .action(run(async (options) => {
-        const range = checkRange(options.since, options.until);
-        const types = checkTypes(options.types);
-        const { client } = await getSlackClient(options.profile);
-        const result = await collectMessages(client, {
-          range,
-          types,
-          channels: options.channel,
-          onWarning: (message) => console.error(`Warning: ${message}`),
-          onProgress: progress,
-        });
+        const result = await collectMessages((await getSlackClient(options.profile)).client, messagesOptions(options));
         printSlackMessages(result, options.json);
       })),
     `Examples:
@@ -226,8 +236,75 @@ export function registerSlackCommands(program: Command): void {
   # direct messages only
   agentio slack messages --since 2026-10-20 --types dm,group
 
+  # also the public channels you never joined; nothing is joined or marked read
+  agentio slack messages --since 2026-10-26 --include-public
+
 Replies in threads that started before --since are found through search
-(needs search:read); without it they are left out, with a warning.`,
+(needs search:read); without it they are left out, with a warning.
+
+In --json, each conversation has isMember; each message has permalink, and
+realName and displayName for its author; each file has id, name, mimetype,
+size, urlPrivateDownload and permalink (download it with: agentio slack download).
+Links read "label (url)" and mentions "@name"; --raw keeps Slack's markup.`,
+  );
+
+  addExamples(
+    leaf(slack, 'download', 'Download one file shared in Slack (needs files:read)')
+      .argument('<file>', 'File id (F…), or the file\'s permalink or private download URL')
+      .option('--out <path>', 'File to write, or a folder to write into (default: the file\'s name in the current folder)')
+      .action(run(async (file: string, options) => {
+        const { client } = await getSlackClient(options.profile);
+        const info = await client.fileInfo(fileIdFrom(file));
+        const path = await downloadTarget(options.out, info.name);
+        const saved = await saveFile(client, info, path);
+        printSlackDownload(path, saved.bytes, saved.file, options.json);
+      })),
+    `Examples:
+
+  # file ids are in: agentio slack messages --json (files[].id)
+  agentio slack download F0123ABCDEF --out ./screenshot.png
+
+  # by link, into a folder
+  agentio slack download https://files.slack.com/files-pri/T0123ABCD-F0123ABCDEF/download/report.pdf --out ./files/`,
+  );
+
+  addExamples(
+    leaf(slack, 'attachments', 'Download every file shared in a date range, with a manifest (needs files:read)')
+      .option('--since <date>', 'Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp')
+      .option('--until <date>', 'End, included, same formats; a date alone means the end of that day (default: now)')
+      .option('--channel <channel>', 'Only this conversation, by id or name; repeat for more (default: all)', repeatable)
+      .option('--types <list>', `Comma-separated: ${SLACK_CONVERSATION_TYPES.join(', ')} (default: all)`)
+      .option('--include-public', 'Also public channels you are not in, without joining them')
+      .option('--out <dir>', 'Folder to save files and manifest.json / manifest.csv into', 'slack-attachments')
+      .option('--dry-run', 'Only list the files and write the manifest; download nothing')
+      .action(run(async (options) => {
+        const { client } = await getSlackClient(options.profile);
+        const messages = await collectMessages(client, messagesOptions(options));
+        const result = await exportSlackAttachments(client, messages, {
+          outDir: options.out,
+          dryRun: !!options.dryRun,
+          onProgress: (entry, index) => {
+            const tag = entry.error ? `${entry.status}: ${entry.error}` : entry.status;
+            console.error(`[${index + 1}] ${entry.name} -> ${entry.savedPath} (${tag})`);
+          },
+        });
+        printSlackAttachments(result, !!options.dryRun, options.json);
+        if (result.failed > 0) process.exitCode = 1;
+      })),
+    `Examples:
+
+  # every file shared in one channel this month
+  agentio slack attachments --channel eng --since 2026-10-01 --out ./eng-files
+
+  # see what would be saved, without downloading
+  agentio slack attachments --since 2026-10-26 --dry-run
+
+Files are named <YYYY-MM-DD>_<sender>_<file name>; clashes get " (2)", " (3)"...
+The manifest has one row per file: conversation, message ts and permalink,
+sender, file id, name, type, size, saved path, status and error. Deleted files,
+files hidden by the plan's history limit and links to files stored outside
+Slack are recorded as skipped. A file that fails is recorded with its error and
+the run continues; the exit code is 1 if any failed.`,
   );
 
   const users = slack.command('users').description('Workspace members (needs a user token profile)');
@@ -370,7 +447,7 @@ Slack app (channel name, Settings, Delete this channel).`,
       })),
     `Examples:
 
-  agentio slack channels leave topic-apple topic-swift
+  agentio slack channels leave old-project team-offsite
 
 Every channel is looked up first: one wrong name leaves none. Channels you
 are not in are skipped. After leaving a private channel you no longer see it,
@@ -450,7 +527,7 @@ in the channel are skipped.`,
   agentio slack profile add
 
   # a user token for the admin commands (users, channels)
-  agentio slack profile add --token --profile hexrays`,
+  agentio slack profile add --token --profile work`,
   );
 }
 
