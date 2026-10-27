@@ -90,7 +90,7 @@ describe('readCanvas', () => {
     const content = await readCanvas(client, canvas.id);
     expect(content).toMatchObject({ id: canvas.id, title: 'Test', owner: 'U0ADMIN' });
     expect(content.markdown).toContain('- [x] todo 1');
-    expect(content.unconverted).toHaveLength(5);
+    expect(content.unconverted).toHaveLength(6);
     expect(content).not.toHaveProperty('downloadUrl');
   });
 

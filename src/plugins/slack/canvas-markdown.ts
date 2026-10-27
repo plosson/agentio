@@ -125,7 +125,13 @@ export function htmlToCanvasMarkdown(html: string, title?: string): CanvasMarkdo
       if (emoji) return `:${emoji}:`;
       const text = (element.textContent ?? '').trim();
       const mention = MENTION.exec(text);
-      if (mention) return `![](${mention[1]}${mention[2]})`;
+      if (mention) {
+        // Alone on its line, Slack shows a written-back user mention as a profile card, not inline.
+        if (mention[1] === '@' && (element.parentNode?.textContent ?? '').trim() === text) {
+          unconverted.add('mention alone on its line (shown as a profile card)');
+        }
+        return `![](${mention[1]}${mention[2]})`;
+      }
       unconverted.add('special element');
       return text;
     },
