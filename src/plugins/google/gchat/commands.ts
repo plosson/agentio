@@ -11,6 +11,7 @@ import { GChatClient } from './client';
 import { checkWebhookUrl, type WebhookCheck } from '../../webhook-check';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
+import { parseDateOption } from '../../../utils/options';
 import { printGChatSendResult, printGChatMessageList, printGChatMessage, printGChatSpaceList, printGChatMemberList, printGChatUser, printGChatAttachmentsResult } from './output';
 import { enforceWriteAccess } from '../../../utils/read-only';
 import { addExamples } from '../../../utils/command-tree';
@@ -475,16 +476,6 @@ must sign in again with \`agentio profile reauth gchat <profile>\`.`,
         handleError(error);
       }
     });
-}
-
-/** `--since` / `--until`: refuse a date that does not parse instead of sending "Invalid Date" to the API. */
-export function parseDateOption(value: string | undefined, flag: string): Date | undefined {
-  if (!value) return undefined;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new CliError('INVALID_PARAMS', `Invalid ${flag} date: ${value}`, 'Use YYYY-MM-DD or an ISO 8601 timestamp');
-  }
-  return date;
 }
 
 export async function gchatProfileAdd(

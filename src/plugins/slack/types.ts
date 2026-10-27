@@ -99,3 +99,69 @@ export interface SlackMembershipResult {
   /** Already members (invite) or not members (remove), so left alone. */
   skipped: SlackUser[];
 }
+
+export type SlackConversationType = 'channel' | 'private' | 'dm' | 'group';
+
+export interface SlackConversation {
+  id: string;
+  /** Channel name; for a direct message, the other person's name once names are resolved. */
+  name: string;
+  type: SlackConversationType;
+  /** Direct messages: the other person's user id. */
+  user?: string;
+}
+
+/** Both ends inclusive. */
+export interface SlackMessageRange {
+  since: Date;
+  until: Date;
+}
+
+/** The message that started an older thread; only `ts` when it could not be read. */
+export interface SlackThreadParent {
+  ts: string;
+  user?: string;
+  userName?: string;
+  text?: string;
+  files?: string[];
+}
+
+export interface SlackMessage {
+  ts: string;
+  user?: string;
+  /** Bots post without a user; Slack gives their name instead. */
+  botName?: string;
+  /** Set when names are resolved. */
+  userName?: string;
+  text: string;
+  /** The parent's ts, for a thread reply or a thread parent. */
+  threadTs?: string;
+  replyCount: number;
+  files: string[];
+  replies: SlackMessage[];
+  source: 'history' | 'search';
+  /** Only on a reply in a thread that started before the range. */
+  parent?: SlackThreadParent;
+}
+
+export interface SlackConversationMessages extends SlackConversation {
+  messages: SlackMessage[];
+}
+
+export interface SlackMessagesResult {
+  /** ISO 8601. */
+  since: string;
+  until: string;
+  conversations: SlackConversationMessages[];
+}
+
+export interface SlackSearchMatch {
+  channelId: string;
+  message: SlackMessage;
+}
+
+export interface SlackSearchResult {
+  matches: SlackSearchMatch[];
+  /** Not every match was read: past Slack's 100 pages, or rate-limited partway. */
+  truncated: boolean;
+}

@@ -1,5 +1,16 @@
 import { writeJson } from '../../utils/output';
-import type { SlackChannelChange, SlackChannel, SlackMembershipResult, SlackSendResult, SlackUser } from './types';
+import { countMessages } from './messages';
+import type {
+  SlackChannelChange,
+  SlackChannel,
+  SlackConversationMessages,
+  SlackMembershipResult,
+  SlackMessage,
+  SlackMessagesResult,
+  SlackSendResult,
+  SlackThreadParent,
+  SlackUser,
+} from './types';
 
 export function printSlackSendResult(result: SlackSendResult): void {
   console.log('Message sent');
@@ -105,6 +116,57 @@ export function printSlackLeave(results: SlackChannelChange[], json?: boolean): 
   emit(json, { results }, () => {
     for (const { channel, changed } of results) {
       console.log(changed ? `Left #${channel.name} (${channel.id})` : `Skipped #${channel.name}: not a member`);
+    }
+  });
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+/** A Slack timestamp as MM-DD HH:MM, local time. */
+function when(ts: string): string {
+  const d = new Date(Number(ts) * 1000);
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Text and file names; continuation lines are indented under the first. */
+function body(m: SlackMessage, indent: number): string {
+  return [m.text, ...m.files.map((f) => `[file: ${f}]`)].filter(Boolean).join(' ').replace(/\n/g, `\n${' '.repeat(indent)}`);
+}
+/** An older thread's first words; undefined text means the parent could not be read. */
+function preview(parent: SlackThreadParent): string {
+  if (parent.text === undefined) return '(no longer available)';
+  const words = parent.text.split(/\s+/).filter(Boolean);
+  const files = (parent.files ?? []).map((f) => `[file: ${f}]`);
+  if (words.length === 0) return files.join(' ') || '(no text)';
+  return `"${words.slice(0, 6).join(' ')}${words.length > 6 ? ' …' : ''}"`;
+}
+function headingOf(c: SlackConversationMessages): string {
+  if (c.type === 'dm') return `@${c.name}`;
+  if (c.type === 'group') return c.name;
+  return `#${c.name}`;
+}
+
+export function printSlackMessages(result: SlackMessagesResult, json?: boolean): void {
+  emit(json, result, () => {
+    const all = result.conversations.flatMap((c) => c.messages);
+    const topLevel = all.filter((m) => !m.parent).length;
+    const replies = all.reduce((n, m) => n + m.replies.length, 0) + all.filter((m) => m.parent).length;
+    console.log(`Slack messages ${result.since.slice(0, 10)} → ${result.until.slice(0, 10)}: `
+      + `${plural(result.conversations.length, 'conversation')}, ${plural(topLevel, 'message')}, ${plural(replies, 'reply', 'replies')}`);
+    for (const c of result.conversations) {
+      console.log(`\n${headingOf(c)}  (${plural(countMessages(c), 'message')})`);
+      let thread: string | undefined;
+      for (const m of c.messages) {
+        if (m.parent) {
+          if (m.parent.ts !== thread) {
+            thread = m.parent.ts;
+            console.log(`${when(m.parent.ts)}  thread by ${m.parent.userName ?? 'unknown'}: ${preview(m.parent)}`);
+          }
+        } else {
+          console.log(`${when(m.ts)}  ${m.userName}: ${body(m, 13)}`);
+        }
+        const replyLines = m.parent ? [m] : m.replies;
+        for (const r of replyLines) console.log(`  ↳ ${when(r.ts)}  ${r.userName}: ${body(r, 17)}`);
+      }
     }
   });
 }

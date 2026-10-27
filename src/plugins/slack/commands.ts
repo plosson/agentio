@@ -9,6 +9,7 @@ import { addJsonOption } from '../../utils/output';
 import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
 import { checkUserToken, SlackClient } from './client';
+import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
@@ -18,6 +19,7 @@ import {
   printSlackChannelList,
   printSlackChannelMembers,
   printSlackMembership,
+  printSlackMessages,
   printSlackSendResult,
   printSlackUser,
   printSlackUserList,
@@ -35,7 +37,7 @@ const SLACK_KIND_INPUT: InputSpec = {
   label: 'Profile type', kind: 'choice', default: 'webhook',
   choices: [
     { value: 'webhook', label: 'Incoming webhook (send messages to one channel)' },
-    { value: 'token', label: 'User token (manage users and channels as you)' },
+    { value: 'token', label: 'User token (manage and read as you)' },
   ],
 };
 const SLACK_TOKEN_INPUT: InputSpec = {
@@ -43,13 +45,15 @@ const SLACK_TOKEN_INPUT: InputSpec = {
   help: 'From your Slack app: OAuth & Permissions, User OAuth Token (starts with xoxp-)',
 };
 
-/** The User Token Scopes the admin commands need. */
+/** The User Token Scopes the token commands need. */
 export const SLACK_USER_SCOPES = [
   'users:read', 'users:read.email',
-  'channels:read', 'groups:read',
+  'channels:read', 'groups:read', 'im:read', 'mpim:read',
   'channels:manage', 'groups:write',
   'channels:write.invites', 'groups:write.invites',
   'channels:write',
+  'channels:history', 'groups:history', 'im:history', 'mpim:history',
+  'search:read',
 ];
 
 export interface SlackProfileAddOptions extends ProfileAddOptions {
@@ -83,6 +87,15 @@ function run<A extends unknown[]>(action: (...args: A) => Promise<void>): (...ar
       handleError(error);
     }
   };
+}
+
+/** A repeatable option's values, in order. */
+const repeatable = (value: string, previous: string[] = []) => [...previous, value];
+
+/** Progress on one stderr line, only on a terminal. */
+function progress(done: number, total: number): void {
+  if (!process.stderr.isTTY) return;
+  process.stderr.write(`\rReading ${done}/${total} conversations…${done === total ? '\n' : ''}`);
 }
 
 async function getWritableClient(profileName: string | undefined, operation: string): Promise<SlackClient> {
@@ -181,6 +194,40 @@ export function registerSlackCommands(program: Command): void {
 
   # send to a specific profile
   agentio slack send --profile alerts "incident opened"`,
+  );
+
+  addExamples(
+    leaf(slack, 'messages', 'Read every message since a date in the conversations you are in, threads included (needs a user token profile)')
+      .option('--since <date>', 'Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp')
+      .option('--until <date>', 'End, included, same formats; a date alone means the end of that day (default: now)')
+      .option('--channel <channel>', 'Only this conversation, by id or name; repeat for more', repeatable)
+      .option('--types <list>', `Comma-separated: ${SLACK_CONVERSATION_TYPES.join(', ')} (default: all)`)
+      .action(run(async (options) => {
+        const range = checkRange(options.since, options.until);
+        const types = checkTypes(options.types);
+        const { client } = await getSlackClient(options.profile);
+        const result = await collectMessages(client, {
+          range,
+          types,
+          channels: options.channel,
+          onWarning: (message) => console.error(`Warning: ${message}`),
+          onProgress: progress,
+        });
+        printSlackMessages(result, options.json);
+      })),
+    `Examples:
+
+  # everything since Monday, for a digest
+  agentio slack messages --since 2026-10-26
+
+  # one week of two channels, as JSON
+  agentio slack messages --since 2026-10-01 --until 2026-10-08 --channel eng --channel '#design' --json
+
+  # direct messages only
+  agentio slack messages --since 2026-10-20 --types dm,group
+
+Replies in threads that started before --since are found through search
+(needs search:read); without it they are left out, with a warning.`,
   );
 
   const users = slack.command('users').description('Workspace members (needs a user token profile)');
