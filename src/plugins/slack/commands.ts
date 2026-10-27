@@ -7,10 +7,10 @@ import { CliError, handleError } from '../../utils/errors';
 import { createProfileCommands } from '../../utils/profile-commands';
 import { addJsonOption } from '../../utils/output';
 import { enforceWriteAccess } from '../../utils/read-only';
-import { readStdin, readStdinRaw } from '../../utils/stdin';
+import { confirm, readStdin, readStdinRaw } from '../../utils/stdin';
 import { checkUserToken, SlackClient } from './client';
 import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
-import { CANVAS_ARGUMENT, findCanvases, readCanvas, resolveCanvasId } from './canvases';
+import { CANVAS_ARGUMENT, checkAccessLevel, findCanvases, readCanvas, resolveCanvasId, resolveTargets } from './canvases';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
@@ -536,6 +536,67 @@ replaced by what the Markdown says.`,
     `Examples:
 
   agentio slack canvases rename F07ABC1234 "Plan, v2"`,
+  );
+
+  addExamples(
+    leaf(canvases, 'share', 'Give users or channels access to a canvas')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .requiredOption('--to <targets...>', 'Users (U…, or email) and channels (#name, C…); comma-separated or repeated')
+      .option('--level <level>', 'read, write or owner (default: read)')
+      .action(run(async (canvas: string, options) => {
+        const level = checkAccessLevel(options.level);
+        const client = await getWritableClient(options.profile, 'share a canvas');
+        const id = await resolveCanvasId(client, canvas);
+        const targets = await resolveTargets(client, options.to);
+        await client.setCanvasAccess(id, level, targets);
+        const { downloadUrl: _, ...shared } = await client.canvasInfo(id);
+        printSlackCanvasChange(shared, `Shared (${level}) with ${[...targets.users, ...targets.channels].join(', ')}:`, options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases share F07ABC1234 --to '#eng' --to alice@example.com
+  agentio slack canvases share F07ABC1234 --to U012AB3CD --level write`,
+  );
+
+  addExamples(
+    leaf(canvases, 'unshare', 'Remove users\' or channels\' access to a canvas')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .requiredOption('--from <targets...>', 'Users (U…, or email) and channels (#name, C…); comma-separated or repeated')
+      .action(run(async (canvas: string, options) => {
+        const client = await getWritableClient(options.profile, 'unshare a canvas');
+        const id = await resolveCanvasId(client, canvas);
+        const targets = await resolveTargets(client, options.from);
+        await client.removeCanvasAccess(id, targets);
+        const { downloadUrl: _, ...unshared } = await client.canvasInfo(id);
+        printSlackCanvasChange(unshared, `Unshared from ${[...targets.users, ...targets.channels].join(', ')}:`, options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases unshare F07ABC1234 --from '#eng'`,
+  );
+
+  addExamples(
+    leaf(canvases, 'delete', 'Delete a canvas; this cannot be undone')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .option('-y, --yes', 'Do not ask for confirmation')
+      .action(run(async (canvas: string, options) => {
+        if (!options.yes && !process.stdin.isTTY) {
+          throw new CliError('INVALID_PARAMS', 'Deleting a canvas needs confirmation', 'Pass --yes to delete without a question');
+        }
+        const client = await getWritableClient(options.profile, 'delete a canvas');
+        const id = await resolveCanvasId(client, canvas);
+        const { downloadUrl: _, ...target } = await client.canvasInfo(id);
+        if (!options.yes && !(await confirm(`Delete canvas "${target.title || target.id}"? This cannot be undone`))) {
+          console.error('Cancelled');
+          return;
+        }
+        await client.deleteCanvas(id);
+        printSlackCanvasChange(target, 'Deleted', options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases delete F07ABC1234
+  agentio slack canvases delete F07ABC1234 --yes   # from a script`,
   );
 
   const profile = createProfileCommands<SlackCredentials>(slack, {

@@ -101,3 +101,41 @@ describe('a webhook profile', () => {
     noRequest(res);
   });
 });
+
+describe('delete and share', () => {
+  withProfiles(() => ({ main: { credentials: token } }));
+
+  test('delete without --yes and without a terminal is refused, before any request', async () => {
+    const res = await cli(['slack', 'canvases', 'delete', 'F0CANVAS01']);
+    expect(res.code).toBe(INVALID);
+    expect(res.stderr).toContain('--yes');
+    noRequest(res);
+  });
+
+  test('an unknown --level is refused before any request', async () => {
+    const res = await cli(['slack', 'canvases', 'share', 'F0CANVAS01', '--to', 'U0001', '--level', 'admin']);
+    expect(res.code).toBe(INVALID);
+    noRequest(res);
+  });
+
+  test('share and unshare need targets', async () => {
+    expect((await cli(['slack', 'canvases', 'share', 'F0CANVAS01'])).code).not.toBe(0);
+    expect((await cli(['slack', 'canvases', 'unshare', 'F0CANVAS01'])).code).not.toBe(0);
+  });
+});
+
+describe('a read-only profile, sharing and deleting', () => {
+  withProfiles(() => ({ ro: { readOnly: true, credentials: token } }));
+
+  test('share, unshare and delete --yes are refused before any request', async () => {
+    for (const args of [
+      ['share', 'F0CANVAS01', '--to', 'U0001'],
+      ['unshare', 'F0CANVAS01', '--from', 'U0001'],
+      ['delete', 'F0CANVAS01', '--yes'],
+    ]) {
+      const res = await cli(['slack', 'canvases', ...args]);
+      expect(res.code).toBe(DENIED);
+      noRequest(res);
+    }
+  });
+});

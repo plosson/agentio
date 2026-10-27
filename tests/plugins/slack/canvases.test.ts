@@ -157,3 +157,32 @@ describe('round trip', () => {
     expect(err.suggestion).toContain('canvases set');
   });
 });
+
+describe('access', () => {
+  test('users and channels go in separate calls, each with the level', async () => {
+    const canvas = fake.addCanvas({ title: 'Plan' });
+    await client.setCanvasAccess(canvas.id, 'write', { users: ['U0001'], channels: ['C0GENERAL'] });
+    expect(fake.accessCalls.map((c): (string | null)[] => [c.params.user_ids ?? null, c.params.channel_ids ?? null, c.params.access_level])).toEqual([
+      ['["U0001"]', null, 'write'],
+      [null, '["C0GENERAL"]', 'write'],
+    ]);
+    expect(canvas.access).toEqual({ U0001: 'write', C0GENERAL: 'write' });
+  });
+
+  test('removing only channels makes no user call', async () => {
+    const canvas = fake.addCanvas({ title: 'Plan', access: { C0GENERAL: 'read' } });
+    await client.removeCanvasAccess(canvas.id, { users: [], channels: ['C0GENERAL'] });
+    expect(fake.accessCalls).toHaveLength(1);
+    expect(canvas.access).toEqual({});
+  });
+
+  test('an unknown email stops sharing before any access call', async () => {
+    fake.addCanvas({ title: 'Plan' });
+    expect((await caught(resolveTargets(client, ['U0001', 'nobody@example.com']))).code).toBe('NOT_FOUND');
+    expect(fake.accessCalls).toEqual([]);
+  });
+
+  test('deleting a canvas that is gone is NOT_FOUND', async () => {
+    expect((await caught(client.deleteCanvas('F0NOPE0001'))).code).toBe('NOT_FOUND');
+  });
+});
