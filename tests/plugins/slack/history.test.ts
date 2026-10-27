@@ -168,7 +168,7 @@ describe('searchMessages', () => {
       { ts: tsAt('2026-10-22T09:00:00Z'), user: 'U0002', text: 'late reply', thread_ts: parent },
       { ts: tsAt('2026-10-23T09:00:00Z'), user: 'U0001', text: 'top level' },
     );
-    const got = await client.searchMessages(window);
+    const { matches: got } = await client.searchMessages(window);
     expect(fake.log[0].params).toMatchObject({ query: 'after:2026-10-18 before:2026-10-29', sort: 'timestamp', sort_dir: 'asc' });
     expect(got.map((m) => [m.channelId, m.message.text, m.message.threadTs, m.message.source])).toEqual([
       ['C0GENERAL', 'late reply', parent, 'search'],
@@ -179,7 +179,7 @@ describe('searchMessages', () => {
   test('every page is read', async () => {
     fake.searchPageSize = 1;
     for (let i = 1; i <= 3; i++) general().messages.push({ ts: tsAt(`2026-10-2${i}T09:00:00Z`), user: 'U0001', text: `m${i}` });
-    expect(await client.searchMessages(window)).toHaveLength(3);
+    expect((await client.searchMessages(window)).matches).toHaveLength(3);
     expect(fake.log.map((c) => c.params.page)).toEqual(['1', '2', '3']);
   });
 
@@ -190,7 +190,7 @@ describe('searchMessages', () => {
       { ts: '1792454600.000100', text: 'no channel' },
       { ts: '1792454700.000100', text: 'empty channel', channel: {} },
     ];
-    const got = await client.searchMessages(window);
+    const { matches: got } = await client.searchMessages(window);
     expect(got).toHaveLength(1);
     expect(got[0].message.threadTs).toBeUndefined();
   });
@@ -200,5 +200,20 @@ describe('searchMessages', () => {
     const err = await caught(client.searchMessages(window));
     expect(err.code).toBe('PERMISSION_DENIED');
     expect(err.message).toContain('search:read');
+  });
+});
+
+describe('searchMessages truncation', () => {
+  test('past 100 pages, the result says it was cut', async () => {
+    fake.searchPageSize = 1;
+    fake.searchMatches = Array.from({ length: 101 }, (_, i) => ({ ts: `1792540800.${String(i + 1).padStart(6, '0')}`, text: 'x', channel: { id: 'C0GENERAL' } }));
+    const got = await client.searchMessages(range('2026-10-20T00:00:00Z', '2026-10-27T00:00:00Z'));
+    expect(got.matches).toHaveLength(100);
+    expect(got.truncated).toBe(true);
+  });
+
+  test('a result that fits is not marked as cut', async () => {
+    const got = await client.searchMessages(range('2026-10-20T00:00:00Z', '2026-10-27T00:00:00Z'));
+    expect(got.truncated).toBe(false);
   });
 });

@@ -148,12 +148,14 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
     } catch (error) {
       if (!skippable(error)) throw error;
       warn(`Could not read ${labelOf(conversation)}: ${(error as Error).message}`);
+      // Left out entirely: a few search results would make it look read.
+      conversations.delete(conversation.id);
     }
     options.onProgress?.(++done, conversations.size);
   }
 
   try {
-    await readSearch(client, conversations, range, seen);
+    await readSearch(client, conversations, range, seen, warn);
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
     warn(`Search failed (${error.message}); replies in threads started before --since may be missing`);
@@ -190,9 +192,12 @@ async function readHistory(
 
 /** Pass B: what search finds in your conversations, in the exact range, merged into what history found. */
 async function readSearch(
-  client: SlackClient, conversations: Map<string, SlackConversationMessages>, range: SlackMessageRange, seen: Set<string>,
+  client: SlackClient, conversations: Map<string, SlackConversationMessages>, range: SlackMessageRange,
+  seen: Set<string>, warn: (message: string) => void,
 ): Promise<void> {
-  const matches = (await client.searchMessages(range))
+  const { matches: found, truncated } = await client.searchMessages(range);
+  if (truncated) warn('Search found more messages than Slack returns; replies in threads started before --since may be missing');
+  const matches = found
     .filter((m) => conversations.has(m.channelId) && inRange(m.message.ts, range))
     .sort((a, b) => compareTs(a.message.ts, b.message.ts));
   for (const match of matches) placeMessages(conversations.get(match.channelId)!, [match.message], seen);
@@ -209,7 +214,7 @@ async function nameOlderThreads(client: SlackClient, conversations: Map<string, 
         parent = { ts: message.parent.ts };
         try {
           const found = await client.threadParent(conversation.id, parent.ts);
-          if (found) Object.assign(parent, { user: found.user, userName: found.botName, text: found.text });
+          if (found) Object.assign(parent, { user: found.user, userName: found.botName, text: found.text, files: found.files });
         } catch (error) {
           if (!skippable(error)) throw error;
         }

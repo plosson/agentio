@@ -123,6 +123,7 @@ export interface SlackThreadParent {
   user?: string;
   userName?: string;
   text?: string;
+  files?: string[];
 }
 
 export interface SlackMessage {
@@ -157,4 +158,10 @@ export interface SlackMessagesResult {
 export interface SlackSearchMatch {
   channelId: string;
   message: SlackMessage;
+}
+
+export interface SlackSearchResult {
+  matches: SlackSearchMatch[];
+  /** Slack returns at most 100 pages; more matches than that were left out. */
+  truncated: boolean;
 }

@@ -222,3 +222,42 @@ describe('collectMessages, search pass', () => {
     expect(JSON.stringify(result)).not.toContain('in random');
   });
 });
+
+describe('review fixes', () => {
+  const oldParent = tsAt('2026-10-15T09:00:00Z');
+
+  test('a conversation whose history could not be read gets no search results either', async () => {
+    channel('C0GENERAL').messages.push({ ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0001', text: 'only via search' });
+    fake.historyErrors.C0GENERAL = 'channel_not_found';
+    const result = await collect();
+    expect(result.conversations.map((c) => c.id)).not.toContain('C0GENERAL');
+    expect(warnings.some((w) => w.includes('#general'))).toBe(true);
+  });
+
+  test('an older thread started by a file only is labelled with the file, not as gone', async () => {
+    channel('C0GENERAL').messages.push(
+      { ts: oldParent, user: 'U0001', text: '', files: [{ name: 'design.png' }] },
+      { ts: tsAt('2026-10-22T14:03:00Z'), user: 'U0002', text: 'nice', thread_ts: oldParent },
+    );
+    const result = await collect();
+    const lines: string[] = [];
+    const spy = spyOn(console, 'log').mockImplementation((line: string) => { lines.push(line); });
+    try {
+      printSlackMessages(result);
+    } finally {
+      spy.mockRestore();
+    }
+    const out = lines.join('\n');
+    expect(out).toContain('thread by alice: [file: design.png]');
+    expect(out).not.toContain('no longer available');
+  });
+
+  test('more search results than Slack returns is a warning, not a silent cut', async () => {
+    fake.searchPageSize = 1;
+    fake.searchMatches = Array.from({ length: 101 }, (_, i) => ({
+      ts: tsAt('2026-10-22T10:00:00Z', i + 1), user: 'U0001', text: `m${i}`, channel: { id: 'C0OTHER' },
+    }));
+    await collect();
+    expect(warnings.some((w) => w.includes('may be missing'))).toBe(true);
+  });
+});

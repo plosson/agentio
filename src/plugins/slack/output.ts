@@ -7,6 +7,7 @@ import type {
   SlackMessage,
   SlackMessagesResult,
   SlackSendResult,
+  SlackThreadParent,
   SlackUser,
 } from './types';
 
@@ -129,9 +130,12 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function body(m: SlackMessage, indent: number): string {
   return [m.text, ...m.files.map((f) => `[file: ${f}]`)].filter(Boolean).join(' ').replace(/\n/g, `\n${' '.repeat(indent)}`);
 }
-function preview(text: string | undefined): string {
-  if (!text) return '(no longer available)';
-  const words = text.split(/\s+/).filter(Boolean);
+/** An older thread's first words; undefined text means the parent could not be read. */
+function preview(parent: SlackThreadParent): string {
+  if (parent.text === undefined) return '(no longer available)';
+  const words = parent.text.split(/\s+/).filter(Boolean);
+  const files = (parent.files ?? []).map((f) => `[file: ${f}]`);
+  if (words.length === 0) return files.join(' ') || '(no text)';
   return `"${words.slice(0, 6).join(' ')}${words.length > 6 ? ' …' : ''}"`;
 }
 function headingOf(c: SlackConversationMessages): string {
@@ -155,7 +159,7 @@ export function printSlackMessages(result: SlackMessagesResult, json?: boolean):
         if (m.parent) {
           if (m.parent.ts !== thread) {
             thread = m.parent.ts;
-            console.log(`${when(m.parent.ts)}  thread by ${m.parent.userName ?? 'unknown'}: ${preview(m.parent.text)}`);
+            console.log(`${when(m.parent.ts)}  thread by ${m.parent.userName ?? 'unknown'}: ${preview(m.parent)}`);
           }
         } else {
           console.log(`${when(m.ts)}  ${m.userName}: ${body(m, 13)}`);

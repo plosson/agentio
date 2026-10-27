@@ -14,6 +14,7 @@ import type {
   SlackMessage,
   SlackMessageRange,
   SlackSearchMatch,
+  SlackSearchResult,
   SlackSendOptions,
   SlackSendResult,
   SlackTokenCredentials,
@@ -433,14 +434,17 @@ export class SlackClient implements ServiceClient {
   }
 
   /** What search finds in the range, oldest first, in every conversation you can see, including some you are not in. */
-  async searchMessages(range: SlackMessageRange): Promise<SlackSearchMatch[]> {
+  async searchMessages(range: SlackMessageRange): Promise<SlackSearchResult> {
     const matches: SlackSearchMatch[] = [];
     const query = searchQuery(range);
+    let truncated = false;
     for (let page = 1, pages = 1; page <= pages; page++) {
       const data = await this.call<SlackApiResponse & { messages?: { matches?: RawSearchMatch[]; paging?: { pages?: number } } }>('search.messages', {
         query, sort: 'timestamp', sort_dir: 'asc', count: String(SEARCH_PAGE_SIZE), page: String(page),
       });
-      pages = Math.min(data.messages?.paging?.pages ?? 1, SEARCH_MAX_PAGES);
+      const total = data.messages?.paging?.pages ?? 1;
+      truncated = total > SEARCH_MAX_PAGES;
+      pages = Math.min(total, SEARCH_MAX_PAGES);
       for (const raw of data.messages?.matches ?? []) {
         const channelId = raw.channel?.id;
         if (!channelId || typeof raw.ts !== 'string') continue;
@@ -448,7 +452,7 @@ export class SlackClient implements ServiceClient {
         matches.push({ channelId, message: { ...message, threadTs: threadTsFromPermalink(raw.permalink) } });
       }
     }
-    return matches;
+    return { matches, truncated };
   }
 
   /** A new channel, with its topic and purpose; you are its first member. */
