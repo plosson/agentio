@@ -1,12 +1,13 @@
 import { CliError } from '../../utils/errors';
 import { parseDateOption } from '../../utils/options';
-import { compareTs } from './client';
+import { compareTs, SlackApiError, type SlackClient } from './client';
 import type {
   SlackConversation,
   SlackConversationMessages,
   SlackConversationType,
   SlackMessage,
   SlackMessageRange,
+  SlackMessagesResult,
   SlackUser,
 } from './types';
 
@@ -109,4 +110,71 @@ export function resolveNames(conversations: SlackConversationMessages[], users: 
     if (c.type === 'dm' && c.user) c.name = nameOf(c.user);
     c.messages.forEach(fix);
   }
+}
+
+export interface SlackMessagesOptions {
+  range: SlackMessageRange;
+  types?: SlackConversationType[];
+  /** --channel values: ids or names. */
+  channels?: string[];
+  /** For stderr. */
+  onWarning?: (message: string) => void;
+  onProgress?: (done: number, total: number) => void;
+}
+
+/** Slack errors that lose one conversation or thread, not the whole run. */
+const SKIPPABLE = new Set(['channel_not_found', 'not_in_channel', 'thread_not_found']);
+
+const skippable = (error: unknown) => error instanceof SlackApiError && SKIPPABLE.has(error.slackError);
+const labelOf = (c: SlackConversation) => (c.type === 'dm' ? `the direct message with ${c.name}` : `#${c.name}`);
+
+/**
+ * Every message in the range, in the conversations you are in: each
+ * conversation's history and the threads under it, then search for replies
+ * in threads that started before the range.
+ */
+export async function collectMessages(client: SlackClient, options: SlackMessagesOptions): Promise<SlackMessagesResult> {
+  const { range } = options;
+  const warn = options.onWarning ?? (() => {});
+  const listed = pickConversations(await client.listMyConversations(options.types ?? SLACK_CONVERSATION_TYPES), options.channels);
+  const conversations = new Map(listed.map((c) => [c.id, { ...c, messages: [] as SlackMessage[] }]));
+  const seen = new Set<string>();
+
+  let done = 0;
+  for (const conversation of conversations.values()) {
+    try {
+      await readHistory(client, conversation, range, seen, warn);
+    } catch (error) {
+      if (!skippable(error)) throw error;
+      warn(`Could not read ${labelOf(conversation)}: ${(error as Error).message}`);
+    }
+    options.onProgress?.(++done, conversations.size);
+  }
+
+  const found = [...conversations.values()].filter((c) => c.messages.length > 0);
+  if (found.length > 0) resolveNames(found, await client.listUsers({ includeDeleted: true, includeBots: true }));
+  for (const c of found) sortConversation(c);
+  found.sort((a, b) => countMessages(b) - countMessages(a));
+  return { since: range.since.toISOString(), until: range.until.toISOString(), conversations: found };
+}
+
+/** Pass A for one conversation: its history, then the in-range replies of each thread in it. */
+async function readHistory(
+  client: SlackClient, conversation: SlackConversationMessages, range: SlackMessageRange,
+  seen: Set<string>, warn: (message: string) => void,
+): Promise<void> {
+  const history = await client.history(conversation.id, range);
+  const topLevel = history.filter((m) => !isReply(m));
+  placeMessages(conversation, topLevel, seen);
+  for (const parent of topLevel.filter((m) => m.replyCount > 0)) {
+    try {
+      const replies = await client.replies(conversation.id, parent.ts);
+      placeMessages(conversation, replies.filter((r) => inRange(r.ts, range)), seen);
+    } catch (error) {
+      if (!skippable(error)) throw error;
+      warn(`Could not read a thread in ${labelOf(conversation)}: ${(error as Error).message}`);
+    }
+  }
+  // Replies also sent to the channel: under their parent if it is here, else on their own.
+  placeMessages(conversation, history.filter(isReply), seen);
 }
