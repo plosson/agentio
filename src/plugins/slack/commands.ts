@@ -57,6 +57,7 @@ export const SLACK_USER_SCOPES = [
   'channels:write.invites', 'groups:write.invites',
   'channels:write',
   'channels:history', 'groups:history', 'im:history', 'mpim:history',
+  'canvases:read', 'canvases:write', 'files:read',
   'search:read',
 ];
 

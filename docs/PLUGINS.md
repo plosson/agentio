@@ -361,10 +361,10 @@ Notes:
 - **What a webhook can't do:** it posts only to its own channel, and can't change the sender's name or icon, or delete messages.
 - **agentio's own setup text is outdated.** It says "create a new app"; Slack's current flow is "Create an app" then "Blank app".
 
-### Create your Slack user token (for the users, channels and messages commands)
+### Create your Slack user token (for the users, channels, messages and canvases commands)
 
 1. Open https://api.slack.com/apps?new_app=1, click **Create an app**, then **Blank app**, choose the workspace, then **Create**.
-2. In **OAuth & Permissions**, under **User Token Scopes** (not Bot Token Scopes), add: `users:read`, `users:read.email`, `channels:read`, `groups:read`, `im:read`, `mpim:read`, `channels:manage`, `groups:write`, `channels:write.invites`, `groups:write.invites`, `channels:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `search:read`.
+2. In **OAuth & Permissions**, under **User Token Scopes** (not Bot Token Scopes), add: `users:read`, `users:read.email`, `channels:read`, `groups:read`, `im:read`, `mpim:read`, `channels:manage`, `groups:write`, `channels:write.invites`, `groups:write.invites`, `channels:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `search:read`, `canvases:read`, `canvases:write`, `files:read`.
 3. Click **Install to Workspace**, signed in as a workspace admin, and copy the **User OAuth Token**.
 4. Run `agentio slack profile add --token` and paste it.
 
@@ -374,6 +374,7 @@ Notes:
 - **Business+ limits:** the API can change a channel's name, topic and purpose, and archive it. Deleting a channel and other channel settings need Enterprise Grid (`admin.*`), so they stay in the Slack app.
 - **Token rotation** must stay off: the profile has no refresh token.
 - **Reading messages.** `slack messages` needs the four `*:history` scopes. Without `search:read` it still works, but it leaves out replies in threads that started before `--since`, and says so.
+- **Canvases.** `slack canvases get` downloads a canvas from `files.slack.com` and converts it to Markdown; `set` writes Markdown back as the whole content. Embedded files, layouts and underlining have no Markdown form: `get` lists them on stderr, and a `set` replaces them with what the Markdown says.
 
 Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks), [app quickstart](https://docs.slack.dev/app-management/quickstart-app-settings), [app approval](https://slack.com/help/articles/222386767).
 
