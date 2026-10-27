@@ -37,7 +37,7 @@ const SLACK_KIND_INPUT: InputSpec = {
   label: 'Profile type', kind: 'choice', default: 'webhook',
   choices: [
     { value: 'webhook', label: 'Incoming webhook (send messages to one channel)' },
-    { value: 'token', label: 'User token (manage users and channels as you)' },
+    { value: 'token', label: 'User token (manage and read as you)' },
   ],
 };
 const SLACK_TOKEN_INPUT: InputSpec = {
@@ -45,13 +45,15 @@ const SLACK_TOKEN_INPUT: InputSpec = {
   help: 'From your Slack app: OAuth & Permissions, User OAuth Token (starts with xoxp-)',
 };
 
-/** The User Token Scopes the admin commands need. */
+/** The User Token Scopes the token commands need. */
 export const SLACK_USER_SCOPES = [
   'users:read', 'users:read.email',
-  'channels:read', 'groups:read',
+  'channels:read', 'groups:read', 'im:read', 'mpim:read',
   'channels:manage', 'groups:write',
   'channels:write.invites', 'groups:write.invites',
   'channels:write',
+  'channels:history', 'groups:history', 'im:history', 'mpim:history',
+  'search:read',
 ];
 
 export interface SlackProfileAddOptions extends ProfileAddOptions {
