@@ -1,4 +1,5 @@
 import { writeJson } from '../../utils/output';
+import { countMessages } from './messages';
 import type {
   SlackChannelChange,
   SlackChannel,
@@ -152,8 +153,7 @@ export function printSlackMessages(result: SlackMessagesResult, json?: boolean):
     console.log(`Slack messages ${result.since.slice(0, 10)} → ${result.until.slice(0, 10)}: `
       + `${plural(result.conversations.length, 'conversation')}, ${plural(topLevel, 'message')}, ${plural(replies, 'reply', 'replies')}`);
     for (const c of result.conversations) {
-      const count = c.messages.reduce((n, m) => n + 1 + m.replies.length, 0);
-      console.log(`\n${headingOf(c)}  (${plural(count, 'message')})`);
+      console.log(`\n${headingOf(c)}  (${plural(countMessages(c), 'message')})`);
       let thread: string | undefined;
       for (const m of c.messages) {
         if (m.parent) {

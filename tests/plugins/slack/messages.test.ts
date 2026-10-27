@@ -36,6 +36,16 @@ describe('checkRange', () => {
     expect(codeOf(() => checkRange('2026-10-20', 'never', NOW))).toBe('INVALID_PARAMS');
   });
 
+  test('a bare --until date includes that whole day', () => {
+    expect(checkRange('2026-10-20', '2026-10-25', NOW).until.toISOString()).toBe('2026-10-25T23:59:59.999Z');
+    const oneDay = checkRange('2026-10-20', '2026-10-20', NOW);
+    expect([oneDay.since.toISOString(), oneDay.until.toISOString()]).toEqual(['2026-10-20T00:00:00.000Z', '2026-10-20T23:59:59.999Z']);
+  });
+
+  test('an --until with a time is taken as given', () => {
+    expect(checkRange('2026-10-20', '2026-10-25T08:00:00Z', NOW).until.toISOString()).toBe('2026-10-25T08:00:00.000Z');
+  });
+
   test('since equal to until is allowed', () => {
     expect(codeOf(() => checkRange('2026-10-20T10:00:00Z', '2026-10-20T10:00:00Z', NOW))).toBe('no error');
   });

@@ -199,7 +199,7 @@ export function registerSlackCommands(program: Command): void {
   addExamples(
     leaf(slack, 'messages', 'Read every message since a date in the conversations you are in, threads included (needs a user token profile)')
       .option('--since <date>', 'Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp')
-      .option('--until <date>', 'End, included, same formats (default: now)')
+      .option('--until <date>', 'End, included, same formats; a date alone means the end of that day (default: now)')
       .option('--channel <channel>', 'Only this conversation, by id or name; repeat for more', repeatable)
       .option('--types <list>', `Comma-separated: ${SLACK_CONVERSATION_TYPES.join(', ')} (default: all)`)
       .action(run(async (options) => {

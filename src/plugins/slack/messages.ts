@@ -14,11 +14,16 @@ import type {
 
 export const SLACK_CONVERSATION_TYPES: SlackConversationType[] = ['channel', 'private', 'dm', 'group'];
 
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+
 /** --since and --until, checked against each other and the clock. */
 export function checkRange(since: string | undefined, until: string | undefined, now = new Date()): SlackMessageRange {
   const from = parseDateOption(since, '--since');
   if (!from) throw new CliError('INVALID_PARAMS', '--since is required', 'For example: --since 2026-10-20');
-  const to = parseDateOption(until, '--until') ?? now;
+  const end = parseDateOption(until, '--until');
+  // A date alone means the end of that day, so the day is included.
+  const to = end && BARE_DATE.test(until!.trim()) ? new Date(end.getTime() + DAY_MS - 1) : end ?? now;
   if (from > now) throw new CliError('INVALID_PARAMS', `--since ${since} is in the future`);
   if (from > to) throw new CliError('INVALID_PARAMS', `--since ${since} is after --until ${until}`);
   return { since: from, until: to };
@@ -126,6 +131,9 @@ export interface SlackMessagesOptions {
 /** Slack errors that lose one conversation or thread, not the whole run. */
 const SKIPPABLE = new Set(['channel_not_found', 'not_in_channel', 'thread_not_found']);
 
+/** Search failures that leave pass A's results usable: a missing search:read, or rate limits. */
+const searchSkippable = (error: unknown): error is CliError => error instanceof CliError
+  && (error.code === 'RATE_LIMITED' || (error instanceof SlackApiError && error.slackError === 'missing_scope'));
 const skippable = (error: unknown) => error instanceof SlackApiError && SKIPPABLE.has(error.slackError);
 const labelOf = (c: SlackConversation) => (c.type === 'dm' ? `the direct message with ${c.name}` : `#${c.name}`);
 
@@ -142,7 +150,8 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
   const seen = new Set<string>();
 
   let done = 0;
-  for (const conversation of conversations.values()) {
+  const total = conversations.size;
+  for (const conversation of [...conversations.values()]) {
     try {
       await readHistory(client, conversation, range, seen, warn);
     } catch (error) {
@@ -151,13 +160,13 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
       // Left out entirely: a few search results would make it look read.
       conversations.delete(conversation.id);
     }
-    options.onProgress?.(++done, conversations.size);
+    options.onProgress?.(++done, total);
   }
 
   try {
     await readSearch(client, conversations, range, seen, warn);
   } catch (error) {
-    if (!(error instanceof CliError)) throw error;
+    if (!searchSkippable(error)) throw error;
     warn(`Search failed (${error.message}); replies in threads started before --since may be missing`);
   }
   await nameOlderThreads(client, conversations);
@@ -196,7 +205,7 @@ async function readSearch(
   seen: Set<string>, warn: (message: string) => void,
 ): Promise<void> {
   const { matches: found, truncated } = await client.searchMessages(range);
-  if (truncated) warn('Search found more messages than Slack returns; replies in threads started before --since may be missing');
+  if (truncated) warn('Search stopped before the end (Slack\'s 10,000-result cap or rate limit); replies in threads started before --since may be missing');
   const matches = found
     .filter((m) => conversations.has(m.channelId) && inRange(m.message.ts, range))
     .sort((a, b) => compareTs(a.message.ts, b.message.ts));

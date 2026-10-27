@@ -261,3 +261,37 @@ describe('review fixes', () => {
     expect(warnings.some((w) => w.includes('may be missing'))).toBe(true);
   });
 });
+
+describe('code review fixes', () => {
+  test('progress keeps its total when a conversation is dropped, and ends at total/total', async () => {
+    fake.channels.push(fakeChannel('C0THIRD', 'third'));
+    fake.historyErrors.C0THIRD = 'channel_not_found';
+    fake.scopes.delete('search:read');
+    const seen: string[] = [];
+    await collect({ onProgress: (done: number, total: number) => seen.push(`${done}/${total}`) });
+    expect(seen).toEqual(['1/3', '2/3', '3/3']);
+  });
+
+  test('a revoked token during search stops the run instead of becoming a warning', async () => {
+    channel('C0GENERAL').messages.push({ ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0001', text: 'x' });
+    // Calls: users.conversations, history x2, then search.
+    fake.queueAt(4, { status: 200, body: { ok: false, error: 'token_revoked' } });
+    const err = await caught(collect());
+    expect(err.code).toBe('AUTH_FAILED');
+  });
+
+  test('search rate-limited after some pages keeps those pages and warns', async () => {
+    const oldParent = tsAt('2026-10-15T09:00:00Z');
+    channel('C0GENERAL').messages.push(
+      { ts: oldParent, user: 'U0001', text: 'p' },
+      { ts: tsAt('2026-10-22T10:00:00Z', 1), user: 'U0002', text: 'first page', thread_ts: oldParent },
+      { ts: tsAt('2026-10-22T10:00:00Z', 2), user: 'U0002', text: 'second page', thread_ts: oldParent },
+    );
+    fake.searchPageSize = 1;
+    // Calls: users.conversations, history x2, search page 1, then page 2 and its 3 retries.
+    for (let call = 5; call <= 8; call++) fake.queueAt(call, { status: 429, headers: { 'Retry-After': '1' } });
+    const [conv] = (await collect()).conversations;
+    expect(conv.messages.map((m) => m.text)).toEqual(['first page']);
+    expect(warnings.some((w) => w.includes('may be missing'))).toBe(true);
+  });
+});

@@ -162,6 +162,6 @@ export interface SlackSearchMatch {
 
 export interface SlackSearchResult {
   matches: SlackSearchMatch[];
-  /** Slack returns at most 100 pages; more matches than that were left out. */
+  /** Not every match was read: past Slack's 100 pages, or rate-limited partway. */
   truncated: boolean;
 }

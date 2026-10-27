@@ -439,9 +439,16 @@ export class SlackClient implements ServiceClient {
     const query = searchQuery(range);
     let truncated = false;
     for (let page = 1, pages = 1; page <= pages; page++) {
-      const data = await this.call<SlackApiResponse & { messages?: { matches?: RawSearchMatch[]; paging?: { pages?: number } } }>('search.messages', {
-        query, sort: 'timestamp', sort_dir: 'asc', count: String(SEARCH_PAGE_SIZE), page: String(page),
-      });
+      let data: SlackApiResponse & { messages?: { matches?: RawSearchMatch[]; paging?: { pages?: number } } };
+      try {
+        data = await this.call('search.messages', {
+          query, sort: 'timestamp', sort_dir: 'asc', count: String(SEARCH_PAGE_SIZE), page: String(page),
+        });
+      } catch (error) {
+        // Rate-limited past the retries after some pages: keep what was read.
+        if (page > 1 && error instanceof CliError && error.code === 'RATE_LIMITED') return { matches, truncated: true };
+        throw error;
+      }
       const total = data.messages?.paging?.pages ?? 1;
       truncated = total > SEARCH_MAX_PAGES;
       pages = Math.min(total, SEARCH_MAX_PAGES);
