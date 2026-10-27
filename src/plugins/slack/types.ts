@@ -199,6 +199,40 @@ export interface SlackSearchResult {
   truncated: boolean;
 }
 
+export type SlackCanvasAccessLevel = 'read' | 'write' | 'owner';
+
+export interface SlackCanvas {
+  id: string;
+  title: string;
+  /** The creator's user id. */
+  owner?: string;
+  /** Set by `list`. */
+  ownerName?: string;
+  /** ISO 8601. */
+  created?: string;
+  updated?: string;
+  link?: string;
+  /** Set for a channel's canvas. */
+  channelId?: string;
+}
+
+export interface SlackCanvasContent extends SlackCanvas {
+  markdown: string;
+  unconverted: string[];
+}
+
+export interface SlackCanvasList {
+  canvases: SlackCanvas[];
+  /** files.list stopped at its page limit, so older canvases may be missing. */
+  truncated: boolean;
+}
+
+/** Who a canvas is shared with or unshared from, already resolved to ids. */
+export interface SlackCanvasTargets {
+  users: string[];
+  channels: string[];
+}
+
 /** One file in an `agentio slack attachments` run. */
 export interface SlackManifestEntry {
   conversationId: string;

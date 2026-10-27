@@ -1,6 +1,6 @@
 ---
 name: agentio-slack
-description: Use when sending or reading Slack messages, downloading files shared in Slack, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.
+description: Use when sending or reading Slack messages, downloading files shared in Slack, reading or writing Slack canvases as Markdown, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.
 ---
 
 # Slack via agentio
@@ -338,5 +338,146 @@ Examples:
 
 Every user is looked up first: one unknown email removes nobody. People not
 in the channel are skipped.
+```
+
+## agentio slack canvases list
+
+List the canvases you can see, newest edit first
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--channel <channel>`: Only this channel's canvas
+- `--mine`: Only canvases you created
+
+```
+Examples:
+
+  agentio slack canvases list
+  agentio slack canvases list --mine --json
+  agentio slack canvases list --channel '#eng'
+```
+
+## agentio slack canvases get <canvas>
+
+Print a canvas as Markdown; what cannot be written back is listed on stderr
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+
+```
+Examples:
+
+  agentio slack canvases get F07ABC1234 > plan.md
+  agentio slack canvases get https://example.slack.com/docs/T0123/F07ABC1234
+  agentio slack canvases get '#eng' --json
+```
+
+## agentio slack canvases create [title] [file]
+
+Create a canvas from Markdown (file or stdin)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--channel <channel>`: Create this channel's canvas instead; then give no title
+
+```
+Examples:
+
+  agentio slack canvases create "Release notes" notes.md
+  echo "# Runbook" | agentio slack canvases create "Runbook"
+  agentio slack canvases create --channel '#eng' plan.md
+```
+
+## agentio slack canvases set <canvas> [file]
+
+Replace a canvas's whole content with Markdown (file or stdin)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--force`: Allow empty content, which clears the canvas
+
+```
+Examples:
+
+  agentio slack canvases get F07ABC1234 > plan.md
+  # edit plan.md
+  agentio slack canvases set F07ABC1234 plan.md
+
+Parts listed by get as "can't be written back" (embedded files, layouts) are
+replaced by what the Markdown says.
+```
+
+## agentio slack canvases rename <canvas> <title>
+
+Change a canvas's title
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+
+```
+Examples:
+
+  agentio slack canvases rename F07ABC1234 "Plan, v2"
+```
+
+## agentio slack canvases share <canvas>
+
+Give users or channels access to a canvas
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--to <targets...>`: Users (U…, or email) and channels (#name, C…); comma-separated or repeated
+- `--level <level>`: read, write or owner (default: read)
+
+```
+Examples:
+
+  agentio slack canvases share F07ABC1234 --to '#eng' --to alice@example.com
+  agentio slack canvases share F07ABC1234 --to U012AB3CD --level write
+```
+
+## agentio slack canvases unshare <canvas>
+
+Remove users' or channels' access to a canvas
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--from <targets...>`: Users (U…, or email) and channels (#name, C…); comma-separated or repeated
+
+```
+Examples:
+
+  agentio slack canvases unshare F07ABC1234 --from '#eng'
+```
+
+## agentio slack canvases delete <canvas>
+
+Delete a canvas; this cannot be undone
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `-y, --yes`: Do not ask for confirmation
+
+```
+Examples:
+
+  agentio slack canvases delete F07ABC1234
+  agentio slack canvases delete F07ABC1234 --yes   # from a script
 ```
 

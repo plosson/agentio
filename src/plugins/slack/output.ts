@@ -1,6 +1,9 @@
 import { writeJson } from '../../utils/output';
 import { countMessages } from './messages';
 import type {
+  SlackCanvas,
+  SlackCanvasContent,
+  SlackCanvasList,
   SlackAttachmentsResult,
   SlackChannelChange,
   SlackChannel,
@@ -170,6 +173,44 @@ export function printSlackMessages(result: SlackMessagesResult, json?: boolean):
         for (const r of replyLines) console.log(`  ↳ ${when(r.ts)}  ${r.userName}: ${body(r, 17)}`);
       }
     }
+  });
+}
+
+function canvasLines(c: SlackCanvas): void {
+  console.log(`${c.id}  ${c.title || '(untitled)'}`);
+  const facts = [
+    c.ownerName ?? c.owner ? `owner: ${c.ownerName ?? c.owner}` : '',
+    c.updated ? `edited: ${c.updated.slice(0, 16).replace('T', ' ')} UTC` : '',
+    c.channelId ? `channel: ${c.channelId}` : '',
+  ].filter(Boolean);
+  if (facts.length > 0) console.log(`  ${facts.join(', ')}`);
+  if (c.link) console.log(`  ${c.link}`);
+}
+
+export function printSlackCanvasList({ canvases, truncated }: SlackCanvasList, json?: boolean): void {
+  if (truncated) console.error('Slack stopped listing at its page limit, so older canvases may be missing; --mine narrows the search');
+  emit(json, { canvases, truncated }, () => {
+    if (canvases.length === 0) {
+      console.log('No canvases found');
+      return;
+    }
+    console.log(`Canvases (${canvases.length})\n`);
+    for (const c of canvases) canvasLines(c);
+  });
+}
+
+/** The Markdown on stdout; what could not be converted on stderr. */
+export function printSlackCanvasContent(content: SlackCanvasContent, json?: boolean): void {
+  emit(json, content, () => console.log(content.markdown));
+  if (!json && content.unconverted.length > 0) {
+    console.error(`${plural(content.unconverted.length, 'part')} can't be written back as Markdown: ${content.unconverted.join(', ')}`);
+  }
+}
+
+export function printSlackCanvasChange(canvas: SlackCanvas, verb: string, json?: boolean): void {
+  emit(json, { canvas }, () => {
+    console.log(`${verb} ${canvas.id}${canvas.title ? ` "${canvas.title}"` : ''}`);
+    if (canvas.link) console.log(`  ${canvas.link}`);
   });
 }
 
