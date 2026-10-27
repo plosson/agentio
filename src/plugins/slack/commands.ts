@@ -10,10 +10,13 @@ import { enforceWriteAccess } from '../../utils/read-only';
 import { readStdin } from '../../utils/stdin';
 import { checkUserToken, SlackClient } from './client';
 import { checkRange, checkTypes, collectMessages, SLACK_CONVERSATION_TYPES } from './messages';
+import { CANVAS_ARGUMENT, findCanvases, readCanvas } from './canvases';
 import { checkWebhookUrl } from '../webhook-check';
 import { answerOrAsk } from '../setup-inputs';
 import {
   printSlackArchive,
+  printSlackCanvasContent,
+  printSlackCanvasList,
   printSlackLeave,
   printSlackChannel,
   printSlackChannelList,
@@ -421,6 +424,37 @@ already in the channel are skipped. You must be a member of the channel.`,
 
 Every user is looked up first: one unknown email removes nobody. People not
 in the channel are skipped.`,
+  );
+
+  const canvases = slack.command('canvases').description('Canvases: read and write them as Markdown, share and delete them (needs a user token profile)');
+
+  addExamples(
+    leaf(canvases, 'list', 'List the canvases you can see, newest edit first')
+      .option('--channel <channel>', 'Only this channel\'s canvas')
+      .option('--mine', 'Only canvases you created')
+      .action(run(async (options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackCanvasList(await findCanvases(client, { channel: options.channel, mine: !!options.mine }), options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases list
+  agentio slack canvases list --mine --json
+  agentio slack canvases list --channel '#eng'`,
+  );
+
+  addExamples(
+    leaf(canvases, 'get', 'Print a canvas as Markdown; what cannot be written back is listed on stderr')
+      .argument('<canvas>', CANVAS_ARGUMENT)
+      .action(run(async (canvas: string, options) => {
+        const { client } = await getSlackClient(options.profile);
+        printSlackCanvasContent(await readCanvas(client, canvas), options.json);
+      })),
+    `Examples:
+
+  agentio slack canvases get F07ABC1234 > plan.md
+  agentio slack canvases get https://example.slack.com/docs/T0123/F07ABC1234
+  agentio slack canvases get '#eng' --json`,
   );
 
   const profile = createProfileCommands<SlackCredentials>(slack, {

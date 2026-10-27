@@ -1,6 +1,8 @@
 import { writeJson } from '../../utils/output';
 import { countMessages } from './messages';
 import type {
+  SlackCanvas,
+  SlackCanvasContent,
   SlackChannelChange,
   SlackChannel,
   SlackConversationMessages,
@@ -168,5 +170,43 @@ export function printSlackMessages(result: SlackMessagesResult, json?: boolean):
         for (const r of replyLines) console.log(`  ↳ ${when(r.ts)}  ${r.userName}: ${body(r, 17)}`);
       }
     }
+  });
+}
+
+function canvasLines(c: SlackCanvas): void {
+  console.log(`${c.id}  ${c.title || '(untitled)'}`);
+  const facts = [
+    c.ownerName ?? c.owner ? `owner: ${c.ownerName ?? c.owner}` : '',
+    c.updated ? `edited: ${c.updated.slice(0, 16).replace('T', ' ')} UTC` : '',
+    c.channelId ? `channel: ${c.channelId}` : '',
+  ].filter(Boolean);
+  if (facts.length > 0) console.log(`  ${facts.join(', ')}`);
+  if (c.link) console.log(`  ${c.link}`);
+}
+
+export function printSlackCanvasList(canvases: SlackCanvas[], json?: boolean): void {
+  emit(json, { canvases }, () => {
+    if (canvases.length === 0) {
+      console.log('No canvases found');
+      return;
+    }
+    console.log(`Canvases (${canvases.length})\n`);
+    for (const c of canvases) canvasLines(c);
+  });
+}
+
+/** The Markdown on stdout; what could not be converted on stderr. */
+export function printSlackCanvasContent(content: SlackCanvasContent, json?: boolean): void {
+  emit(json, content, () => console.log(content.markdown));
+  if (!json && content.unconverted.length > 0) {
+    const n = content.unconverted.length;
+    console.error(`${n} part${n === 1 ? '' : 's'} can't be written back as Markdown: ${content.unconverted.join(', ')}`);
+  }
+}
+
+export function printSlackCanvasChange(canvas: SlackCanvas, verb: string, json?: boolean): void {
+  emit(json, { canvas }, () => {
+    console.log(`${verb} ${canvas.id}${canvas.title ? ` "${canvas.title}"` : ''}`);
+    if (canvas.link) console.log(`  ${canvas.link}`);
   });
 }
