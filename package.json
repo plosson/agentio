@@ -48,6 +48,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^25.0.3",
+    "@types/turndown": "5.0.6",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -70,6 +71,7 @@
     "marked": "^18.0.3",
     "pdf-lib": "^1.17.1",
     "qrcode-terminal": "0.12.0",
-    "rss-parser": "^3.13.0"
+    "rss-parser": "^3.13.0",
+    "turndown": "7.2.4"
   }
 }
