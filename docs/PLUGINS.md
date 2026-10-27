@@ -375,6 +375,9 @@ Notes:
 - **Token rotation** must stay off: the profile has no refresh token.
 - **Reading messages.** `slack messages` needs the four `*:history` scopes. Without `search:read` it still works, but it leaves out replies in threads that started before `--since`, and says so.
 - **Canvases.** `slack canvases get` downloads a canvas from `files.slack.com` and converts it to Markdown; `set` writes Markdown back as the whole content. Embedded files, layouts and underlining have no Markdown form: `get` lists them on stderr, and a `set` replaces them with what the Markdown says.
+- **Public channels you are not in.** `slack messages --include-public` lists them with `conversations.list` (`channels:read`) and reads them with `conversations.history` (`channels:history`), without joining. A channel Slack refuses (`not_in_channel`, `missing_scope`) is left out with a warning naming it. Nothing is joined, marked read or posted.
+- **Files.** `slack download` and `slack attachments` need `files:read`: without it, Slack answers a download with its sign-in page, which agentio refuses rather than saves. A profile made before this scope existed needs it added, **Reinstall to Workspace**, then `agentio slack profile add --token` again.
+- **Names cache.** Authors' names, real names and display names come from `users.list`, cached for a day per workspace and user under `~/.config/agentio/cache/slack/` (names only, no emails). Permalinks are built from the workspace URL `auth.test` returns, with no call per message.
 
 Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks), [app quickstart](https://docs.slack.dev/app-management/quickstart-app-settings), [app approval](https://slack.com/help/articles/222386767).
 

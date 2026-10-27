@@ -59,7 +59,7 @@ describe('listMyConversations', () => {
     expect(listed.map((c) => [c.id, c.type])).toEqual([
       ['C0GENERAL', 'channel'], ['C0RANDOM', 'channel'], ['G0TEAM', 'private'], ['D0BOB', 'dm'], ['G0MPDM', 'group'],
     ]);
-    expect(listed.find((c) => c.id === 'D0BOB')).toEqual({ id: 'D0BOB', name: 'U0001', type: 'dm', user: 'U0001' });
+    expect(listed.find((c) => c.id === 'D0BOB')).toEqual({ id: 'D0BOB', name: 'U0001', type: 'dm', user: 'U0001', isMember: true });
     expect(fake.log[0].params.types).toBe('public_channel,private_channel,im,mpim');
     expect(fake.log[0].params.exclude_archived).toBe('true');
   });
@@ -105,12 +105,16 @@ describe('history', () => {
     expect(got[0]).toMatchObject({ threadTs: parent, replyCount: 2 });
   });
 
-  test('a bot message keeps the bot name; files keep their names', async () => {
-    general().messages.push({ ts: tsAt('2026-10-21T09:00:00Z'), username: 'deploybot', subtype: 'bot_message', text: 'done', files: [{ name: 'log.txt' }] });
+  test('a bot message keeps the bot name; files keep their id, name, type, size and links', async () => {
+    general().messages.push({ ts: tsAt('2026-10-21T09:00:00Z'), username: 'deploybot', subtype: 'bot_message', text: 'done', files: [{ id: 'F0LOG', name: 'log.txt', mimetype: 'text/plain', size: 12, url_private_download: 'https://files.slack.com/files-pri/T0TEAM-F0LOG/download/log.txt', permalink: 'https://example.slack.com/files/U0001/F0LOG/log.txt' }, { name: 'no id' }] });
     const [m] = await client.history('C0GENERAL', range('2026-10-20T00:00:00Z', '2026-10-27T00:00:00Z'));
     expect(m.user).toBeUndefined();
     expect(m.botName).toBe('deploybot');
-    expect(m.files).toEqual(['log.txt']);
+    expect(m.files).toEqual([{
+      id: 'F0LOG', name: 'log.txt', mimetype: 'text/plain', size: 12,
+      urlPrivateDownload: 'https://files.slack.com/files-pri/T0TEAM-F0LOG/download/log.txt',
+      permalink: 'https://example.slack.com/files/U0001/F0LOG/log.txt',
+    }]);
   });
 
   test('a 429 between pages retries the same cursor: no duplicates, no gaps', async () => {

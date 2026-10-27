@@ -1,7 +1,8 @@
 /**
  * An in-process stand-in for the Slack Web API: it replaces globalThis.fetch,
  * answers slack.com/api/<method> as Slack does (HTTP 200 with `ok: false` for
- * API errors, 429 with Retry-After for rate limits), and refuses any other host.
+ * API errors, 429 with Retry-After for rate limits), serves files.slack.com
+ * downloads (its sign-in page without files:read), and refuses any other host.
  */
 
 import { expect } from 'bun:test';
@@ -78,7 +79,30 @@ export interface FakeMessage {
   subtype?: string;
   text: string;
   thread_ts?: string;
-  files?: { name: string }[];
+  files?: Record<string, unknown>[];
+}
+
+/** A file Slack hosts: files.info answers `raw`; its download URL serves `content`. */
+export interface FakeFile {
+  raw: Record<string, unknown>;
+  content: string;
+  contentType: string;
+}
+
+export const FILE_HOST = 'https://files.slack.com';
+
+/** A hosted file, with its download URL and permalink. */
+export function fakeFile(id: string, name: string, content = `content of ${name}`, overrides: Record<string, unknown> = {}): FakeFile {
+  return {
+    raw: {
+      id, name, title: name, mimetype: 'text/plain', size: content.length, mode: 'hosted',
+      url_private_download: `${FILE_HOST}/files-pri/T0001-${id}/download/${name}`,
+      permalink: `https://example.slack.com/files/U0001/${id}/${name}`,
+      ...overrides,
+    },
+    content,
+    contentType: 'text/plain',
+  };
 }
 
 export interface FakeCanvas {
@@ -130,7 +154,7 @@ const ALL_SCOPES = [
 export class FakeSlack {
   readonly log: LoggedCall[] = [];
   readonly queue: Scripted[] = [];
-  team = { id: 'T0001', name: 'Hex-Rays SA' };
+  team = { id: 'T0001', name: 'Example Co', url: 'https://example.slack.com/' };
   self = { id: 'U0ADMIN', name: 'admin' };
   /** users.list answers these, `pageSize` per page. */
   users: Record<string, unknown>[] = [rawUser('U0001'), rawUser('U0002')];
@@ -149,6 +173,8 @@ export class FakeSlack {
   /** When set, search.messages answers these raw matches instead of searching. */
   searchMatches?: Record<string, unknown>[];
   searchPageSize = 100;
+  /** Files by id, for files.info and downloads. */
+  files: Record<string, FakeFile> = {};
   /** Answers for one call by its 1-based number, before the queue. */
   private readonly at = new Map<number, Scripted>();
   canvases: FakeCanvas[] = [];
@@ -157,7 +183,7 @@ export class FakeSlack {
   /** files.list answers this many files per page, before keeping canvases. */
   filesPageSize = 100;
   /** The download link files.info gives; replace it to test the token guard. */
-  downloadUrlFor = (c: FakeCanvas) => `https://files.slack.com/files-pri/T0001-${c.id}/download`;
+  downloadUrlFor = (c: FakeCanvas) => `${FILE_HOST}/files-pri/T0001-${c.id}/download`;
   /** When set, every download answers this. */
   downloadAnswer?: { status: number; contentType?: string; body?: string };
   /** Each canvases.edit call's changes, in order. */
@@ -196,7 +222,7 @@ export class FakeSlack {
     const params = Object.fromEntries(new URLSearchParams(typeof init?.body === 'string' ? init.body : ''));
     this.log.push({ url, method: init?.method ?? 'GET', authorization: headers.get('authorization'), contentType: headers.get('content-type'), params });
 
-    if (url.startsWith('https://files.slack.com/')) return this.download(url, headers.get('authorization'));
+    if (url.startsWith(`${FILE_HOST}/`)) return this.download(url, headers.get('authorization'));
     if (!url.startsWith('https://slack.com/api/')) throw new TypeError(`blocked: ${url}`);
 
     const scriptedAt = this.at.get(this.log.length);
@@ -217,7 +243,7 @@ export class FakeSlack {
     const need = (scope: string) => (this.scopes.has(scope) ? null : { ok: false, error: 'missing_scope', needed: scope, provided: [...this.scopes].join(',') });
     switch (method) {
       case 'auth.test':
-        return { ok: true, team_id: this.team.id, team: this.team.name, user_id: this.self.id, user: this.self.name, url: 'https://hex-rays.slack.com/' };
+        return { ok: true, team_id: this.team.id, team: this.team.name, user_id: this.self.id, user: this.self.name, url: this.team.url };
       case 'users.list': {
         const denied = need('users:read');
         if (denied) return denied;
@@ -399,7 +425,7 @@ export class FakeSlack {
         if (denied) return denied;
         const canvas = this.canvases.find((c) => c.id === params.file);
         if (canvas) return { ok: true, file: this.canvasFile(canvas) };
-        const file = this.otherFiles.find((f) => f.id === params.file);
+        const file = this.files[params.file ?? '']?.raw ?? this.otherFiles.find((f) => f.id === params.file);
         return file ? { ok: true, file } : { ok: false, error: 'file_not_found' };
       }
       case 'canvases.create': {
@@ -478,17 +504,6 @@ export class FakeSlack {
     };
   }
 
-  private download(url: string, authorization: string | null): Response {
-    if (this.downloadAnswer) {
-      const a = this.downloadAnswer;
-      return new Response(a.body ?? '', { status: a.status, headers: { 'Content-Type': a.contentType ?? 'text/html; charset=utf-8' } });
-    }
-    if (authorization !== `Bearer ${TOKEN}`) return new Response('', { status: 403 });
-    const canvas = this.canvases.find((c) => url === this.downloadUrlFor(c));
-    if (!canvas) return new Response('', { status: 404 });
-    return new Response(canvas.html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-  }
-
   private withReplyCount(c: FakeChannel, m: FakeMessage): Record<string, unknown> {
     const count = c.messages.filter((r) => r.thread_ts === m.ts && r.ts !== m.ts).length;
     return count > 0 ? { ...m, thread_ts: m.ts, reply_count: count } : { ...m };
@@ -506,7 +521,7 @@ export class FakeSlack {
       .map(({ thread_ts, ...m }) => ({
         ...m,
         channel: { id: c.id, name: c.name },
-        permalink: `https://hex-rays.slack.com/archives/${c.id}/p${m.ts.replace('.', '')}`
+        permalink: `${this.team.url}archives/${c.id}/p${m.ts.replace('.', '')}`
           + (thread_ts && thread_ts !== m.ts ? `?thread_ts=${thread_ts}&cid=${c.id}` : ''),
       })))
       .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
@@ -529,6 +544,25 @@ export class FakeSlack {
     const start = cursor ? Number(cursor.replace('page-', '')) : 0;
     const next = start + this.channelPageSize;
     return { ok: true, [key]: items.slice(start, next), response_metadata: { next_cursor: next < items.length ? `page-${next}` : '' } };
+  }
+
+  /**
+   * As Slack does: a file or a canvas's HTML with the token and files:read, otherwise its sign-in
+   * page, HTTP 200 either way. `downloadAnswer`, when set, answers every download instead.
+   */
+  private download(url: string, authorization: string | null): Response {
+    if (this.downloadAnswer) {
+      const a = this.downloadAnswer;
+      return new Response(a.body ?? '', { status: a.status, headers: { 'Content-Type': a.contentType ?? 'text/html; charset=utf-8' } });
+    }
+    const canvas = this.canvases.find((c) => url === this.downloadUrlFor(c));
+    const file = Object.values(this.files).find((f) => f.raw.url_private_download === url);
+    if (!canvas && !file) return new Response('not found', { status: 404 });
+    if (authorization !== `Bearer ${TOKEN}` || !this.scopes.has('files:read')) {
+      return new Response('<!DOCTYPE html><html><body>Sign in to Slack</body></html>', { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+    if (canvas) return new Response(canvas.html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    return new Response(file!.content, { status: 200, headers: { 'Content-Type': file!.contentType } });
   }
 
   private json(body: unknown): Response {

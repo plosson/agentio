@@ -15,6 +15,7 @@ import type {
   SlackConversation,
   SlackConversationType,
   SlackCredentials,
+  SlackFile,
   SlackMembershipResult,
   SlackMessage,
   SlackMessageRange,
@@ -30,6 +31,8 @@ import type {
 
 export const SLACK_API_URL = 'https://slack.com/api';
 const REQUEST_TIMEOUT_MS = 30_000;
+/** A file download streams to disk; this bounds the whole transfer. */
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const PAGE_SIZE = 200;
 /** Retries after a 429; Slack's Retry-After is honoured up to MAX_RETRY_WAIT_S each time. */
 const MAX_RETRIES = 3;
@@ -77,7 +80,24 @@ interface RawMessage {
   text?: string;
   thread_ts?: string;
   reply_count?: number;
-  files?: { name?: string; title?: string }[];
+  files?: RawFile[];
+}
+
+interface RawFile {
+  id?: string;
+  name?: string;
+  title?: string;
+  mimetype?: string;
+  size?: number;
+  mode?: string;
+  url_private_download?: string;
+  permalink?: string;
+  /** Canvases are files: these say who made one, when, and for which channel. */
+  filetype?: string;
+  user?: string;
+  created?: number;
+  updated?: number;
+  linked_channel_id?: string | null;
 }
 
 interface RawConversation {
@@ -99,19 +119,6 @@ interface RawChannelProperties {
   tabs?: { type?: string; data?: { file_id?: string } }[];
 }
 
-interface RawFile {
-  id: string;
-  title?: string;
-  name?: string;
-  filetype?: string;
-  user?: string;
-  created?: number;
-  updated?: number;
-  permalink?: string;
-  url_private_download?: string;
-  linked_channel_id?: string | null;
-}
-
 /** Canvases are files of this type. */
 const CANVAS_FILETYPE = 'quip';
 /** files.list: at most 100 files per page; pages are read up to this many. */
@@ -128,6 +135,10 @@ const CONVERSATION_TYPES: Record<SlackConversationType, string> = {
 const SEARCH_PAGE_SIZE = 100;
 const SEARCH_MAX_PAGES = 100;
 const DAY_MS = 86_400_000;
+/** Slackbot's user id, the same in every workspace. */
+export const SLACKBOT_ID = 'USLACKBOT';
+/** Hosts the token may be sent to when downloading a file. */
+const FILE_HOST = /(^|\.)slack\.com$/;
 
 /** The token-only Web API errors that have a clearer meaning than Slack's code. */
 const API_ERRORS: Record<string, { code: ErrorCode; message: string; suggestion?: string }> = {
@@ -257,7 +268,7 @@ export function threadTsFromPermalink(permalink: unknown): string | undefined {
 function toCanvas(raw: RawFile): SlackCanvas {
   const iso = (s?: number) => (s ? new Date(s * 1000).toISOString() : undefined);
   return {
-    id: raw.id,
+    id: raw.id ?? '',
     title: raw.title ?? raw.name ?? '',
     owner: raw.user || undefined,
     created: iso(raw.created),
@@ -291,6 +302,39 @@ export function displayNameOf(user: SlackUser): string {
 /** Markdown as canvases.create and canvases.edit take it. */
 const markdownContent = (markdown: string) => ({ type: 'markdown', markdown });
 
+/**
+ * A file id from an id (F…) or from any Slack file link: a permalink
+ * (https://team.slack.com/files/U…/F…/name) or a private download URL
+ * (https://files.slack.com/files-pri/T…-F…/download/name).
+ */
+export function fileIdFrom(input: string): string {
+  const key = input.trim();
+  if (/^F[A-Z0-9]{6,}$/.test(key)) return key;
+  let url: URL;
+  try {
+    url = new URL(key);
+  } catch {
+    throw new CliError('INVALID_PARAMS', `"${key}" is neither a Slack file id (F…) nor a link to a Slack file`,
+      'File ids are in: agentio slack messages --json (files[].id)');
+  }
+  if (url.protocol !== 'https:' || !FILE_HOST.test(url.hostname)) {
+    throw new CliError('INVALID_PARAMS', `${url.hostname} is not a Slack address`, 'Give a file id (F…) or a slack.com file link');
+  }
+  const id = url.pathname.split('/').flatMap((segment) => segment.split('-')).find((part) => /^F[A-Z0-9]{6,}$/.test(part));
+  if (!id) throw new CliError('INVALID_PARAMS', `No file id in ${key}`, 'Give a file id (F…) or a slack.com file link');
+  return id;
+}
+
+/**
+ * A message's link, built the way Slack builds it: the workspace URL, the
+ * channel, the ts without its dot, and for a thread reply the thread's ts.
+ */
+export function messagePermalink(teamUrl: string, channelId: string, ts: string, threadTs?: string): string {
+  const base = teamUrl.endsWith('/') ? teamUrl : `${teamUrl}/`;
+  const link = `${base}archives/${channelId}/p${ts.replace('.', '')}`;
+  return threadTs && threadTs !== ts ? `${link}?thread_ts=${threadTs}&cid=${channelId}` : link;
+}
+
 /** Slack timestamps have more digits than a Number holds, so they compare as strings. */
 export function compareTs(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -304,15 +348,26 @@ function toMessage(raw: Partial<RawMessage> & { ts: string }, source: SlackMessa
     text: raw.text ?? '',
     threadTs: raw.thread_ts || undefined,
     replyCount: raw.reply_count ?? 0,
-    files: (raw.files ?? []).map((f) => f.name || f.title || 'file'),
+    files: (raw.files ?? []).filter((f) => !!f.id).map(toFile),
     replies: [],
     source,
   };
 }
 
+function toFile(raw: RawFile): SlackFile {
+  const file: SlackFile = { id: raw.id!, name: raw.name || raw.title || raw.id! };
+  if (raw.mimetype) file.mimetype = raw.mimetype;
+  if (typeof raw.size === 'number') file.size = raw.size;
+  if (raw.url_private_download) file.urlPrivateDownload = raw.url_private_download;
+  if (raw.permalink) file.permalink = raw.permalink;
+  if (raw.mode && raw.mode !== 'hosted') file.mode = raw.mode;
+  return file;
+}
+
+/** users.conversations lists only conversations you are in. */
 function toConversation(raw: RawConversation): SlackConversation {
   const type: SlackConversationType = raw.is_im ? 'dm' : raw.is_mpim ? 'group' : raw.is_private ? 'private' : 'channel';
-  return { id: raw.id, name: raw.name || raw.user || raw.id, type, ...(raw.user ? { user: raw.user } : {}) };
+  return { id: raw.id, name: raw.name || raw.user || raw.id, type, ...(raw.user ? { user: raw.user } : {}), isMember: true };
 }
 
 function toChannel(raw: RawChannel): SlackChannel {
@@ -416,12 +471,21 @@ export class SlackClient implements ServiceClient {
 
   /** Channels visible to you: every public one, and the private ones you belong to. */
   async listChannels(options: SlackChannelListOptions = {}): Promise<SlackChannel[]> {
+    return this.listChannelsOf(options.privateOnly ? 'private_channel' : 'public_channel,private_channel', !!options.includeArchived);
+  }
+
+  /** Every public channel that is not archived, whether you are in it or not. */
+  async listPublicChannels(): Promise<SlackChannel[]> {
+    return this.listChannelsOf('public_channel', false);
+  }
+
+  private async listChannelsOf(types: string, includeArchived: boolean): Promise<SlackChannel[]> {
     const channels: SlackChannel[] = [];
     let cursor = '';
     do {
       const data = await this.call<SlackApiResponse & { channels: RawChannel[] }>('conversations.list', {
-        types: options.privateOnly ? 'private_channel' : 'public_channel,private_channel',
-        exclude_archived: options.includeArchived ? 'false' : 'true',
+        types,
+        exclude_archived: includeArchived ? 'false' : 'true',
         limit: String(PAGE_SIZE),
         ...(cursor ? { cursor } : {}),
       });
@@ -537,6 +601,44 @@ export class SlackClient implements ServiceClient {
       }
     }
     return { matches, truncated };
+  }
+
+  /** One file's details, by id (needs files:read). */
+  async fileInfo(id: string): Promise<SlackFile> {
+    const data = await this.call<SlackApiResponse & { file: RawFile }>('files.info', { file: id });
+    return toFile(data.file);
+  }
+
+  /**
+   * A file's bytes, as a response to stream to disk. The token goes only to
+   * slack.com hosts. Without files:read, Slack answers with its sign-in page
+   * instead of the file, which is refused here rather than saved.
+   */
+  async downloadFile(file: SlackFile): Promise<Response> {
+    const token = this.token();
+    if (!file.urlPrivateDownload) {
+      throw new CliError('NOT_FOUND', `Slack offers no download for ${file.name}${file.mode ? ` (${file.mode} file)` : ''}`);
+    }
+    const url = new URL(file.urlPrivateDownload);
+    if (url.protocol !== 'https:' || !FILE_HOST.test(url.hostname)) {
+      throw new CliError('API_ERROR', `Refusing to send the Slack token to ${url.hostname}`);
+    }
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    } catch {
+      throw new CliError('NETWORK_ERROR', `Cannot download ${file.name} from Slack`, 'Check your network connection');
+    }
+    if (!response.ok) {
+      throw new CliError(httpStatusToErrorCode(response.status), `Slack answered HTTP ${response.status} for ${file.name}`);
+    }
+    const type = response.headers.get('content-type') ?? '';
+    if (type.startsWith('text/html') && file.mimetype !== 'text/html') {
+      await response.body?.cancel();
+      throw new CliError('PERMISSION_DENIED', `Slack answered with its sign-in page instead of ${file.name}`,
+        'Add files:read under User Token Scopes in your Slack app, reinstall it, then run: agentio slack profile add');
+    }
+    return response;
   }
 
   /** Every canvas you can see. files.list filters after paging, so every page is read. */
@@ -862,7 +964,6 @@ export class SlackClient implements ServiceClient {
     return result;
   }
 
-  /** One Web API call: form-encoded POST with the user token, retried on 429. */
   /** The user token; a webhook profile has none. */
   private token(): string {
     if (!isTokenCredentials(this.credentials)) {
@@ -872,6 +973,7 @@ export class SlackClient implements ServiceClient {
     return this.credentials.token;
   }
 
+  /** One Web API call: form-encoded POST with the user token, retried on 429. */
   private async call<T extends SlackApiResponse>(method: string, params: Record<string, string> = {}): Promise<T> {
     const token = this.token();
 

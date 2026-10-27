@@ -4,8 +4,10 @@ import type {
   SlackCanvas,
   SlackCanvasContent,
   SlackCanvasList,
+  SlackAttachmentsResult,
   SlackChannelChange,
   SlackChannel,
+  SlackFile,
   SlackConversationMessages,
   SlackMembershipResult,
   SlackMessage,
@@ -132,13 +134,13 @@ function when(ts: string): string {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** Text and file names; continuation lines are indented under the first. */
 function body(m: SlackMessage, indent: number): string {
-  return [m.text, ...m.files.map((f) => `[file: ${f}]`)].filter(Boolean).join(' ').replace(/\n/g, `\n${' '.repeat(indent)}`);
+  return [m.text, ...m.files.map((f) => `[file: ${f.name}]`)].filter(Boolean).join(' ').replace(/\n/g, `\n${' '.repeat(indent)}`);
 }
 /** An older thread's first words; undefined text means the parent could not be read. */
 function preview(parent: SlackThreadParent): string {
   if (parent.text === undefined) return '(no longer available)';
   const words = parent.text.split(/\s+/).filter(Boolean);
-  const files = (parent.files ?? []).map((f) => `[file: ${f}]`);
+  const files = (parent.files ?? []).map((f) => `[file: ${f.name}]`);
   if (words.length === 0) return files.join(' ') || '(no text)';
   return `"${words.slice(0, 6).join(' ')}${words.length > 6 ? ' …' : ''}"`;
 }
@@ -209,5 +211,24 @@ export function printSlackCanvasChange(canvas: SlackCanvas, verb: string, json?:
   emit(json, { canvas }, () => {
     console.log(`${verb} ${canvas.id}${canvas.title ? ` "${canvas.title}"` : ''}`);
     if (canvas.link) console.log(`  ${canvas.link}`);
+  });
+}
+
+export function printSlackDownload(path: string, bytes: number, file: SlackFile, json?: boolean): void {
+  emit(json, { path, bytes, file }, () => {
+    console.log(`Saved: ${path}`);
+    console.log(`Bytes: ${bytes}`);
+    if (file.mimetype) console.log(`Type: ${file.mimetype}`);
+  });
+}
+
+export function printSlackAttachments(result: SlackAttachmentsResult, dryRun: boolean, json?: boolean): void {
+  const { entries: _entries, ...summary } = result;
+  emit(json, summary, () => {
+    console.log(`${dryRun ? 'Would save' : 'Saved'} ${dryRun ? result.files - result.skipped : result.saved} of ${plural(result.files, 'file')} `
+      + `from ${plural(result.messagesWithFiles, 'message')} into ${result.outDir}`);
+    if (result.skipped > 0) console.log(`Skipped: ${result.skipped} (deleted, hidden or stored outside Slack)`);
+    if (result.failed > 0) console.log(`Failed: ${result.failed} (see the error column in the manifest)`);
+    console.log(`Manifest: ${result.manifestJson}, ${result.manifestCsv}`);
   });
 }
