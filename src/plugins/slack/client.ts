@@ -575,10 +575,7 @@ export class SlackClient implements ServiceClient {
     if (!(response.headers.get('content-type') ?? '').includes('text/html')) {
       throw new CliError('API_ERROR', 'Slack sent the canvas in an unexpected format, not HTML');
     }
-    const html = await response.text();
-    // Every canvas is wrapped in this; anything else (a sign-in page, say) must not be taken for its content.
-    if (!html.includes('quip-canvas-content')) throw new CliError('API_ERROR', 'Slack sent a page that is not a canvas');
-    return html;
+    return response.text();
   }
 
   private redirected(): CliError {

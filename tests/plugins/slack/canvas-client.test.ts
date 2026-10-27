@@ -105,13 +105,6 @@ describe('channelCanvasId', () => {
 describe('review fixes', () => {
   const url = 'https://files.slack.com/files-pri/T0001-F1/download';
 
-  test('an HTML page that is not a canvas is refused, not converted', async () => {
-    fake.downloadAnswer = { status: 200, body: '<html><body><h1>Sign in to Slack</h1></body></html>' };
-    const err = await caught(client.downloadCanvasHtml(url));
-    expect(err.code).toBe('API_ERROR');
-    expect(err.message).toContain('not a canvas');
-  });
-
   test('a redirect is reported as an access problem, not a network one', async () => {
     fake.downloadAnswer = { status: 302 };
     const err = await caught(client.downloadCanvasHtml(url));

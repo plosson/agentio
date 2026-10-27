@@ -1,5 +1,4 @@
 import { CliError } from '../../utils/errors';
-import { htmlToCanvasMarkdown } from './canvas-markdown';
 import { isChannelId, isUserId, type SlackClient } from './client';
 import type { SlackCanvas, SlackCanvasAccessLevel, SlackCanvasContent, SlackCanvasList, SlackCanvasTargets } from './types';
 
@@ -46,7 +45,10 @@ export async function resolveCanvasId(client: SlackClient, input: string): Promi
 /** A canvas as Markdown, with the parts Markdown cannot carry back. */
 export async function readCanvas(client: SlackClient, input: string): Promise<SlackCanvasContent> {
   const { downloadUrl, ...canvas } = await client.canvasInfo(await resolveCanvasId(client, input));
-  return { ...canvas, ...htmlToCanvasMarkdown(await client.downloadCanvasHtml(downloadUrl)) };
+  const html = await client.downloadCanvasHtml(downloadUrl);
+  // Loaded here, not at startup: turndown and its HTML parser are only needed to read a canvas.
+  const { htmlToCanvasMarkdown } = await import('./canvas-markdown');
+  return { ...canvas, ...htmlToCanvasMarkdown(html) };
 }
 
 /** Canvases for `list`: newest edit first, with their owners' names. */

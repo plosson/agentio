@@ -1,4 +1,6 @@
+import { createDocument } from '@mixmark-io/domino';
 import TurndownService from 'turndown';
+import { CliError } from '../../utils/errors';
 
 export interface CanvasMarkdown {
   markdown: string;
@@ -17,14 +19,39 @@ const TRANSPARENT = new Set(['DIV', 'SPAN', 'BODY', 'HTML', 'TBODY', 'THEAD', 'T
 const FILE_PLACEHOLDER = /^_SLACK_FILE_ALT_PLACEHOLDER_(F[A-Z0-9]+)$/;
 const EMBEDDED_FILE = /File ID: sf:(F[A-Z0-9]+), File URL: (\S+)/;
 const MENTION = /^([@#])([UWCG][A-Z0-9]+)$/;
-/** Slack's code blocks are paragraphs; as <pre>, turndown keeps their whitespace. They never contain </p>. */
-const CODE_PARAGRAPH = /<p(\s[^>]*\bclass=(['"])[^'"]*\bprettyprint\b[^'"]*\2[^>]*)>([\s\S]*?)<\/p>/g;
+/** Text that is only Slack's zero-width padding around embedded files. */
+const PADDING = /^[\u200b\s]*\u200b[\u200b\s]*$/;
 const trimNewlines = (text: string) => text.replace(/^\n+|\n+$/g, '');
 
 type Element = HTMLElement;
 
 const hasClass = (node: Element, name: string) => (node.getAttribute('class') ?? '').split(/\s+/).includes(name);
 const children = (node: Element) => Array.from(node.childNodes) as Element[];
+const isList = (node: Element) => node.nodeName === 'UL' || node.nodeName === 'OL';
+
+/**
+ * The canvas element of a page Slack sent, made ready for turndown: code paragraphs become
+ * <pre>, whose whitespace turndown keeps, and padding-only text goes, so its paragraphs are blank.
+ */
+function canvasRoot(html: string): Element {
+  const doc = createDocument(html);
+  const root = doc.querySelector('.quip-canvas-content') as Element | null;
+  if (!root) throw new CliError('API_ERROR', 'Slack sent a page that is not a canvas');
+  for (const code of Array.from(root.querySelectorAll('p.prettyprint'))) {
+    const pre = doc.createElement('pre');
+    pre.setAttribute('class', code.getAttribute('class') ?? '');
+    while (code.firstChild) pre.appendChild(code.firstChild);
+    code.replaceWith(pre);
+  }
+  const dropPadding = (node: Element) => {
+    for (const child of children(node)) {
+      if (child.nodeType === 3 && PADDING.test(child.nodeValue ?? '')) child.remove();
+      else dropPadding(child);
+    }
+  };
+  dropPadding(root);
+  return root;
+}
 
 /** Text with <br> as a newline, for code blocks. */
 function codeText(node: Element): string {
@@ -37,7 +64,7 @@ function codeText(node: Element): string {
   return out;
 }
 
-/** Slack's canvas HTML as the Markdown canvases.create and canvases.edit accept. */
+/** Slack's canvas HTML as the Markdown canvases.create and canvases.edit accept; API_ERROR when it is not a canvas. */
 export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   const unconverted = new Set<string>();
   const service = new TurndownService({
@@ -54,13 +81,13 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
       return (node as unknown as { isBlock: boolean }).isBlock ? `\n\n${content}\n\n` : content;
     },
   });
-  const inline = (node: Element) => service.turndown(node.innerHTML).replace(/\n+/g, ' ').trim();
+  const inline = (node: Element) => service.turndown(node).replace(/\n+/g, ' ').trim();
 
   function renderList(list: Element, style: ListStyle, depth: number, lines: string[]): void {
     const indent = ' '.repeat(depth * (style === 'numbered' ? 3 : 2));
     let n = 0;
     for (const child of children(list)) {
-      if (child.nodeName === 'UL' || child.nodeName === 'OL') {
+      if (isList(child)) {
         renderList(child, style, depth + 1, lines);
         continue;
       }
@@ -99,22 +126,21 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   service.addRule('canvasList', {
-    filter: (node) => node.nodeName === 'DIV' && (node as Element).hasAttribute('data-section-style')
-      && children(node as Element).some((c) => c.nodeName === 'UL' || c.nodeName === 'OL'),
+    filter: (node) => node.nodeName === 'DIV' && node.hasAttribute('data-section-style') && children(node).some(isList),
     replacement: (_content, node) => {
       const styleKey = (node as Element).getAttribute('data-section-style') ?? '';
       const style = LIST_STYLES[styleKey];
       if (!style) unconverted.add(`list style ${styleKey}`);
       const lines: string[] = [];
       for (const list of children(node as Element)) {
-        if (list.nodeName === 'UL' || list.nodeName === 'OL') renderList(list, style ?? 'bullet', 0, lines);
+        if (isList(list)) renderList(list, style ?? 'bullet', 0, lines);
       }
       return `\n\n${lines.join('\n')}\n\n`;
     },
   });
 
   service.addRule('codeBlock', {
-    filter: (node) => node.nodeName === 'PRE' && hasClass(node as Element, 'prettyprint'),
+    filter: (node) => node.nodeName === 'PRE' && hasClass(node, 'prettyprint'),
     replacement: (_content, node) => {
       const code = trimNewlines(codeText(node as Element).split('\n').map((line) => line.trimEnd()).join('\n'));
       return `\n\n\`\`\`\n${code}\n\`\`\`\n\n`;
@@ -134,7 +160,7 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   service.addRule('layout', {
-    filter: (node) => node.nodeName === 'DIV' && hasClass(node as Element, 'flexbox'),
+    filter: (node) => node.nodeName === 'DIV' && hasClass(node, 'flexbox'),
     replacement: (content) => {
       unconverted.add('layout columns');
       return `\n\n${content}\n\n`;
@@ -142,7 +168,7 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   service.addRule('embeddedImage', {
-    filter: (node) => node.nodeName === 'IMG' && FILE_PLACEHOLDER.test((node as Element).getAttribute('alt') ?? ''),
+    filter: (node) => node.nodeName === 'IMG' && FILE_PLACEHOLDER.test(node.getAttribute('alt') ?? ''),
     replacement: (_content, node) => {
       unconverted.add(`embedded file ${FILE_PLACEHOLDER.exec((node as Element).getAttribute('alt') ?? '')![1]}`);
       return '';
@@ -150,7 +176,7 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   service.addRule('embeddedFile', {
-    filter: (node) => node.nodeName === 'P' && hasClass(node as Element, 'embedded-file'),
+    filter: (node) => node.nodeName === 'P' && hasClass(node, 'embedded-file'),
     replacement: (_content, node) => {
       const file = EMBEDDED_FILE.exec((node as Element).textContent ?? '');
       if (!file) {
@@ -163,7 +189,6 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   // Slack pads embedded files with zero-width spaces: paragraphs of nothing else go, and the rest are dropped.
-  const markdown = trimNewlines(service.turndown(html.replace(CODE_PARAGRAPH, '<pre$1>$3</pre>'))
-    .replace(/\n\n[\u200b \t]+(?=\n\n|$)/g, '').replace(/\u200b/g, ''));
+  const markdown = trimNewlines(service.turndown(canvasRoot(html)));
   return { markdown, unconverted: [...unconverted] };
 }

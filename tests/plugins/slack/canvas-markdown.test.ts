@@ -66,9 +66,23 @@ describe('a real canvas', () => {
 });
 
 describe('edge cases', () => {
-  test('empty HTML is empty Markdown with nothing unconverted', () => {
-    expect(htmlToCanvasMarkdown('')).toEqual({ markdown: '', unconverted: [] });
+  test('an empty canvas is empty Markdown with nothing unconverted', () => {
+    expect(htmlToCanvasMarkdown(wrap(''))).toEqual({ markdown: '', unconverted: [] });
     expect(htmlToCanvasMarkdown(wrap('<p class="line"></p>'))).toEqual({ markdown: '', unconverted: [] });
+  });
+
+  test('a page that is not a canvas is refused, even when it mentions the canvas class elsewhere', () => {
+    for (const page of ['', '<html><body><h1>Sign in to Slack</h1></body></html>', '<script>var c = "quip-canvas-content";</script><h1>Sign in</h1>']) {
+      expect(() => htmlToCanvasMarkdown(page)).toThrow('not a canvas');
+    }
+  });
+
+  test('only the canvas element is converted, not the page around it', () => {
+    expect(htmlToCanvasMarkdown(`<header>Slack</header>${wrap('<p class="line">body</p>')}<footer>x</footer>`).markdown).toBe('body');
+  });
+
+  test('a zero-width space the author typed inside text is kept', () => {
+    expect(htmlToCanvasMarkdown(wrap('<p class="line">a\u200bb</p>')).markdown).toBe('a\u200bb');
   });
 
   test('Markdown characters in text are escaped, so writing it back adds no formatting', () => {
