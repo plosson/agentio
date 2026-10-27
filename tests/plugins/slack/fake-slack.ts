@@ -55,15 +55,56 @@ export interface FakeChannel {
   topic: { value: string };
   purpose: { value: string };
   members: string[];
+  is_im?: boolean;
+  is_mpim?: boolean;
+  /** Direct messages: the other person. */
+  user?: string;
+  /** Top-level messages and thread replies alike; replies carry thread_ts. */
+  messages: FakeMessage[];
 }
 
 export function fakeChannel(id: string, name: string, overrides: Partial<FakeChannel> = {}): FakeChannel {
-  return { id, name, is_private: false, is_archived: false, topic: { value: '' }, purpose: { value: '' }, members: ['U0ADMIN'], ...overrides };
+  return { id, name, is_private: false, is_archived: false, topic: { value: '' }, purpose: { value: '' }, members: ['U0ADMIN'], messages: [], ...overrides };
+}
+
+export interface FakeMessage {
+  ts: string;
+  user?: string;
+  username?: string;
+  subtype?: string;
+  text: string;
+  thread_ts?: string;
+  files?: { name: string }[];
+}
+
+/** A Slack timestamp for an ISO date: whole seconds, then a six-digit sequence. */
+export function tsAt(iso: string, seq = 1): string {
+  return `${Math.floor(Date.parse(iso) / 1000)}.${String(seq).padStart(6, '0')}`;
+}
+
+type Kind = 'public_channel' | 'private_channel' | 'im' | 'mpim';
+const READ_SCOPE: Record<Kind, string> = { public_channel: 'channels:read', private_channel: 'groups:read', im: 'im:read', mpim: 'mpim:read' };
+const HISTORY_SCOPE: Record<Kind, string> = { public_channel: 'channels:history', private_channel: 'groups:history', im: 'im:history', mpim: 'mpim:history' };
+const byTs = (a: FakeMessage, b: FakeMessage) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+
+function kindOf(c: FakeChannel): Kind {
+  if (c.is_im) return 'im';
+  if (c.is_mpim) return 'mpim';
+  return c.is_private ? 'private_channel' : 'public_channel';
+}
+
+/** Slack's oldest/latest window: exclusive unless inclusive=true. */
+function inWindow(ts: string, oldest: string | undefined, latest: string | undefined, inclusive: boolean): boolean {
+  const n = Number(ts);
+  const lo = oldest ? Number(oldest) : -Infinity;
+  const hi = latest ? Number(latest) : Infinity;
+  return inclusive ? n >= lo && n <= hi : n > lo && n < hi;
 }
 
 const ALL_SCOPES = [
   'users:read', 'users:read.email', 'channels:read', 'groups:read',
   'channels:manage', 'groups:write', 'channels:write.invites', 'groups:write.invites', 'channels:write',
+  'channels:history', 'groups:history', 'im:history', 'mpim:history', 'im:read', 'mpim:read', 'search:read',
 ];
 
 export class FakeSlack {
@@ -83,6 +124,13 @@ export class FakeSlack {
   inviteErrors: Record<string, string> = {};
   /** Users conversations.kick refuses, with the error Slack gives. */
   kickErrors: Record<string, string> = {};
+  /** conversations.history answers this Slack error for these channel ids. */
+  historyErrors: Record<string, string> = {};
+  /** When set, search.messages answers these raw matches instead of searching. */
+  searchMatches?: Record<string, unknown>[];
+  searchPageSize = 100;
+  /** Answers for one call by its 1-based number, before the queue. */
+  private readonly at = new Map<number, Scripted>();
   private readonly original = globalThis.fetch;
 
   constructor() {
@@ -93,6 +141,10 @@ export class FakeSlack {
     globalThis.fetch = this.original;
   }
 
+  queueAt(call: number, scripted: Scripted): void {
+    this.at.set(call, scripted);
+  }
+
   private async handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = String(input instanceof Request ? input.url : input);
     const headers = new Headers(init?.headers);
@@ -101,7 +153,9 @@ export class FakeSlack {
 
     if (!url.startsWith('https://slack.com/api/')) throw new TypeError(`blocked: ${url}`);
 
-    const next = this.queue.shift();
+    const scriptedAt = this.at.get(this.log.length);
+    if (scriptedAt) this.at.delete(this.log.length);
+    const next = scriptedAt ?? this.queue.shift();
     if (next) {
       if ('throws' in next) throw next.throws;
       const text = next.text ?? (next.body === undefined ? '' : JSON.stringify(next.body));
@@ -233,6 +287,55 @@ export class FakeSlack {
         c.members.push(...ids);
         return { ok: true, channel: this.view(c) };
       }
+      case 'users.conversations': {
+        const types = (params.types ?? 'public_channel').split(',') as Kind[];
+        for (const t of types) {
+          const denied = need(READ_SCOPE[t]);
+          if (denied) return denied;
+        }
+        const mine = this.channels.filter((c) => c.members.includes(this.self.id)
+          && types.includes(kindOf(c)) && (params.exclude_archived !== 'true' || !c.is_archived));
+        return this.page(mine.map((c) => this.view(c)), params.cursor, 'channels');
+      }
+      case 'conversations.history': {
+        const c = this.find(params.channel);
+        if (!c) return { ok: false, error: 'channel_not_found' };
+        const denied = need(HISTORY_SCOPE[kindOf(c)]);
+        if (denied) return denied;
+        if (this.historyErrors[c.id]) return { ok: false, error: this.historyErrors[c.id] };
+        const listed = c.messages
+          .filter((m) => (!m.thread_ts || m.thread_ts === m.ts || m.subtype === 'thread_broadcast')
+            && inWindow(m.ts, params.oldest, params.latest, params.inclusive === 'true'))
+          .sort(byTs).reverse()
+          .map((m) => this.withReplyCount(c, m));
+        return this.page(listed, params.cursor, 'messages');
+      }
+      case 'conversations.replies': {
+        const c = this.find(params.channel);
+        if (!c) return { ok: false, error: 'channel_not_found' };
+        const denied = need(HISTORY_SCOPE[kindOf(c)]);
+        if (denied) return denied;
+        const parent = c.messages.find((m) => m.ts === params.ts);
+        if (!parent) return { ok: false, error: 'thread_not_found' };
+        const thread = [parent, ...c.messages.filter((m) => m.thread_ts === params.ts && m.ts !== params.ts).sort(byTs)]
+          .map((m) => this.withReplyCount(c, m));
+        if (params.limit === '1') return { ok: true, messages: thread.slice(0, 1), has_more: thread.length > 1 };
+        return this.page(thread, params.cursor, 'messages');
+      }
+      case 'search.messages': {
+        const denied = need('search:read');
+        if (denied) return denied;
+        const matches = this.searchMatches ?? this.search(params.query ?? '');
+        const page = Number(params.page ?? '1');
+        const size = this.searchPageSize;
+        return {
+          ok: true,
+          messages: {
+            matches: matches.slice((page - 1) * size, page * size),
+            paging: { count: size, total: matches.length, page, pages: Math.max(1, Math.ceil(matches.length / size)) },
+          },
+        };
+      }
       default:
         return { ok: false, error: 'unknown_method' };
     }
@@ -240,7 +343,30 @@ export class FakeSlack {
 
   /** Private channels are visible only to their members, as for a real user token. */
   private visible(c: FakeChannel): boolean {
-    return !c.is_private || c.members.includes(this.self.id);
+    return (!c.is_private && !c.is_im && !c.is_mpim) || c.members.includes(this.self.id);
+  }
+
+  private withReplyCount(c: FakeChannel, m: FakeMessage): Record<string, unknown> {
+    const count = c.messages.filter((r) => r.thread_ts === m.ts && r.ts !== m.ts).length;
+    return count > 0 ? { ...m, thread_ts: m.ts, reply_count: count } : { ...m };
+  }
+
+  /** Real search: whole days, exclusive, over every channel the user can see, including public ones they are not in. */
+  private search(query: string): Record<string, unknown>[] {
+    const after = /after:(\d{4}-\d{2}-\d{2})/.exec(query)?.[1];
+    const before = /before:(\d{4}-\d{2}-\d{2})/.exec(query)?.[1];
+    if (!after && !before) return [];
+    const from = after ? Date.parse(after) + 86_400_000 : -Infinity;
+    const to = before ? Date.parse(before) : Infinity;
+    return this.channels.filter((c) => this.visible(c)).flatMap((c) => c.messages
+      .filter((m) => Number(m.ts) * 1000 >= from && Number(m.ts) * 1000 < to)
+      .map(({ thread_ts, ...m }) => ({
+        ...m,
+        channel: { id: c.id, name: c.name },
+        permalink: `https://hex-rays.slack.com/archives/${c.id}/p${m.ts.replace('.', '')}`
+          + (thread_ts && thread_ts !== m.ts ? `?thread_ts=${thread_ts}&cid=${c.id}` : ''),
+      })))
+      .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   }
 
   private find(id: string | undefined): FakeChannel | undefined {
@@ -249,7 +375,7 @@ export class FakeSlack {
   }
 
   private view(c: FakeChannel): Record<string, unknown> {
-    const { members, ...rest } = c;
+    const { members, messages, ...rest } = c;
     return { ...rest, topic: { ...c.topic }, purpose: { ...c.purpose }, is_member: members.includes(this.self.id) };
   }
 

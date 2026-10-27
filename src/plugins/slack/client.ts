@@ -7,8 +7,13 @@ import type {
   SlackChannelCreateOptions,
   SlackChannelListOptions,
   SlackChannelUpdate,
+  SlackConversation,
+  SlackConversationType,
   SlackCredentials,
   SlackMembershipResult,
+  SlackMessage,
+  SlackMessageRange,
+  SlackSearchMatch,
   SlackSendOptions,
   SlackSendResult,
   SlackTokenCredentials,
@@ -58,6 +63,40 @@ interface RawChannel {
   purpose?: { value?: string };
 }
 
+interface RawMessage {
+  ts: string;
+  user?: string;
+  username?: string;
+  bot_profile?: { name?: string };
+  text?: string;
+  thread_ts?: string;
+  reply_count?: number;
+  files?: { name?: string; title?: string }[];
+}
+
+interface RawConversation {
+  id: string;
+  name?: string;
+  is_im?: boolean;
+  is_mpim?: boolean;
+  is_private?: boolean;
+  user?: string;
+}
+
+interface RawSearchMatch extends Partial<RawMessage> {
+  channel?: { id?: string };
+  permalink?: unknown;
+}
+
+/** Slack's conversation type for each of ours. */
+const CONVERSATION_TYPES: Record<SlackConversationType, string> = {
+  channel: 'public_channel', private: 'private_channel', dm: 'im', group: 'mpim',
+};
+/** search.messages answers at most 100 per page and 100 pages. */
+const SEARCH_PAGE_SIZE = 100;
+const SEARCH_MAX_PAGES = 100;
+const DAY_MS = 86_400_000;
+
 /** The token-only Web API errors that have a clearer meaning than Slack's code. */
 const API_ERRORS: Record<string, { code: ErrorCode; message: string; suggestion?: string }> = {
   not_authed: { code: 'AUTH_FAILED', message: 'Slack received no token' },
@@ -83,6 +122,7 @@ const API_ERRORS: Record<string, { code: ErrorCode; message: string; suggestion?
   ura_max_channels: { code: 'INVALID_PARAMS', message: 'A single-channel guest cannot join a second channel' },
   user_is_restricted: { code: 'PERMISSION_DENIED', message: 'A guest cannot be invited here' },
   user_is_ultra_restricted: { code: 'INVALID_PARAMS', message: 'A single-channel guest cannot join a second channel' },
+  thread_not_found: { code: 'NOT_FOUND', message: 'The thread is gone, perhaps deleted' },
 };
 
 export function isTokenCredentials(credentials: SlackCredentials): credentials is SlackTokenCredentials {
@@ -137,6 +177,64 @@ function isEmail(input: string): boolean {
 /** Whether `input` names a user by id (U… or W…) rather than by email. */
 export function isUserId(input: string): boolean {
   return /^[UW][A-Z0-9]{2,}$/.test(input);
+}
+
+/** A Web API error, keeping Slack's own code for callers that expect some of them. */
+export class SlackApiError extends CliError {
+  constructor(public slackError: string, code: ErrorCode, message: string, suggestion?: string) {
+    super(code, message, suggestion);
+  }
+}
+
+/** A date as a Slack timestamp: seconds, six decimals. */
+export function slackTs(date: Date): string {
+  return (date.getTime() / 1000).toFixed(6);
+}
+
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * The search query for a range. Search dates are whole days in the user's time
+ * zone, and exclusive, so the range is widened by two days each side and the
+ * results are trimmed after.
+ */
+export function searchQuery(range: SlackMessageRange): string {
+  return `after:${isoDay(range.since.getTime() - 2 * DAY_MS)} before:${isoDay(range.until.getTime() + 2 * DAY_MS)}`;
+}
+
+/** The thread a search result belongs to, read from its permalink; undefined when there is none or it is malformed. */
+export function threadTsFromPermalink(permalink: unknown): string | undefined {
+  if (typeof permalink !== 'string') return undefined;
+  try {
+    const ts = new URL(permalink).searchParams.get('thread_ts');
+    return ts && /^\d+\.\d+$/.test(ts) ? ts : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Slack timestamps have more digits than a Number holds, so they compare as strings. */
+export function compareTs(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function toMessage(raw: Partial<RawMessage> & { ts: string }, source: SlackMessage['source']): SlackMessage {
+  return {
+    ts: raw.ts,
+    user: raw.user || undefined,
+    botName: raw.username || raw.bot_profile?.name || undefined,
+    text: raw.text ?? '',
+    threadTs: raw.thread_ts || undefined,
+    replyCount: raw.reply_count ?? 0,
+    files: (raw.files ?? []).map((f) => f.name || f.title || 'file'),
+    replies: [],
+    source,
+  };
+}
+
+function toConversation(raw: RawConversation): SlackConversation {
+  const type: SlackConversationType = raw.is_im ? 'dm' : raw.is_mpim ? 'group' : raw.is_private ? 'private' : 'channel';
+  return { id: raw.id, name: raw.name || raw.user || raw.id, type, ...(raw.user ? { user: raw.user } : {}) };
 }
 
 function toChannel(raw: RawChannel): SlackChannel {
@@ -270,6 +368,87 @@ export class SlackClient implements ServiceClient {
         'Private channels are visible only to their members; see: agentio slack channels list');
     }
     return found;
+  }
+
+  /** The conversations you belong to, of the given types; archived ones left out. */
+  async listMyConversations(types: SlackConversationType[]): Promise<SlackConversation[]> {
+    const conversations: SlackConversation[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { channels: RawConversation[] }>('users.conversations', {
+        types: types.map((t) => CONVERSATION_TYPES[t]).join(','),
+        exclude_archived: 'true',
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      conversations.push(...(data.channels ?? []).map(toConversation));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return conversations;
+  }
+
+  /** A conversation's messages in the range, oldest first: top-level ones, and replies also sent to the channel. */
+  async history(channel: string, range: SlackMessageRange): Promise<SlackMessage[]> {
+    const messages: SlackMessage[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { messages: RawMessage[] }>('conversations.history', {
+        channel,
+        oldest: slackTs(range.since),
+        latest: slackTs(range.until),
+        inclusive: 'true',
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      messages.push(...(data.messages ?? []).map((m) => toMessage(m, 'history')));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return messages.sort((a, b) => compareTs(a.ts, b.ts));
+  }
+
+  /** Every reply in a thread, oldest first, without its parent. */
+  async replies(channel: string, threadTs: string): Promise<SlackMessage[]> {
+    const replies: SlackMessage[] = [];
+    let cursor = '';
+    do {
+      const data = await this.call<SlackApiResponse & { messages: RawMessage[] }>('conversations.replies', {
+        channel,
+        ts: threadTs,
+        limit: String(PAGE_SIZE),
+        ...(cursor ? { cursor } : {}),
+      });
+      replies.push(...(data.messages ?? []).filter((m) => m.ts !== threadTs).map((m) => toMessage(m, 'history')));
+      cursor = data.response_metadata?.next_cursor ?? '';
+    } while (cursor);
+    return replies.sort((a, b) => compareTs(a.ts, b.ts));
+  }
+
+  /** The message that started a thread; undefined when Slack answers with another one. */
+  async threadParent(channel: string, threadTs: string): Promise<SlackMessage | undefined> {
+    const data = await this.call<SlackApiResponse & { messages: RawMessage[] }>('conversations.replies', {
+      channel, ts: threadTs, limit: '1',
+    });
+    const first = data.messages?.[0];
+    return first?.ts === threadTs ? toMessage(first, 'history') : undefined;
+  }
+
+  /** What search finds in the range, oldest first, in every conversation you can see, including some you are not in. */
+  async searchMessages(range: SlackMessageRange): Promise<SlackSearchMatch[]> {
+    const matches: SlackSearchMatch[] = [];
+    const query = searchQuery(range);
+    for (let page = 1, pages = 1; page <= pages; page++) {
+      const data = await this.call<SlackApiResponse & { messages?: { matches?: RawSearchMatch[]; paging?: { pages?: number } } }>('search.messages', {
+        query, sort: 'timestamp', sort_dir: 'asc', count: String(SEARCH_PAGE_SIZE), page: String(page),
+      });
+      pages = Math.min(data.messages?.paging?.pages ?? 1, SEARCH_MAX_PAGES);
+      for (const raw of data.messages?.matches ?? []) {
+        const channelId = raw.channel?.id;
+        if (!channelId || typeof raw.ts !== 'string') continue;
+        const message = toMessage({ ...raw, ts: raw.ts, thread_ts: undefined }, 'search');
+        matches.push({ channelId, message: { ...message, threadTs: threadTsFromPermalink(raw.permalink) } });
+      }
+    }
+    return matches;
   }
 
   /** A new channel, with its topic and purpose; you are its first member. */
@@ -515,12 +694,12 @@ export class SlackClient implements ServiceClient {
     const error = typeof data?.error === 'string' ? data.error : 'unknown_error';
     if (error === 'missing_scope') {
       const needed = typeof data?.needed === 'string' ? data.needed : 'unknown';
-      return new CliError('PERMISSION_DENIED', `The Slack token lacks the ${needed} scope for ${method}`,
+      return new SlackApiError(error, 'PERMISSION_DENIED', `The Slack token lacks the ${needed} scope for ${method}`,
         `Add ${needed} under User Token Scopes in your Slack app, reinstall it, then run: agentio slack profile add`);
     }
     const known = API_ERRORS[error];
-    if (known) return new CliError(known.code, known.message, known.suggestion);
-    return new CliError('API_ERROR', `Slack ${method} failed: ${error}`);
+    if (known) return new SlackApiError(error, known.code, known.message, known.suggestion);
+    return new SlackApiError(error, 'API_ERROR', `Slack ${method} failed: ${error}`);
   }
 
   private async sendViaWebhook(options: SlackSendOptions): Promise<SlackSendResult> {
