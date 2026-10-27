@@ -10,7 +10,7 @@ const msg = (ts: string, extra: Partial<SlackMessage> = {}): SlackMessage => ({
   ts, text: `text ${ts}`, replyCount: 0, files: [], replies: [], source: 'history', ...extra,
 });
 const conv = (id = 'C1', extra: Partial<SlackConversationMessages> = {}): SlackConversationMessages => ({
-  id, name: id.toLowerCase(), type: 'channel', messages: [], ...extra,
+  id, name: id.toLowerCase(), type: 'channel', isMember: true, messages: [], ...extra,
 });
 const user = (id: string, extra: Partial<SlackUser> = {}): SlackUser => ({
   id, name: id.toLowerCase(), isAdmin: false, isOwner: false, isBot: false, deleted: false, isRestricted: false, ...extra,
@@ -75,8 +75,8 @@ describe('inRange', () => {
 
 describe('pickConversations', () => {
   const all: SlackConversation[] = [
-    { id: 'C0GENERAL', name: 'general', type: 'channel' },
-    { id: 'D0BOB', name: 'U0001', type: 'dm', user: 'U0001' },
+    { id: 'C0GENERAL', name: 'general', type: 'channel', isMember: true },
+    { id: 'D0BOB', name: 'U0001', type: 'dm', user: 'U0001', isMember: true },
   ];
 
   test('no --channel keeps all', () => {
@@ -188,6 +188,6 @@ describe('resolveNames', () => {
     });
     resolveNames([c], [user('U1', { displayName: 'alice' })]);
     expect(c.name).toBe('alice');
-    expect(c.messages[0].parent).toEqual({ ts: '1.1', user: 'U1', userName: 'alice', text: 'see @alice' });
+    expect(c.messages[0].parent).toEqual({ ts: '1.1', user: 'U1', userName: 'alice', displayName: 'alice', text: 'see @alice' });
   });
 });

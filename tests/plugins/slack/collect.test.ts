@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { SlackClient } from '../../../src/plugins/slack/client';
 import { collectMessages } from '../../../src/plugins/slack/messages';
 import { printSlackMessages } from '../../../src/plugins/slack/output';
@@ -7,15 +10,25 @@ import { caught, FakeSlack, fakeChannel, rawUser, TOKEN, tsAt } from './fake-sla
 let fake: FakeSlack;
 let client: SlackClient;
 let warnings: string[];
+let home: string;
+let savedHome: string | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
+  savedHome = process.env.AGENTIO_HOME;
+  home = await mkdtemp(join(tmpdir(), 'agentio-slack-collect-'));
+  process.env.AGENTIO_HOME = home;
   fake = new FakeSlack();
   fake.users = [rawUser('U0001', { profile: { display_name: 'alice' } }), rawUser('U0002', { profile: { display_name: 'bob' } })];
   client = new SlackClient({ type: 'token', token: TOKEN }, { sleep: async () => {} });
   warnings = [];
 });
 
-afterEach(() => fake.stop());
+afterEach(async () => {
+  fake.stop();
+  if (savedHome === undefined) delete process.env.AGENTIO_HOME;
+  else process.env.AGENTIO_HOME = savedHome;
+  await rm(home, { recursive: true, force: true });
+});
 
 const range = { since: new Date('2026-10-20T00:00:00Z'), until: new Date('2026-10-27T00:00:00Z') };
 const collect = (extra: Record<string, unknown> = {}) => collectMessages(client, { range, onWarning: (m) => warnings.push(m), ...extra });
@@ -106,9 +119,9 @@ describe('printSlackMessages', () => {
       printSlackMessages({
         since: '2026-10-20T00:00:00.000Z', until: '2026-10-27T00:00:00.000Z',
         conversations: [{
-          id: 'C1', name: 'eng', type: 'channel',
+          id: 'C1', name: 'eng', type: 'channel', isMember: true,
           messages: [{
-            ts: tsAt('2026-10-21T09:12:00Z'), userName: 'alice', text: 'line one\nline two', replyCount: 1, files: ['log.txt'], source: 'history',
+            ts: tsAt('2026-10-21T09:12:00Z'), userName: 'alice', text: 'line one\nline two', replyCount: 1, files: [{ id: 'F1', name: 'log.txt' }], source: 'history',
             replies: [{ ts: tsAt('2026-10-21T09:13:00Z'), userName: 'bob', text: 'thanks', replyCount: 0, files: [], replies: [], source: 'history' }],
           }],
         }],
@@ -185,7 +198,7 @@ describe('collectMessages, search pass', () => {
     channel('C0GENERAL').messages.push({ ts: tsAt('2026-10-22T14:03:00Z'), user: 'U0002', text: 'orphan', thread_ts: oldParent });
     const result = await collect();
     const [conv] = result.conversations;
-    expect(conv.messages[0].parent).toEqual({ ts: oldParent });
+    expect(conv.messages[0].parent).toEqual({ ts: oldParent, permalink: `https://example.slack.com/archives/C0GENERAL/p${oldParent.replace('.', '')}` });
     const lines: string[] = [];
     const spy = spyOn(console, 'log').mockImplementation((line: string) => { lines.push(line); });
     try {
@@ -236,7 +249,7 @@ describe('review fixes', () => {
 
   test('an older thread started by a file only is labelled with the file, not as gone', async () => {
     channel('C0GENERAL').messages.push(
-      { ts: oldParent, user: 'U0001', text: '', files: [{ name: 'design.png' }] },
+      { ts: oldParent, user: 'U0001', text: '', files: [{ id: 'F0DESIGN', name: 'design.png' }] },
       { ts: tsAt('2026-10-22T14:03:00Z'), user: 'U0002', text: 'nice', thread_ts: oldParent },
     );
     const result = await collect();

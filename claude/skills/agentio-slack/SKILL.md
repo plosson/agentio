@@ -1,6 +1,6 @@
 ---
 name: agentio-slack
-description: Use when sending Slack messages, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.
+description: Use when sending or reading Slack messages, downloading files shared in Slack, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.
 ---
 
 # Slack via agentio
@@ -30,6 +30,98 @@ Examples:
 
   # send to a specific profile
   agentio slack send --profile alerts "incident opened"
+```
+
+## agentio slack messages
+
+Read every message since a date in the conversations you are in (with --include-public, every public channel too), threads included (needs a user token profile)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--since <date>`: Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp
+- `--until <date>`: End, included, same formats; a date alone means the end of that day (default: now)
+- `--channel <channel>`: Only this conversation, by id or name; repeat for more
+- `--types <list>`: Comma-separated: channel, private, dm, group (default: all)
+- `--include-public`: Also read public channels you are not in, without joining them
+- `--raw`: Keep Slack's text markup as sent: <@U…> mentions, <url|label> links
+
+```
+Examples:
+
+  # everything since Monday, for a digest
+  agentio slack messages --since 2026-10-26
+
+  # one week of two channels, as JSON
+  agentio slack messages --since 2026-10-01 --until 2026-10-08 --channel eng --channel '#design' --json
+
+  # direct messages only
+  agentio slack messages --since 2026-10-20 --types dm,group
+
+  # also the public channels you never joined; nothing is joined or marked read
+  agentio slack messages --since 2026-10-26 --include-public
+
+Replies in threads that started before --since are found through search
+(needs search:read); without it they are left out, with a warning.
+
+In --json, each conversation has isMember; each message has permalink, and
+realName and displayName for its author; each file has id, name, mimetype,
+size, urlPrivateDownload and permalink (download it with: agentio slack download).
+Links read "label (url)" and mentions "@name"; --raw keeps Slack's markup.
+```
+
+## agentio slack download <file>
+
+Download one file shared in Slack (needs files:read)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--out <path>`: File to write, or a folder to write into (default: the file's name in the current folder)
+
+```
+Examples:
+
+  # file ids are in: agentio slack messages --json (files[].id)
+  agentio slack download F0123ABCDEF --out ./screenshot.png
+
+  # by link, into a folder
+  agentio slack download https://files.slack.com/files-pri/T0123ABCD-F0123ABCDEF/download/report.pdf --out ./files/
+```
+
+## agentio slack attachments
+
+Download every file shared in a date range, with a manifest (needs files:read)
+
+Options:
+
+- `--profile <name>`: Profile name (optional if only one profile exists)
+- `--json`: Output JSON for programs to read
+- `--since <date>`: Start, included: YYYY-MM-DD (midnight UTC) or an ISO 8601 timestamp
+- `--until <date>`: End, included, same formats; a date alone means the end of that day (default: now)
+- `--channel <channel>`: Only this conversation, by id or name; repeat for more (default: all)
+- `--types <list>`: Comma-separated: channel, private, dm, group (default: all)
+- `--include-public`: Also public channels you are not in, without joining them
+- `--out <dir>`: Folder to save files and manifest.json / manifest.csv into (default: slack-attachments)
+- `--dry-run`: Only list the files and write the manifest; download nothing
+
+```
+Examples:
+
+  # every file shared in one channel this month
+  agentio slack attachments --channel eng --since 2026-10-01 --out ./eng-files
+
+  # see what would be saved, without downloading
+  agentio slack attachments --since 2026-10-26 --dry-run
+
+Files are named <YYYY-MM-DD>_<sender>_<file name>; clashes get " (2)", " (3)"...
+The manifest has one row per file: conversation, message ts and permalink,
+sender, file id, name, type, size, saved path, status and error. Deleted files,
+files hidden by the plan's history limit and links to files stored outside
+Slack are recorded as skipped. A file that fails is recorded with its error and
+the run continues; the exit code is 1 if any failed.
 ```
 
 ## agentio slack users list
@@ -189,7 +281,7 @@ Options:
 ```
 Examples:
 
-  agentio slack channels leave topic-apple topic-swift
+  agentio slack channels leave old-project team-offsite
 
 Every channel is looked up first: one wrong name leaves none. Channels you
 are not in are skipped. After leaving a private channel you no longer see it,

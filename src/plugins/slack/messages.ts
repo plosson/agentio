@@ -1,15 +1,17 @@
 import { CliError } from '../../utils/errors';
 import { parseDateOption } from '../../utils/options';
-import { compareTs, SlackApiError, type SlackClient } from './client';
+import { compareTs, messagePermalink, SLACKBOT_ID, SlackApiError, type SlackClient } from './client';
+import { SlackDirectory } from './directory';
+import { formatSlackText } from './format';
 import type {
   SlackConversation,
+  SlackDirectoryEntry,
   SlackConversationMessages,
   SlackConversationType,
   SlackMessage,
   SlackMessageRange,
   SlackMessagesResult,
   SlackThreadParent,
-  SlackUser,
 } from './types';
 
 export const SLACK_CONVERSATION_TYPES: SlackConversationType[] = ['channel', 'private', 'dm', 'group'];
@@ -47,7 +49,7 @@ export function inRange(ts: string, range: SlackMessageRange): boolean {
   return ms >= range.since.getTime() && ms <= range.until.getTime();
 }
 
-/** The conversations --channel names, by id or name, each once; one you are not in is NOT_FOUND. */
+/** The conversations --channel names, by id or name, each once; one not in `all` is NOT_FOUND. */
 export function pickConversations(all: SlackConversation[], wanted: string[] | undefined): SlackConversation[] {
   if (!wanted?.length) return all;
   const picked = new Map<string, SlackConversation>();
@@ -56,7 +58,7 @@ export function pickConversations(all: SlackConversation[], wanted: string[] | u
     const found = all.find((c) => c.id === key || c.name === key);
     if (!found) {
       throw new CliError('NOT_FOUND', `You are not in a conversation named ${input.trim()}`,
-        'See: agentio slack channels list. Check --types too');
+        'See: agentio slack channels list. Check --types too; for a public channel you are not in, add --include-public');
     }
     picked.set(found.id, found);
   }
@@ -100,16 +102,54 @@ export function countMessages(conversation: SlackConversationMessages): number {
 
 const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
 
-/** User ids to names, in authors, mentions, older threads' parents, and direct messages' names. */
-export function resolveNames(conversations: SlackConversationMessages[], users: SlackUser[]): void {
+/** Every user id the names are needed for: authors, older threads' parents, mentions, direct messages. */
+export function referencedUsers(conversations: SlackConversationMessages[]): Set<string> {
+  const ids = new Set<string>();
+  const addText = (text: string | undefined) => { for (const [, id] of (text ?? '').matchAll(MENTION)) ids.add(id); };
+  const visit = (m: SlackMessage) => {
+    if (m.user) ids.add(m.user);
+    if (m.parent?.user) ids.add(m.parent.user);
+    addText(m.text);
+    addText(m.parent?.text);
+    m.replies.forEach(visit);
+  };
+  for (const c of conversations) {
+    if (c.user) ids.add(c.user);
+    c.messages.forEach(visit);
+  }
+  return ids;
+}
+
+export interface ResolveNamesOptions {
+  /** Keep Slack's text as sent: mentions and links left as markup. */
+  raw?: boolean;
+}
+
+/**
+ * User ids to names, in authors (with their real and display names), older
+ * threads' parents and direct messages' names; unless `raw`, text markup
+ * (mentions, channel links, links) made readable.
+ */
+export function resolveNames(conversations: SlackConversationMessages[], users: SlackDirectoryEntry[], options: ResolveNamesOptions = {}): void {
+  const byId = new Map(users.map((u) => [u.id, u]));
   const names = new Map(users.map((u) => [u.id, u.displayName || u.realName || u.name]));
+  const channels = new Map(conversations.filter((c) => c.type === 'channel' || c.type === 'private').map((c) => [c.id, c.name]));
   const nameOf = (id: string | undefined, botName?: string) => (id ? names.get(id) ?? id : botName ?? 'unknown');
-  const mentions = (text: string) => text.replace(MENTION, (_, id: string) => `@${names.get(id) ?? id}`);
+  const text = (value: string) => (options.raw ? value : formatSlackText(value, { users: names, channels }));
+  const person = (target: { realName?: string; displayName?: string }, id: string | undefined) => {
+    const entry = id ? byId.get(id) : undefined;
+    if (entry?.realName) target.realName = entry.realName;
+    if (entry?.displayName) target.displayName = entry.displayName;
+  };
   const fix = (m: SlackMessage) => {
     m.userName = nameOf(m.user, m.botName);
-    m.text = mentions(m.text);
-    if (m.parent && (m.parent.user || m.parent.userName)) m.parent.userName = nameOf(m.parent.user, m.parent.userName);
-    if (m.parent?.text) m.parent.text = mentions(m.parent.text);
+    person(m, m.user);
+    m.text = text(m.text);
+    if (m.parent && (m.parent.user || m.parent.userName)) {
+      m.parent.userName = nameOf(m.parent.user, m.parent.userName);
+      person(m.parent, m.parent.user);
+    }
+    if (m.parent?.text) m.parent.text = text(m.parent.text);
     m.replies.forEach(fix);
   };
   for (const c of conversations) {
@@ -118,11 +158,27 @@ export function resolveNames(conversations: SlackConversationMessages[], users: 
   }
 }
 
+/** A link on every message, reply and older thread's parent; an older thread's parent is shared, so set once. */
+export function addPermalinks(conversations: SlackConversationMessages[], teamUrl: string): void {
+  for (const c of conversations) {
+    const visit = (m: SlackMessage) => {
+      m.permalink = messagePermalink(teamUrl, c.id, m.ts, m.threadTs);
+      if (m.parent) m.parent.permalink = messagePermalink(teamUrl, c.id, m.parent.ts);
+      m.replies.forEach(visit);
+    };
+    c.messages.forEach(visit);
+  }
+}
+
 export interface SlackMessagesOptions {
   range: SlackMessageRange;
   types?: SlackConversationType[];
   /** --channel values: ids or names. */
   channels?: string[];
+  /** Also read public channels you are not in, without joining them. */
+  includePublic?: boolean;
+  /** Keep Slack's text markup as sent. */
+  raw?: boolean;
   /** For stderr. */
   onWarning?: (message: string) => void;
   onProgress?: (done: number, total: number) => void;
@@ -134,18 +190,41 @@ const SKIPPABLE = new Set(['channel_not_found', 'not_in_channel', 'thread_not_fo
 /** Search failures that leave pass A's results usable: a missing search:read, or rate limits. */
 const searchSkippable = (error: unknown): error is CliError => error instanceof CliError
   && (error.code === 'RATE_LIMITED' || (error instanceof SlackApiError && error.slackError === 'missing_scope'));
-const skippable = (error: unknown) => error instanceof SlackApiError && SKIPPABLE.has(error.slackError);
-const labelOf = (c: SlackConversation) => (c.type === 'dm' ? `the direct message with ${c.name}` : `#${c.name}`);
+/** A public channel you are not in can also be refused for a missing scope or for not being a member; that loses only it. */
+const NOT_MEMBER_SKIPPABLE = new Set(['missing_scope', 'not_in_channel']);
+const skippable = (error: unknown, conversation?: SlackConversation) => error instanceof SlackApiError
+  && (SKIPPABLE.has(error.slackError) || (conversation?.isMember === false && NOT_MEMBER_SKIPPABLE.has(error.slackError)));
+const labelOf = (c: SlackConversation) => {
+  if (c.type === 'dm') return `the direct message with ${c.name}`;
+  return c.isMember ? `#${c.name}` : `#${c.name} (public, not a member)`;
+};
+
+/** The conversations to read: yours, without Slackbot's direct message, then with --include-public every other public channel. */
+async function listConversations(client: SlackClient, types: SlackConversationType[], includePublic: boolean): Promise<SlackConversation[]> {
+  if (includePublic && !types.includes('channel')) {
+    throw new CliError('INVALID_PARAMS', '--include-public reads public channels, which --types leaves out', 'Add channel to --types');
+  }
+  // Slackbot's direct message cannot be read through the API; it is left out rather than warned about each run.
+  const mine = (await client.listMyConversations(types)).filter((c) => !(c.type === 'dm' && c.user === SLACKBOT_ID));
+  if (!includePublic) return mine;
+  const ids = new Set(mine.map((c) => c.id));
+  const others = (await client.listPublicChannels())
+    .filter((c) => !ids.has(c.id))
+    .map((c): SlackConversation => ({ id: c.id, name: c.name, type: 'channel', isMember: false }));
+  return [...mine, ...others];
+}
 
 /**
- * Every message in the range, in the conversations you are in: each
- * conversation's history and the threads under it, then search for replies
- * in threads that started before the range.
+ * Every message in the range, in the conversations you are in (and with
+ * includePublic the public channels you are not in): each conversation's
+ * history and the threads under it, then search for replies in threads that
+ * started before the range. Read-only: nothing is joined or marked read.
  */
 export async function collectMessages(client: SlackClient, options: SlackMessagesOptions): Promise<SlackMessagesResult> {
   const { range } = options;
   const warn = options.onWarning ?? (() => {});
-  const listed = pickConversations(await client.listMyConversations(options.types ?? SLACK_CONVERSATION_TYPES), options.channels);
+  const types = options.types ?? SLACK_CONVERSATION_TYPES;
+  const listed = pickConversations(await listConversations(client, types, !!options.includePublic), options.channels);
   const conversations = new Map(listed.map((c) => [c.id, { ...c, messages: [] as SlackMessage[] }]));
   const seen = new Set<string>();
 
@@ -155,7 +234,7 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
     try {
       await readHistory(client, conversation, range, seen, warn);
     } catch (error) {
-      if (!skippable(error)) throw error;
+      if (!skippable(error, conversation)) throw error;
       warn(`Could not read ${labelOf(conversation)}: ${(error as Error).message}`);
       // Left out entirely: a few search results would make it look read.
       conversations.delete(conversation.id);
@@ -172,7 +251,12 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
   await nameOlderThreads(client, conversations);
 
   const found = [...conversations.values()].filter((c) => c.messages.length > 0);
-  if (found.length > 0) resolveNames(found, await client.listUsers({ includeDeleted: true, includeBots: true }));
+  if (found.length > 0) {
+    const auth = await client.authTest();
+    const directory = new SlackDirectory(client, `${auth.teamId}:${auth.userId}`);
+    resolveNames(found, await directory.entries(referencedUsers(found)), { raw: options.raw });
+    if (auth.url) addPermalinks(found, auth.url);
+  }
   for (const c of found) sortConversation(c);
   found.sort((a, b) => countMessages(b) - countMessages(a));
   return { since: range.since.toISOString(), until: range.until.toISOString(), conversations: found };
@@ -191,7 +275,7 @@ async function readHistory(
       const replies = await client.replies(conversation.id, parent.ts);
       placeMessages(conversation, replies.filter((r) => inRange(r.ts, range)), seen);
     } catch (error) {
-      if (!skippable(error)) throw error;
+      if (!skippable(error, conversation)) throw error;
       warn(`Could not read a thread in ${labelOf(conversation)}: ${(error as Error).message}`);
     }
   }

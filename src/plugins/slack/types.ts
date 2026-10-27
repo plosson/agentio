@@ -109,6 +109,8 @@ export interface SlackConversation {
   type: SlackConversationType;
   /** Direct messages: the other person's user id. */
   user?: string;
+  /** False for a public channel read without being in it (`--include-public`). */
+  isMember: boolean;
 }
 
 /** Both ends inclusive. */
@@ -117,13 +119,39 @@ export interface SlackMessageRange {
   until: Date;
 }
 
-/** The message that started an older thread; only `ts` when it could not be read. */
+/** A file shared in a message. Only `id` and `name` are always there: Slack leaves the rest out for deleted or hidden files. */
+export interface SlackFile {
+  id: string;
+  name: string;
+  mimetype?: string;
+  /** Bytes. */
+  size?: number;
+  /** Needs the token in an Authorization header; see `agentio slack download`. */
+  urlPrivateDownload?: string;
+  permalink?: string;
+  /** Slack's mode when it is not a normal upload: external, snippet, post, tombstone (deleted), hidden_by_limit. */
+  mode?: string;
+}
+
+/** What names are resolved from: one workspace member. */
+export interface SlackDirectoryEntry {
+  id: string;
+  /** The handle. */
+  name: string;
+  realName?: string;
+  displayName?: string;
+}
+
+/** The message that started an older thread; only `ts` (and `permalink`) when it could not be read. */
 export interface SlackThreadParent {
   ts: string;
   user?: string;
   userName?: string;
+  realName?: string;
+  displayName?: string;
   text?: string;
-  files?: string[];
+  files?: SlackFile[];
+  permalink?: string;
 }
 
 export interface SlackMessage {
@@ -131,13 +159,18 @@ export interface SlackMessage {
   user?: string;
   /** Bots post without a user; Slack gives their name instead. */
   botName?: string;
-  /** Set when names are resolved. */
+  /** Set when names are resolved: the display name, else the real name, else the handle. */
   userName?: string;
+  /** The author's full name and display name, when the workspace has them. */
+  realName?: string;
+  displayName?: string;
   text: string;
   /** The parent's ts, for a thread reply or a thread parent. */
   threadTs?: string;
   replyCount: number;
-  files: string[];
+  files: SlackFile[];
+  /** A link to the message in Slack; a thread reply's opens its thread. */
+  permalink?: string;
   replies: SlackMessage[];
   source: 'history' | 'search';
   /** Only on a reply in a thread that started before the range. */
@@ -164,4 +197,40 @@ export interface SlackSearchResult {
   matches: SlackSearchMatch[];
   /** Not every match was read: past Slack's 100 pages, or rate-limited partway. */
   truncated: boolean;
+}
+
+/** One file in an `agentio slack attachments` run. */
+export interface SlackManifestEntry {
+  conversationId: string;
+  conversation: string;
+  messageTs: string;
+  /** ISO 8601. */
+  time: string;
+  user?: string;
+  userName?: string;
+  realName?: string;
+  permalink?: string;
+  fileId: string;
+  name: string;
+  mimetype?: string;
+  size?: number;
+  /** Path the file was (or, in a dry run, would be) saved to. */
+  savedPath: string;
+  status: 'saved' | 'failed' | 'skipped' | 'planned';
+  bytes?: number;
+  /** Why the file failed or was skipped. */
+  error?: string;
+}
+
+export interface SlackAttachmentsResult {
+  outDir: string;
+  messagesScanned: number;
+  messagesWithFiles: number;
+  files: number;
+  saved: number;
+  failed: number;
+  skipped: number;
+  manifestJson: string;
+  manifestCsv: string;
+  entries: SlackManifestEntry[];
 }

@@ -98,8 +98,8 @@ describe('slackProfileAdd with a user token', () => {
   test('the token flow checks the token with auth.test and stores who it acts as', async () => {
     const context = fakeSetupContext({ 'Profile type': 'token', 'User OAuth Token': `  ${TOKEN} ` });
     const result = await slackProfileAdd({}, context);
-    expect(result.credentials).toEqual({ type: 'token', token: TOKEN, teamId: 'T0001', teamName: 'Hex-Rays SA', userName: 'admin' });
-    expect(result.suggestedProfileName).toBe('hex-rays-sa');
+    expect(result.credentials).toEqual({ type: 'token', token: TOKEN, teamId: 'T0001', teamName: 'Example Co', userName: 'admin' });
+    expect(result.suggestedProfileName).toBe('example-co');
     expect(result.info ?? '').not.toContain(TOKEN);
     expect(fake.log.map((c) => c.url)).toEqual(['https://slack.com/api/auth.test']);
   });

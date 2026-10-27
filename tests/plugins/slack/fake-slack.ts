@@ -1,7 +1,8 @@
 /**
  * An in-process stand-in for the Slack Web API: it replaces globalThis.fetch,
  * answers slack.com/api/<method> as Slack does (HTTP 200 with `ok: false` for
- * API errors, 429 with Retry-After for rate limits), and refuses any other host.
+ * API errors, 429 with Retry-After for rate limits), serves files.slack.com
+ * downloads (its sign-in page without files:read), and refuses any other host.
  */
 
 import { expect } from 'bun:test';
@@ -74,7 +75,30 @@ export interface FakeMessage {
   subtype?: string;
   text: string;
   thread_ts?: string;
-  files?: { name: string }[];
+  files?: Record<string, unknown>[];
+}
+
+/** A file Slack hosts: files.info answers `raw`; its download URL serves `content`. */
+export interface FakeFile {
+  raw: Record<string, unknown>;
+  content: string;
+  contentType: string;
+}
+
+export const FILE_HOST = 'https://files.slack.com';
+
+/** A hosted file, with its download URL and permalink. */
+export function fakeFile(id: string, name: string, content = `content of ${name}`, overrides: Record<string, unknown> = {}): FakeFile {
+  return {
+    raw: {
+      id, name, title: name, mimetype: 'text/plain', size: content.length, mode: 'hosted',
+      url_private_download: `${FILE_HOST}/files-pri/T0001-${id}/download/${name}`,
+      permalink: `https://example.slack.com/files/U0001/${id}/${name}`,
+      ...overrides,
+    },
+    content,
+    contentType: 'text/plain',
+  };
 }
 
 /** A Slack timestamp for an ISO date: whole seconds, then a six-digit sequence. */
@@ -104,13 +128,13 @@ function inWindow(ts: string, oldest: string | undefined, latest: string | undef
 const ALL_SCOPES = [
   'users:read', 'users:read.email', 'channels:read', 'groups:read',
   'channels:manage', 'groups:write', 'channels:write.invites', 'groups:write.invites', 'channels:write',
-  'channels:history', 'groups:history', 'im:history', 'mpim:history', 'im:read', 'mpim:read', 'search:read',
+  'channels:history', 'groups:history', 'im:history', 'mpim:history', 'im:read', 'mpim:read', 'search:read', 'files:read',
 ];
 
 export class FakeSlack {
   readonly log: LoggedCall[] = [];
   readonly queue: Scripted[] = [];
-  team = { id: 'T0001', name: 'Hex-Rays SA' };
+  team = { id: 'T0001', name: 'Example Co', url: 'https://example.slack.com/' };
   self = { id: 'U0ADMIN', name: 'admin' };
   /** users.list answers these, `pageSize` per page. */
   users: Record<string, unknown>[] = [rawUser('U0001'), rawUser('U0002')];
@@ -129,6 +153,8 @@ export class FakeSlack {
   /** When set, search.messages answers these raw matches instead of searching. */
   searchMatches?: Record<string, unknown>[];
   searchPageSize = 100;
+  /** Files by id, for files.info and downloads. */
+  files: Record<string, FakeFile> = {};
   /** Answers for one call by its 1-based number, before the queue. */
   private readonly at = new Map<number, Scripted>();
   private readonly original = globalThis.fetch;
@@ -151,6 +177,7 @@ export class FakeSlack {
     const params = Object.fromEntries(new URLSearchParams(typeof init?.body === 'string' ? init.body : ''));
     this.log.push({ url, method: init?.method ?? 'GET', authorization: headers.get('authorization'), contentType: headers.get('content-type'), params });
 
+    if (url.startsWith(`${FILE_HOST}/`)) return this.download(url, headers.get('authorization'));
     if (!url.startsWith('https://slack.com/api/')) throw new TypeError(`blocked: ${url}`);
 
     const scriptedAt = this.at.get(this.log.length);
@@ -171,7 +198,7 @@ export class FakeSlack {
     const need = (scope: string) => (this.scopes.has(scope) ? null : { ok: false, error: 'missing_scope', needed: scope, provided: [...this.scopes].join(',') });
     switch (method) {
       case 'auth.test':
-        return { ok: true, team_id: this.team.id, team: this.team.name, user_id: this.self.id, user: this.self.name, url: 'https://hex-rays.slack.com/' };
+        return { ok: true, team_id: this.team.id, team: this.team.name, user_id: this.self.id, user: this.self.name, url: this.team.url };
       case 'users.list': {
         const denied = need('users:read');
         if (denied) return denied;
@@ -336,6 +363,12 @@ export class FakeSlack {
           },
         };
       }
+      case 'files.info': {
+        const denied = need('files:read');
+        if (denied) return denied;
+        const file = this.files[params.file ?? ''];
+        return file ? { ok: true, file: file.raw } : { ok: false, error: 'file_not_found' };
+      }
       default:
         return { ok: false, error: 'unknown_method' };
     }
@@ -363,7 +396,7 @@ export class FakeSlack {
       .map(({ thread_ts, ...m }) => ({
         ...m,
         channel: { id: c.id, name: c.name },
-        permalink: `https://hex-rays.slack.com/archives/${c.id}/p${m.ts.replace('.', '')}`
+        permalink: `${this.team.url}archives/${c.id}/p${m.ts.replace('.', '')}`
           + (thread_ts && thread_ts !== m.ts ? `?thread_ts=${thread_ts}&cid=${c.id}` : ''),
       })))
       .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
@@ -383,6 +416,16 @@ export class FakeSlack {
     const start = cursor ? Number(cursor.replace('page-', '')) : 0;
     const next = start + this.channelPageSize;
     return { ok: true, [key]: items.slice(start, next), response_metadata: { next_cursor: next < items.length ? `page-${next}` : '' } };
+  }
+
+  /** As Slack does: the file with the token and files:read, otherwise its sign-in page, HTTP 200 either way. */
+  private download(url: string, authorization: string | null): Response {
+    const file = Object.values(this.files).find((f) => f.raw.url_private_download === url);
+    if (!file) return new Response('not found', { status: 404 });
+    if (authorization !== `Bearer ${TOKEN}` || !this.scopes.has('files:read')) {
+      return new Response('<!DOCTYPE html><html><body>Sign in to Slack</body></html>', { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+    return new Response(file.content, { status: 200, headers: { 'Content-Type': file.contentType } });
   }
 
   private json(body: unknown): Response {

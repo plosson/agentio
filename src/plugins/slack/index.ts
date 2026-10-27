@@ -7,7 +7,7 @@ const slack = defineServicePlugin<SlackCredentials>()({
   apiVersion: 1,
   id: 'slack',
   displayName: 'Slack',
-  description: 'Use when sending Slack messages, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.',
+  description: 'Use when sending or reading Slack messages, downloading files shared in Slack, looking up workspace members, or creating and managing channels and their members, via the agentio CLI.',
   brand: { url: 'https://app.slack.com' },
   registerCommands: registerSlackCommands,
   profile: {
