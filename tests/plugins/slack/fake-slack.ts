@@ -59,6 +59,8 @@ export interface FakeChannel {
   is_mpim?: boolean;
   /** Direct messages: the other person. */
   user?: string;
+  /** The file id of the channel's canvas. */
+  canvas?: string;
   /** Top-level messages and thread replies alike; replies carry thread_ts. */
   messages: FakeMessage[];
 }
@@ -75,6 +77,21 @@ export interface FakeMessage {
   text: string;
   thread_ts?: string;
   files?: { name: string }[];
+}
+
+export interface FakeCanvas {
+  id: string;
+  title: string;
+  user: string;
+  /** What a download returns. */
+  html: string;
+  /** The last Markdown written by create or edit. */
+  markdown: string;
+  channel?: string;
+  created: number;
+  updated: number;
+  /** User or channel id → access level. */
+  access: Record<string, string>;
 }
 
 /** A Slack timestamp for an ISO date: whole seconds, then a six-digit sequence. */
@@ -105,6 +122,7 @@ const ALL_SCOPES = [
   'users:read', 'users:read.email', 'channels:read', 'groups:read',
   'channels:manage', 'groups:write', 'channels:write.invites', 'groups:write.invites', 'channels:write',
   'channels:history', 'groups:history', 'im:history', 'mpim:history', 'im:read', 'mpim:read', 'search:read',
+  'canvases:read', 'canvases:write', 'files:read',
 ];
 
 export class FakeSlack {
@@ -131,6 +149,29 @@ export class FakeSlack {
   searchPageSize = 100;
   /** Answers for one call by its 1-based number, before the queue. */
   private readonly at = new Map<number, Scripted>();
+  canvases: FakeCanvas[] = [];
+  /** Files that are not canvases, which files.list pages over too. */
+  otherFiles: Record<string, unknown>[] = [];
+  /** files.list answers this many files per page, before keeping canvases. */
+  filesPageSize = 100;
+  /** The download link files.info gives; replace it to test the token guard. */
+  downloadUrlFor = (c: FakeCanvas) => `https://files.slack.com/files-pri/T0001-${c.id}/download`;
+  /** When set, every download answers this. */
+  downloadAnswer?: { status: number; contentType?: string; body?: string };
+  /** Each canvases.edit call's changes, in order. */
+  readonly edits: { id: string; changes: Record<string, unknown>[] }[] = [];
+  /** Each canvases.access.set or .delete call's parameters, in order. */
+  readonly accessCalls: { method: string; params: Record<string, string> }[] = [];
+
+  addCanvas(fields: Partial<FakeCanvas> & { title: string }): FakeCanvas {
+    const n = this.canvases.length + 1;
+    const canvas: FakeCanvas = {
+      id: `F0CANVAS${String(n).padStart(2, '0')}`, user: this.self.id, html: '<div class="quip-canvas-content"></div>', markdown: '',
+      created: 1792454400 + n, updated: 1792454400 + n, access: {}, ...fields,
+    };
+    this.canvases.push(canvas);
+    return canvas;
+  }
   private readonly original = globalThis.fetch;
 
   constructor() {
@@ -151,6 +192,7 @@ export class FakeSlack {
     const params = Object.fromEntries(new URLSearchParams(typeof init?.body === 'string' ? init.body : ''));
     this.log.push({ url, method: init?.method ?? 'GET', authorization: headers.get('authorization'), contentType: headers.get('content-type'), params });
 
+    if (url.startsWith('https://files.slack.com/')) return this.download(url, headers.get('authorization'));
     if (!url.startsWith('https://slack.com/api/')) throw new TypeError(`blocked: ${url}`);
 
     const scriptedAt = this.at.get(this.log.length);
@@ -336,6 +378,80 @@ export class FakeSlack {
           },
         };
       }
+      case 'files.list': {
+        const denied = need('files:read');
+        if (denied) return denied;
+        const page = Number(params.page ?? '1');
+        const size = this.filesPageSize;
+        // Like Slack: pages over every file, then keeps the asked type.
+        const all = [...this.canvases.map((c) => this.canvasFile(c)), ...this.otherFiles]
+          .filter((f) => !params.user || f.user === params.user);
+        const slice = all.slice((page - 1) * size, page * size);
+        const files = params.types === 'canvas' ? slice.filter((f) => f.filetype === 'quip') : slice;
+        return { ok: true, files, paging: { count: size, total: all.length, page, pages: Math.max(1, Math.ceil(all.length / size)) } };
+      }
+      case 'files.info': {
+        const denied = need('files:read');
+        if (denied) return denied;
+        const canvas = this.canvases.find((c) => c.id === params.file);
+        if (canvas) return { ok: true, file: this.canvasFile(canvas) };
+        const file = this.otherFiles.find((f) => f.id === params.file);
+        return file ? { ok: true, file } : { ok: false, error: 'file_not_found' };
+      }
+      case 'canvases.create': {
+        const denied = need('canvases:write');
+        if (denied) return denied;
+        const markdown = params.document_content ? (JSON.parse(params.document_content) as { markdown: string }).markdown : '';
+        return { ok: true, canvas_id: this.addCanvas({ title: params.title ?? 'Untitled', markdown }).id };
+      }
+      case 'conversations.canvases.create': {
+        const denied = need('canvases:write');
+        if (denied) return denied;
+        const channel = this.find(params.channel_id);
+        if (!channel) return { ok: false, error: 'channel_not_found' };
+        if (channel.canvas) return { ok: false, error: 'channel_canvas_already_exists' };
+        const markdown = params.document_content ? (JSON.parse(params.document_content) as { markdown: string }).markdown : '';
+        const canvas = this.addCanvas({ title: '', markdown, channel: channel.id });
+        channel.canvas = canvas.id;
+        return { ok: true, canvas_id: canvas.id };
+      }
+      case 'canvases.edit': {
+        const denied = need('canvases:write');
+        if (denied) return denied;
+        const canvas = this.canvases.find((c) => c.id === params.canvas_id);
+        if (!canvas) return { ok: false, error: 'canvas_not_found' };
+        const changes = JSON.parse(params.changes ?? '[]') as Record<string, any>[];
+        for (const change of changes) {
+          if (change.operation === 'replace' && !change.section_id) canvas.markdown = change.document_content.markdown;
+          else if (change.operation === 'rename') canvas.title = change.title_content.markdown;
+          else return { ok: false, error: 'invalid_arguments' };
+        }
+        this.edits.push({ id: canvas.id, changes });
+        return { ok: true };
+      }
+      case 'canvases.access.set':
+      case 'canvases.access.delete': {
+        const denied = need('canvases:write');
+        if (denied) return denied;
+        const canvas = this.canvases.find((c) => c.id === params.canvas_id);
+        if (!canvas) return { ok: false, error: 'canvas_not_found' };
+        this.accessCalls.push({ method, params });
+        const ids = [...JSON.parse(params.user_ids ?? '[]'), ...JSON.parse(params.channel_ids ?? '[]')] as string[];
+        if (ids.length === 0) return { ok: false, error: 'invalid_arguments' };
+        for (const id of ids) {
+          if (method === 'canvases.access.set') canvas.access[id] = params.access_level;
+          else delete canvas.access[id];
+        }
+        return { ok: true };
+      }
+      case 'canvases.delete': {
+        const denied = need('canvases:write');
+        if (denied) return denied;
+        const index = this.canvases.findIndex((c) => c.id === params.canvas_id);
+        if (index < 0) return { ok: false, error: 'canvas_not_found' };
+        this.canvases.splice(index, 1);
+        return { ok: true };
+      }
       default:
         return { ok: false, error: 'unknown_method' };
     }
@@ -344,6 +460,25 @@ export class FakeSlack {
   /** Private channels are visible only to their members, as for a real user token. */
   private visible(c: FakeChannel): boolean {
     return (!c.is_private && !c.is_im && !c.is_mpim) || c.members.includes(this.self.id);
+  }
+
+  private canvasFile(c: FakeCanvas): Record<string, unknown> {
+    return {
+      id: c.id, title: c.title, name: c.title, filetype: 'quip', pretty_type: 'Canvas', user: c.user,
+      created: c.created, updated: c.updated, permalink: `https://example.slack.com/docs/T0001/${c.id}`,
+      url_private_download: this.downloadUrlFor(c), linked_channel_id: c.channel ?? null,
+    };
+  }
+
+  private download(url: string, authorization: string | null): Response {
+    if (this.downloadAnswer) {
+      const a = this.downloadAnswer;
+      return new Response(a.body ?? '', { status: a.status, headers: { 'Content-Type': a.contentType ?? 'text/html; charset=utf-8' } });
+    }
+    if (authorization !== `Bearer ${TOKEN}`) return new Response('', { status: 403 });
+    const canvas = this.canvases.find((c) => url === this.downloadUrlFor(c));
+    if (!canvas) return new Response('', { status: 404 });
+    return new Response(canvas.html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
 
   private withReplyCount(c: FakeChannel, m: FakeMessage): Record<string, unknown> {
@@ -375,8 +510,9 @@ export class FakeSlack {
   }
 
   private view(c: FakeChannel): Record<string, unknown> {
-    const { members, messages, ...rest } = c;
-    return { ...rest, topic: { ...c.topic }, purpose: { ...c.purpose }, is_member: members.includes(this.self.id) };
+    const { members, messages, canvas, ...rest } = c;
+    return { ...rest, topic: { ...c.topic }, purpose: { ...c.purpose }, is_member: members.includes(this.self.id),
+      properties: canvas ? { canvas: { file_id: canvas } } : {} };
   }
 
   private page(items: unknown[], cursor: string | undefined, key: string): Record<string, unknown> {

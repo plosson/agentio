@@ -3,6 +3,9 @@ import { CliError, httpStatusToErrorCode, type ErrorCode } from '../../utils/err
 import type {
   SlackChannelChange,
   SlackAuthInfo,
+  SlackCanvas,
+  SlackCanvasAccessLevel,
+  SlackCanvasTargets,
   SlackChannel,
   SlackChannelCreateOptions,
   SlackChannelListOptions,
@@ -89,6 +92,25 @@ interface RawSearchMatch extends Partial<RawMessage> {
   permalink?: unknown;
 }
 
+interface RawFile {
+  id: string;
+  title?: string;
+  name?: string;
+  filetype?: string;
+  user?: string;
+  created?: number;
+  updated?: number;
+  permalink?: string;
+  url_private_download?: string;
+  linked_channel_id?: string | null;
+}
+
+/** Canvases are files of this type. */
+export const CANVAS_FILETYPE = 'quip';
+/** files.list: at most 100 files per page; pages are read up to this many. */
+const FILES_PAGE_SIZE = 100;
+const FILES_MAX_PAGES = 100;
+
 /** Slack's conversation type for each of ours. */
 const CONVERSATION_TYPES: Record<SlackConversationType, string> = {
   channel: 'public_channel', private: 'private_channel', dm: 'im', group: 'mpim',
@@ -124,6 +146,15 @@ const API_ERRORS: Record<string, { code: ErrorCode; message: string; suggestion?
   user_is_restricted: { code: 'PERMISSION_DENIED', message: 'A guest cannot be invited here' },
   user_is_ultra_restricted: { code: 'INVALID_PARAMS', message: 'A single-channel guest cannot join a second channel' },
   thread_not_found: { code: 'NOT_FOUND', message: 'The thread is gone, perhaps deleted' },
+  file_not_found: { code: 'NOT_FOUND', message: 'No canvas or file with this id is visible to you' },
+  file_deleted: { code: 'NOT_FOUND', message: 'The canvas was deleted' },
+  canvas_not_found: { code: 'NOT_FOUND', message: 'No canvas with this id is visible to you' },
+  canvas_deleted: { code: 'NOT_FOUND', message: 'The canvas was deleted' },
+  canvas_creation_failed: { code: 'API_ERROR', message: 'Slack could not create a canvas from this Markdown', suggestion: 'Check the Markdown: headings, lists, links and mentions such as ![](@U123) are supported' },
+  canvas_editing_failed: { code: 'API_ERROR', message: 'Slack could not apply this Markdown to the canvas', suggestion: 'Check the Markdown: headings, lists, links and mentions such as ![](@U123) are supported' },
+  channel_canvas_already_exists: { code: 'INVALID_PARAMS', message: 'This channel already has a canvas', suggestion: 'Replace its content with: agentio slack canvases set #<channel>' },
+  canvas_disabled_user_team: { code: 'PERMISSION_DENIED', message: 'Canvases are turned off in this workspace' },
+  team_tier_cannot_create_channel_canvases: { code: 'PERMISSION_DENIED', message: 'This workspace\'s plan does not allow channel canvases' },
 };
 
 export function isTokenCredentials(credentials: SlackCredentials): credentials is SlackTokenCredentials {
@@ -212,6 +243,35 @@ export function threadTsFromPermalink(permalink: unknown): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function toCanvas(raw: RawFile): SlackCanvas {
+  const iso = (s?: number) => (s ? new Date(s * 1000).toISOString() : undefined);
+  return {
+    id: raw.id,
+    title: raw.title ?? raw.name ?? '',
+    owner: raw.user || undefined,
+    created: iso(raw.created),
+    updated: iso(raw.updated),
+    link: raw.permalink || undefined,
+    channelId: raw.linked_channel_id || undefined,
+  };
+}
+
+/** The canvas download link, refused unless it is https://files.slack.com, so the token goes nowhere else. */
+export function checkDownloadUrl(url: unknown): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    throw new CliError('API_ERROR', 'Slack gave no download link for this canvas');
+  }
+  if (typeof url !== 'string' || parsed.protocol !== 'https:' || parsed.hostname !== 'files.slack.com'
+    || parsed.username || parsed.password || parsed.port) {
+    throw new CliError('API_ERROR', `Refusing to send the Slack token to ${parsed.protocol}//${parsed.host}`,
+      'Canvas downloads come only from https://files.slack.com');
+  }
+  return parsed.toString();
 }
 
 /** Slack timestamps have more digits than a Number holds, so they compare as strings. */
@@ -460,6 +520,99 @@ export class SlackClient implements ServiceClient {
       }
     }
     return { matches, truncated };
+  }
+
+  /** Every canvas you can see. files.list filters after paging, so every page is read. */
+  async listCanvases(options: { user?: string } = {}): Promise<SlackCanvas[]> {
+    const canvases: SlackCanvas[] = [];
+    for (let page = 1, pages = 1; page <= pages; page++) {
+      const data = await this.call<SlackApiResponse & { files?: RawFile[]; paging?: { pages?: number } }>('files.list', {
+        types: 'canvas', count: String(FILES_PAGE_SIZE), page: String(page), ...(options.user ? { user: options.user } : {}),
+      });
+      pages = Math.min(data.paging?.pages ?? 1, FILES_MAX_PAGES);
+      canvases.push(...(data.files ?? []).filter((f) => f.filetype === CANVAS_FILETYPE).map(toCanvas));
+    }
+    return canvases;
+  }
+
+  /** One canvas, with its download link; NOT_FOUND when the id is a file of another kind. */
+  async canvasInfo(id: string): Promise<SlackCanvas & { downloadUrl?: string }> {
+    const data = await this.call<SlackApiResponse & { file: RawFile }>('files.info', { file: id });
+    if (data.file?.filetype !== CANVAS_FILETYPE) throw new CliError('NOT_FOUND', `${id} is a file, not a canvas`);
+    return { ...toCanvas(data.file), downloadUrl: data.file.url_private_download };
+  }
+
+  /** A canvas's HTML, from files.slack.com only; a redirect is refused rather than followed with the token. */
+  async downloadCanvasHtml(url: string | undefined): Promise<string> {
+    const target = checkDownloadUrl(url);
+    if (!isTokenCredentials(this.credentials)) {
+      throw new CliError('INVALID_PARAMS', 'This Slack profile is a webhook, which can only send messages',
+        'Add a profile with a user token: agentio slack profile add');
+    }
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        headers: { Authorization: `Bearer ${this.credentials.token}` },
+        redirect: 'error',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch {
+      throw new CliError('NETWORK_ERROR', 'Cannot download the canvas from files.slack.com', 'Check your network connection');
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new CliError('PERMISSION_DENIED', 'Slack refused the canvas download', 'Check that the token has files:read and that the canvas is shared with you');
+    }
+    if (response.status === 404) throw new CliError('NOT_FOUND', 'The canvas content is gone');
+    if (!response.ok) throw new CliError('API_ERROR', `Slack answered the canvas download with HTTP ${response.status}`);
+    if (!(response.headers.get('content-type') ?? '').includes('text/html')) {
+      throw new CliError('API_ERROR', 'Slack sent the canvas in an unexpected format, not HTML');
+    }
+    return response.text();
+  }
+
+  /** The file id of a channel's canvas; undefined when the channel has none. */
+  async channelCanvasId(channelId: string): Promise<string | undefined> {
+    const data = await this.call<SlackApiResponse & { channel: { properties?: { canvas?: { file_id?: string } } } }>('conversations.info', { channel: channelId });
+    return data.channel?.properties?.canvas?.file_id || undefined;
+  }
+
+  /** A new standalone canvas; its id. */
+  async createCanvas(title: string, markdown: string): Promise<string> {
+    const data = await this.call<SlackApiResponse & { canvas_id: string }>('canvases.create', {
+      title,
+      ...(markdown ? { document_content: JSON.stringify({ type: 'markdown', markdown }) } : {}),
+    });
+    return data.canvas_id;
+  }
+
+  /** A channel's canvas; its id. */
+  async createChannelCanvas(channelId: string, markdown: string): Promise<string> {
+    const data = await this.call<SlackApiResponse & { canvas_id: string }>('conversations.canvases.create', {
+      channel_id: channelId,
+      ...(markdown ? { document_content: JSON.stringify({ type: 'markdown', markdown }) } : {}),
+    });
+    return data.canvas_id;
+  }
+
+  /** One canvases.edit change, such as a whole-document replace or a rename. */
+  async editCanvas(id: string, change: Record<string, unknown>): Promise<void> {
+    await this.call('canvases.edit', { canvas_id: id, changes: JSON.stringify([change]) });
+  }
+
+  /** Gives access; users and channels go in separate calls. */
+  async setCanvasAccess(id: string, level: SlackCanvasAccessLevel, targets: SlackCanvasTargets): Promise<void> {
+    if (targets.users.length) await this.call('canvases.access.set', { canvas_id: id, access_level: level, user_ids: JSON.stringify(targets.users) });
+    if (targets.channels.length) await this.call('canvases.access.set', { canvas_id: id, access_level: level, channel_ids: JSON.stringify(targets.channels) });
+  }
+
+  /** Removes access; users and channels go in separate calls. */
+  async removeCanvasAccess(id: string, targets: SlackCanvasTargets): Promise<void> {
+    if (targets.users.length) await this.call('canvases.access.delete', { canvas_id: id, user_ids: JSON.stringify(targets.users) });
+    if (targets.channels.length) await this.call('canvases.access.delete', { canvas_id: id, channel_ids: JSON.stringify(targets.channels) });
+  }
+
+  async deleteCanvas(id: string): Promise<void> {
+    await this.call('canvases.delete', { canvas_id: id });
   }
 
   /** A new channel, with its topic and purpose; you are its first member. */

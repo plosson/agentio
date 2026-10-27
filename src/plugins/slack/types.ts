@@ -165,3 +165,31 @@ export interface SlackSearchResult {
   /** Not every match was read: past Slack's 100 pages, or rate-limited partway. */
   truncated: boolean;
 }
+
+export type SlackCanvasAccessLevel = 'read' | 'write' | 'owner';
+
+export interface SlackCanvas {
+  id: string;
+  title: string;
+  /** The creator's user id. */
+  owner?: string;
+  /** Set by `list`. */
+  ownerName?: string;
+  /** ISO 8601. */
+  created?: string;
+  updated?: string;
+  link?: string;
+  /** Set for a channel's canvas. */
+  channelId?: string;
+}
+
+export interface SlackCanvasContent extends SlackCanvas {
+  markdown: string;
+  unconverted: string[];
+}
+
+/** Who a canvas is shared with or unshared from, already resolved to ids. */
+export interface SlackCanvasTargets {
+  users: string[];
+  channels: string[];
+}
