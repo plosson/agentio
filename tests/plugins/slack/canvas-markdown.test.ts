@@ -47,7 +47,7 @@ describe('a real canvas', () => {
     expect(markdown).toContain('A layout');
     expect(markdown).toContain('[F0PDF00001](https://example.slack.com/files/U0ALICE01/F0PDF00001/report.pdf)');
     expect(markdown).not.toContain('_SLACK_FILE_ALT_PLACEHOLDER_');
-    expect([...unconverted].sort()).toEqual(['embedded file F0IMAGE001', 'embedded file F0PDF00001', 'layout columns', 'table header row', 'underline']);
+    expect([...unconverted].sort()).toEqual(['embedded file F0IMAGE001', 'embedded file F0PDF00001', 'layout columns', 'mention alone on its line (shown as a profile card)', 'table header row', 'underline']);
   });
 
   test('no HTML and no ids of the HTML structure leak into the Markdown', () => {
@@ -106,6 +106,13 @@ describe('edge cases', () => {
 
   test('blank lines inside a code block are kept', () => {
     expect(htmlToCanvasMarkdown(wrap('<p class="prettyprint line">a<br><br><br>b</p>')).markdown).toBe('```\na\n\n\nb\n```');
+  });
+
+  test('a user mention alone on its line is flagged, one inside a sentence is not', () => {
+    expect(htmlToCanvasMarkdown(wrap('<p class="line"><control><a>@U0ALICE01</a></control></p>')).unconverted)
+      .toEqual(['mention alone on its line (shown as a profile card)']);
+    expect(htmlToCanvasMarkdown(wrap('<p class="line">ask <control><a>@U0ALICE01</a></control> first</p>')).unconverted).toEqual([]);
+    expect(htmlToCanvasMarkdown(wrap('<p class="line"><control><a>#C0GENERAL</a></control></p>')).unconverted).toEqual([]);
   });
 
   test('a link without href keeps its text', () => {
