@@ -17,6 +17,9 @@ const TRANSPARENT = new Set(['DIV', 'SPAN', 'BODY', 'HTML', 'TBODY', 'THEAD', 'T
 const FILE_PLACEHOLDER = /^_SLACK_FILE_ALT_PLACEHOLDER_(F[A-Z0-9]+)$/;
 const EMBEDDED_FILE = /File ID: sf:(F[A-Z0-9]+), File URL: (\S+)/;
 const MENTION = /^([@#])([UWCG][A-Z0-9]+)$/;
+/** Slack's code blocks are paragraphs; as <pre>, turndown keeps their whitespace. They never contain </p>. */
+const CODE_PARAGRAPH = /<p(\s[^>]*\bclass=(['"])[^'"]*\bprettyprint\b[^'"]*\2[^>]*)>([\s\S]*?)<\/p>/g;
+const trimNewlines = (text: string) => text.replace(/^\n+|\n+$/g, '');
 
 type Element = HTMLElement;
 
@@ -111,9 +114,9 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   service.addRule('codeBlock', {
-    filter: (node) => node.nodeName === 'P' && hasClass(node as Element, 'prettyprint'),
+    filter: (node) => node.nodeName === 'PRE' && hasClass(node as Element, 'prettyprint'),
     replacement: (_content, node) => {
-      const code = codeText(node as Element).split('\n').map((line) => line.trimEnd()).join('\n').trim();
+      const code = trimNewlines(codeText(node as Element).split('\n').map((line) => line.trimEnd()).join('\n'));
       return `\n\n\`\`\`\n${code}\n\`\`\`\n\n`;
     },
   });
@@ -160,6 +163,7 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   // Slack pads embedded files with zero-width spaces: paragraphs of nothing else go, and the rest are dropped.
-  const markdown = service.turndown(html).replace(/\n\n[\u200b \t]+(?=\n\n|$)/g, '').replace(/\u200b/g, '').trim();
+  const markdown = trimNewlines(service.turndown(html.replace(CODE_PARAGRAPH, '<pre$1>$3</pre>'))
+    .replace(/\n\n[\u200b \t]+(?=\n\n|$)/g, '').replace(/\u200b/g, ''));
   return { markdown, unconverted: [...unconverted] };
 }

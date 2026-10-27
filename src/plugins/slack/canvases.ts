@@ -1,7 +1,7 @@
 import { CliError } from '../../utils/errors';
 import { htmlToCanvasMarkdown } from './canvas-markdown';
 import { isChannelId, isUserId, type SlackClient } from './client';
-import type { SlackCanvas, SlackCanvasAccessLevel, SlackCanvasContent, SlackCanvasTargets } from './types';
+import type { SlackCanvas, SlackCanvasAccessLevel, SlackCanvasContent, SlackCanvasList, SlackCanvasTargets } from './types';
 
 export const CANVAS_ARGUMENT = 'Canvas id (F…), canvas link, or #channel for that channel\'s canvas';
 
@@ -50,9 +50,10 @@ export async function readCanvas(client: SlackClient, input: string): Promise<Sl
 }
 
 /** Canvases for `list`: newest edit first, with their owners' names. */
-export async function findCanvases(client: SlackClient, options: { channel?: string; mine?: boolean }): Promise<SlackCanvas[]> {
+export async function findCanvases(client: SlackClient, options: { channel?: string; mine?: boolean }): Promise<SlackCanvasList> {
   const user = options.mine ? (await client.authTest()).userId : undefined;
   let canvases: SlackCanvas[];
+  let truncated = false;
   if (options.channel) {
     const channel = await client.getChannel(options.channel);
     const id = await client.channelCanvasId(channel.id);
@@ -62,7 +63,7 @@ export async function findCanvases(client: SlackClient, options: { channel?: str
       if (!user || info.owner === user) canvases.push({ ...info, channelId: channel.id });
     }
   } else {
-    canvases = await client.listCanvases(user ? { user } : {});
+    ({ canvases, truncated } = await client.listCanvases(user ? { user } : {}));
   }
   const names = new Map<string, string>();
   for (const owner of new Set(canvases.map((c) => c.owner).filter((o): o is string => !!o))) {
@@ -74,9 +75,10 @@ export async function findCanvases(client: SlackClient, options: { channel?: str
       names.set(owner, owner);
     }
   }
-  return canvases
+  const named = canvases
     .map((c) => (c.owner ? { ...c, ownerName: names.get(c.owner) } : c))
     .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
+  return { canvases: named, truncated };
 }
 
 /** Share targets as ids, split into users and channels, each once. Comma-separated values are allowed. */

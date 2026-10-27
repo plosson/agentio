@@ -160,6 +160,8 @@ export class FakeSlack {
   downloadAnswer?: { status: number; contentType?: string; body?: string };
   /** Each canvases.edit call's changes, in order. */
   readonly edits: { id: string; changes: Record<string, unknown>[] }[] = [];
+  /** canvases.access.set and .delete answer this Slack error when one of these ids is in the call. */
+  accessErrors: Record<string, string> = {};
   /** Each canvases.access.set or .delete call's parameters, in order. */
   readonly accessCalls: { method: string; params: Record<string, string> }[] = [];
 
@@ -436,8 +438,12 @@ export class FakeSlack {
         const canvas = this.canvases.find((c) => c.id === params.canvas_id);
         if (!canvas) return { ok: false, error: 'canvas_not_found' };
         this.accessCalls.push({ method, params });
-        const ids = [...JSON.parse(params.user_ids ?? '[]'), ...JSON.parse(params.channel_ids ?? '[]')] as string[];
-        if (ids.length === 0) return { ok: false, error: 'invalid_arguments' };
+        // Like Slack: users or channels, not both, 1 to 20 ids.
+        if (params.user_ids && params.channel_ids) return { ok: false, error: 'invalid_arguments' };
+        const ids = JSON.parse(params.user_ids ?? params.channel_ids ?? '[]') as string[];
+        if (ids.length === 0 || ids.length > 20) return { ok: false, error: 'invalid_arguments' };
+        const failing = ids.find((id) => this.accessErrors[id]);
+        if (failing) return { ok: false, error: this.accessErrors[failing] };
         for (const id of ids) {
           if (method === 'canvases.access.set') canvas.access[id] = params.access_level;
           else delete canvas.access[id];

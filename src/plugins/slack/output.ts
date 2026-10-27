@@ -3,6 +3,7 @@ import { countMessages } from './messages';
 import type {
   SlackCanvas,
   SlackCanvasContent,
+  SlackCanvasList,
   SlackChannelChange,
   SlackChannel,
   SlackConversationMessages,
@@ -184,8 +185,9 @@ function canvasLines(c: SlackCanvas): void {
   if (c.link) console.log(`  ${c.link}`);
 }
 
-export function printSlackCanvasList(canvases: SlackCanvas[], json?: boolean): void {
-  emit(json, { canvases }, () => {
+export function printSlackCanvasList({ canvases, truncated }: SlackCanvasList, json?: boolean): void {
+  if (truncated) console.error('Slack stopped listing at 10,000 files, so older canvases may be missing; --mine narrows the search');
+  emit(json, { canvases, truncated }, () => {
     if (canvases.length === 0) {
       console.log('No canvases found');
       return;

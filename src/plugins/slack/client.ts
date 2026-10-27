@@ -5,6 +5,7 @@ import type {
   SlackAuthInfo,
   SlackCanvas,
   SlackCanvasAccessLevel,
+  SlackCanvasList,
   SlackCanvasTargets,
   SlackChannel,
   SlackChannelCreateOptions,
@@ -110,6 +111,8 @@ export const CANVAS_FILETYPE = 'quip';
 /** files.list: at most 100 files per page; pages are read up to this many. */
 const FILES_PAGE_SIZE = 100;
 const FILES_MAX_PAGES = 100;
+/** canvases.access.set and .delete take at most this many ids per call. */
+const ACCESS_BATCH = 20;
 
 /** Slack's conversation type for each of ours. */
 const CONVERSATION_TYPES: Record<SlackConversationType, string> = {
@@ -523,16 +526,19 @@ export class SlackClient implements ServiceClient {
   }
 
   /** Every canvas you can see. files.list filters after paging, so every page is read. */
-  async listCanvases(options: { user?: string } = {}): Promise<SlackCanvas[]> {
+  async listCanvases(options: { user?: string } = {}): Promise<SlackCanvasList> {
     const canvases: SlackCanvas[] = [];
+    let truncated = false;
     for (let page = 1, pages = 1; page <= pages; page++) {
       const data = await this.call<SlackApiResponse & { files?: RawFile[]; paging?: { pages?: number } }>('files.list', {
         types: 'canvas', count: String(FILES_PAGE_SIZE), page: String(page), ...(options.user ? { user: options.user } : {}),
       });
-      pages = Math.min(data.paging?.pages ?? 1, FILES_MAX_PAGES);
+      const total = data.paging?.pages ?? 1;
+      truncated = total > FILES_MAX_PAGES;
+      pages = Math.min(total, FILES_MAX_PAGES);
       canvases.push(...(data.files ?? []).filter((f) => f.filetype === CANVAS_FILETYPE).map(toCanvas));
     }
-    return canvases;
+    return { canvases, truncated };
   }
 
   /** One canvas, with its download link; NOT_FOUND when the id is a file of another kind. */
@@ -556,9 +562,11 @@ export class SlackClient implements ServiceClient {
         redirect: 'error',
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-    } catch {
+    } catch (error) {
+      if (/redirect/i.test(String(error))) throw this.redirected();
       throw new CliError('NETWORK_ERROR', 'Cannot download the canvas from files.slack.com', 'Check your network connection');
     }
+    if (response.status >= 300 && response.status < 400) throw this.redirected();
     if (response.status === 401 || response.status === 403) {
       throw new CliError('PERMISSION_DENIED', 'Slack refused the canvas download', 'Check that the token has files:read and that the canvas is shared with you');
     }
@@ -567,7 +575,15 @@ export class SlackClient implements ServiceClient {
     if (!(response.headers.get('content-type') ?? '').includes('text/html')) {
       throw new CliError('API_ERROR', 'Slack sent the canvas in an unexpected format, not HTML');
     }
-    return response.text();
+    const html = await response.text();
+    // Every canvas is wrapped in this; anything else (a sign-in page, say) must not be taken for its content.
+    if (!html.includes('quip-canvas-content')) throw new CliError('API_ERROR', 'Slack sent a page that is not a canvas');
+    return html;
+  }
+
+  private redirected(): CliError {
+    return new CliError('PERMISSION_DENIED', 'Slack redirected the canvas download, usually to a sign-in page',
+      'Check that the token has files:read and that the canvas is shared with you');
   }
 
   /** The file id of a channel's canvas; undefined when the channel has none. */
@@ -599,16 +615,32 @@ export class SlackClient implements ServiceClient {
     await this.call('canvases.edit', { canvas_id: id, changes: JSON.stringify([change]) });
   }
 
-  /** Gives access; users and channels go in separate calls. */
+  /** Gives access; users and channels go in separate calls of at most 20 ids. */
   async setCanvasAccess(id: string, level: SlackCanvasAccessLevel, targets: SlackCanvasTargets): Promise<void> {
-    if (targets.users.length) await this.call('canvases.access.set', { canvas_id: id, access_level: level, user_ids: JSON.stringify(targets.users) });
-    if (targets.channels.length) await this.call('canvases.access.set', { canvas_id: id, access_level: level, channel_ids: JSON.stringify(targets.channels) });
+    await this.changeAccess('canvases.access.set', { canvas_id: id, access_level: level }, targets, 'shared with');
   }
 
-  /** Removes access; users and channels go in separate calls. */
+  /** Removes access; users and channels go in separate calls of at most 20 ids. */
   async removeCanvasAccess(id: string, targets: SlackCanvasTargets): Promise<void> {
-    if (targets.users.length) await this.call('canvases.access.delete', { canvas_id: id, user_ids: JSON.stringify(targets.users) });
-    if (targets.channels.length) await this.call('canvases.access.delete', { canvas_id: id, channel_ids: JSON.stringify(targets.channels) });
+    await this.changeAccess('canvases.access.delete', { canvas_id: id }, targets, 'unshared from');
+  }
+
+  /** One call per batch; a failure after some batches says who was already changed, so a retry can be scoped. */
+  private async changeAccess(method: string, params: Record<string, string>, targets: SlackCanvasTargets, done: string): Promise<void> {
+    const batches: [string, string[]][] = [];
+    for (const [field, ids] of [['user_ids', targets.users], ['channel_ids', targets.channels]] as const) {
+      for (let i = 0; i < ids.length; i += ACCESS_BATCH) batches.push([field, ids.slice(i, i + ACCESS_BATCH)]);
+    }
+    const changed: string[] = [];
+    for (const [field, ids] of batches) {
+      try {
+        await this.call(method, { ...params, [field]: JSON.stringify(ids) });
+      } catch (error) {
+        if (!(error instanceof CliError) || changed.length === 0) throw error;
+        throw new CliError(error.code, `${error.message}. Already ${done}: ${changed.join(', ')}`, error.suggestion);
+      }
+      changed.push(...ids);
+    }
   }
 
   async deleteCanvas(id: string): Promise<void> {

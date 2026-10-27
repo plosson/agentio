@@ -188,6 +188,12 @@ export interface SlackCanvasContent extends SlackCanvas {
   unconverted: string[];
 }
 
+export interface SlackCanvasList {
+  canvases: SlackCanvas[];
+  /** files.list stopped at its page limit, so older canvases may be missing. */
+  truncated: boolean;
+}
+
 /** Who a canvas is shared with or unshared from, already resolved to ids. */
 export interface SlackCanvasTargets {
   users: string[];

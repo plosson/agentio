@@ -92,14 +92,15 @@ describe('findCanvases', () => {
     fake.addCanvas({ title: 'Old', updated: 1792000000 });
     fake.addCanvas({ title: 'New', user: 'U0001', updated: 1793000000 });
     fake.addCanvas({ title: 'Orphan', user: 'U0GONE001', updated: 1792500000 });
-    const canvases = await findCanvases(client, {});
+    const { canvases, truncated } = await findCanvases(client, {});
+    expect(truncated).toBe(false);
     expect(canvases.map((c) => [c.title, c.ownerName])).toEqual([['New', 'alice'], ['Orphan', 'U0GONE001'], ['Old', 'admin']]);
   });
 
   test('--mine asks Slack for your canvases only', async () => {
     fake.addCanvas({ title: 'Mine' });
     fake.addCanvas({ title: 'Theirs', user: 'U0001' });
-    expect((await findCanvases(client, { mine: true })).map((c) => c.title)).toEqual(['Mine']);
+    expect((await findCanvases(client, { mine: true })).canvases.map((c) => c.title)).toEqual(['Mine']);
     expect(fake.log.find((c) => c.url.endsWith('files.list'))?.params.user).toBe('U0ADMIN');
   });
 
@@ -107,8 +108,8 @@ describe('findCanvases', () => {
     const canvas = fake.addCanvas({ title: 'Docs', channel: 'C0DOCS' });
     fake.addCanvas({ title: 'Other' });
     fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: canvas.id }));
-    expect((await findCanvases(client, { channel: '#docs' })).map((c) => c.title)).toEqual(['Docs']);
-    expect(await findCanvases(client, { channel: '#general' })).toEqual([]);
+    expect((await findCanvases(client, { channel: '#docs' })).canvases.map((c) => c.title)).toEqual(['Docs']);
+    expect(await findCanvases(client, { channel: '#general' })).toEqual({ canvases: [], truncated: false });
     expect(methods()).not.toContain('files.list');
   });
 });

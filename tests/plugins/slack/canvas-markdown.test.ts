@@ -116,3 +116,14 @@ describe('edge cases', () => {
     expect(unconverted).toEqual(['list style 9']);
   });
 });
+
+describe('review fixes', () => {
+  test('code keeps its indentation, inner spaces and first-line indent', () => {
+    const html = wrap('<p class="prettyprint line">  top:<br>    nested:  x<br>        deep</p>');
+    expect(htmlToCanvasMarkdown(html).markdown).toBe('```\n  top:\n    nested:  x\n        deep\n```');
+  });
+
+  test('a nested list at the very start keeps its indent', () => {
+    expect(htmlToCanvasMarkdown(wrap(`<div data-section-style='5'><ul><ul>${li('orphan')}</ul></ul></div>`)).markdown).toBe('  - orphan');
+  });
+});

@@ -80,8 +80,9 @@ describe('listCanvases', () => {
     fake.filesPageSize = 2;
     for (let i = 0; i < 5; i++) fake.otherFiles.push({ id: `F0OTHER0${i}`, filetype: 'png', user: 'U0001' });
     fake.addCanvas({ title: 'Last' });
-    const canvases = await client.listCanvases();
+    const { canvases, truncated } = await client.listCanvases();
     expect(canvases.map((c) => c.title)).toEqual(['Last']);
+    expect(truncated).toBe(false);
     expect(fake.log.map((c) => c.params.page)).toEqual(['1', '2', '3']);
     expect(fake.log.every((c) => c.params.types === 'canvas')).toBe(true);
   });
@@ -89,7 +90,7 @@ describe('listCanvases', () => {
   test('a user filter is passed to Slack', async () => {
     fake.addCanvas({ title: 'Mine' });
     fake.addCanvas({ title: 'Theirs', user: 'U0001' });
-    expect((await client.listCanvases({ user: 'U0ADMIN' })).map((c) => c.title)).toEqual(['Mine']);
+    expect((await client.listCanvases({ user: 'U0ADMIN' })).canvases.map((c) => c.title)).toEqual(['Mine']);
   });
 });
 
@@ -98,5 +99,47 @@ describe('channelCanvasId', () => {
     fake.channels.push(fakeChannel('C0DOCS', 'docs', { canvas: 'F0CANVAS09' }));
     expect(await client.channelCanvasId('C0DOCS')).toBe('F0CANVAS09');
     expect(await client.channelCanvasId('C0GENERAL')).toBeUndefined();
+  });
+});
+
+describe('review fixes', () => {
+  const url = 'https://files.slack.com/files-pri/T0001-F1/download';
+
+  test('an HTML page that is not a canvas is refused, not converted', async () => {
+    fake.downloadAnswer = { status: 200, body: '<html><body><h1>Sign in to Slack</h1></body></html>' };
+    const err = await caught(client.downloadCanvasHtml(url));
+    expect(err.code).toBe('API_ERROR');
+    expect(err.message).toContain('not a canvas');
+  });
+
+  test('a redirect is reported as an access problem, not a network one', async () => {
+    fake.downloadAnswer = { status: 302 };
+    const err = await caught(client.downloadCanvasHtml(url));
+    expect(err.code).toBe('PERMISSION_DENIED');
+  });
+
+  test('a list cut at the page limit says so', async () => {
+    fake.filesPageSize = 1;
+    fake.addCanvas({ title: 'First' });
+    for (let i = 0; i < 100; i++) fake.otherFiles.push({ id: `F0OTHER${String(i).padStart(3, '0')}`, filetype: 'png', user: 'U0001' });
+    const result = await client.listCanvases();
+    expect(result.canvases.map((c) => c.title)).toEqual(['First']);
+    expect(result.truncated).toBe(true);
+  });
+
+  test('more than 20 users are shared in batches of 20', async () => {
+    const canvas = fake.addCanvas({ title: 'Plan' });
+    const users = Array.from({ length: 25 }, (_, i) => `U0X${String(i).padStart(4, '0')}`);
+    await client.setCanvasAccess(canvas.id, 'read', { users, channels: [] });
+    expect(fake.accessCalls.map((c) => JSON.parse(c.params.user_ids).length)).toEqual([20, 5]);
+  });
+
+  test('a failure after some access was given names who already has it', async () => {
+    const canvas = fake.addCanvas({ title: 'Plan' });
+    fake.accessErrors.C0BAD = 'channel_not_found';
+    const err = await caught(client.setCanvasAccess(canvas.id, 'read', { users: ['U0001'], channels: ['C0BAD'] }));
+    expect(err.code).toBe('NOT_FOUND');
+    expect(err.message).toContain('U0001');
+    expect(canvas.access).toEqual({ U0001: 'read' });
   });
 });

@@ -502,6 +502,9 @@ in the channel are skipped.`,
       .argument('[file]', 'Markdown file; stdin when absent')
       .option('--force', 'Allow empty content, which clears the canvas')
       .action(run(async (canvas: string, file: string | undefined, options) => {
+        if (file === undefined && process.stdin.isTTY) {
+          throw new CliError('INVALID_PARAMS', 'No Markdown was given', 'Give a Markdown file, or pipe Markdown on stdin');
+        }
         const markdown = await readMarkdown(file);
         if (!markdown.trim() && !options.force) {
           throw new CliError('INVALID_PARAMS', 'The Markdown is empty, which would clear the canvas', 'Pass --force to clear it');
