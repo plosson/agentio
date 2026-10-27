@@ -54,7 +54,7 @@ export async function readCanvas(client: SlackClient, input: string): Promise<Sl
   const { canvas, html } = await client.canvasHtml(await resolveCanvasId(client, input));
   // Loaded here, not at startup: turndown and its HTML parser are only needed to read a canvas.
   const { htmlToCanvasMarkdown } = await import('./canvas-markdown');
-  return { ...canvas, ...htmlToCanvasMarkdown(html) };
+  return { ...canvas, ...htmlToCanvasMarkdown(html, canvas.title) };
 }
 
 /** Canvases for `list`: newest edit first, with their owners' names. */

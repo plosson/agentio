@@ -80,6 +80,22 @@ describe('readCanvas', () => {
     expect(content).not.toHaveProperty('downloadUrl');
   });
 
+  test('the title Slack repeats as the first heading is left out, so set does not add it twice', async () => {
+    const canvas = fake.addCanvas({ title: 'This a test canvas', html: FIXTURE });
+    const { markdown } = await readCanvas(client, canvas.id);
+    expect(markdown.startsWith('A todo list:')).toBe(true);
+    expect(markdown).toContain('# qsdqsd');
+  });
+
+  test('a first heading that is not the title, or a lower-level one, is kept', async () => {
+    const other = fake.addCanvas({ title: 'Plan', html: '<div class="quip-canvas-content"><h1>Goals</h1><p class="line">x</p></div>' });
+    expect((await readCanvas(client, other.id)).markdown).toBe('# Goals\n\nx');
+    const sub = fake.addCanvas({ title: 'Plan', html: '<div class="quip-canvas-content"><h2>Plan</h2><p class="line">x</p></div>' });
+    expect((await readCanvas(client, sub.id)).markdown).toBe('## Plan\n\nx');
+    const only = fake.addCanvas({ title: 'Plan', html: '<div class="quip-canvas-content"><h1>Plan</h1></div>' });
+    expect((await readCanvas(client, only.id)).markdown).toBe('');
+  });
+
   test('a file that is not a canvas is NOT_FOUND, without a download', async () => {
     fake.otherFiles.push({ id: 'F0PDF00001', filetype: 'pdf', title: 'report.pdf', user: 'U0001' });
     expect((await caught(readCanvas(client, 'F0PDF00001'))).code).toBe('NOT_FOUND');

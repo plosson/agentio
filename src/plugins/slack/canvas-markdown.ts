@@ -33,10 +33,13 @@ const isList = (node: Element) => node.nodeName === 'UL' || node.nodeName === 'O
  * The canvas element of a page Slack sent, made ready for turndown: code paragraphs become
  * <pre>, whose whitespace turndown keeps, and padding-only text goes, so its paragraphs are blank.
  */
-function canvasRoot(html: string): Element {
+function canvasRoot(html: string, title: string | undefined): Element {
   const doc = createDocument(html);
   const root = doc.querySelector('.quip-canvas-content') as Element | null;
   if (!root) throw new CliError('API_ERROR', 'Slack sent a page that is not a canvas');
+  // Slack repeats the title as the first heading; kept, a set would add it to the content.
+  const first = root.firstElementChild;
+  if (title?.trim() && first?.nodeName === 'H1' && first.textContent?.trim() === title.trim()) first.remove();
   for (const code of Array.from(root.querySelectorAll('p.prettyprint'))) {
     const pre = doc.createElement('pre');
     pre.setAttribute('class', code.getAttribute('class') ?? '');
@@ -64,8 +67,11 @@ function codeText(node: Element): string {
   return out;
 }
 
-/** Slack's canvas HTML as the Markdown canvases.create and canvases.edit accept; API_ERROR when it is not a canvas. */
-export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
+/**
+ * Slack's canvas HTML as the Markdown canvases.create and canvases.edit accept; API_ERROR when it
+ * is not a canvas. With the canvas title, the heading that repeats it is left out.
+ */
+export function htmlToCanvasMarkdown(html: string, title?: string): CanvasMarkdown {
   const unconverted = new Set<string>();
   const service = new TurndownService({
     headingStyle: 'atx',
@@ -189,6 +195,6 @@ export function htmlToCanvasMarkdown(html: string): CanvasMarkdown {
   });
 
   // Slack pads embedded files with zero-width spaces: paragraphs of nothing else go, and the rest are dropped.
-  const markdown = trimNewlines(service.turndown(canvasRoot(html)));
+  const markdown = trimNewlines(service.turndown(canvasRoot(html, title)));
   return { markdown, unconverted: [...unconverted] };
 }
