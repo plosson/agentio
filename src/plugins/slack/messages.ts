@@ -8,6 +8,7 @@ import type {
   SlackMessage,
   SlackMessageRange,
   SlackMessagesResult,
+  SlackThreadParent,
   SlackUser,
 } from './types';
 
@@ -151,6 +152,14 @@ export async function collectMessages(client: SlackClient, options: SlackMessage
     options.onProgress?.(++done, conversations.size);
   }
 
+  try {
+    await readSearch(client, conversations, range, seen);
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+    warn(`Search failed (${error.message}); replies in threads started before --since may be missing`);
+  }
+  await nameOlderThreads(client, conversations);
+
   const found = [...conversations.values()].filter((c) => c.messages.length > 0);
   if (found.length > 0) resolveNames(found, await client.listUsers({ includeDeleted: true, includeBots: true }));
   for (const c of found) sortConversation(c);
@@ -177,4 +186,36 @@ async function readHistory(
   }
   // Replies also sent to the channel: under their parent if it is here, else on their own.
   placeMessages(conversation, history.filter(isReply), seen);
+}
+
+/** Pass B: what search finds in your conversations, in the exact range, merged into what history found. */
+async function readSearch(
+  client: SlackClient, conversations: Map<string, SlackConversationMessages>, range: SlackMessageRange, seen: Set<string>,
+): Promise<void> {
+  const matches = (await client.searchMessages(range))
+    .filter((m) => conversations.has(m.channelId) && inRange(m.message.ts, range))
+    .sort((a, b) => compareTs(a.message.ts, b.message.ts));
+  for (const match of matches) placeMessages(conversations.get(match.channelId)!, [match.message], seen);
+}
+
+/** Reads each older thread's parent once, to name the thread; a parent that is gone keeps only its ts. */
+async function nameOlderThreads(client: SlackClient, conversations: Map<string, SlackConversationMessages>): Promise<void> {
+  for (const conversation of conversations.values()) {
+    const parents = new Map<string, SlackThreadParent>();
+    for (const message of conversation.messages) {
+      if (!message.parent) continue;
+      let parent = parents.get(message.parent.ts);
+      if (!parent) {
+        parent = { ts: message.parent.ts };
+        try {
+          const found = await client.threadParent(conversation.id, parent.ts);
+          if (found) Object.assign(parent, { user: found.user, userName: found.botName, text: found.text });
+        } catch (error) {
+          if (!skippable(error)) throw error;
+        }
+        parents.set(parent.ts, parent);
+      }
+      message.parent = parent;
+    }
+  }
 }

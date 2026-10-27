@@ -135,3 +135,90 @@ describe('printSlackMessages', () => {
     expect(lines).toEqual(['Slack messages 2026-10-20 → 2026-10-27: 0 conversations, 0 messages, 0 replies']);
   });
 });
+describe('collectMessages, search pass', () => {
+  const oldParent = tsAt('2026-10-15T09:00:00Z');
+
+  test('replies in a thread that started before --since appear, under a label naming the thread, parent read once', async () => {
+    channel('C0GENERAL').messages.push(
+      { ts: oldParent, user: 'U0001', text: 'logo v2 for the new site, thoughts please' },
+      { ts: tsAt('2026-10-22T14:03:00Z'), user: 'U0002', text: 'looks good to me', thread_ts: oldParent },
+      { ts: tsAt('2026-10-23T08:00:00Z'), user: 'U0001', text: 'merged', thread_ts: oldParent },
+    );
+    const [conv] = (await collect()).conversations;
+    expect(conv.messages.map((m) => [m.text, m.source, m.parent?.ts])).toEqual([
+      ['looks good to me', 'search', oldParent],
+      ['merged', 'search', oldParent],
+    ]);
+    expect(conv.messages[0].parent).toMatchObject({ userName: 'alice', text: 'logo v2 for the new site, thoughts please' });
+    expect(fake.log.filter((c) => c.url.endsWith('conversations.replies') && c.params.limit === '1')).toHaveLength(1);
+  });
+
+  test('what both passes find is kept once, from history', async () => {
+    const parent = tsAt('2026-10-21T09:00:00Z');
+    channel('C0GENERAL').messages.push(
+      { ts: parent, user: 'U0001', text: 'p' },
+      { ts: tsAt('2026-10-21T09:01:00Z'), user: 'U0002', text: 'r', thread_ts: parent },
+    );
+    const [conv] = (await collect()).conversations;
+    expect(conv.messages).toHaveLength(1);
+    expect(conv.messages[0].source).toBe('history');
+    expect(conv.messages[0].replies.map((r) => r.source)).toEqual(['history']);
+  });
+
+  test('search results from a public channel you are not in are dropped', async () => {
+    fake.channels.push(fakeChannel('C0OTHER', 'other', { members: ['U0001'], messages: [{ ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0001', text: 'not yours' }] }));
+    const result = await collect();
+    expect(JSON.stringify(result)).not.toContain('not yours');
+  });
+
+  test('search results inside the two-day widening but outside the exact range are trimmed', async () => {
+    channel('C0GENERAL').messages.push(
+      { ts: oldParent, user: 'U0001', text: 'p' },
+      { ts: tsAt('2026-10-19T23:00:00Z'), user: 'U0002', text: 'an hour early', thread_ts: oldParent },
+      { ts: tsAt('2026-10-27T01:00:00Z'), user: 'U0002', text: 'an hour late', thread_ts: oldParent },
+    );
+    const result = await collect();
+    expect(result.conversations).toEqual([]);
+  });
+
+  test('a deleted parent leaves its replies in, labelled as no longer available', async () => {
+    channel('C0GENERAL').messages.push({ ts: tsAt('2026-10-22T14:03:00Z'), user: 'U0002', text: 'orphan', thread_ts: oldParent });
+    const result = await collect();
+    const [conv] = result.conversations;
+    expect(conv.messages[0].parent).toEqual({ ts: oldParent });
+    const lines: string[] = [];
+    const spy = spyOn(console, 'log').mockImplementation((line: string) => { lines.push(line); });
+    try {
+      printSlackMessages(result);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines.join('\n')).toContain('thread by unknown: (no longer available)');
+  });
+
+  test('without search:read the history pass still prints, with a warning; a broadcast reply to an older thread survives', async () => {
+    fake.scopes.delete('search:read');
+    channel('C0GENERAL').messages.push(
+      { ts: oldParent, user: 'U0001', text: 'p' },
+      { ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0002', text: 'also to channel', thread_ts: oldParent, subtype: 'thread_broadcast' },
+    );
+    const [conv] = (await collect()).conversations;
+    expect(conv.messages.map((m) => [m.text, m.parent?.text])).toEqual([['also to channel', 'p']]);
+    expect(warnings.some((w) => w.includes('search:read') && w.includes('may be missing'))).toBe(true);
+  });
+
+  test('search rate-limited past every retry is a warning, not a failure', async () => {
+    channel('C0GENERAL').messages.push({ ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0001', text: 'kept' });
+    // Calls: users.conversations, history x2, then search plus its 3 retries.
+    for (let call = 4; call <= 7; call++) fake.queueAt(call, { status: 429, headers: { 'Retry-After': '1' } });
+    const [conv] = (await collect()).conversations;
+    expect(conv.messages[0].text).toBe('kept');
+    expect(warnings.some((w) => w.includes('may be missing'))).toBe(true);
+  });
+
+  test('--channel limits search results to the picked conversations', async () => {
+    channel('C0RANDOM').messages.push({ ts: oldParent, user: 'U0001', text: 'p' }, { ts: tsAt('2026-10-22T10:00:00Z'), user: 'U0002', text: 'in random', thread_ts: oldParent });
+    const result = await collect({ channels: ['general'] });
+    expect(JSON.stringify(result)).not.toContain('in random');
+  });
+});
