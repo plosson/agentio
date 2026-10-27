@@ -75,8 +75,9 @@ describe('versions', () => {
   test('a server without version history says so and names the Kite version it needs', async () => {
     fake.versionsApi = false;
     const doc = fake.seedDoc(ME);
-    for (const p of [client.versions(doc.id), client.getVersion(doc.id, 1)]) {
-      const e = await caught(p);
+    // One call at a time: a second promise rejected while the first is awaited is unhandled, and ends the test early.
+    for (const call of [() => client.versions(doc.id), () => client.getVersion(doc.id, 1)]) {
+      const e = await caught(call());
       expect(e.code).toBe('API_ERROR');
       expect(e.message).toBe(`Kite at ${fake.url} does not have version history yet`);
       expect(e.suggestion).toContain('Kite 1.3.0 or later');
@@ -167,8 +168,9 @@ describe('views', () => {
   test('a server without view tracking says so', async () => {
     fake.viewsApi = false;
     const doc = fake.seedDoc(ME);
-    for (const p of [client.views(doc.id), client.viewsSummary()]) {
-      const e = await caught(p);
+    // One call at a time: a second promise rejected while the first is awaited is unhandled, and ends the test early.
+    for (const call of [() => client.views(doc.id), () => client.viewsSummary()]) {
+      const e = await caught(call());
       expect(e.message).toBe(`Kite at ${fake.url} does not have view tracking yet`);
       expect(e.suggestion).toContain('Kite 1.2.0 or later');
     }
