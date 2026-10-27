@@ -22,7 +22,7 @@ import {
   type DownloadDeps,
 } from '../../../../src/plugins/google/gchat/attachments';
 import { printGChatMessage, printGChatMessageList } from '../../../../src/plugins/google/gchat/output';
-import { parseDateOption } from '../../../../src/plugins/google/gchat/commands';
+import { parseDateOption } from '../../../../src/utils/options';
 import { GChatClient } from '../../../../src/plugins/google/gchat/client';
 import { SCOPES } from '../../../../src/plugins/google/oauth';
 import { CliError } from '../../../../src/utils/errors';
