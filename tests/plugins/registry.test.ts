@@ -34,6 +34,7 @@ const SERVICE_ORDER = [
   'jira',
   'kite',
   'memory',
+  'metube',
   'notes',
   'pagerio',
   'pocketalert',
