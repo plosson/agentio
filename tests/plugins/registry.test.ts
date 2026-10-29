@@ -35,6 +35,7 @@ const SERVICE_ORDER = [
   'kite',
   'memory',
   'metube',
+  'higgsfield',
   'notes',
   'pagerio',
   'revolut',

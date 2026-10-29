@@ -36,7 +36,7 @@ export interface Config {
 }
 
 /** Built-in profile service ids, useful only where compile-time narrowing helps. */
-export type BuiltInServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'discourse' | 'dropbox' | 'sql' | 'revolut' | 'falco' | 'spotify' | 'whatsapp' | 'kite' | 'memory' | 'notes' | 'pagerio' | 'metube' | 'jev' | 'claude' | 'chatgpt' | 'secrets';
+export type BuiltInServiceName = 'gdocs' | 'gdrive' | 'gmail' | 'gcal' | 'gtasks' | 'gchat' | 'gsheets' | 'gslides' | 'gscript' | 'github' | 'jira' | 'confluence' | 'slack' | 'discourse' | 'dropbox' | 'sql' | 'revolut' | 'falco' | 'spotify' | 'whatsapp' | 'kite' | 'memory' | 'notes' | 'pagerio' | 'metube' | 'higgsfield' | 'jev' | 'claude' | 'chatgpt' | 'secrets';
 
 /**
  * A plugin id after registry validation. External plugin ids make the service
@@ -47,5 +47,5 @@ export type ServiceName = string;
 
 export const ALL_SERVICES: readonly BuiltInServiceName[] = [
   'gdocs', 'gdrive', 'gmail', 'gcal', 'gtasks', 'gchat', 'gsheets', 'gslides', 'gscript',
-  'github', 'jira', 'confluence', 'slack', 'discourse', 'dropbox', 'sql', 'revolut', 'falco', 'spotify', 'whatsapp', 'kite', 'memory', 'notes', 'pagerio', 'metube', 'jev', 'claude', 'chatgpt', 'secrets',
+  'github', 'jira', 'confluence', 'slack', 'discourse', 'dropbox', 'sql', 'revolut', 'falco', 'spotify', 'whatsapp', 'kite', 'memory', 'notes', 'pagerio', 'metube', 'higgsfield', 'jev', 'claude', 'chatgpt', 'secrets',
 ];

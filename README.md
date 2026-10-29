@@ -182,6 +182,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 | **Apple Notes** | API Key | `folders`, `list`, `search`, `get`, `create`, `update`, `delete` |
 | **Graphiti memory** | Server URL + bearer token | `add`, `search`, `entity`, `episodes`, `forget` |
 | **MeTube** | Server URL + HTTP basic auth | `get`, `list`, `status`, `fetch`, `delete`, `clear` |
+| **Higgsfield** | API key (`id:secret`) | `run`, `estimate`, `upload`, `status`, `fetch`, `cancel`, `delete`, `list` |
 | **Secrets** | None | `set`, `get`, `list`, `unset`, `import`, `exec` |
 | **Falco** | Password + 2FA | `peppol list`, `peppol get`, `peppol sync`, `peppol mark-paid`, `invoices sync` |
 | **RSS** | None | `articles`, `get`, `info` |

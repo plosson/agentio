@@ -21,6 +21,7 @@ import kite from './kite';
 import memory from './memory';
 import notes from './notes';
 import metube from './metube';
+import higgsfield from './higgsfield';
 import pagerio from './pagerio';
 import revolut from './revolut';
 import rss from './rss';
@@ -56,6 +57,7 @@ export const SERVICE_PLUGINS = [
   kite,
   memory,
   metube,
+  higgsfield,
   notes,
   pagerio,
   revolut,
