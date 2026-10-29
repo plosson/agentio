@@ -22,7 +22,6 @@ import memory from './memory';
 import notes from './notes';
 import metube from './metube';
 import pagerio from './pagerio';
-import pocketalert from './pocketalert';
 import revolut from './revolut';
 import rss from './rss';
 import secrets from './secrets';
@@ -59,7 +58,6 @@ export const SERVICE_PLUGINS = [
   metube,
   notes,
   pagerio,
-  pocketalert,
   revolut,
   rss,
   secrets,
