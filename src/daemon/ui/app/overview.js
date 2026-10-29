@@ -82,7 +82,7 @@ const SERVICE_USE = {
   github: 'Repositories and issues', jira: 'Issues and boards', confluence: 'Pages and spaces', spotify: 'Music and playlists',
   dropbox: 'Files', notes: 'Notes on this Mac', whatsapp: 'Chats', discourse: 'Forum posts', revolut: 'Accounts and payments',
   sql: 'A database', secrets: 'API keys and tokens', rss: 'Feeds', gscript: 'Scripts', falco: 'Accounting and invoices',
-  kite: 'Pages you share', pocketalert: 'Push notifications', pagerio: 'Alerts on your iPhone and Mac',
+  kite: 'Pages you share', pagerio: 'Alerts on your iPhone and Mac',
   jev: 'Yes/no answers for scripts', memory: 'Facts from your documents', claude: 'Ask Claude', chatgpt: 'Ask ChatGPT',
 };
 

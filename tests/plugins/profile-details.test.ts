@@ -103,7 +103,6 @@ describe('what each service shows about a profile', () => {
     ['secrets', { values: { A: 'SECRETa', B: 'SECRETb' } }, { account: '2 secrets' }],
     ['secrets', { values: { ONLY: 'SECRETo' } }, { account: '1 secret' }],
     ['pagerio', { url: 'https://pagerio.chuut.com/p/SECRETtoken12345' }, { url: 'https://pagerio.chuut.com', serviceUrl: true }],
-    ['pocketalert', { apiKey: 'SECRETk' }, { url: 'https://pocketalert.app', serviceUrl: true }],
     ['whatsapp', {}, { url: 'https://web.whatsapp.com', serviceUrl: true }],
   ];
 

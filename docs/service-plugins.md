@@ -64,7 +64,6 @@ src/plugins/
 ├── memory/           # facts linked to a document id, in a Graphiti server; URL + bearer token
 ├── notes/            # Apple Notes through an apple-notes-api server; API key
 ├── pagerio/          # pages to your iPhone and Mac; secret URL, send only
-├── pocketalert/      # push notifications; API key, send only
 ├── revolut/
 ├── secrets/          # named secrets per profile; no remote service
 ├── spotify/

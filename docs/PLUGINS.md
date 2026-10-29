@@ -22,7 +22,6 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | metube | HTTP basic auth (user and password) in front of the user's own MeTube server; the URL is a profile value. A server without auth takes no credentials | **The user's own server**, no app | No | YouTube often asks datacenter IPs to sign in; downloads then fail until the server runs from another IP or has cookies |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
-| pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
 | claude | A `claude setup-token` token or an Anthropic API key, given only to the user's own `claude` CLI | **The user's own subscription or key** | No | Needs the `claude` CLI where the command runs |
 | chatgpt | OAuth 2.0 with PKCE, browser, `localhost:1455/auth/callback`, with **OpenAI's Codex client**; or an OpenAI API key. Prompts run through the user's own `codex` CLI | **OpenAI's public Codex client** for the sign-in; the user's own account or key | No | Uses Codex's OAuth client outside codex. Needs the `codex` CLI where the command runs |
 | jev | TypeSafe API key, sent as a Bearer token | **Created by the user at console.typesafe.ai** | No | None |
@@ -569,25 +568,6 @@ Sends a page (a push notification on the owner's iPhone and Mac) by posting to a
 **Remote mode:** agents with a key that covers the profile receive the whole credential, URL included, as with the other static-token plugins.
 
 **What's needed:** a Pocket Pager account (Google sign-in on the dashboard), and the iPhone or Mac app signed in to receive pages.
-
----
-
-## Pocket Alert
-
-**Code:** `src/plugins/pocketalert/`
-
-Sends push notifications to the user's devices through the [Pocket Alert](https://pocketalert.app) REST API (`https://api.pocketalert.app/v1`). Only `send` is implemented.
-
-**Sign-in:** the account's API key, from Settings in the Pocket Alert app, sent as `Token: <key>`.
-- `agentio pocketalert profile add` asks for the key when `--api-key` is absent, so the key can stay out of shell history.
-- Setup checks the key with `GET /v1/applications`, which sends nothing. A refused key stops setup.
-- There is no expiry and no refresh. A regenerated key breaks the profile; run `agentio pocketalert profile add` again.
-
-**What the vault stores:** API key.
-
-**Remote mode:** agents with a key that covers the profile receive the whole credential, API key included, as with the other static-token plugins.
-
-**What's needed:** a Pocket Alert account, and the app on at least one device.
 
 ---
 

@@ -37,7 +37,6 @@ const SERVICE_ORDER = [
   'metube',
   'notes',
   'pagerio',
-  'pocketalert',
   'revolut',
   'rss',
   'secrets',
