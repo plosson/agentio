@@ -20,6 +20,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
 | memory | Bearer token of the proxy in front of the user's own Graphiti REST server; the URL is a profile value | **The user's own server and token**, no app | No | The server needs its own LLM key (OpenAI) to extract facts |
 | metube | HTTP basic auth (user and password) in front of the user's own MeTube server; the URL is a profile value. A server without auth takes no credentials | **The user's own server**, no app | No | YouTube often asks datacenter IPs to sign in; downloads then fail until the server runs from another IP or has cookies |
+| higgsfield | API key (`<key id>:<key secret>`), sent as `Authorization: Key …` to api.higgsfield.ai | **Created by the user at console.higgsfield.ai** | No | Generations are paid from the account balance; the API key cannot read the balance |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | claude | A `claude setup-token` token or an Anthropic API key, given only to the user's own `claude` CLI | **The user's own subscription or key** | No | Needs the `claude` CLI where the command runs |
@@ -549,6 +550,25 @@ Downloads video or audio from YouTube, X, Instagram and the other sites yt-dlp s
 **Remote mode:** agents with a key that covers the profile receive the whole credential, password included, as with the other static-credential plugins.
 
 **What's needed:** a MeTube server, ideally with `DELETE_FILE_ON_TRASHCAN=true` so removing a finished download also deletes its file.
+
+---
+
+## Higgsfield
+
+**Code:** `src/plugins/higgsfield/`
+
+Runs any model of the [Higgsfield API](https://docs.higgsfield.ai) (Soul, Genjutsu, Kling, Hailuo and the others listed at console.higgsfield.ai). It is generic: `run <model-id>` posts a JSON body to `https://api.higgsfield.ai/<model-id>` with a fresh `Idempotency-Key`, polls `GET /requests/{id}/status` (2 s, growing to 10 s) until `completed`, `failed`, `nsfw` or `canceled`, and saves every output URL (`images`, `video`, `audio`, `audios` and any other `{ url }` field). The body comes from `--json-body` and repeated `--arg key=value` (a repeated key or `key[]=` makes an array; numbers, booleans, null and JSON are typed). A string value with a media extension (.jpg, .jpeg, .png, .webp, .gif, .wav, .mp4) that is not a URL is a local file: it is uploaded through `POST /files/generate-upload-url` and a `PUT` to the presigned URL, and replaced by its `public_url`. A full queue (`429 account_queue_full`), a 5xx or a network failure on submission is retried after `Retry-After` with the same `Idempotency-Key`, so no duplicate is created. Also `estimate` (`POST /estimate/<model-id>`, shows `usd` or the model's pricing text), `upload`, `status`, `fetch`, `cancel` (queued only), `delete` (`DELETE /requests/{id}`) and `list`, which reads a local record of submitted requests under `~/.config/agentio/cache/higgsfield/` because the API cannot list requests.
+
+**Sign-in:** an API key from console.higgsfield.ai, as `<key id>:<key secret>`.
+- `agentio higgsfield profile add` asks for the key when `--key` is absent, so it stays out of shell history.
+- Setup checks the key by asking for the status of a request id that does not exist: 404 means the key works, 401/403 that it does not. It costs nothing.
+- There is no expiry and no refresh.
+
+**What the vault stores:** the key. Output shows only the first characters of the key id; the key never goes to the upload or output URLs.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, as with the other static-credential plugins.
+
+**What's needed:** a Higgsfield API account with balance. Only completed requests are charged; `failed` and `nsfw` are refunded.
 
 ---
 
