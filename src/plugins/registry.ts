@@ -20,6 +20,7 @@ import jira from './jira';
 import kite from './kite';
 import memory from './memory';
 import notes from './notes';
+import metube from './metube';
 import pagerio from './pagerio';
 import pocketalert from './pocketalert';
 import revolut from './revolut';
@@ -55,6 +56,7 @@ export const SERVICE_PLUGINS = [
   jira,
   kite,
   memory,
+  metube,
   notes,
   pagerio,
   pocketalert,

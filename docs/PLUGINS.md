@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-10-27. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-10-29. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -19,6 +19,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | discourse | Admin API key | **Created by the user on their forum** | No | None |
 | kite | Device sign-in: the browser approves a code on the Kite server, which hands out a CLI token | **The user's own Kite server and account**, no app | No | Token dies after 90 days unused |
 | memory | Bearer token of the proxy in front of the user's own Graphiti REST server; the URL is a profile value | **The user's own server and token**, no app | No | The server needs its own LLM key (OpenAI) to extract facts |
+| metube | HTTP basic auth (user and password) in front of the user's own MeTube server; the URL is a profile value. A server without auth takes no credentials | **The user's own server**, no app | No | YouTube often asks datacenter IPs to sign in; downloads then fail until the server runs from another IP or has cookies |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | pocketalert | API key of the user's Pocket Alert account, sent in the `Token` header | **Created by the user in the Pocket Alert app** | No | Pocket Alert caps messages per day |
@@ -530,6 +531,25 @@ agentio does not talk to Notes.app itself. It talks to [apple-notes-api](https:/
 4. Run `agentio notes profile add --url <server URL>` and paste the key.
 
 **What's needed:** a Mac with Notes signed in, and a network path from the agent to the server. Optional: Full Disk Access for the server's `node` binary, so `notes get` shows which checklist items are ticked; the server reads them from Notes' database, read-only.
+
+---
+
+## MeTube
+
+**Code:** `src/plugins/metube/`
+
+Downloads video or audio from YouTube, X, Instagram and the other sites yt-dlp supports, through the user's own [MeTube](https://github.com/alexta69/metube) server. agentio only talks to MeTube's HTTP API (`/add`, `/history`, `/delete`, `/download/`, `/audio_download/`); yt-dlp and ffmpeg run on the server, so the CLI has no dependencies. `get` queues links, polls `/history` until they finish, saves the files (to `~/Downloads` by default) and removes them from the server unless `--keep` is given.
+
+**Sign-in:** the server URL, plus a user and password when the server sits behind HTTP basic auth. MeTube has no login of its own, so a server on the internet needs a proxy in front of it (see `docs/metube-server.md`).
+- `agentio metube profile add --url <url> --username <user>` asks for the password when `--password` is absent, so it stays out of shell history. An empty username stores no credentials.
+- Setup calls `/version`, then `/history` to prove the credentials. A refused login (401/403) stops setup.
+- There is no expiry and no refresh.
+
+**What the vault stores:** the URL, the user and the password. Output never shows the password.
+
+**Remote mode:** agents with a key that covers the profile receive the whole credential, password included, as with the other static-credential plugins.
+
+**What's needed:** a MeTube server, ideally with `DELETE_FILE_ON_TRASHCAN=true` so removing a finished download also deletes its file.
 
 ---
 
