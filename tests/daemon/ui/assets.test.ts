@@ -608,6 +608,45 @@ describe('the assembled admin page', () => {
     expect(style).toMatch(/\.svc-tile \{[^}]*clip-path: inset\(0 round 23%\)/);
   });
 
+  test('a multi-colour logo with a colour of its own sits inset on a white tile; a plugin colour does not make an app icon a logo', () => {
+    const t = script.slice(script.indexOf('function tile('), script.indexOf('const GLYPHS'));
+    const ICONS = {
+      logo: ['Logo', '#ABCDEF', [['"><script>', 'M0 0h24v24H0z'], ['#123456', 'M1 1h2']]],
+      // An app icon whose plugin sets brand.color, as Apple Notes does.
+      app: ['App', null, [['#123456', 'M0 0h24v24H0z']]],
+    };
+    const serviceColour = (s: string) => ({ app: '#FFCC00' } as Record<string, string>)[s] || (ICONS as any)[s]?.[1] || '';
+    const tile = new Function('escapeHtml', 'raw', 'ICONS', 'PLUGIN_METADATA', 'displayName', 'serviceColour', `${t}; return tile;`)(
+      escapeHtml, raw, ICONS, {}, (s: string) => (ICONS as any)[s]?.[0] || s, serviceColour);
+    const logo: string = tile('logo').__html;
+    expect(logo).toContain('<rect x=".25" y=".25" width="23.5" height="23.5" rx="5.25" fill="white" stroke="#D1D1D6" stroke-width=".5"/>');
+    // The brand colour is for the charts, never the tile behind a full-colour logo.
+    expect(logo).not.toContain('#ABCDEF');
+    expect(logo).toContain('<g transform="translate(5 5) scale(0.5833)"><path fill="&quot;&gt;&lt;script&gt;" d="M0 0h24v24H0z"/><path fill="#123456" d="M1 1h2"/></g>');
+    expect(logo).not.toContain('<script>');
+    // Its own colours survive: no white group repaints it.
+    expect(logo).not.toContain('<g fill="white"');
+    expect(logo.match(/<rect/g)).toHaveLength(1);
+    const app: string = tile('app').__html;
+    expect(app).not.toContain('fill="white"');
+    expect(app).not.toContain('scale(0.5833)');
+    expect(app).toContain('<rect width="24" height="24" rx="5.5" fill="#FFCC00"/><path fill="#123456" d="M0 0h24v24H0z"/>');
+  });
+
+  test('every multi-colour icon is well formed: hex fills, and a colour that is a hex or null', () => {
+    const src = readFileSync(join(import.meta.dir, '../../../src/daemon/ui/app/icons.js'), 'utf8');
+    const ICONS = new Function(`${src}; return ICONS;`)() as Record<string, [string, string | null, string | [string, string][]]>;
+    const multi = Object.entries(ICONS).filter(([, e]) => Array.isArray(e[2]));
+    expect(multi.length).toBeGreaterThan(10);
+    for (const [id, [, colour, parts]] of multi) {
+      expect([id, colour === null || /^#[0-9A-F]{6}$/i.test(colour)]).toEqual([id, true]);
+      for (const [fill, d] of parts as [string, string][]) {
+        expect([id, fill]).toEqual([id, expect.stringMatching(/^#[0-9A-F]{6}$/i)]);
+        expect([id, /^[MmA-Za-z0-9.,\s-]+$/.test(d) && /^[Mm]/.test(d)]).toEqual([id, true]);
+      }
+    }
+  });
+
   test('a tile with no brand colour is grey, and the logo stays white in both modes', () => {
     expect(style).toMatch(/\.svc-tile rect:not\(\[fill\]\) \{ fill: var\(--muted\); \}/);
     expect(adminCss).not.toMatch(/\.svc-tile g \{/);

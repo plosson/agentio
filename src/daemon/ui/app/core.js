@@ -84,15 +84,22 @@ function icon(service, cls = '') {
   return raw(`<svg class="ico ${escapeHtml(cls)}" viewBox="0 0 24 24" fill="${escapeHtml(colour)}" aria-hidden="true">${shapes}</svg>`);
 }
 
-/** A service's logo in white on its colour, as a rounded square: the lead of a profile row, and the top of its page. */
+/** A service's logo in white on its colour, or in full colour on white, as a rounded square: the lead of a profile row, and the top of its page. */
 function tile(service, cls = '') {
   const entry = ICONS[service];
   const colour = serviceColour(service);
   const rect = `<rect width="24" height="24" rx="5.5"${colour ? ` fill="${escapeHtml(colour)}"` : ''}/>`;
-  // A multi-colour entry is full-colour art at 24 units: each path keeps its own fill, full size, on the tile.
+  // A multi-colour entry is full-colour art at 24 units: each path keeps its own fill.
+  // With a colour of its own in ICONS, it is a logo, shrunk onto a white tile outlined in Apple Notes' grey, so it shows
+  // on a white page; without, it is an app icon, full size on
+  // the tile. (Not serviceColour: a plugin may give an app icon a brand colour, as Apple Notes does.)
   // Its corners are clipped in admin.css (an SVG clip path would repeat its id on every tile).
   if (entry && Array.isArray(entry[2])) {
-    return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${rect}${entry[2].map(([fill, d]) => `<path fill="${escapeHtml(fill)}" d="${escapeHtml(d)}"/>`).join('')}</svg>`);
+    const paths = entry[2].map(([fill, d]) => `<path fill="${escapeHtml(fill)}" d="${escapeHtml(d)}"/>`).join('');
+    const art = entry[1]
+      ? `<rect x=".25" y=".25" width="23.5" height="23.5" rx="5.25" fill="white" stroke="#D1D1D6" stroke-width=".5"/><g transform="translate(5 5) scale(0.5833)">${paths}</g>`
+      : `${rect}${paths}`;
+    return raw(`<svg class="svc-tile ${escapeHtml(cls)}" viewBox="0 0 24 24" aria-hidden="true">${art}</svg>`);
   }
   const shapes = entry
     ? `<path d="${escapeHtml(entry[2])}"/>`
