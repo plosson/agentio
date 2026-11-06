@@ -261,11 +261,7 @@ export function registerWhatsAppCommands(program: Command): void {
           handleError(error);
         }
       }),
-    `Saving never marks anything as read and sends nothing to the chat. The file
-is named after the message's date and ID (a document keeps its own name), and
-an existing file is never overwritten.
-
-Examples:
+    `Examples:
 
   # find the ID with read, then save the file
   agentio whatsapp read "Alice Martin" --no-read-receipts
@@ -273,7 +269,11 @@ Examples:
 
   # into a directory, or at an exact path
   agentio whatsapp download 120363000000000000@g.us 3EB0C431D5F2A7B8E9F1 --out ./media/
-  agentio whatsapp download +33612345678 3EB0C431D5F2A7B8E9F1 --out ./photo.jpg`,
+  agentio whatsapp download +33612345678 3EB0C431D5F2A7B8E9F1 --out ./photo.jpg
+
+Saving never marks anything as read and sends nothing to the chat. The file
+is named after the message's date and ID (a document keeps its own name), and
+an existing file is never overwritten.`,
   );
 
   addExamples(
