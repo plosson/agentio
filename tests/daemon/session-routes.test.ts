@@ -10,6 +10,7 @@ import { activatePluginRegistry, DEFAULT_PLUGIN_REGISTRY, SERVICE_PLUGINS } from
 import { PluginRegistry } from '../../src/plugins/plugin-registry';
 import {
   defineServicePlugin,
+  SessionFile,
   type Pairing,
   type PairingStatus,
   type Session,
@@ -21,6 +22,7 @@ import { createStore, openStore, storeDir, STORE_KEY_FIELD } from '../../src/dae
 import { sessionStatus, startPairing, startSessions, stopSessions, whenPairingEnds } from '../../src/daemon/sessions';
 import { createRequestHandler } from '../../src/daemon/api';
 import { v1AuthLimiter, v1KeyLimiter } from '../../src/daemon/routes-v1';
+import { dispositionFileName } from '../../src/auth/remote';
 
 const PASSPHRASE = 'session-routes-passphrase';
 
@@ -38,6 +40,7 @@ class FakeSession implements Session {
   }
   async handle(request: SessionRequest) {
     handled.push(request);
+    if (request.operation === 'file') return new SessionFile(new Uint8Array([1, 2, 3]), 'image/jpeg', 'été 2026.jpg');
     return { profile: this.profile, generation: await this.host.store.get('generation') };
   }
   async stop(options?: { logout?: boolean }) {
@@ -181,6 +184,15 @@ describe('session routes', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ profile: 'a', generation: 'old' });
     expect(handled).toEqual([{ operation: 'echo', params: { x: 1 }, readOnly: false }]);
+  });
+
+  test('a file an operation answers with is the body, with its type and name in the headers', async () => {
+    const res = await call('/v1/sessions/fakechat/a/file', manager, { method: 'POST', body: {} });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    expect(res.headers.get('content-length')).toBe('3');
+    expect(dispositionFileName(res.headers.get('content-disposition'))).toBe('été 2026.jpg');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   test('an empty body is no parameters; a body that is not a JSON object is 400', async () => {

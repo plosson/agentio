@@ -2,11 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import {
   contactRows,
   foldName,
+  mediaExtension,
+  mediaFileName,
+  messageMedia,
   messageText,
   normalizeJid,
   parseRecipient,
   phoneOf,
+  placeholderKind,
   resolveName,
+  safeFileName,
   seconds,
   type NameRecord,
 } from '../../../src/plugins/whatsapp/records';
@@ -152,5 +157,73 @@ describe('names', () => {
     expect(contactRows(records)).toHaveLength(7);
     expect(contactRows(records, '   ')).toHaveLength(7);
     expect(contactRows(records, 'nobody')).toEqual([]);
+  });
+});
+
+describe('media details', () => {
+  const KEY = new Uint8Array([1, 2, 3, 4]);
+  const image = { url: 'https://mmg.whatsapp.net/x', directPath: '/v/t62/abc', mediaKey: KEY, mimetype: 'image/jpeg', fileLength: { toNumber: () => 2048 }, jpegThumbnail: 'AAAA', caption: 'cat' };
+
+  test('a media message keeps what a download needs, and no thumbnail or caption', () => {
+    expect(messageMedia({ imageMessage: image })).toEqual({
+      kind: 'image', mimetype: 'image/jpeg', size: 2048, url: 'https://mmg.whatsapp.net/x', directPath: '/v/t62/abc', mediaKey: 'AQIDBA==',
+    });
+  });
+
+  test('every kind is found, inside the wrappers too, and only a document keeps its name', () => {
+    const media = { directPath: '/p', mediaKey: KEY, fileName: 'x.pdf' };
+    expect(messageMedia({ videoMessage: { ...media, gifPlayback: true } })?.kind).toBe('video');
+    expect(messageMedia({ audioMessage: { ...media, ptt: true } })).toEqual({ kind: 'audio', directPath: '/p', mediaKey: 'AQIDBA==' });
+    expect(messageMedia({ stickerMessage: media })?.kind).toBe('sticker');
+    expect(messageMedia({ documentWithCaptionMessage: { message: { documentMessage: media } } })).toMatchObject({ kind: 'document', fileName: 'x.pdf' });
+    expect(messageMedia({ ephemeralMessage: { message: { viewOnceMessageV2: { message: { imageMessage: media } } } } })?.kind).toBe('image');
+  });
+
+  test('a key already in base64 is kept as it is', () => {
+    expect(messageMedia({ imageMessage: { directPath: '/p', mediaKey: 'AQIDBA==' } })?.mediaKey).toBe('AQIDBA==');
+  });
+
+  test('text, or media without its address or key, has nothing to download', () => {
+    expect(messageMedia({ conversation: 'hi' })).toBeNull();
+    expect(messageMedia({ imageMessage: { caption: 'cat', jpegThumbnail: 'AAAA' } })).toBeNull();
+    expect(messageMedia({ imageMessage: { directPath: '/p', mediaKey: new Uint8Array() } })).toBeNull();
+    expect(messageMedia(null)).toBeNull();
+  });
+
+  test('the placeholder of media stored before its details were kept still says its kind', () => {
+    expect(placeholderKind('[image] cat')).toBe('image');
+    expect(placeholderKind('[gif]')).toBe('video');
+    expect(placeholderKind('[voice message]')).toBe('audio');
+    expect(placeholderKind('[document: report.pdf] for you')).toBe('document');
+    expect(placeholderKind('[sticker]')).toBe('sticker');
+    expect(placeholderKind('[location]')).toBeNull();
+    expect(placeholderKind('look at [image]')).toBeNull();
+  });
+});
+
+describe('media file names', () => {
+  const at = Date.UTC(2026, 10, 6, 15, 15, 45) / 1000;
+
+  test('a file is named after its date and message ID, with the extension of its type', () => {
+    expect(mediaFileName({ id: '3EB0AB', at }, { kind: 'image', mimetype: 'image/jpeg' })).toBe('2026-11-06_15-15-45_3EB0AB.jpg');
+    expect(mediaFileName({ id: 'A1', at }, { kind: 'audio', mimetype: 'audio/ogg; codecs=opus' })).toBe('2026-11-06_15-15-45_A1.ogg');
+  });
+
+  test('a document keeps its own name, with an extension added only when it has none', () => {
+    expect(mediaFileName({ id: 'D1', at }, { kind: 'document', mimetype: 'application/pdf', fileName: 'Offer 2026.pdf' })).toBe('2026-11-06_15-15-45_Offer 2026.pdf');
+    expect(mediaFileName({ id: 'D1', at }, { kind: 'document', mimetype: 'application/pdf', fileName: 'Offer' })).toBe('2026-11-06_15-15-45_Offer.pdf');
+  });
+
+  test('the extension falls back to the subtype, then to the kind', () => {
+    expect(mediaExtension({ kind: 'video', mimetype: 'video/webm' })).toBe('webm');
+    expect(mediaExtension({ kind: 'sticker' })).toBe('webp');
+    expect(mediaExtension({ kind: 'document', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })).toBe('bin');
+  });
+
+  test('a name from a message can never leave its directory', () => {
+    expect(safeFileName('../../etc/passwd')).toBe('_.._etc_passwd');
+    expect(safeFileName('a\\b:c*?.txt')).toBe('a_b_c__.txt');
+    expect(safeFileName('...')).toBe('file');
+    expect(mediaFileName({ id: 'X', at }, { kind: 'document', fileName: '../secret.sh' })).toBe('2026-11-06_15-15-45__secret.sh');
   });
 });

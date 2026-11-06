@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { WhatsAppSession } from '../../../src/plugins/whatsapp/session';
 import { CREDS_KEY, MAX_MESSAGES_PER_CHAT } from '../../../src/plugins/whatsapp/records';
 import type { ChatSummary, ContactView, ReadResult, SendResult } from '../../../src/plugins/whatsapp/types';
+import { SessionFile } from '../../../src/plugins/types';
 import { FakeBaileys, fakeHost, memoryStore, tick } from '../../helpers/fake-baileys';
 
 const ME = '33600000000:3@s.whatsapp.net';
@@ -20,7 +21,7 @@ async function linkedStore() {
 async function connected(store?: Awaited<ReturnType<typeof linkedStore>>) {
   const api = new FakeBaileys();
   const host = fakeHost(store ?? (await linkedStore()));
-  const session = await WhatsAppSession.start(api, host, { backoffMs: 1 });
+  const session = await WhatsAppSession.start(api, host, { backoffMs: 1, resendWaitMs: 50 });
   api.last.open();
   await tick();
   return { api, host, session, socket: api.last };
@@ -457,5 +458,100 @@ describe('operations', () => {
     expect(again.status().state).toBe('connecting');
     expect((await call<ChatSummary[]>(again, 'conversations')).map((c) => [c.id, c.lastMessage, c.unread])).toEqual([[ALICE, 'kept', 1]]);
     expect((await call<ReadResult>(again, 'read', { chat: ALICE })).messages.map((m) => m.text)).toEqual(['kept']);
+  });
+});
+
+describe('media', () => {
+  const KEY = new Uint8Array([9, 8, 7]);
+  const PHOTO = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const imageAt = (chat: string, id: string, at: number, extra: Record<string, unknown> = {}) => ({
+    key: { remoteJid: chat, id, fromMe: false, ...extra },
+    message: { imageMessage: { url: 'https://mmg.whatsapp.net/i', directPath: `/v/${id}`, mediaKey: KEY, mimetype: 'image/jpeg', fileLength: PHOTO.length, jpegThumbnail: 'AAAA' } },
+    messageTimestamp: at,
+  });
+
+  test('read shows the media of a message: its kind, type and size', async () => {
+    const { socket, session } = await connected();
+    socket.emit('messages.upsert', { type: 'notify', messages: [imageAt(ALICE, 'img', 1), incoming(ALICE, 't', 'text', 2)] });
+    await tick();
+    const read = await call<ReadResult>(session, 'read', { chat: ALICE, receipts: false });
+    expect(read.messages.map((m) => [m.id, m.text, m.media])).toEqual([
+      ['img', '[image]', { type: 'image', mimetype: 'image/jpeg', size: PHOTO.length }],
+      ['t', 'text', undefined],
+    ]);
+  });
+
+  test('download fetches the file and names it, without receipts, presence or a request to the phone', async () => {
+    const { api, socket, session } = await connected();
+    api.files.set('/v/img', PHOTO);
+    socket.emit('messages.upsert', { type: 'notify', messages: [imageAt(GROUP, 'img', Date.UTC(2026, 10, 6, 15, 15, 45) / 1000, { participant: BOB })] });
+    await tick();
+    const file = await call<SessionFile>(session, 'media', { chat: GROUP, id: 'img' });
+    expect(file).toBeInstanceOf(SessionFile);
+    expect(file.data).toEqual(PHOTO);
+    expect(file.contentType).toBe('image/jpeg');
+    expect(file.fileName).toBe('2026-11-06_15-15-45_img.jpg');
+    expect(api.downloads).toEqual([{ kind: 'image', directPath: '/v/img', mediaKey: 'CQgH' }]);
+    expect(socket.receipts).toEqual([]);
+    expect(socket.resendRequests).toEqual([]);
+    expect(socket.sent).toEqual([]);
+  });
+
+  test('a read-only profile can download too: nothing is sent', async () => {
+    const { api, socket, session } = await connected();
+    api.files.set('/v/img', PHOTO);
+    socket.emit('messages.upsert', { type: 'notify', messages: [imageAt(ALICE, 'img', 1)] });
+    await tick();
+    expect((await call<SessionFile>(session, 'media', { chat: '+33611111111', id: 'img' }, true)).data).toEqual(PHOTO);
+  });
+
+  test('media stored before its details were kept is asked again from the phone, then downloaded', async () => {
+    const store = await linkedStore();
+    // What an earlier version stored: the placeholder only.
+    await store.set('msgs:120363000@g.us', [{ id: 'old', chat: GROUP, participant: BOB, fromMe: false, sender: BOB, text: '[image]', at: 5 }]);
+    await store.set('chat:120363000@g.us', { id: GROUP, unread: 0, lastMessage: '[image]', lastMessageAt: 5 });
+    const { api, socket, session } = await connected(store);
+    expect((await call<ReadResult>(session, 'read', { chat: GROUP, receipts: false })).messages[0]!.media).toEqual({ type: 'image' });
+    socket.phoneHas.set('old', imageAt(GROUP, 'old', 5, { participant: BOB }));
+    api.files.set('/v/old', PHOTO);
+
+    const file = await call<SessionFile>(session, 'media', { chat: GROUP, id: 'old' });
+    expect(file.data).toEqual(PHOTO);
+    expect(socket.resendRequests).toEqual([{ remoteJid: GROUP, id: 'old', fromMe: false, participant: BOB }]);
+    // The answer is the same message again: not new, not unread, and stored once.
+    const chats = await call<ChatSummary[]>(session, 'conversations');
+    expect(chats.map((c) => [c.id, c.unread])).toEqual([[GROUP, 0]]);
+    const read = await call<ReadResult>(session, 'read', { chat: GROUP, receipts: false });
+    expect(read.messages.map((m) => [m.id, m.media?.mimetype])).toEqual([['old', 'image/jpeg']]);
+    expect(socket.receipts).toEqual([]);
+    expect(socket.sent).toEqual([]);
+  });
+
+  test('a phone that does not answer is an error that says why', async () => {
+    const store = await linkedStore();
+    await store.set('msgs:33611111111@s.whatsapp.net', [{ id: 'old', chat: ALICE, fromMe: false, sender: ALICE, text: '[voice message]', at: 5 }]);
+    const { session, socket } = await connected(store);
+    await expect(call(session, 'media', { chat: ALICE, id: 'old' })).rejects.toMatchObject({ code: 'API_ERROR', message: expect.stringContaining('did not send') });
+    expect(socket.resendRequests).toHaveLength(1);
+  });
+
+  test('a file WhatsApp no longer holds, a text message and an unknown ID each fail with the reason', async () => {
+    const { socket, session } = await connected();
+    socket.emit('messages.upsert', { type: 'notify', messages: [imageAt(ALICE, 'img', 1), incoming(ALICE, 't', '[image] is what I typed', 2)] });
+    await tick();
+    await expect(call(session, 'media', { chat: ALICE, id: 'img' })).rejects.toMatchObject({ code: 'NOT_FOUND', message: expect.stringContaining('no longer hold') });
+    expect(await codeOf(call(session, 'media', { chat: ALICE, id: 'nope' }))).toBe('NOT_FOUND');
+    expect(await codeOf(call(session, 'media', { chat: ALICE }))).toBe('INVALID_PARAMS');
+    // Text that looks like a placeholder is checked with the phone, which sends back text: still nothing to download.
+    socket.phoneHas.set('t', incoming(ALICE, 't', '[image] is what I typed', 2));
+    expect(await codeOf(call(session, 'media', { chat: ALICE, id: 't' }))).toBe('API_ERROR');
+  });
+
+  test('media from a history sync is downloadable too', async () => {
+    const { api, socket, session } = await connected();
+    api.files.set('/v/h1', PHOTO);
+    socket.emit('messaging-history.set', { chats: [], contacts: [], messages: [imageAt(ALICE, 'h1', 3)] });
+    await tick();
+    expect((await call<SessionFile>(session, 'media', { chat: ALICE, id: 'h1' })).data).toEqual(PHOTO);
   });
 });

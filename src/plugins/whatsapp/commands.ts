@@ -12,12 +12,14 @@ import { newProfileName } from '../profile-host';
 import { isProfileReadOnly } from '../../config/config-manager';
 import { sessionTarget } from '../../daemon/client';
 import { cancelPairing, pollPairing, startPairing, WhatsAppClient } from './client';
+import { downloadMedia, saveChatMedia } from './download';
 import { parseRecipient } from './records';
 import {
   formatPairingCode,
   printContacts,
   printConversations,
   printReadResult,
+  printSavedFile,
   printSendResult,
   printWhatsAppStatus,
 } from './output';
@@ -208,17 +210,26 @@ export function registerWhatsAppCommands(program: Command): void {
   addExamples(
     whatsapp
       .command('read')
-      .description('Show the last messages of a chat, and mark them as read')
+      .description('Show the last messages of a chat with their IDs, and mark them as read')
       .argument('<chat>', 'A number in international format, a JID, or a known name')
       .option('--last <n>', 'How many messages (1-500)', positiveInteger('--last'), 20)
       .option('--no-read-receipts', 'Do not mark the messages as read (no blue ticks)')
+      .option('--download-media <dir>', 'Also save the images, videos, audio, documents and stickers shown into this directory')
       .option('--profile <name>', PROFILE_OPTION)
       .action(async (chat: string, options) => {
         try {
           const client = await clientFor(options.profile);
           // A read-only profile never sends receipts; the daemon enforces it too.
           const receipts = options.readReceipts !== false && !(await isProfileReadOnly('whatsapp', client.profile));
-          printReadResult(await client.read(chat, { last: options.last, receipts }));
+          const result = await client.read(chat, { last: options.last, receipts });
+          if (options.downloadMedia === undefined) {
+            printReadResult(result);
+            return;
+          }
+          const outcomes = await saveChatMedia(client, result.chat.id, result.messages, options.downloadMedia);
+          printReadResult(result, outcomes);
+          const failed = [...outcomes.values()].filter((o) => o.state === 'failed').length;
+          if (failed > 0) throw new CliError('API_ERROR', `${failed} of ${outcomes.size} media file(s) could not be saved`, 'See "Not saved" above for each one');
         } catch (error) {
           handleError(error);
         }
@@ -228,7 +239,41 @@ export function registerWhatsAppCommands(program: Command): void {
   agentio whatsapp read +33612345678 --last 10
 
   # look without the sender seeing blue ticks
-  agentio whatsapp read "Alice Martin" --no-read-receipts`,
+  agentio whatsapp read "Alice Martin" --no-read-receipts
+
+  # also save the photos, videos, voice notes and documents shown
+  agentio whatsapp read "Alice Martin" --no-read-receipts --download-media ./whatsapp-media`,
+  );
+
+  addExamples(
+    whatsapp
+      .command('download')
+      .description('Save the file of one image, video, audio, document or sticker message')
+      .argument('<chat>', 'A number in international format, a JID, or a known name')
+      .argument('<messageId>', 'The message ID, as `read` shows it')
+      .option('--out <path>', 'A file path, or a directory to save into (default: the current directory)')
+      .option('--profile <name>', PROFILE_OPTION)
+      .action(async (chat: string, messageId: string, options) => {
+        try {
+          const client = await clientFor(options.profile);
+          printSavedFile(await downloadMedia(client, chat, messageId, options.out));
+        } catch (error) {
+          handleError(error);
+        }
+      }),
+    `Examples:
+
+  # find the ID with read, then save the file
+  agentio whatsapp read "Alice Martin" --no-read-receipts
+  agentio whatsapp download "Alice Martin" 3EB0C431D5F2A7B8E9F1
+
+  # into a directory, or at an exact path
+  agentio whatsapp download 120363000000000000@g.us 3EB0C431D5F2A7B8E9F1 --out ./media/
+  agentio whatsapp download +33612345678 3EB0C431D5F2A7B8E9F1 --out ./photo.jpg
+
+Saving never marks anything as read and sends nothing to the chat. The file
+is named after the message's date and ID (a document keeps its own name), and
+an existing file is never overwritten.`,
   );
 
   addExamples(

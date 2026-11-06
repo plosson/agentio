@@ -8,11 +8,12 @@ import { deleteProfileForKey, renameProfileForKey, saveProfileForKey, writeFailu
 import { NO_STORED_CREDENTIALS, type RemoteAddBody, type RemoteRenameBody } from '../auth/remote';
 import type { ServiceName } from '../types/config';
 import { RateLimiter } from './rate-limit';
-import { daemonLog, errorResponse, json, profilePath, readJson } from './http';
+import { daemonLog, errorResponse, fileResponse, json, profilePath, readJson } from './http';
 import { recordUsage } from '../usage/store';
 import { USAGE_HEADERS } from '../usage/event';
 import { pollDeviceAuth, startDeviceAuth } from './device-auth';
 import { findServicePlugin, findSessionPlugin } from '../plugins/registry';
+import { SessionFile } from '../plugins/types';
 import {
   cancelPairing,
   pairingStatus,
@@ -313,7 +314,7 @@ async function handlePairCancel(key: ApiKeyView, service: ServiceName, name: str
   return new Response(null, { status: 204 });
 }
 
-/** One of the service's own operations, run by the profile's session. */
+/** One of the service's own operations, run by the profile's session. A file it answers with is sent as is; anything else as JSON. */
 async function handleSessionOperation(request: Request, key: ApiKeyView, service: ServiceName, name: string, operation: string): Promise<Response> {
   const plugin = requireSessionPlugin(service);
   const readOnly = await allowedProfile(key, service, name);
@@ -335,7 +336,7 @@ async function handleSessionOperation(request: Request, key: ApiKeyView, service
   }
   const result = await audited(key, `session.${operation}`, service, name,
     () => requireSession(service, name).handle({ operation, params: params as Record<string, unknown>, readOnly }));
-  return json(result ?? null);
+  return result instanceof SessionFile ? fileResponse(result) : json(result ?? null);
 }
 
 /** Routes under /v1. Returns null for anything else. */

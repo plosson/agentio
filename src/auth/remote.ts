@@ -190,17 +190,21 @@ export interface HubCallOptions {
   token?: string;
   /** Extra request headers, such as the usage headers on a credential request. */
   headers?: Record<string, string>;
+  /** How long to wait for the whole answer; 15 seconds unless set. */
+  timeoutMs?: number;
 }
 
-/**
- * One JSON call to a hub. Transport failures are NETWORK_ERROR; an error
- * answer keeps the hub's own code and suggestion (see hubError). Shared by
- * the authenticated credential and profile calls and the pre-token login flow.
- */
-export async function hubCall<T>(url: string, path: string, { method = 'GET', body, token, headers: extra }: HubCallOptions = {}): Promise<T> {
-  let response: Response;
+/** A file a hub answered with, and the name it suggests for it. */
+export interface HubFile {
+  data: Uint8Array<ArrayBuffer>;
+  contentType: string;
+  fileName?: string;
+}
+
+/** The request, sent; a transport failure is NETWORK_ERROR. */
+async function hubFetch(url: string, path: string, { method = 'GET', body, token, headers: extra, timeoutMs = REQUEST_TIMEOUT_MS }: HubCallOptions): Promise<Response> {
   try {
-    response = await fetch(`${url}${path}`, {
+    return await fetch(`${url}${path}`, {
       method,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -208,23 +212,62 @@ export async function hubCall<T>(url: string, path: string, { method = 'GET', bo
         ...extra,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new CliError('NETWORK_ERROR', `Cannot reach the vault hub at ${url}: ${reason}`,
       'Check the network, and that the hub daemon is running');
   }
-  const text = await response.text();
+}
+
+/** An error answer as the CLI error it stands for. */
+async function hubFailure(response: Response, url: string, request: { method: string; path: string }): Promise<CliError> {
   let answer: unknown = null;
-  try { answer = text ? JSON.parse(text) : null; } catch { answer = null; }
-  if (!response.ok) {
-    throw hubError(response.status, (answer ?? {}) as { error?: string; code?: string; suggestion?: string }, url, {
-      method,
-      path,
-    });
+  try { answer = JSON.parse(await response.text()); } catch { answer = null; }
+  return hubError(response.status, (answer ?? {}) as { error?: string; code?: string; suggestion?: string }, url, request);
+}
+
+/**
+ * One JSON call to a hub. Transport failures are NETWORK_ERROR; an error
+ * answer keeps the hub's own code and suggestion (see hubError). Shared by
+ * the authenticated credential and profile calls and the pre-token login flow.
+ */
+export async function hubCall<T>(url: string, path: string, options: HubCallOptions = {}): Promise<T> {
+  const response = await hubFetch(url, path, options);
+  if (!response.ok) throw await hubFailure(response, url, { method: options.method ?? 'GET', path });
+  const text = await response.text();
+  try {
+    return (text ? JSON.parse(text) : null) as T;
+  } catch {
+    return null as T;
   }
-  return answer as T;
+}
+
+/** The file name a Content-Disposition header suggests, if any. */
+export function dispositionFileName(header: string | null): string | undefined {
+  if (!header) return undefined;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.trim());
+    } catch {
+      // Not valid percent-encoding; try the plain form.
+    }
+  }
+  return /filename="?([^";]+)"?/i.exec(header)?.[1];
+}
+
+/** One call to a hub that answers with a file. Errors are read as hubCall reads them. */
+export async function hubDownload(url: string, path: string, options: HubCallOptions = {}): Promise<HubFile> {
+  const response = await hubFetch(url, path, options);
+  if (!response.ok) throw await hubFailure(response, url, { method: options.method ?? 'GET', path });
+  const fileName = dispositionFileName(response.headers.get('Content-Disposition'));
+  return {
+    data: new Uint8Array(await response.arrayBuffer()),
+    contentType: response.headers.get('Content-Type') ?? 'application/octet-stream',
+    ...(fileName ? { fileName } : {}),
+  };
 }
 
 const hubRequest = <T>(path: string, method: HubCallOptions['method'] = 'GET', body?: unknown) =>

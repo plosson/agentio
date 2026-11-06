@@ -60,6 +60,18 @@ export interface SessionStatus {
   detail?: string;
 }
 
+/**
+ * A file a session operation answers with. The daemon sends its bytes as the
+ * response body, with its type and suggested name in the headers, instead of JSON.
+ */
+export class SessionFile {
+  constructor(
+    readonly data: Uint8Array<ArrayBuffer>,
+    readonly contentType: string,
+    readonly fileName: string,
+  ) {}
+}
+
 /** One call to a session's own operations, already authorised by the daemon. */
 export interface SessionRequest {
   operation: string;
@@ -78,7 +90,7 @@ export interface SessionHost {
 
 export interface Session {
   status(): SessionStatus;
-  /** The service's own operations. Throw CliError for anything the caller should see. */
+  /** The service's own operations, answering JSON or a SessionFile. Throw CliError for anything the caller should see. */
   handle(request: SessionRequest): Promise<unknown>;
   /** Close the connection after writing the last state; with `logout`, unlink the account first, best effort. */
   stop(options?: { logout?: boolean }): Promise<void>;

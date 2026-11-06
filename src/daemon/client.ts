@@ -2,7 +2,7 @@ import { readFileSync, unlinkSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { assertTestWritable, configDir } from '../vault/pointer';
-import { absentAsOutcome, hub, hubCall, isRemoteMode, remoteToken, type HubCallOptions } from '../auth/remote';
+import { absentAsOutcome, hub, hubCall, hubDownload, isRemoteMode, remoteToken, type HubCallOptions, type HubFile } from '../auth/remote';
 import { CliError } from '../utils/errors';
 import type { WriteOutcome } from '../config/profile-store';
 import { DAEMON_PORT, type HealthResponse } from './types';
@@ -116,13 +116,13 @@ function daemonDownError(url?: string): CliError {
 }
 
 /**
- * One call to the daemon that holds the sessions. The hub's errors come back
+ * A call to the daemon that holds the sessions. The hub's errors come back
  * as they are; the local daemon's are worded for the machine they happen on.
  */
-export async function daemonCall<T>(path: string, options: Omit<HubCallOptions, 'token'> = {}): Promise<T> {
+async function toSessionDaemon<T>(call: (target: { url: string; token: string }) => Promise<T>): Promise<T> {
   const target = sessionTarget();
   try {
-    return await hubCall<T>(target.url, path, { ...options, token: target.token });
+    return await call(target);
   } catch (err) {
     if (target.remote || !(err instanceof CliError)) throw err;
     if (err.code === 'NETWORK_ERROR') throw daemonDownError(target.url);
@@ -132,6 +132,16 @@ export async function daemonCall<T>(path: string, options: Omit<HubCallOptions, 
     }
     throw err;
   }
+}
+
+/** One JSON call to the daemon that holds the sessions. */
+export function daemonCall<T>(path: string, options: Omit<HubCallOptions, 'token'> = {}): Promise<T> {
+  return toSessionDaemon((target) => hubCall<T>(target.url, path, { ...options, token: target.token }));
+}
+
+/** One call to the daemon that holds the sessions, answered with a file. */
+export function daemonDownload(path: string, options: Omit<HubCallOptions, 'token'> = {}): Promise<HubFile> {
+  return toSessionDaemon((target) => hubDownload(target.url, path, { ...options, token: target.token }));
 }
 
 const profileRoute = (service: string, name: string) => `/v1/profiles/${encodeURIComponent(service)}/${encodeURIComponent(name)}`;

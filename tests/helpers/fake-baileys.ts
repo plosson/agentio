@@ -1,6 +1,8 @@
 import type { PluginStore } from '../../src/daemon/plugin-store';
 import type { SessionHost, SessionLogFields } from '../../src/plugins/types';
-import type { BaileysApi, WaAuthState, WaSocket } from '../../src/plugins/whatsapp/types';
+import type { BaileysApi, MediaKind, WaAuthState, WaSocket } from '../../src/plugins/whatsapp/types';
+
+type MessageKey = { remoteJid: string; id: string; participant?: string; fromMe: boolean };
 
 /**
  * A stand-in for Baileys: sockets the test drives by emitting the events
@@ -16,7 +18,11 @@ export class FakeSocket implements WaSocket {
   };
   user?: { id: string; name?: string };
   sent: Array<{ jid: string; text: string }> = [];
-  receipts: Array<Array<{ remoteJid: string; id: string; participant?: string; fromMe: boolean }>> = [];
+  receipts: MessageKey[][] = [];
+  /** Messages asked again from the phone. */
+  resendRequests: MessageKey[] = [];
+  /** What the phone answers a resend request with, if anything: emitted as WhatsApp would. */
+  phoneHas = new Map<string, unknown>();
   /** Numbers WhatsApp knows, as digits; anything else is not on WhatsApp. */
   registered = new Map<string, string>();
   groups: Record<string, { id: string; subject: string }> = {};
@@ -52,8 +58,15 @@ export class FakeSocket implements WaSocket {
     return numbers.map((n) => (this.registered.has(n) ? { jid: this.registered.get(n)!, exists: true } : { jid: `${n}@s.whatsapp.net`, exists: false }));
   }
 
-  async readMessages(keys: Array<{ remoteJid: string; id: string; participant?: string; fromMe: boolean }>) {
+  async readMessages(keys: MessageKey[]) {
     this.receipts.push(keys);
+  }
+
+  async requestPlaceholderResend(key: MessageKey) {
+    this.resendRequests.push(key);
+    const answer = this.phoneHas.get(key.id);
+    if (answer) setTimeout(() => this.emit('messages.upsert', { type: 'notify', requestId: 'PDO1', messages: [answer] }), 1);
+    return undefined;
   }
 
   async groupFetchAllParticipating() {
@@ -108,6 +121,17 @@ export class FakeBaileys implements BaileysApi {
 
   appStateSyncKey(value: unknown) {
     return { proto: value };
+  }
+
+  /** Files WhatsApp's media servers hold, by direct path. Anything else answers 410 Gone. */
+  readonly files = new Map<string, Uint8Array<ArrayBuffer>>();
+  downloads: Array<{ kind: MediaKind; directPath: string; mediaKey: string }> = [];
+
+  async downloadMedia(media: { kind: MediaKind; url?: string; directPath: string; mediaKey: string }) {
+    this.downloads.push({ kind: media.kind, directPath: media.directPath, mediaKey: media.mediaKey });
+    const file = this.files.get(media.directPath);
+    if (!file) throw Object.assign(new Error('Failed to fetch stream'), { output: { statusCode: 410 } });
+    return file;
   }
 }
 

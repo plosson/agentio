@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { existsSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import type { Server } from 'bun';
 import { withTempVault } from '../../helpers/vault';
 import { FakeBaileys, tick, until } from '../../helpers/fake-baileys';
@@ -16,6 +18,7 @@ import { registerWhatsAppCommands } from '../../../src/plugins/whatsapp/commands
 import { whatsappSessions } from '../../../src/plugins/whatsapp/session';
 import { pairWhatsAppProfile, PairingExpired } from '../../../src/plugins/whatsapp/commands';
 import { WhatsAppClient } from '../../../src/plugins/whatsapp/client';
+import { downloadMedia, saveChatMedia } from '../../../src/plugins/whatsapp/download';
 import { startSessions, stopSessions } from '../../../src/daemon/sessions';
 import { createRequestHandler } from '../../../src/daemon/api';
 import { v1KeyLimiter } from '../../../src/daemon/routes-v1';
@@ -242,6 +245,61 @@ describe('commands through the daemon', () => {
     expect((await client.read('Alice', { receipts: true })).receiptsSent).toBe(0);
     expect(api.last.sent).toEqual([]);
     expect(api.last.receipts).toEqual([]);
+  });
+
+  describe('media', () => {
+    const PHOTO = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 7, 7]);
+    const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const AT = Date.UTC(2026, 10, 6, 15, 15, 45) / 1000;
+
+    async function withMedia(): Promise<{ client: WhatsAppClient; dir: string }> {
+      const client = await paired();
+      api.files.set('/v/p1', PHOTO);
+      api.files.set('/v/d1', PDF);
+      api.last.emit('messages.upsert', {
+        type: 'notify',
+        messages: [
+          { key: { remoteJid: '33611111111@s.whatsapp.net', id: 'p1', fromMe: false }, message: { imageMessage: { directPath: '/v/p1', mediaKey: new Uint8Array([1]), mimetype: 'image/jpeg' } }, messageTimestamp: AT },
+          { key: { remoteJid: '33611111111@s.whatsapp.net', id: 'd1', fromMe: false }, message: { documentMessage: { directPath: '/v/d1', mediaKey: new Uint8Array([2]), mimetype: 'application/pdf', fileName: 'Offer.pdf' } }, messageTimestamp: AT + 1 },
+          { key: { remoteJid: '33611111111@s.whatsapp.net', id: 'gone', fromMe: false }, message: { audioMessage: { directPath: '/v/gone', mediaKey: new Uint8Array([3]), mimetype: 'audio/ogg; codecs=opus', ptt: true } }, messageTimestamp: AT + 2 },
+        ],
+      });
+      await until(async () => (await client.read('Alice', { receipts: false })).messages.length === 4, 'the media stored');
+      return { client, dir: mkdtempSync(join(tmpdir(), 'agentio-wa-media-')) };
+    }
+
+    test('download saves the file the daemon sends, under its suggested name, and never overwrites', async () => {
+      const { client, dir } = await withMedia();
+      const saved = await downloadMedia(client, 'Alice', 'p1', `${dir}/`);
+      expect(saved).toEqual({ path: join(dir, '2026-11-06_15-15-45_p1.jpg'), contentType: 'image/jpeg', size: PHOTO.length });
+      expect(new Uint8Array(readFileSync(saved.path))).toEqual(PHOTO);
+      await expect(downloadMedia(client, 'Alice', 'p1', dir)).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: expect.stringContaining('already exists') });
+      const exact = await downloadMedia(client, '+33611111111', 'd1', join(dir, 'sub', 'offer.pdf'));
+      expect(exact.path).toBe(join(dir, 'sub', 'offer.pdf'));
+      expect(new Uint8Array(readFileSync(exact.path))).toEqual(PDF);
+      // Downloading sent nothing: no receipt, no message.
+      expect(api.last.receipts).toEqual([]);
+      expect(api.last.sent).toEqual([]);
+    });
+
+    test('a failure on the daemon keeps its code through the file route', async () => {
+      const { client, dir } = await withMedia();
+      await expect(downloadMedia(client, 'Alice', 'gone', dir)).rejects.toMatchObject({ code: 'NOT_FOUND', message: expect.stringContaining('no longer hold') });
+      await expect(downloadMedia(client, 'Alice', 'a1', dir)).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: expect.stringContaining('no media') });
+    });
+
+    test('read --download-media saves every file shown, skips the ones already there, and reports the rest', async () => {
+      const { client, dir } = await withMedia();
+      writeFileSync(join(dir, '2026-11-06_15-15-45_p1.jpg'), 'kept');
+      const read = await client.read('Alice', { receipts: false });
+      const outcomes = await saveChatMedia(client, read.chat.id, read.messages, dir);
+      expect(outcomes.get('p1')).toEqual({ state: 'existing', path: join(dir, '2026-11-06_15-15-45_p1.jpg') });
+      expect(outcomes.get('d1')).toEqual({ state: 'saved', file: { path: join(dir, '2026-11-06_15-15-46_Offer.pdf'), contentType: 'application/pdf', size: PDF.length } });
+      expect(outcomes.get('gone')).toMatchObject({ state: 'failed', error: expect.stringContaining('no longer hold') });
+      expect(outcomes.has('a1')).toBe(false);
+      expect(readFileSync(join(dir, '2026-11-06_15-15-45_p1.jpg'), 'utf8')).toBe('kept');
+      expect(api.last.receipts).toEqual([]);
+    });
   });
 
   test('removing the profile goes through the daemon: logged out, store deleted, entry gone', async () => {
