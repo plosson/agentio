@@ -161,6 +161,9 @@ connection per profile while the vault is unlocked (`src/daemon/sessions.ts`):
   token or remotely with a hub key. A session's credentials never leave the
   daemon.
 - Operations listed in `writeOperations` are refused on a read-only profile.
+- An operation answers JSON, or a `SessionFile` (bytes, content type and
+  suggested name), which the daemon sends as the response body. The CLI reads
+  it with `daemonDownload`; WhatsApp's media download is the example.
 
 Google plugins are grouped under `plugins/google` rather than nine parallel
 top-level folders. Each Google service has its own folder and `ServicePlugin`

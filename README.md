@@ -173,7 +173,7 @@ Done. Your agent can now access all your services securely in CI/CD.
 |---------|------|----------|
 | **Gmail** | OAuth | `list`, `get`, `search`, `send`, `reply`, `archive`, `mark`, `attachment`, `export` |
 | **Slack** | Webhook/User token | `send`, `messages`, `download`, `attachments`, `users`, `channels` |
-| **WhatsApp** | Linked device, through the daemon | `status`, `conversations`, `send`, `read`, `contacts` |
+| **WhatsApp** | Linked device, through the daemon | `status`, `conversations`, `send`, `read`, `download`, `contacts` |
 | **Google Chat** | Webhook/OAuth | `send`, `list`, `get` |
 | **JIRA** | OAuth | `projects`, `search`, `get`, `users search`, `users get`, `comment`, `transitions`, `transition` |
 | **Revolut** | Certificate + OAuth | `accounts`, `transactions`, `transaction`, `counterparties`, `pay` (drafts only), `drafts`, `links` |
@@ -255,8 +255,14 @@ agentio whatsapp profile add --profile work
 # What is waiting to be read
 agentio whatsapp conversations --unread-only
 
-# Read without sending blue ticks
+# Read without sending blue ticks; each message shows its ID, and media its type
 agentio whatsapp read "Alice Martin" --no-read-receipts
+
+# Save one photo, video, voice note, document or sticker, by message ID
+agentio whatsapp download "Alice Martin" 3EB0C431D5F2A7B8E9F1 --out ./media/
+
+# Or save every file shown while reading
+agentio whatsapp read "Alice Martin" --no-read-receipts --download-media ./media
 
 # Send
 agentio whatsapp send +33612345678 "On my way"

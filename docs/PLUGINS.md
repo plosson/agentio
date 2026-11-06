@@ -397,7 +397,7 @@ Sources: [incoming webhooks](https://docs.slack.dev/messaging/sending-messages-u
 
 **What the vault stores:** the profile, and the key of its store. Nothing else, and the vault is not written when messages arrive.
 
-**What the store holds:** the auth state (Signal keys), the chat index, the last 100 text messages of each chat, and the names known. It is encrypted, lives next to the vault at `stores/whatsapp/<profile>/`, and only the daemon opens it. It is not part of `vault export`. If it is lost, the profile must be paired again.
+**What the store holds:** the auth state (Signal keys), the chat index, the last 100 messages of each chat (their text, and for media the address and key needed to download the file, never the file), and the names known. It is encrypted, lives next to the vault at `stores/whatsapp/<profile>/`, and only the daemon opens it. It is not part of `vault export`. If it is lost, the profile must be paired again.
 
 Notes:
 - **Ban risk.** Baileys is not WhatsApp's own API, and Meta can ban a number used for automation. **Use a dedicated number**, not your personal one.
@@ -405,7 +405,7 @@ Notes:
 - **Read receipts.** `read` marks the messages it returns as read (blue ticks), unless you pass `--no-read-receipts`. A read-only profile never sends receipts and cannot send messages.
 - **Hidden IDs.** WhatsApp increasingly identifies people by a hidden ID (`…@lid`) instead of their number, especially group members and people who are not in your contacts. Such a person is shown by name and ID, without a number. Sending to them still works.
 - **Names.** Names come from the contacts saved on the phone, the names people set for themselves, and group names. `send` and `read` accept a name only when it matches exactly one of these. `contacts` lists them.
-- **Media** is stored as a placeholder such as `[image]`. agentio sends text only.
+- **Media.** `read` shows media as a placeholder such as `[image]`, with the message ID and the file's type, name and size. `download <chat> <messageId>` and `read --download-media <dir>` fetch the file from WhatsApp's servers through the daemon, which decrypts it. Downloading sends nothing to the chat: no read receipt and no presence. Media stored by agentio 3.40 or earlier has only its placeholder; for it, the daemon first asks the account's own phone to send the message again (a request to the linked phone, never to the chat), so the phone must be online. WhatsApp keeps files on its servers for a limited time only. agentio sends text only.
 - **Not confirmed:** whether a reconnecting device receives the chat list again or only the messages sent while it was offline, and whether contact names come back on each connection. agentio keeps everything it receives and asks for the contact sync on each connection, so either way works.
 
 **What's needed:** nothing from Meta, and no app. The WhatsApp Business Cloud API would avoid the ban risk; it is future work.

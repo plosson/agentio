@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { encodeToken } from '../../src/auth/token';
-import { clearRemoteToken, hub, isRemoteMode, NO_STORED_CREDENTIALS, remoteDeleteProfile, remoteProfiles, remoteSaveProfile, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
+import { clearRemoteToken, dispositionFileName, hub, isRemoteMode, NO_STORED_CREDENTIALS, remoteDeleteProfile, remoteProfiles, remoteSaveProfile, remoteToken, resetRemoteCache, saveRemoteToken, tokenFilePath } from '../../src/auth/remote';
 import { CliError } from '../../src/utils/errors';
 import { getCredentials, setCredentials } from '../../src/auth/token-store';
 import { isProfileReadOnly, listProfileRefs, loadConfig, resolveProfile } from '../../src/config/config-manager';
@@ -284,5 +284,15 @@ describe('usage headers', () => {
   test('the listing request carries no usage headers', async () => {
     await remoteProfiles();
     expect(headersSeen.at(-1)!.has(USAGE_HEADERS.host)).toBe(false);
+  });
+});
+
+describe('file names from a hub', () => {
+  test('the encoded form is preferred, the plain one is read too, and none is undefined', () => {
+    expect(dispositionFileName(`attachment; filename*=UTF-8''%C3%A9t%C3%A9%202026.jpg`)).toBe('été 2026.jpg');
+    expect(dispositionFileName('attachment; filename="photo.jpg"')).toBe('photo.jpg');
+    expect(dispositionFileName(`attachment; filename*=UTF-8''%E0%A4%A; filename="plain.bin"`)).toBe('plain.bin');
+    expect(dispositionFileName('attachment')).toBeUndefined();
+    expect(dispositionFileName(null)).toBeUndefined();
   });
 });

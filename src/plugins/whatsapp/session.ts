@@ -1,5 +1,5 @@
 import { CliError } from '../../utils/errors';
-import type { Pairing, PairingStatus, Session, SessionHost, SessionPlugin, SessionRequest, SessionStatus } from '../types';
+import { SessionFile, type Pairing, type PairingStatus, type Session, type SessionHost, type SessionPlugin, type SessionRequest, type SessionStatus } from '../types';
 import {
   chatRecord,
   contactRows,
@@ -10,12 +10,15 @@ import {
   isPhoneJid,
   keyRecord,
   MAX_MESSAGES_PER_CHAT,
+  mediaFileName,
+  messageMedia,
   messagesRecord,
   messageText,
   nameRecord,
   normalizeJid,
   parseRecipient,
   phoneOf,
+  placeholderKind,
   pnRecord,
   preview,
   resolveName,
@@ -24,7 +27,7 @@ import {
   type NameRecord,
   type StoredMessage,
 } from './records';
-import type { BaileysApi, ChatSummary, ContactView, MessageView, ReadResult, SendResult, WaAuthState, WaSocket } from './types';
+import type { BaileysApi, ChatSummary, ContactView, MediaView, MessageView, ReadResult, SendResult, WaAuthState, WaSocket } from './types';
 
 /**
  * The daemon's side of a WhatsApp profile: one Baileys socket, kept open while
@@ -55,10 +58,16 @@ const MAX_TEXT = 65_536;
 const MAX_BACKOFF_MS = 60_000;
 /** Sent messages kept in memory, so WhatsApp's retry requests can be answered. */
 const SENT_KEPT = 200;
+/** How long to wait for the phone to send a message again, with its media details. */
+const RESEND_WAIT_MS = 20_000;
+/** The HTTP statuses WhatsApp's media servers answer for a file they no longer hold. */
+const MEDIA_GONE = new Set([404, 410]);
 
 export interface SessionOptions {
   /** First reconnection delay; doubles on each failure. */
   backoffMs?: number;
+  /** How long a download waits for the phone to send an old media message again. */
+  resendWaitMs?: number;
 }
 
 const statusCode = (error: any): number | undefined => error?.output?.statusCode ?? error?.statusCode;
@@ -94,6 +103,8 @@ export class WhatsAppSession implements Session {
   private stopped = false;
   private writes: Promise<void> = Promise.resolve();
   private readonly sent = new Map<string, unknown>();
+  /** Downloads waiting for the phone to send a message again, by message ID. */
+  private readonly resends = new Map<string, () => void>();
 
   // Pairing: a session that starts with blank credentials and becomes a normal one once linked.
   private pairing: boolean;
@@ -195,7 +206,8 @@ export class WhatsAppSession implements Session {
     on('chats.update', (chats) => this.onChats(chats));
     on('contacts.upsert', (contacts) => this.onContacts(contacts));
     on('contacts.update', (contacts) => this.onContacts(contacts));
-    on('messages.upsert', ({ messages, type }) => this.onMessages(messages ?? [], type === 'notify'));
+    // A message the phone sent again on request comes as `notify` too, with the request's ID: it is not new.
+    on('messages.upsert', ({ messages, type, requestId }) => this.onMessages(messages ?? [], type === 'notify' && !requestId));
     on('groups.upsert', (groups) => this.onGroups(groups));
     on('groups.update', (groups) => this.onGroups(groups));
     on('lid-mapping.update', (mapping) => this.onMappings([mapping]));
@@ -474,12 +486,15 @@ export class WhatsAppSession implements Session {
       const text = messageText(message.message);
       if (text === null || !key.id) continue;
       const at = seconds(message.messageTimestamp) ?? Math.floor(Date.now() / 1000);
+      const media = messageMedia(message.message);
       const stored: StoredMessage = {
         id: key.id, chat, fromMe, sender, text, at,
         ...(participant ? { participant } : {}),
         ...(!fromMe && message.pushName ? { senderName: message.pushName } : {}),
+        ...(media ? { media } : {}),
       };
       await this.putMessage(stored);
+      if (media) this.resends.get(key.id)?.();
       const current = await this.host.store.get<ChatRecord>(chatRecord(chat));
       const newer = at >= (current?.lastMessageAt ?? 0);
       await this.putChat(chat, {
@@ -505,6 +520,7 @@ export class WhatsAppSession implements Session {
       case 'send': return this.send(request.params, request.readOnly);
       case 'read': return this.read(request.params, request.readOnly);
       case 'contacts': return this.contacts(request.params);
+      case 'media': return this.media(request.params);
       default: throw new CliError('NOT_FOUND', `Unknown WhatsApp operation: ${request.operation}`);
     }
   }
@@ -613,12 +629,91 @@ export class WhatsAppSession implements Session {
         chat.unread = 0;
       }
     }
-    const view = (m: StoredMessage): MessageView => ({
-      id: m.id, fromMe: m.fromMe, sender: m.sender, text: m.text, at: m.at,
-      ...(m.senderName ? { senderName: m.senderName } : {}),
-    });
+    const view = (m: StoredMessage): MessageView => {
+      const media = mediaView(m);
+      return {
+        id: m.id, fromMe: m.fromMe, sender: m.sender, text: m.text, at: m.at,
+        ...(m.senderName ? { senderName: m.senderName } : {}),
+        ...(media ? { media } : {}),
+      };
+    };
     return { chat: await this.summary(chat), messages: messages.map(view), receiptsSent };
   }
+
+  /**
+   * The file of one stored media message, fetched from WhatsApp's servers and
+   * decrypted. Media stored before its details were kept is first asked again
+   * from this account's own phone, which answers with the full message. Nothing
+   * reaches the chat: no read receipt, no presence, no message.
+   */
+  private async media(params: Record<string, unknown>): Promise<SessionFile> {
+    const chatInput = stringParam(params, 'chat', true)!;
+    const id = stringParam(params, 'id', true)!;
+    const { jid } = await this.target(chatInput, false);
+    let message = await this.storedMessage(jid, id);
+    if (!message) {
+      throw new CliError('NOT_FOUND', `No stored message has the ID ${id} in this chat`,
+        `Run \`agentio whatsapp read ${chatInput}\` to see the IDs; only the last ${MAX_MESSAGES_PER_CHAT} messages of a chat are kept`);
+    }
+    if (!message.media) {
+      if (!placeholderKind(message.text)) throw new CliError('INVALID_PARAMS', `Message ${id} has no media to download`);
+      message = await this.resend(message);
+    }
+    const media = message.media!;
+    let data: Uint8Array<ArrayBuffer>;
+    try {
+      data = await this.api.downloadMedia(media);
+    } catch (err) {
+      const code = statusCode(err);
+      if (code !== undefined && MEDIA_GONE.has(code)) {
+        throw new CliError('NOT_FOUND', `WhatsApp's servers no longer hold the file of message ${id}`,
+          'WhatsApp keeps media for a limited time; save it from the phone instead');
+      }
+      throw new CliError('API_ERROR', `The file of message ${id} could not be downloaded${code ? ` (HTTP ${code})` : ''}`, 'Try again in a moment');
+    }
+    return new SessionFile(data, media.mimetype ?? 'application/octet-stream', mediaFileName(message, media));
+  }
+
+  private async storedMessage(jid: string, id: string): Promise<StoredMessage | undefined> {
+    return ((await this.host.store.get<StoredMessage[]>(messagesRecord(jid))) ?? []).find((m) => m.id === id);
+  }
+
+  /** Ask the phone for a message again and wait until it is stored with its media details. */
+  private async resend(message: StoredMessage): Promise<StoredMessage> {
+    const sock = this.requireOpen();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arrived = new Promise<void>((resolve) => {
+      this.resends.set(message.id, resolve);
+      timer = setTimeout(resolve, this.options.resendWaitMs ?? RESEND_WAIT_MS);
+    });
+    try {
+      await sock.requestPlaceholderResend({
+        remoteJid: message.chat, id: message.id, fromMe: message.fromMe,
+        ...(message.participant ? { participant: message.participant } : {}),
+      });
+      await arrived;
+    } finally {
+      clearTimeout(timer);
+      this.resends.delete(message.id);
+    }
+    await this.writes;
+    const again = await this.storedMessage(message.chat, message.id);
+    if (!again?.media) {
+      throw new CliError('API_ERROR', `The phone did not send the media details of message ${message.id}`,
+        'This message predates media downloads, so its details come from the phone: make sure it is online, then try again');
+    }
+    return again;
+  }
+}
+
+/** What read shows of a message's media: its details, or only its kind when it was stored before they were kept. */
+function mediaView(message: StoredMessage): MediaView | undefined {
+  if (message.media) {
+    const { kind, mimetype, fileName, size } = message.media;
+    return { type: kind, ...(mimetype ? { mimetype } : {}), ...(fileName ? { fileName } : {}), ...(size !== undefined ? { size } : {}) };
+  }
+  const kind = placeholderKind(message.text);
+  return kind ? { type: kind } : undefined;
 }
 
 /** Baileys itself, loaded only when a session starts, so the CLI never pays for it. */
@@ -641,6 +736,12 @@ async function loadBaileys(): Promise<BaileysApi> {
     toJson: (value) => JSON.parse(JSON.stringify(value, baileys.BufferJSON.replacer)),
     fromJson: (value) => JSON.parse(JSON.stringify(value), baileys.BufferJSON.reviver),
     appStateSyncKey: (value) => baileys.proto.Message.AppStateSyncKeyData.fromObject(value as any),
+    downloadMedia: async ({ kind, url, directPath, mediaKey }) => {
+      const stream = await baileys.downloadContentFromMessage({ url, directPath, mediaKey: Buffer.from(mediaKey, 'base64') }, kind);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return new Uint8Array(Buffer.concat(chunks));
+    },
   };
 }
 

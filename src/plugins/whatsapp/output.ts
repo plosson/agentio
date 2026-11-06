@@ -1,4 +1,5 @@
-import type { ChatSummary, ContactView, MessageView, ReadResult, SendResult, WhatsAppStatus } from './types';
+import type { MediaOutcome, SavedFile } from './download';
+import type { ChatSummary, ContactView, MediaView, MessageView, ReadResult, SendResult, WhatsAppStatus } from './types';
 
 // WhatsApp specific formatters
 
@@ -33,12 +34,37 @@ export function printConversations(chats: ChatSummary[]): void {
   });
 }
 
-function printMessage(message: MessageView): void {
-  const from = message.fromMe ? 'me' : message.senderName ? `${message.senderName} (${message.sender})` : message.sender;
-  console.log(`[${when(message.at)}] ${from}: ${message.text}`);
+export function formatSize(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let n = bytes;
+  let u = 0;
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+  return `${u === 0 ? n : n.toFixed(1)} ${units[u]}`;
 }
 
-export function printReadResult(result: ReadResult): void {
+/** `image, image/jpeg, 182.3 KB`; a document's name comes after its kind. */
+export function describeMedia(media: MediaView): string {
+  return [media.type, media.fileName, media.mimetype, media.size !== undefined ? formatSize(media.size) : undefined]
+    .filter((part): part is string => !!part)
+    .join(', ');
+}
+
+function printOutcome(outcome: MediaOutcome): void {
+  if (outcome.state === 'saved') console.log(`    Saved: ${outcome.file.path} (${formatSize(outcome.file.size)})`);
+  else if (outcome.state === 'existing') console.log(`    Saved: ${outcome.path} (already there)`);
+  else console.log(`    Not saved: ${outcome.error}`);
+}
+
+function printMessage(message: MessageView, outcome?: MediaOutcome): void {
+  const from = message.fromMe ? 'me' : message.senderName ? `${message.senderName} (${message.sender})` : message.sender;
+  console.log(`[${when(message.at)}] ${from}: ${message.text}`);
+  console.log(`    ID: ${message.id}`);
+  if (message.media) console.log(`    Media: ${describeMedia(message.media)}`);
+  if (outcome) printOutcome(outcome);
+}
+
+/** A chat's messages, each with its ID; with `media`, what became of each file `--download-media` saved. */
+export function printReadResult(result: ReadResult, media?: Map<string, MediaOutcome>): void {
   console.log(`Chat: ${who(result.chat)}${result.chat.isGroup ? ' [group]' : ''}`);
   console.log(`ID: ${result.chat.id}`);
   if (result.messages.length === 0) {
@@ -46,8 +72,14 @@ export function printReadResult(result: ReadResult): void {
     return;
   }
   console.log(`Messages (${result.messages.length}), oldest first\n`);
-  result.messages.forEach(printMessage);
+  for (const message of result.messages) printMessage(message, media?.get(message.id));
   if (result.receiptsSent > 0) console.error(`\nMarked ${result.receiptsSent} message(s) as read`);
+}
+
+export function printSavedFile(file: SavedFile): void {
+  console.log(`Saved: ${file.path}`);
+  console.log(`Type: ${file.contentType}`);
+  console.log(`Size: ${formatSize(file.size)}`);
 }
 
 export function printSendResult(result: SendResult): void {

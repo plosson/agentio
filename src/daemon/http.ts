@@ -37,6 +37,18 @@ export function json(body: unknown, status = 200, headers: Record<string, string
   });
 }
 
+/** A file as the response body, with its type and suggested name in the headers. */
+export function fileResponse(file: { data: Uint8Array<ArrayBuffer>; contentType: string; fileName: string }): Response {
+  return new Response(file.data, {
+    headers: {
+      'Content-Type': file.contentType,
+      'Content-Length': String(file.data.byteLength),
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 export function errorResponse(err: unknown): Response {
   if (err instanceof CliError) {
     return json(

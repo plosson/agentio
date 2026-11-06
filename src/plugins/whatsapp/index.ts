@@ -11,7 +11,7 @@ const whatsapp = defineServicePlugin()({
   apiVersion: 1,
   id: 'whatsapp',
   displayName: 'WhatsApp',
-  description: 'Use when sending or reading WhatsApp messages via the agentio CLI.',
+  description: 'Use when sending or reading WhatsApp messages, or saving their photos, videos, voice notes and documents, via the agentio CLI.',
   brand: { color: '#25D366', url: 'https://web.whatsapp.com' },
   registerCommands: registerWhatsAppCommands,
   session: whatsappSessions(),

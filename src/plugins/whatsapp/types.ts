@@ -19,6 +19,19 @@ export interface ChatSummary {
   unread: number;
 }
 
+/** The media WhatsApp carries as a file: a gif is a video, a voice message an audio. */
+export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';
+
+export interface MediaView {
+  type: MediaKind;
+  /** Absent for media stored before its details were kept; download still works. */
+  mimetype?: string;
+  /** A document's own name. */
+  fileName?: string;
+  /** In bytes. */
+  size?: number;
+}
+
 export interface MessageView {
   id: string;
   fromMe: boolean;
@@ -28,6 +41,8 @@ export interface MessageView {
   text: string;
   /** Seconds since the epoch. */
   at: number;
+  /** Set when the message is a file that `download` can fetch. */
+  media?: MediaView;
 }
 
 export interface ReadResult {
@@ -86,6 +101,11 @@ export interface WaSocket {
   sendMessage(jid: string, content: { text: string }): Promise<any>;
   onWhatsApp(...numbers: string[]): Promise<Array<{ jid: string; exists: boolean }> | undefined>;
   readMessages(keys: Array<{ remoteJid: string; id: string; participant?: string; fromMe: boolean }>): Promise<void>;
+  /**
+   * Ask this account's own phone to send a stored message again, in full; the
+   * answer arrives as a `messages.upsert` with a `requestId`. Nothing reaches the chat.
+   */
+  requestPlaceholderResend(key: { remoteJid: string; id: string; participant?: string; fromMe: boolean }): Promise<unknown>;
   groupFetchAllParticipating(): Promise<Record<string, { id: string; subject: string }>>;
   requestPairingCode(phone: string): Promise<string>;
   resyncAppState?(collections: readonly string[], isInitialSync: boolean): Promise<void>;
@@ -111,4 +131,6 @@ export interface BaileysApi {
   fromJson(value: unknown): any;
   /** Baileys wants app-state keys back as protobuf objects. */
   appStateSyncKey(value: unknown): unknown;
+  /** Fetch a media file from WhatsApp's servers and decrypt it. An HTTP failure keeps its status code. */
+  downloadMedia(media: { kind: MediaKind; url?: string; directPath: string; mediaKey: string }): Promise<Uint8Array<ArrayBuffer>>;
 }

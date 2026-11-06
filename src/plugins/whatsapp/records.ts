@@ -1,5 +1,5 @@
 import { CliError } from '../../utils/errors';
-import type { ContactView, NameSource } from './types';
+import type { ContactView, MediaKind, NameSource } from './types';
 
 /**
  * What the WhatsApp session keeps in its store, and the pure rules over it:
@@ -9,7 +9,8 @@ import type { ContactView, NameSource } from './types';
  * Records, by key:
  * - `auth:creds` and `auth:key:<type>:<id>`: the Baileys auth state.
  * - `chat:<jid>`: one chat of the index.
- * - `msgs:<jid>`: its most recent text messages, oldest first.
+ * - `msgs:<jid>`: its most recent messages, oldest first: their text, and for
+ *   media what it takes to download the file later (never the file itself).
  * - `name:<jid>`: the names known for a person or group, by source.
  * - `pn:<lid>`: the phone JID a hidden ID is known to belong to.
  */
@@ -44,6 +45,22 @@ export interface StoredMessage {
   senderName?: string;
   text: string;
   at: number;
+  /** Set for media received since media details are kept; older media has only its placeholder text. */
+  media?: StoredMedia;
+}
+
+/** What it takes to fetch a media file from WhatsApp's servers and decrypt it, and to name it. */
+export interface StoredMedia {
+  kind: MediaKind;
+  mimetype?: string;
+  /** A document's own name. */
+  fileName?: string;
+  /** In bytes. */
+  size?: number;
+  url?: string;
+  directPath: string;
+  /** The file's decryption key, base64. */
+  mediaKey: string;
 }
 
 export interface NameRecord {
@@ -75,15 +92,21 @@ export function phoneOf(jid: string | undefined): string | undefined {
 const NOT_A_MESSAGE = new Set(['protocolMessage', 'reactionMessage', 'senderKeyDistributionMessage', 'messageContextInfo', 'keepInChatMessage', 'pollUpdateMessage']);
 const WRAPPERS = ['ephemeralMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension', 'documentWithCaptionMessage', 'editedMessage'];
 
+/** The message inside the wrappers WhatsApp puts around disappearing, view-once, captioned and edited ones. */
+function unwrap(message: any): any {
+  for (const wrapper of WRAPPERS) {
+    if (message[wrapper]?.message) return unwrap(message[wrapper].message);
+  }
+  return message;
+}
+
 /**
  * The text of a message, with a placeholder such as `[image]` for media, or
  * null when it is not something a person wrote. Media itself is never kept.
  */
-export function messageText(message: any): string | null {
-  if (!message || typeof message !== 'object') return null;
-  for (const wrapper of WRAPPERS) {
-    if (message[wrapper]?.message) return messageText(message[wrapper].message);
-  }
+export function messageText(raw: any): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const message = unwrap(raw);
   if (typeof message.conversation === 'string' && message.conversation) return message.conversation;
   if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
   const captioned = (label: string, caption?: string | null) => (caption ? `[${label}] ${caption}` : `[${label}]`);
@@ -100,11 +123,120 @@ export function messageText(message: any): string | null {
   return kinds.length > 0 ? '[message]' : null;
 }
 
-/** Seconds since the epoch from Baileys' number, Long or string timestamps. */
-export function seconds(value: unknown): number | undefined {
+const MEDIA_FIELDS: ReadonlyArray<[string, MediaKind]> = [
+  ['imageMessage', 'image'],
+  ['videoMessage', 'video'],
+  ['audioMessage', 'audio'],
+  ['documentMessage', 'document'],
+  ['stickerMessage', 'sticker'],
+];
+
+function base64(value: unknown): string | undefined {
+  if (value instanceof Uint8Array) return value.length > 0 ? Buffer.from(value).toString('base64') : undefined;
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+/**
+ * What it takes to download a message's media later, or null when it has
+ * none. Thumbnails, captions and quoted messages are left out: the store
+ * keeps only the file's address, key and description.
+ */
+export function messageMedia(raw: any): StoredMedia | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const message = unwrap(raw);
+  for (const [field, kind] of MEDIA_FIELDS) {
+    const media = message[field];
+    if (!media) continue;
+    const mediaKey = base64(media.mediaKey);
+    if (typeof media.directPath !== 'string' || !media.directPath || !mediaKey) return null;
+    const size = positiveNumber(media.fileLength);
+    return {
+      kind,
+      ...(typeof media.mimetype === 'string' && media.mimetype ? { mimetype: media.mimetype } : {}),
+      ...(kind === 'document' && typeof media.fileName === 'string' && media.fileName ? { fileName: media.fileName } : {}),
+      ...(size !== undefined ? { size } : {}),
+      ...(typeof media.url === 'string' && media.url ? { url: media.url } : {}),
+      directPath: media.directPath,
+      mediaKey,
+    };
+  }
+  return null;
+}
+
+/** The media kind behind a placeholder messageText wrote, for media stored before its details were kept. */
+export function placeholderKind(text: string): MediaKind | null {
+  const label = /^\[(image|gif|video|audio|voice message|sticker|document)(?::[^\]]*)?\]/.exec(text)?.[1];
+  switch (label) {
+    case 'image': return 'image';
+    case 'gif': case 'video': return 'video';
+    case 'audio': case 'voice message': return 'audio';
+    case 'sticker': return 'sticker';
+    case 'document': return 'document';
+    default: return null;
+  }
+}
+
+const EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/heic': 'heic',
+  'video/mp4': 'mp4',
+  'video/3gpp': '3gp',
+  'video/quicktime': 'mov',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+  'audio/amr': 'amr',
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'text/plain': 'txt',
+};
+const DEFAULT_EXTENSIONS: Record<MediaKind, string> = { image: 'jpg', video: 'mp4', audio: 'ogg', document: 'bin', sticker: 'webp' };
+
+/** The file extension for a media file, from its MIME type, else from its kind. */
+export function mediaExtension(media: Pick<StoredMedia, 'kind' | 'mimetype'>): string {
+  const type = media.mimetype?.split(';')[0]!.trim().toLowerCase();
+  if (type && EXTENSIONS[type]) return EXTENSIONS[type];
+  const subtype = type?.split('/')[1];
+  return subtype && /^[a-z0-9]{1,8}$/.test(subtype) ? subtype : DEFAULT_EXTENSIONS[media.kind];
+}
+
+/** A name that is safe as one file on any disk: no separators, control or reserved characters, no leading dot. */
+export function safeFileName(name: string): string {
+  const cleaned = name.normalize('NFC')
+    .replace(/[\/\\:*?"<>|\u0000-\u001f\u007f]/g, '_')
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    .slice(0, 200);
+  return cleaned || 'file';
+}
+
+/**
+ * The name a media file is saved under: the message's date and time (UTC),
+ * then its ID and an extension, so names sort by date and two messages never
+ * share one. A document keeps its own name after the date instead of the ID.
+ */
+export function mediaFileName(message: { id: string; at: number }, media: Pick<StoredMedia, 'kind' | 'mimetype' | 'fileName'>): string {
+  const stamp = new Date(message.at * 1000).toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+  if (media.kind === 'document' && media.fileName) {
+    const own = safeFileName(media.fileName);
+    return `${stamp}_${/\.[a-z0-9]{1,8}$/i.test(own) ? own : `${own}.${mediaExtension(media)}`}`;
+  }
+  return `${stamp}_${safeFileName(message.id)}.${mediaExtension(media)}`;
+}
+
+/** A positive number from Baileys' number, Long or string values; anything else is none. */
+function positiveNumber(value: unknown): number | undefined {
   if (value === null || value === undefined) return undefined;
   const n = typeof value === 'object' && value !== null && 'toNumber' in value ? (value as { toNumber(): number }).toNumber() : Number(value);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Seconds since the epoch from Baileys' number, Long or string timestamps. */
+export function seconds(value: unknown): number | undefined {
+  return positiveNumber(value);
 }
 
 export const preview = (text: string) => (text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH - 1)}…` : text);
