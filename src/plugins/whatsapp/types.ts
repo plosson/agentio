@@ -106,6 +106,11 @@ export interface WaSocket {
    * answer arrives as a `messages.upsert` with a `requestId`. Nothing reaches the chat.
    */
   requestPlaceholderResend(key: { remoteJid: string; id: string; participant?: string; fromMe: boolean }): Promise<unknown>;
+  /**
+   * Ask this account's own phone for up to `count` messages of a chat older
+   * than `oldest`; they arrive as a `messaging-history.set`. Nothing reaches the chat.
+   */
+  fetchMessageHistory(count: number, oldest: { remoteJid: string; id: string; fromMe: boolean }, oldestTimestampMs: number): Promise<unknown>;
   groupFetchAllParticipating(): Promise<Record<string, { id: string; subject: string }>>;
   requestPairingCode(phone: string): Promise<string>;
   resyncAppState?(collections: readonly string[], isInitialSync: boolean): Promise<void>;

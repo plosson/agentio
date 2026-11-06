@@ -60,6 +60,8 @@ const MAX_BACKOFF_MS = 60_000;
 const SENT_KEPT = 200;
 /** How long to wait for the phone to send a message again, with its media details. */
 const RESEND_WAIT_MS = 20_000;
+/** Messages asked from the phone's history, older than the one after the wanted message. */
+const HISTORY_BATCH = 10;
 /** The HTTP statuses WhatsApp's media servers answer for a file they no longer hold. */
 const MEDIA_GONE = new Set([404, 410]);
 
@@ -678,19 +680,30 @@ export class WhatsAppSession implements Session {
     return ((await this.host.store.get<StoredMessage[]>(messagesRecord(jid))) ?? []).find((m) => m.id === id);
   }
 
-  /** Ask the phone for a message again and wait until it is stored with its media details. */
+  /**
+   * Ask the phone for a message again and wait until it is stored with its
+   * media details. With a later message stored, the phone is asked for the
+   * history before that one, which it answers reliably; for the newest
+   * message of a chat, it is asked to send that message again.
+   */
   private async resend(message: StoredMessage): Promise<StoredMessage> {
     const sock = this.requireOpen();
+    const stored = (await this.host.store.get<StoredMessage[]>(messagesRecord(message.chat))) ?? [];
+    const next = stored[stored.findIndex((m) => m.id === message.id) + 1];
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arrived = new Promise<void>((resolve) => {
       this.resends.set(message.id, resolve);
       timer = setTimeout(resolve, this.options.resendWaitMs ?? RESEND_WAIT_MS);
     });
     try {
-      await sock.requestPlaceholderResend({
-        remoteJid: message.chat, id: message.id, fromMe: message.fromMe,
-        ...(message.participant ? { participant: message.participant } : {}),
-      });
+      if (next) {
+        await sock.fetchMessageHistory(HISTORY_BATCH, { remoteJid: next.chat, id: next.id, fromMe: next.fromMe }, next.at * 1000);
+      } else {
+        await sock.requestPlaceholderResend({
+          remoteJid: message.chat, id: message.id, fromMe: message.fromMe,
+          ...(message.participant ? { participant: message.participant } : {}),
+        });
+      }
       await arrived;
     } finally {
       clearTimeout(timer);
