@@ -21,6 +21,8 @@ export class FakeSocket implements WaSocket {
   receipts: MessageKey[][] = [];
   /** Messages asked again from the phone. */
   resendRequests: MessageKey[] = [];
+  /** History asked from the phone: how many, older than which message, and its time in ms. */
+  historyRequests: Array<{ count: number; oldest: Omit<MessageKey, 'participant'>; oldestTimestampMs: number }> = [];
   /** What the phone answers a resend request with, if anything: emitted as WhatsApp would. */
   phoneHas = new Map<string, unknown>();
   /** Numbers WhatsApp knows, as digits; anything else is not on WhatsApp. */
@@ -67,6 +69,14 @@ export class FakeSocket implements WaSocket {
     const answer = this.phoneHas.get(key.id);
     if (answer) setTimeout(() => this.emit('messages.upsert', { type: 'notify', requestId: 'PDO1', messages: [answer] }), 1);
     return undefined;
+  }
+
+  /** The phone answers with what it has of that chat, older than the anchor, as an on-demand history sync. */
+  async fetchMessageHistory(count: number, oldest: Omit<MessageKey, 'participant'>, oldestTimestampMs: number) {
+    this.historyRequests.push({ count, oldest, oldestTimestampMs });
+    const messages = [...this.phoneHas.values()].filter((m: any) => m.key.remoteJid === oldest.remoteJid && m.messageTimestamp * 1000 < oldestTimestampMs).slice(-count);
+    setTimeout(() => this.emit('messaging-history.set', { chats: [], contacts: [], messages, syncType: 6 }), 1);
+    return 'PDO2';
   }
 
   async groupFetchAllParticipating() {

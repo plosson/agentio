@@ -7,8 +7,8 @@ import type { ChatSummary, ContactView, PairState, ReadResult, SendResult, Whats
  * daemon that holds the profile's session, on this machine or on the hub.
  */
 
-/** A download waits for WhatsApp's servers, and sometimes for the phone first. */
-const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+/** A download waits for WhatsApp's servers, and sometimes for the phone first; the daemon allows 255 seconds. */
+const DOWNLOAD_TIMEOUT_MS = 255_000;
 
 const route = (profile: string, action?: string) =>
   `/v1/sessions/whatsapp/${encodeURIComponent(profile)}${action ? `/${action}` : ''}`;

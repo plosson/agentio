@@ -62,6 +62,8 @@ export function startApiServer(ctx: UiContext, address: DaemonAddress): number {
   server = Bun.serve({
     port: address.port,
     hostname: address.host,
+    // Bun's default of 10 seconds would cut off a session operation that waits on its service, such as a media download.
+    idleTimeout: 255,
     fetch: (request, srv) => handle(request, srv),
   });
   return server.port!;

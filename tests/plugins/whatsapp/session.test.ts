@@ -505,7 +505,27 @@ describe('media', () => {
     expect((await call<SessionFile>(session, 'media', { chat: '+33611111111', id: 'img' }, true)).data).toEqual(PHOTO);
   });
 
-  test('media stored before its details were kept is asked again from the phone, then downloaded', async () => {
+  test('media stored before its details were kept, with a later message, comes from the phone\'s history before that one', async () => {
+    const store = await linkedStore();
+    await store.set('msgs:120363000@g.us', [
+      { id: 'old', chat: GROUP, participant: BOB, fromMe: false, sender: BOB, text: '[image]', at: 5 },
+      { id: 'next', chat: GROUP, participant: BOB, fromMe: false, sender: BOB, text: 'see?', at: 9 },
+    ]);
+    await store.set('chat:120363000@g.us', { id: GROUP, unread: 0, lastMessage: 'see?', lastMessageAt: 9 });
+    const { api, socket, session } = await connected(store);
+    socket.phoneHas.set('old', imageAt(GROUP, 'old', 5, { participant: BOB }));
+    api.files.set('/v/old', PHOTO);
+
+    expect((await call<SessionFile>(session, 'media', { chat: GROUP, id: 'old' })).data).toEqual(PHOTO);
+    expect(socket.historyRequests).toEqual([{ count: 10, oldest: { remoteJid: GROUP, id: 'next', fromMe: false }, oldestTimestampMs: 9000 }]);
+    expect(socket.resendRequests).toEqual([]);
+    const chats = await call<ChatSummary[]>(session, 'conversations');
+    expect(chats.map((c) => [c.id, c.unread, c.lastMessage])).toEqual([[GROUP, 0, 'see?']]);
+    expect(socket.receipts).toEqual([]);
+    expect(socket.sent).toEqual([]);
+  });
+
+  test('the newest message of a chat, stored before media details were kept, is asked again from the phone, then downloaded', async () => {
     const store = await linkedStore();
     // What an earlier version stored: the placeholder only.
     await store.set('msgs:120363000@g.us', [{ id: 'old', chat: GROUP, participant: BOB, fromMe: false, sender: BOB, text: '[image]', at: 5 }]);
