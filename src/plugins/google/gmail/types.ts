@@ -54,6 +54,14 @@ export interface GmailSendOptions {
   replyTo?: string; // Thread ID to reply to
 }
 
+export interface GmailDraftResult {
+  id: string;
+  messageId: string;
+  threadId: string;
+  /** The mailbox's address, used to build links that open the right account. */
+  account: string;
+}
+
 export interface GmailFilterCriteria {
   from?: string;
   to?: string;

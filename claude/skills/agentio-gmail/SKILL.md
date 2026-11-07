@@ -16,7 +16,7 @@ Options:
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--limit <n>`: Number of messages (default: 10)
 - `--query <query>`: Gmail search query (see "gmail search --help" for syntax)
-- `--label <label>`: Filter by label (repeatable) (default: )
+- `--label <label>`: Filter by label (repeatable)
 
 ```
 Examples:
@@ -99,9 +99,9 @@ Send an email
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
-- `--to <email>`: Recipient (repeatable, required unless --reply-to) (default: )
-- `--cc <email>`: CC recipient (repeatable) (default: )
-- `--bcc <email>`: BCC recipient (repeatable) (default: )
+- `--to <email>`: Recipient (repeatable, required unless --reply-to)
+- `--cc <email>`: CC recipient (repeatable)
+- `--bcc <email>`: BCC recipient (repeatable)
 - `--subject <subject>`: Email subject (required unless --reply-to)
 - `--subject-file <path>`: Read subject from a UTF-8 file (preferred for agents; avoids shell quoting)
 - `--body <body>`: Email body (omit or pass "-" to read from stdin)
@@ -109,8 +109,8 @@ Options:
 - `--spec <path.json>`: Compose from JSON file {to,cc,bcc,subject,body,attachments}; flags override
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
-- `--attachment <path>`: File to attach (repeatable) (default: )
-- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG) (default: )
+- `--attachment <path>`: File to attach (repeatable)
+- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)
 
 ```
 Examples:
@@ -141,9 +141,9 @@ Create an email draft (or update an existing one with [draft-id])
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
-- `--to <email>`: Recipient (repeatable, required unless --reply-to) (default: )
-- `--cc <email>`: CC recipient (repeatable) (default: )
-- `--bcc <email>`: BCC recipient (repeatable) (default: )
+- `--to <email>`: Recipient (repeatable, required unless --reply-to)
+- `--cc <email>`: CC recipient (repeatable)
+- `--bcc <email>`: BCC recipient (repeatable)
 - `--subject <subject>`: Email subject (required unless --reply-to)
 - `--subject-file <path>`: Read subject from a UTF-8 file (preferred for agents; avoids shell quoting)
 - `--body <body>`: Email body (omit or pass "-" to read from stdin)
@@ -151,8 +151,8 @@ Options:
 - `--spec <path.json>`: Compose from JSON file {to,cc,bcc,subject,body,attachments}; flags override
 - `--html`: Treat body as HTML
 - `--reply-to <thread-id>`: Thread ID to reply to (derives to/subject from thread)
-- `--attachment <path>`: File to attach (repeatable) (default: )
-- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG) (default: )
+- `--attachment <path>`: File to attach (repeatable)
+- `--inline <cid:path>`: Inline image (repeatable, format: contentId:filepath). Supports PNG, JPG, GIF only (not SVG)
 
 ```
 Examples:
@@ -166,8 +166,14 @@ Examples:
   # or a single JSON spec (flags still override individual fields)
   agentio gmail draft --spec ./draft.json
 
-  # update an existing draft (replaces its entire content)
+  # update an existing draft (replaces its entire content; the draft stays in
+  # its thread and keeps replying to the same message)
   agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
+
+  # output: draft, message and thread IDs, plus two Gmail links. "Link" (by
+  # thread) keeps working across updates; "This version" opens only this
+  # content, since each update gives the draft a new message ID. Gmail does
+  # not refresh open tabs: close a compose window open on the draft, then reload.
 
   # draft a reply within an existing thread
   agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
@@ -370,8 +376,8 @@ Options:
 - `--exclude-chats`: Exclude chat messages
 - `--size <bytes>`: Match by message size (paired with --size-comparison)
 - `--size-comparison <cmp>`: Size comparison: larger|smaller (paired with --size)
-- `--apply <label>`: Label to apply (name or ID, repeatable) (default: )
-- `--remove <label>`: Label to remove (name or ID, repeatable) (default: )
+- `--apply <label>`: Label to apply (name or ID, repeatable)
+- `--remove <label>`: Label to remove (name or ID, repeatable)
 - `--forward <email>`: Forward to a verified forwarding address
 
 ```
@@ -420,8 +426,8 @@ Apply and/or remove labels on messages or threads (bulk-safe via batchModify)
 Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
-- `--apply <name>`: Label to apply (name or ID, repeatable) (default: )
-- `--remove <name>`: Label to remove (name or ID, repeatable) (default: )
+- `--apply <name>`: Label to apply (name or ID, repeatable)
+- `--remove <name>`: Label to remove (name or ID, repeatable)
 - `--thread`: Treat IDs as thread IDs (expands to messages for batching)
 - `--chunk-size <n>`: IDs per batchModify call (max 1000) (default: 1000)
 - `--max-retries <n>`: Retries per chunk on 429/5xx (default: 5)

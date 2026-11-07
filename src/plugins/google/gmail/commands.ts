@@ -453,8 +453,14 @@ Combine with spaces (AND), OR, or - to negate.`,
   # or a single JSON spec (flags still override individual fields)
   agentio gmail draft --spec ./draft.json
 
-  # update an existing draft (replaces its entire content)
+  # update an existing draft (replaces its entire content; the draft stays in
+  # its thread and keeps replying to the same message)
   agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
+
+  # output: draft, message and thread IDs, plus two Gmail links. "Link" (by
+  # thread) keeps working across updates; "This version" opens only this
+  # content, since each update gives the draft a new message ID. Gmail does
+  # not refresh open tabs: close a compose window open on the draft, then reload.
 
   # draft a reply within an existing thread
   agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
