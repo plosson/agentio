@@ -1,7 +1,7 @@
 import { gmail, type gmail_v1 } from '@googleapis/gmail';
 import type { OAuth2Client } from 'google-auth-library';
 import { basename } from 'path';
-import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailAttachment, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction, GmailFilterCreateOptions } from './types';
+import type { GmailMessage, GmailListOptions, GmailSendOptions, GmailDraftResult, GmailAttachment, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction, GmailFilterCreateOptions } from './types';
 import { GMAIL_LIST_HARD_CAP } from './types';
 import type { ServiceClient, ValidationResult } from '../../../types/service';
 import { CliError } from '../../../utils/errors';
@@ -346,7 +346,18 @@ export class GmailClient implements ServiceClient {
       throw new CliError('NOT_FOUND', `Thread not found: ${threadId}`);
     }
 
-    const lastMessage = messages[messages.length - 1];
+    // A thread lists its drafts too, and a draft is not something to reply
+    // to: once replaced or sent, its Message-ID no longer exists anywhere.
+    const realMessages = messages.filter((m) => !m.labelIds?.includes('DRAFT'));
+    if (realMessages.length === 0) {
+      throw new CliError(
+        'INVALID_PARAMS',
+        `Thread ${threadId} holds only drafts; there is no message to reply to`,
+        'Pass --reply-to with the thread ID of a sent or received message.',
+      );
+    }
+
+    const lastMessage = realMessages[realMessages.length - 1];
     const headers = this.parseHeaders(lastMessage.payload?.headers);
 
     const to = [headers['reply-to'] || headers['from'] || ''];
@@ -357,20 +368,39 @@ export class GmailClient implements ServiceClient {
 
     const extraHeaders: string[] = [];
     if (messageId) {
+      const references = [headers['references'], messageId].filter(Boolean).join(' ');
       extraHeaders.push(`In-Reply-To: ${messageId}`);
-      extraHeaders.push(`References: ${messageId}`);
+      extraHeaders.push(`References: ${references}`);
     }
 
     return { to, subject, extraHeaders };
   }
 
-  private async buildEncodedMessage(options: GmailSendOptions): Promise<string> {
+  /**
+   * The threading headers of a draft's current message, so an update that
+   * names no new reply target keeps replying to the same message.
+   */
+  private threadingHeaders(headers: gmail_v1.Schema$MessagePartHeader[] | undefined): string[] {
+    const parsed = this.parseHeaders(headers);
+    const result: string[] = [];
+    for (const [name, key] of [['In-Reply-To', 'in-reply-to'], ['References', 'references']] as const) {
+      const value = parsed[key]?.replace(/[\r\n]+/g, ' ').trim();
+      if (value) result.push(`${name}: ${value}`);
+    }
+    return result;
+  }
+
+  /**
+   * @param inheritedHeaders threading headers to use when options.replyTo is
+   *   not set (an updated draft keeps those of the message it replaces).
+   */
+  private async buildEncodedMessage(options: GmailSendOptions, inheritedHeaders?: string[]): Promise<string> {
     const { cc, bcc, body, isHtml, attachments, replyTo } = options;
     const userEmail = await this.getUserEmail();
 
     let to = options.to;
     let subject = options.subject;
-    let extraHeaders: string[] | undefined;
+    let extraHeaders: string[] | undefined = inheritedHeaders;
 
     if (replyTo) {
       const replyContext = await this.resolveReplyContext(replyTo);
@@ -433,7 +463,7 @@ export class GmailClient implements ServiceClient {
     }
   }
 
-  async draft(options: GmailSendOptions): Promise<{ id: string; messageId: string }> {
+  async draft(options: GmailSendOptions): Promise<GmailDraftResult> {
     const encodedMessage = await this.buildEncodedMessage(options);
 
     try {
@@ -450,6 +480,8 @@ export class GmailClient implements ServiceClient {
       return {
         id: response.data.id!,
         messageId: response.data.message?.id || '',
+        threadId: response.data.message?.threadId || options.replyTo || '',
+        account: await this.getUserEmail(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -457,8 +489,17 @@ export class GmailClient implements ServiceClient {
     }
   }
 
-  async updateDraft(draftId: string, options: GmailSendOptions): Promise<{ id: string; messageId: string }> {
-    const encodedMessage = await this.buildEncodedMessage(options);
+  /**
+   * Replace a draft's content. Gmail gives the new content a new message ID
+   * every time; passing the current thread ID keeps the draft in its thread,
+   * so a thread-based link to it keeps working. Without it, Gmail starts a
+   * new thread on every update.
+   */
+  async updateDraft(draftId: string, options: GmailSendOptions): Promise<GmailDraftResult> {
+    const current = await this.getDraftMessage(draftId);
+    const threadId = options.replyTo || current.threadId || undefined;
+    const inheritedHeaders = options.replyTo ? undefined : this.threadingHeaders(current.payload?.headers);
+    const encodedMessage = await this.buildEncodedMessage(options, inheritedHeaders);
 
     try {
       const response = await this.gmail.users.drafts.update({
@@ -467,7 +508,7 @@ export class GmailClient implements ServiceClient {
         requestBody: {
           message: {
             raw: encodedMessage,
-            ...(options.replyTo ? { threadId: options.replyTo } : {}),
+            ...(threadId ? { threadId } : {}),
           },
         },
       });
@@ -475,14 +516,33 @@ export class GmailClient implements ServiceClient {
       return {
         id: response.data.id!,
         messageId: response.data.message?.id || '',
+        threadId: response.data.message?.threadId || threadId || '',
+        account: await this.getUserEmail(),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('404') || message.toLowerCase().includes('not found')) {
-        throw new CliError('NOT_FOUND', `Draft not found: ${draftId}`, 'Check the draft ID (use the ID returned when the draft was created).');
-      }
-      throw new CliError('API_ERROR', `Failed to update draft: ${message}`);
+      throw this.draftError(draftId, 'update', error);
     }
+  }
+
+  private async getDraftMessage(draftId: string): Promise<gmail_v1.Schema$Message> {
+    try {
+      const response = await this.gmail.users.drafts.get({
+        userId: 'me',
+        id: draftId,
+        format: 'metadata',
+      });
+      return response.data.message || {};
+    } catch (error) {
+      throw this.draftError(draftId, 'read', error);
+    }
+  }
+
+  private draftError(draftId: string, action: string, error: unknown): CliError {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('404') || message.toLowerCase().includes('not found')) {
+      return new CliError('NOT_FOUND', `Draft not found: ${draftId}`, 'Check the draft ID (use the ID returned when the draft was created).');
+    }
+    return new CliError('API_ERROR', `Failed to ${action} draft: ${message}`);
   }
 
   async deleteDraft(draftId: string): Promise<void> {
@@ -492,13 +552,10 @@ export class GmailClient implements ServiceClient {
         id: draftId,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('404') || message.toLowerCase().includes('not found')) {
-        throw new CliError('NOT_FOUND', `Draft not found: ${draftId}`, 'Check the draft ID (use the ID returned when the draft was created).');
-      }
-      throw new CliError('API_ERROR', `Failed to delete draft: ${message}`);
+      throw this.draftError(draftId, 'delete', error);
     }
   }
+
 
   private async buildMultipartMessage(options: {
     from: string;
