@@ -328,7 +328,23 @@ agentio gmail profile add --profile personal
 
 # Use specific profile
 agentio gmail list --profile work
+
+# List profiles, sorted by name
+agentio gmail profile list
 ```
+
+`<service> profile list` prints every profile, sorted by name. A profile whose
+credentials cannot be read (for example an expired token the hub cannot
+refresh) shows its error on its own line, and the list goes on:
+
+```
+bdemahieu@example.com - bdemahieu@example.com
+leo@example.com - ERROR TOKEN_EXPIRED: Re-authentication is needed on the vault host: ...
+work@example.com - work@example.com
+```
+
+It exits 0 either way; add `--strict` to exit non-zero (with the first failing
+profile's error code) when any profile failed.
 
 ## Workflow Examples
 

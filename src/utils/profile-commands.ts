@@ -2,8 +2,8 @@ import { Command } from 'commander';
 import { listProfiles, setProfileReadOnly } from '../config/config-manager';
 import { getCredentials } from '../auth/token-store';
 import { deleteProfile, renameProfile, writeFailure } from '../config/profile-store';
-import { handleError, CliError, profileNotFoundError } from './errors';
-import type { ServiceName } from '../types/config';
+import { handleError, CliError, profileNotFoundError, type ErrorCode } from './errors';
+import type { ProfileEntry, ServiceName } from '../types/config';
 import { isRemoteMode } from '../auth/remote';
 import { findSessionPlugin } from '../plugins/registry';
 import { daemonDeleteProfile, daemonRenameProfile } from '../daemon/client';
@@ -46,6 +46,58 @@ export interface ProfileCommandsOptions<T> {
   getExtraInfo?: (credentials: T | null) => string;
 }
 
+/** One row of `<service> profile list`: a profile, what its credentials say about it, or why they could not be read. */
+export interface ProfileListing {
+  name: string;
+  readOnly?: boolean;
+  info: string;
+  error?: { code: ErrorCode; message: string };
+}
+
+/**
+ * The rows of `<service> profile list`, sorted by name. `describe` reads what
+ * a profile's credentials say about it; when it throws (an expired token the
+ * hub cannot refresh, say), that profile carries the error and the others are
+ * still described.
+ */
+export async function listProfileListings(
+  profiles: readonly ProfileEntry[],
+  describe?: (name: string) => Promise<string>,
+): Promise<ProfileListing[]> {
+  const sorted = [...profiles].sort((a, b) => a.name.localeCompare(b.name));
+  return Promise.all(sorted.map(async ({ name, readOnly }): Promise<ProfileListing> => {
+    const base = { name, readOnly };
+    if (!describe) return { ...base, info: '' };
+    try {
+      return { ...base, info: await describe(name) };
+    } catch (error) {
+      return { ...base, info: '', error: listingError(error) };
+    }
+  }));
+}
+
+function listingError(error: unknown): ProfileListing['error'] {
+  if (error instanceof CliError) return { code: error.code, message: error.message };
+  return { code: 'UNKNOWN_ERROR', message: error instanceof Error ? error.message : String(error) };
+}
+
+export function formatProfileListing(listing: ProfileListing): string {
+  const readOnly = listing.readOnly ? ' [read-only]' : '';
+  const detail = listing.error ? ` - ERROR ${listing.error.code}: ${listing.error.message}` : listing.info;
+  return `${listing.name}${readOnly}${detail}`;
+}
+
+/** The error `profile list --strict` exits with when any profile failed, carrying the first failure's code; null when none did. */
+export function strictListingFailure(service: ServiceName, listings: readonly ProfileListing[]): CliError | null {
+  const failed = listings.filter((listing) => listing.error);
+  if (failed.length === 0) return null;
+  return new CliError(
+    failed[0].error!.code,
+    `${failed.length} of ${listings.length} ${service} profiles failed: ${failed.map((listing) => listing.name).join(', ')}`,
+    `Run: agentio profile reauth ${service} <name>`,
+  );
+}
+
 export function createProfileCommands<T>(
   parent: Command,
   options: ProfileCommandsOptions<T>
@@ -58,8 +110,9 @@ export function createProfileCommands<T>(
 
   profile
     .command('list')
-    .description(`List ${displayName} profiles`)
-    .action(async () => {
+    .description(`List ${displayName} profiles; one that fails shows its error and the list goes on`)
+    .option('--strict', 'Exit non-zero if any profile failed')
+    .action(async (opts: { strict?: boolean }) => {
       try {
         const result = await listProfiles(service);
         const { profiles } = result[0];
@@ -67,14 +120,15 @@ export function createProfileCommands<T>(
         if (profiles.length === 0) {
           console.log(`No ${displayName} profiles configured.`);
           console.log(`Run: agentio ${service} profile add`);
-        } else {
-          for (const entry of profiles) {
-            const credentials = await getCredentials<T>(service, entry.name);
-            const extraInfo = getExtraInfo ? getExtraInfo(credentials) : '';
-            const readOnlyIndicator = entry.readOnly ? ' [read-only]' : '';
-            console.log(`${entry.name}${readOnlyIndicator}${extraInfo}`);
-          }
+          return;
         }
+        const describe = getExtraInfo
+          ? async (name: string) => getExtraInfo(await getCredentials<T>(service, name))
+          : undefined;
+        const listings = await listProfileListings(profiles, describe);
+        for (const listing of listings) console.log(formatProfileListing(listing));
+        const failure = opts.strict ? strictListingFailure(service, listings) : null;
+        if (failure) throw failure;
       } catch (error) {
         handleError(error);
       }
