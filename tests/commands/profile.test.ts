@@ -29,4 +29,12 @@ describe('formatProfileList', () => {
     const out = formatProfileList(summaries);
     expect(out).toContain('[read-only]');
   });
+
+  test('lists each service\'s profiles sorted by name', () => {
+    const out = formatProfileList([
+      { service: 'gmail', name: 'zed' },
+      { service: 'gmail', name: 'alice' },
+    ]);
+    expect(out).toBe('gmail:\n  alice\n  zed');
+  });
 });

@@ -24,7 +24,7 @@ export function formatProfileList(summaries: ProfileSummary[]): string {
   const lines: string[] = [];
   for (const [svc, profiles] of byService) {
     lines.push(`${svc}:`);
-    for (const p of profiles) {
+    for (const p of [...profiles].sort((a, b) => a.name.localeCompare(b.name))) {
       const ro = p.readOnly ? ' [read-only]' : '';
       lines.push(`  ${p.name}${ro}`);
     }
