@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { OAuth2Client } from 'google-auth-library';
 import { GmailClient } from '../../../../src/plugins/google/gmail/client';
-import { gmailDraftLinks, printDraftResult } from '../../../../src/plugins/google/gmail/output';
+import { printDraftResult } from '../../../../src/plugins/google/gmail/output';
 import { CliError } from '../../../../src/utils/errors';
 
 const ME = 'me@example.com';
@@ -66,7 +66,18 @@ describe('GmailClient.updateDraft', () => {
 
     expect(calls.get[0]).toMatchObject({ id: 'r-1', format: 'metadata' });
     expect(calls.update[0].requestBody.message.threadId).toBe('thread-1');
-    expect(result).toEqual({ id: 'r-1', messageId: 'msg-1', threadId: 'thread-1', account: ME });
+    expect(result).toEqual({ id: 'r-1', messageId: 'msg-1', threadId: 'thread-1', account: ME, inConversation: false });
+  });
+
+  test('a draft in a thread with sent or received mail is in a conversation', async () => {
+    const { client } = makeClient({
+      draft: { ...message('d1', ['DRAFT'], {}), threadId: 'thread-1' },
+      thread: NOTARY_THREAD,
+    });
+
+    const result = await client.updateDraft('r-1', { to: ['notary@example.it'], subject: 'Re: Quote', body: 'v2' });
+
+    expect(result.inConversation).toBe(true);
   });
 
   test('keeps the threading headers of the message it replaces', async () => {
@@ -123,6 +134,7 @@ describe('GmailClient reply context', () => {
     expect(raw).toContain('In-Reply-To: <b@notary>\r\n');
     expect(raw).toContain('References: <a@me> <b@notary>\r\n');
     expect(result.threadId).toBe('thread-1');
+    expect(result.inConversation).toBe(true);
   });
 
   test('a thread holding only drafts has nothing to reply to', async () => {
@@ -139,7 +151,7 @@ describe('GmailClient reply context', () => {
 
     const result = await client.draft({ to: ['a@example.com'], subject: 'Hello', body: 'v1' });
 
-    expect(result).toEqual({ id: 'r-1', messageId: 'msg-1', threadId: 'new-thread-1', account: ME });
+    expect(result).toEqual({ id: 'r-1', messageId: 'msg-1', threadId: 'new-thread-1', account: ME, inConversation: false });
   });
 });
 
@@ -149,25 +161,17 @@ describe('draft output', () => {
 
   const lines = () => logSpy!.mock.calls.map((c: unknown[]) => String(c[0]));
 
-  test('links open the right account, by thread and by exact version', () => {
-    expect(gmailDraftLinks('a.b+tag@example.com', 't1', 'm1')).toEqual({
-      thread: 'https://mail.google.com/mail/u/a.b%2Btag@example.com/#drafts/t1',
-      version: 'https://mail.google.com/mail/u/a.b%2Btag@example.com/#drafts?compose=m1',
-    });
-  });
-
-  test('an update prints IDs, both links and the refresh note', () => {
+  test('an update prints IDs, the Gmail link and the refresh note', () => {
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
 
-    printDraftResult({ id: 'r-1', messageId: 'm2', threadId: 't1', account: ME }, true);
+    printDraftResult({ id: 'r-2301998990183903913', messageId: 'm2', threadId: '1a1ba38855a04f00', account: ME, inConversation: false }, true);
 
     expect(lines()).toEqual([
       'Draft updated',
-      'Draft ID: r-1',
+      'Draft ID: r-2301998990183903913',
       'Message ID: m2',
-      'Thread ID: t1',
-      `Link: https://mail.google.com/mail/u/${ME}/#drafts/t1`,
-      `This version: https://mail.google.com/mail/u/${ME}/#drafts?compose=m2`,
+      'Thread ID: 1a1ba38855a04f00',
+      'Link: https://mail.google.com/mail/u/?authuser=me%40example.com#drafts?compose=CqMvqmcrdzdNnHRJcfxMwZrNMxHPPQmhKQtJHnvghzqHkNsFSFKXZthDvtVbLVPzZLWsrrLQSfg',
       expect.stringContaining('Close any compose window open on this draft'),
     ]);
   });
@@ -175,9 +179,10 @@ describe('draft output', () => {
   test('a new draft prints no refresh note', () => {
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
 
-    printDraftResult({ id: 'r-1', messageId: 'm1', threadId: 't1', account: ME });
+    printDraftResult({ id: 'r-1', messageId: 'm1', threadId: '1a1b59621b12f33e', account: ME, inConversation: true });
 
     expect(lines()[0]).toBe('Draft created');
+    expect(lines()).toContain('Link: https://mail.google.com/mail/u/?authuser=me%40example.com#drafts/FMfcgzQjgqKPSPRxQdrKkvsFXdjrzDnB');
     expect(lines().some((l: string) => l.startsWith('Note:'))).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import type { GmailMessage, GmailDraftResult, GmailAttachmentInfo, GmailLabel, GmailFilter, GmailFilterCriteria, GmailFilterAction } from './types';
 import { formatBytes } from '../format';
+import { gmailDraftLink } from './web-links';
 export { raw } from '../format';
 
 // Format a list of Gmail messages
@@ -71,29 +72,19 @@ export function printSendResult(result: { id: string; threadId: string }): void 
   console.log(`Thread: ${result.threadId}`);
 }
 
-/**
- * Gmail web links to a draft. The thread link survives updates (agentio keeps
- * a draft in its thread); the compose link opens this exact version only,
- * since every update gives the draft a new message ID.
- */
-export function gmailDraftLinks(account: string, threadId: string, messageId: string): { thread: string; version: string } {
-  const base = `https://mail.google.com/mail/u/${account.split('@').map(encodeURIComponent).join('@')}/`;
-  return {
-    thread: `${base}#drafts/${threadId}`,
-    version: `${base}#drafts?compose=${messageId}`,
-  };
-}
-
 // Format draft creation/update result
 export function printDraftResult(result: GmailDraftResult, updated = false): void {
   console.log(updated ? 'Draft updated' : 'Draft created');
   console.log(`Draft ID: ${result.id}`);
   console.log(`Message ID: ${result.messageId}`);
   console.log(`Thread ID: ${result.threadId}`);
-  if (result.threadId && result.messageId && result.account) {
-    const links = gmailDraftLinks(result.account, result.threadId, result.messageId);
-    console.log(`Link: ${links.thread}`);
-    console.log(`This version: ${links.version}`);
+  if (result.threadId && result.account) {
+    console.log(`Link: ${gmailDraftLink({
+      account: result.account,
+      draftId: result.id,
+      threadId: result.threadId,
+      inConversation: result.inConversation,
+    })}`);
   }
   if (updated) {
     console.log('Note: Gmail does not refresh open tabs. Close any compose window open on this draft (it can save its older content back) and reload Gmail.');

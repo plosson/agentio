@@ -457,10 +457,9 @@ Combine with spaces (AND), OR, or - to negate.`,
   # its thread and keeps replying to the same message)
   agentio gmail draft r-1234567890 --to alice@example.com --subject "Hello" --body "Revised body"
 
-  # output: draft, message and thread IDs, plus two Gmail links. "Link" (by
-  # thread) keeps working across updates; "This version" opens only this
-  # content, since each update gives the draft a new message ID. Gmail does
-  # not refresh open tabs: close a compose window open on the draft, then reload.
+  # output: draft, message and thread IDs, and a Gmail web link to the draft
+  # that keeps working across updates. Gmail does not refresh open tabs: close
+  # a compose window open on the draft, then reload.
 
   # draft a reply within an existing thread
   agentio gmail draft --reply-to 18c4f1a2b3d --body "Draft reply"
