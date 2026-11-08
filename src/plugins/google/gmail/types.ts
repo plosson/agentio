@@ -60,6 +60,8 @@ export interface GmailDraftResult {
   threadId: string;
   /** The mailbox's address, used to build links that open the right account. */
   account: string;
+  /** True when the thread holds sent or received mail (the draft is a reply). */
+  inConversation: boolean;
 }
 
 export interface GmailFilterCriteria {

@@ -482,6 +482,8 @@ export class GmailClient implements ServiceClient {
         messageId: response.data.message?.id || '',
         threadId: response.data.message?.threadId || options.replyTo || '',
         account: await this.getUserEmail(),
+        // Without a thread to reply to, Gmail starts a new one for the draft.
+        inConversation: Boolean(options.replyTo),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -501,6 +503,7 @@ export class GmailClient implements ServiceClient {
     const inheritedHeaders = options.replyTo ? undefined : this.threadingHeaders(current.payload?.headers);
     const encodedMessage = await this.buildEncodedMessage(options, inheritedHeaders);
 
+    let result: Omit<GmailDraftResult, 'inConversation'>;
     try {
       const response = await this.gmail.users.drafts.update({
         userId: 'me',
@@ -513,7 +516,7 @@ export class GmailClient implements ServiceClient {
         },
       });
 
-      return {
+      result = {
         id: response.data.id!,
         messageId: response.data.message?.id || '',
         threadId: response.data.message?.threadId || threadId || '',
@@ -522,6 +525,15 @@ export class GmailClient implements ServiceClient {
     } catch (error) {
       throw this.draftError(draftId, 'update', error);
     }
+
+    const inConversation = Boolean(options.replyTo) || (result.threadId ? await this.threadHasMail(result.threadId) : false);
+    return { ...result, inConversation };
+  }
+
+  /** Whether a thread holds any sent or received message, not only drafts. */
+  private async threadHasMail(threadId: string): Promise<boolean> {
+    const thread = await this.gmail.users.threads.get({ userId: 'me', id: threadId, format: 'minimal' });
+    return (thread.data.messages || []).some((m) => !m.labelIds?.includes('DRAFT'));
   }
 
   private async getDraftMessage(draftId: string): Promise<gmail_v1.Schema$Message> {
