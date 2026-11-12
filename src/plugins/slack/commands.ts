@@ -59,6 +59,7 @@ export const SLACK_USER_SCOPES = [
   'channels:manage', 'groups:write',
   'channels:write.invites', 'groups:write.invites',
   'channels:write',
+  'chat:write', 'im:write',
   'channels:history', 'groups:history', 'im:history', 'mpim:history',
   'canvases:read', 'canvases:write', 'files:read',
   'search:read',
@@ -151,6 +152,7 @@ export function registerSlackCommands(program: Command): void {
       .description('Send a message to Slack')
       .option('--profile <name>', 'Profile name (optional if only one profile exists)')
       .option('--json [file]', 'Send Block Kit message from JSON file (or stdin if no file specified)')
+      .option('--channel <target>', 'User-token profiles: #channel or channel id, or a member to DM as @handle, email or user id')
       .argument('[message]', 'Message text (or pipe via stdin)')
       .action(async (message: string | undefined, options) => {
         try {
@@ -211,7 +213,7 @@ export function registerSlackCommands(program: Command): void {
 
           const { client, profile } = await getSlackClient(options.profile);
           await enforceWriteAccess('slack', profile, 'send message');
-          const result = await client.send({ text, payload });
+          const result = await client.send({ text, payload, channel: options.channel });
           printSlackSendResult(result);
         } catch (error) {
           handleError(error);
@@ -229,7 +231,14 @@ export function registerSlackCommands(program: Command): void {
   agentio slack send --json ./alert.json
 
   # send to a specific profile
-  agentio slack send --profile alerts "incident opened"`,
+  agentio slack send --profile alerts "incident opened"
+
+  # user-token profile: post to a channel, by name or id
+  agentio slack send --profile acme --channel "#deploys" "release 1.2 is out"
+
+  # user-token profile: DM a member by @handle, email or user id
+  agentio slack send --profile acme --channel @jane "Can you review the PR?"
+  agentio slack send --profile acme --channel jane@example.com --json ./card.json`,
   );
 
   addExamples(

@@ -13,6 +13,11 @@ import type {
 import type { ServiceClient, ValidationResult } from '../../../types/service';
 import { CliError } from '../../../utils/errors';
 
+/** A date with no time (YYYY-MM-DD), or any value when the event is all-day. */
+function isDateOnly(value: string, allDay?: boolean): boolean {
+  return Boolean(allDay) || !value.trim().includes('T');
+}
+
 export class GCalClient implements ServiceClient {
   private calendar: calendar_v3.Calendar;
   private userEmail: string | null = null;
@@ -109,13 +114,19 @@ export class GCalClient implements ServiceClient {
   async createEvent(options: GCalCreateOptions): Promise<GCalEvent> {
     const { calendarId = 'primary', summary, description, location, start, end, allDay, attendees, recurrence, reminders, colorId, visibility, transparency, sendUpdates = 'all', withMeet } = options;
 
+    // Google expands a recurrence in a named time zone, so a recurring timed
+    // event needs one even when its times carry an offset.
+    const timed = !isDateOnly(start, allDay) || !isDateOnly(end, allDay);
+    const timeZone = options.timeZone
+      ?? (recurrence?.length && timed ? await this.getCalendarTimeZone(calendarId) : undefined);
+
     try {
       const event: calendar_v3.Schema$Event = {
         summary,
         description,
         location,
-        start: this.buildEventDateTime(start, allDay),
-        end: this.buildEventDateTime(end, allDay),
+        start: this.buildEventDateTime(start, allDay, timeZone),
+        end: this.buildEventDateTime(end, allDay, timeZone),
       };
 
       if (attendees?.length) {
@@ -168,11 +179,20 @@ export class GCalClient implements ServiceClient {
     const { calendarId = 'primary', eventId, summary, description, location, start, end, allDay, attendees, addAttendees, recurrence, reminders, colorId, visibility, transparency, sendUpdates = 'all' } = options;
 
     try {
-      // If addAttendees is used, fetch existing event first
-      let existingAttendees: calendar_v3.Schema$EventAttendee[] = [];
-      if (addAttendees?.length) {
-        const existing = await this.calendar.events.get({ calendarId, eventId });
-        existingAttendees = existing.data.attendees || [];
+      const recurring = Boolean(recurrence?.length);
+      const movesTimedEvent = Boolean(start || end) && !allDay;
+      // The current event is needed to merge attendees, and to give its times a
+      // time zone when the patch makes it (or keeps it) recurring.
+      const needsCurrent = Boolean(addAttendees?.length)
+        || recurring
+        || (options.timeZone !== undefined && !(start && end))
+        || (movesTimedEvent && options.timeZone === undefined);
+      const current = needsCurrent ? (await this.calendar.events.get({ calendarId, eventId })).data : undefined;
+      const existingAttendees = current?.attendees || [];
+
+      let timeZone = options.timeZone;
+      if (timeZone === undefined && !allDay && (recurring || current?.recurrence?.length)) {
+        timeZone = current?.start?.timeZone || await this.getCalendarTimeZone(calendarId);
       }
 
       const patch: calendar_v3.Schema$Event = {};
@@ -180,8 +200,10 @@ export class GCalClient implements ServiceClient {
       if (summary !== undefined) patch.summary = summary;
       if (description !== undefined) patch.description = description;
       if (location !== undefined) patch.location = location;
-      if (start) patch.start = this.buildEventDateTime(start, allDay);
-      if (end) patch.end = this.buildEventDateTime(end, allDay);
+      if (start) patch.start = this.buildEventDateTime(start, allDay, timeZone);
+      else if (timeZone && current?.start?.dateTime) patch.start = { dateTime: current.start.dateTime, timeZone };
+      if (end) patch.end = this.buildEventDateTime(end, allDay, timeZone);
+      else if (timeZone && current?.end?.dateTime) patch.end = { dateTime: current.end.dateTime, timeZone };
       if (colorId !== undefined) patch.colorId = colorId;
       if (visibility) patch.visibility = visibility;
       if (transparency) patch.transparency = transparency;
@@ -216,6 +238,7 @@ export class GCalClient implements ServiceClient {
 
       return this.parseEvent(response.data);
     } catch (error) {
+      if (error instanceof CliError) throw error;
       if (this.isNotFoundError(error)) {
         throw new CliError('NOT_FOUND', `Event not found: ${eventId}`);
       }
@@ -308,12 +331,30 @@ export class GCalClient implements ServiceClient {
     return this.listEvents({ ...options, query });
   }
 
-  private buildEventDateTime(value: string, allDay?: boolean): calendar_v3.Schema$EventDateTime {
+  /** An all-day value is a plain date and takes no time zone; a timed one takes it when given. */
+  private buildEventDateTime(value: string, allDay?: boolean, timeZone?: string): calendar_v3.Schema$EventDateTime {
     const trimmed = value.trim();
-    if (allDay || !trimmed.includes('T')) {
-      return { date: trimmed };
+    if (isDateOnly(trimmed, allDay)) {
+      return { date: allDay ? trimmed.split('T')[0] : trimmed };
     }
-    return { dateTime: trimmed };
+    return timeZone ? { dateTime: trimmed, timeZone } : { dateTime: trimmed };
+  }
+
+  /** The calendar's own time zone, else the account's (Calendar settings). */
+  private async getCalendarTimeZone(calendarId: string): Promise<string> {
+    try {
+      const calendar = await this.calendar.calendars.get({ calendarId });
+      if (calendar.data.timeZone) return calendar.data.timeZone;
+      const setting = await this.calendar.settings.get({ setting: 'timezone' });
+      if (setting.data.value) return setting.data.value;
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        throw new CliError('NOT_FOUND', `Calendar not found: ${calendarId}`);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError('API_ERROR', `Could not read the time zone of calendar ${calendarId}: ${message}`, 'Pass --timezone <IANA name>, e.g. --timezone Europe/Brussels');
+    }
+    throw new CliError('API_ERROR', `Calendar ${calendarId} has no time zone`, 'Pass --timezone <IANA name>, e.g. --timezone Europe/Brussels');
   }
 
   private parseEvent(event: calendar_v3.Schema$Event): GCalEvent {

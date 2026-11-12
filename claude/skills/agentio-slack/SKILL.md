@@ -15,6 +15,7 @@ Options:
 
 - `--profile <name>`: Profile name (optional if only one profile exists)
 - `--json [file]`: Send Block Kit message from JSON file (or stdin if no file specified)
+- `--channel <target>`: User-token profiles: #channel or channel id, or a member to DM as @handle, email or user id
 
 ```
 Examples:
@@ -30,6 +31,13 @@ Examples:
 
   # send to a specific profile
   agentio slack send --profile alerts "incident opened"
+
+  # user-token profile: post to a channel, by name or id
+  agentio slack send --profile acme --channel "#deploys" "release 1.2 is out"
+
+  # user-token profile: DM a member by @handle, email or user id
+  agentio slack send --profile acme --channel @jane "Can you review the PR?"
+  agentio slack send --profile acme --channel jane@example.com --json ./card.json
 ```
 
 ## agentio slack messages

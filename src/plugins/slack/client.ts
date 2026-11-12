@@ -226,6 +226,11 @@ function isEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@]+$/.test(input);
 }
 
+/** Whether `input` is a direct-message conversation id (D…). */
+export function isDmId(input: string): boolean {
+  return /^D[A-Z0-9]{2,}$/.test(input);
+}
+
 /** Whether `input` names a user by id (U… or W…) rather than by email. */
 export function isUserId(input: string): boolean {
   return /^[UW][A-Z0-9]{2,}$/.test(input);
@@ -426,10 +431,71 @@ export class SlackClient implements ServiceClient {
 
   async send(options: SlackSendOptions): Promise<SlackSendResult> {
     if (this.credentials.type === 'webhook') {
+      if (options.channel) {
+        throw new CliError('INVALID_PARAMS', 'A webhook posts only to its own channel, so it takes no --channel',
+          'Use a user-token profile for --channel: agentio slack send --profile <token profile> --channel <target>');
+      }
       return this.sendViaWebhook(options);
     }
-    throw new CliError('INVALID_PARAMS', 'This Slack profile holds a user token, which cannot send messages yet',
-      'Send with a webhook profile: agentio slack send --profile <webhook profile>');
+    if (!options.channel?.trim()) {
+      throw new CliError('INVALID_PARAMS', 'A user-token profile needs --channel to know where to post',
+        'Pass --channel with a channel (#name or C…) or a member (@handle, email or U…)');
+    }
+
+    const target = await this.resolveSendTarget(options.channel);
+    const params: Record<string, string> = { channel: target.id };
+    if (options.payload) {
+      // Block Kit fields go form-encoded: arrays and objects as JSON strings.
+      for (const [key, value] of Object.entries(options.payload)) {
+        if (key === 'channel' || value === undefined || value === null) continue;
+        params[key] = typeof value === 'string' ? value : JSON.stringify(value);
+      }
+    } else {
+      params.text = options.text ?? '';
+    }
+
+    const data = await this.call<SlackApiResponse & { channel: string; ts: string }>('chat.postMessage', params);
+    return { success: true, isJsonPayload: !!options.payload, channelId: data.channel, target: target.label, ts: data.ts };
+  }
+
+  /**
+   * Where `slack send --channel` posts: a conversation id as given, a channel
+   * by name, or the DM with a member found by @handle, email or user id
+   * (opened with conversations.open; Slack returns the existing one if any).
+   */
+  async resolveSendTarget(input: string): Promise<{ id: string; label: string }> {
+    const key = input.trim();
+    if (isChannelId(key) || isDmId(key)) return { id: key, label: key };
+
+    const handle = key.startsWith('@') ? key.slice(1).trim() : undefined;
+    if (handle !== undefined || isUserId(key) || isEmail(key)) {
+      const user = await this.findMember(handle ?? key);
+      const opened = await this.call<SlackApiResponse & { channel: { id: string } }>('conversations.open', { users: user.id });
+      return { id: opened.channel.id, label: `@${user.name}` };
+    }
+
+    const channel = await this.getChannel(key);
+    return { id: channel.id, label: `#${channel.name}` };
+  }
+
+  /** A workspace member by user id, email, or handle (username, else display name). */
+  private async findMember(key: string): Promise<SlackUser> {
+    if (!key) throw new CliError('INVALID_PARAMS', 'A member handle is required after @');
+    if (isUserId(key) || isEmail(key)) return this.getUser(key);
+
+    const wanted = key.toLowerCase();
+    const users = await this.listUsers({ includeBots: true });
+    const byName = users.filter((u) => u.name.toLowerCase() === wanted);
+    const matches = byName.length ? byName : users.filter((u) => u.displayName?.toLowerCase() === wanted);
+    if (matches.length === 0) {
+      throw new CliError('NOT_FOUND', `No workspace member has the handle @${key}`,
+        'Use their email address or user id instead; see: agentio slack users list');
+    }
+    if (matches.length > 1) {
+      throw new CliError('INVALID_PARAMS', `@${key} matches ${matches.length} members: ${matches.map((u) => u.id).join(', ')}`,
+        'Pass the user id or email address of the one you mean');
+    }
+    return matches[0];
   }
 
   async authTest(): Promise<SlackAuthInfo> {

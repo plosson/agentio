@@ -148,7 +148,7 @@ const ALL_SCOPES = [
   'users:read', 'users:read.email', 'channels:read', 'groups:read',
   'channels:manage', 'groups:write', 'channels:write.invites', 'groups:write.invites', 'channels:write',
   'channels:history', 'groups:history', 'im:history', 'mpim:history', 'im:read', 'mpim:read', 'search:read',
-  'canvases:read', 'canvases:write', 'files:read',
+  'canvases:read', 'canvases:write', 'files:read', 'chat:write', 'im:write',
 ];
 
 export class FakeSlack {
@@ -192,6 +192,8 @@ export class FakeSlack {
   accessErrors: Record<string, string> = {};
   /** Each canvases.access.set or .delete call's parameters, in order. */
   readonly accessCalls: { method: string; params: Record<string, string> }[] = [];
+  /** Messages chat.postMessage accepted, with their parameters as sent. */
+  readonly posted: Record<string, string>[] = [];
 
   addCanvas(fields: Partial<FakeCanvas> & { title: string }): FakeCanvas {
     const n = this.canvases.length + 1;
@@ -244,6 +246,29 @@ export class FakeSlack {
     switch (method) {
       case 'auth.test':
         return { ok: true, team_id: this.team.id, team: this.team.name, user_id: this.self.id, user: this.self.name, url: this.team.url };
+      case 'conversations.open': {
+        const denied = need('im:write');
+        if (denied) return denied;
+        const user = this.users.find((u) => u.id === params.users);
+        if (!user) return { ok: false, error: 'user_not_found' };
+        let dm = this.channels.find((c) => c.is_im && c.user === user.id);
+        if (!dm) {
+          dm = fakeChannel(`D0${String(user.id).slice(1)}`, '', { is_im: true, user: String(user.id), members: [this.self.id, String(user.id)] });
+          this.channels.push(dm);
+        }
+        return { ok: true, channel: { id: dm.id } };
+      }
+      case 'chat.postMessage': {
+        const denied = need('chat:write');
+        if (denied) return denied;
+        const channel = this.find(params.channel);
+        if (!channel) return { ok: false, error: 'channel_not_found' };
+        if (!channel.members.includes(this.self.id)) return { ok: false, error: 'not_in_channel' };
+        const ts = `1793000000.${String(this.posted.length + 1).padStart(6, '0')}`;
+        this.posted.push(params);
+        channel.messages.push({ ts, user: this.self.id, text: params.text ?? '' });
+        return { ok: true, channel: channel.id, ts };
+      }
       case 'users.list': {
         const denied = need('users:read');
         if (denied) return denied;

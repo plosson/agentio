@@ -100,6 +100,8 @@ export interface GCalCreateOptions {
   transparency?: 'opaque' | 'transparent';
   sendUpdates?: 'all' | 'externalOnly' | 'none';
   withMeet?: boolean;
+  /** IANA time zone for timed start/end; recurring events default to the calendar's. */
+  timeZone?: string;
 }
 
 export interface GCalUpdateOptions {
@@ -119,6 +121,8 @@ export interface GCalUpdateOptions {
   visibility?: 'default' | 'public' | 'private' | 'confidential';
   transparency?: 'opaque' | 'transparent';
   sendUpdates?: 'all' | 'externalOnly' | 'none';
+  /** IANA time zone for timed start/end; recurring events default to theirs, else the calendar's. */
+  timeZone?: string;
 }
 
 export interface GCalRespondOptions {

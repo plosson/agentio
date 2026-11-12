@@ -231,6 +231,10 @@ agentio slack send "Deployment complete ✓"
 # Send rich Block Kit message
 agentio slack send --json blocks.json
 
+# With a user-token profile: post to a channel, or DM a member (@handle, email or user id)
+agentio slack send --profile acme --channel "#deploys" "Release 1.2 is out"
+agentio slack send --profile acme --channel @jane "Can you review the PR?"
+
 # Read everything since Monday (user token), also from public channels you never
 # joined; read-only: nothing is joined or marked read
 agentio slack messages --since 2026-10-26 --include-public --json
