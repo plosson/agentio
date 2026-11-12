@@ -3,7 +3,7 @@ name: agentio-gcal
 description: Use when interacting with Google Calendar via the agentio CLI.
 ---
 
-# Gcal via agentio
+# Google Calendar via agentio
 
 Auto-generated from `agentio skill gcal`. Do not edit by hand.
 
@@ -91,9 +91,10 @@ Options:
 - `--description <text>`: Event description (or pipe via stdin)
 - `--location <place>`: Event location
 - `--all-day`: Create as all-day event
-- `--attendee <email>`: Attendee email (repeatable) (default: )
-- `--rrule <rule>`: Recurrence rule (repeatable, e.g., RRULE:FREQ=WEEKLY;BYDAY=MO) (default: )
-- `--reminder <spec>`: Reminder as method:minutes (repeatable, e.g., popup:30, email:1440) (default: )
+- `--attendee <email>`: Attendee email (repeatable)
+- `--rrule <rule>`: Recurrence rule (repeatable, e.g., RRULE:FREQ=WEEKLY;BYDAY=MO)
+- `--timezone <iana>`: Time zone for --from/--to, an IANA name (e.g., Europe/Brussels); with --rrule it defaults to the calendar's
+- `--reminder <spec>`: Reminder as method:minutes (repeatable, e.g., popup:30, email:1440)
 - `--color <id>`: Color ID (1-11)
 - `--visibility <v>`: Visibility: default, public, private, confidential
 - `--show-as <v>`: Show as: busy, free
@@ -111,8 +112,16 @@ Examples:
     --location "Lake Tahoe" --attendee alice@example.com --attendee bob@example.com
 
   # weekly recurring 30-min standup with a Meet link and a 10-min popup reminder
+  # (the recurrence follows the calendar's time zone unless --timezone is given)
   agentio gcal create --summary "Standup" --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T09:30:00-07:00 \
     --rrule "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" --reminder popup:10 --with-meet
+
+  # weekly on Mondays, 14:00 Brussels time, all year round (summer time included)
+  agentio gcal create --summary "Weekly review" --from 2026-11-16T14:00:00+01:00 --to 2026-11-16T15:00:00+01:00 \
+    --rrule "RRULE:FREQ=WEEKLY;BYDAY=MO" --timezone Europe/Brussels
+
+  # yearly all-day event (no time zone needed)
+  agentio gcal create --summary "Anniversary" --from 2026-06-12 --to 2026-06-13 --all-day --rrule "RRULE:FREQ=YEARLY"
 
   # private event on a specific calendar, no notifications
   agentio gcal create team@example.com --summary "1:1" --from 2024-04-15T10:00:00-07:00 \
@@ -132,8 +141,10 @@ Options:
 - `--description <text>`: New description (or pipe via stdin)
 - `--location <place>`: New location
 - `--all-day`: Convert to all-day event
-- `--attendee <email>`: Replace attendees (repeatable) (default: )
-- `--add-attendee <email>`: Add attendee (repeatable) (default: )
+- `--attendee <email>`: Replace attendees (repeatable)
+- `--add-attendee <email>`: Add attendee (repeatable)
+- `--rrule <rule>`: Replace the recurrence rules (repeatable, e.g., RRULE:FREQ=WEEKLY;BYDAY=MO)
+- `--timezone <iana>`: Time zone for the event's times, an IANA name (e.g., Europe/Brussels); a recurring event keeps its own, else the calendar's
 - `--color <id>`: New color ID (1-11)
 - `--visibility <v>`: Visibility: default, public, private, confidential
 - `--show-as <v>`: Show as: busy, free
@@ -154,6 +165,9 @@ Examples:
 
   # mark as free time
   agentio gcal update primary abc123def456 --show-as free
+
+  # make it repeat every other Tuesday, in Brussels time
+  agentio gcal update primary abc123def456 --rrule "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU" --timezone Europe/Brussels
 ```
 
 ## agentio gcal delete <calendar-id> <event-id>
@@ -244,3 +258,4 @@ Examples:
   agentio gcal freebusy alice@example.com,bob@example.com \
     --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T18:00:00-07:00
 ```
+

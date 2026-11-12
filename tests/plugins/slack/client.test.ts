@@ -71,7 +71,7 @@ describe('requests', () => {
     expect(fake.log).toHaveLength(0);
   });
 
-  test('a token profile refuses to send instead of posting somewhere', async () => {
+  test('a token profile without --channel refuses to send instead of posting somewhere', async () => {
     const err = await caught(client.send({ text: 'hi' }));
     expect(err.code).toBe('INVALID_PARAMS');
     expect(fake.log).toHaveLength(0);

@@ -19,11 +19,21 @@ export type SlackCredentials = SlackWebhookCredentials | SlackTokenCredentials;
 export interface SlackSendOptions {
   text?: string;
   payload?: Record<string, unknown>;
+  /**
+   * User-token profiles only: where to post. A channel id (C…, G…), a DM id
+   * (D…), a channel name (with or without #), or a member as @handle, email
+   * or user id (U…, W…), whose DM is opened.
+   */
+  channel?: string;
 }
 
 export interface SlackSendResult {
   success: boolean;
   isJsonPayload?: boolean;
+  /** Token sends: the conversation posted to, how it was named, and the message's ts. */
+  channelId?: string;
+  target?: string;
+  ts?: string;
 }
 
 /** What `auth.test` says about a token. */

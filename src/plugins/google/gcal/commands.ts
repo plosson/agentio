@@ -6,6 +6,7 @@ import { createProfileCommands } from '../../../utils/profile-commands';
 import { addProfileWithSetup } from '../../profile-host';
 import { googleSnakeSetup } from '../shared';
 import { GCalClient } from './client';
+import { parseTimeZone } from './timezone';
 import { printGCalCalendarList, printGCalEventList, printGCalEvent, printGCalEventCreated, printGCalEventDeleted, printGCalFreeBusy } from './output';
 import { CliError, handleError } from '../../../utils/errors';
 import { readStdin } from '../../../utils/stdin';
@@ -171,6 +172,7 @@ export function registerGCalCommands(program: Command): void {
     .option('--all-day', 'Create as all-day event')
     .option('--attendee <email>', 'Attendee email (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .option('--rrule <rule>', 'Recurrence rule (repeatable, e.g., RRULE:FREQ=WEEKLY;BYDAY=MO)', (val, acc: string[]) => [...acc, val], [])
+    .option('--timezone <iana>', "Time zone for --from/--to, an IANA name (e.g., Europe/Brussels); with --rrule it defaults to the calendar's")
     .option('--reminder <spec>', 'Reminder as method:minutes (repeatable, e.g., popup:30, email:1440)', (val, acc: string[]) => [...acc, val], [])
     .option('--color <id>', 'Color ID (1-11)')
     .option('--visibility <v>', 'Visibility: default, public, private, confidential')
@@ -193,6 +195,7 @@ export function registerGCalCommands(program: Command): void {
           return { method: method as 'email' | 'popup', minutes: parseInt(minutes, 10) };
         });
 
+        const timeZone = parseTimeZone(options.timezone);
         const { client, profile } = await getGCalClient(options.profile);
         await enforceWriteAccess('gcal', profile, 'create event');
         const event = await client.createEvent({
@@ -211,6 +214,7 @@ export function registerGCalCommands(program: Command): void {
           transparency: options.showAs === 'free' ? 'transparent' : options.showAs === 'busy' ? 'opaque' : undefined,
           sendUpdates: options.sendUpdates,
           withMeet: options.withMeet,
+          timeZone,
         });
         printGCalEventCreated(event);
       } catch (error) {
@@ -230,8 +234,16 @@ export function registerGCalCommands(program: Command): void {
     --location "Lake Tahoe" --attendee alice@example.com --attendee bob@example.com
 
   # weekly recurring 30-min standup with a Meet link and a 10-min popup reminder
+  # (the recurrence follows the calendar's time zone unless --timezone is given)
   agentio gcal create --summary "Standup" --from 2024-04-15T09:00:00-07:00 --to 2024-04-15T09:30:00-07:00 \\
     --rrule "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR" --reminder popup:10 --with-meet
+
+  # weekly on Mondays, 14:00 Brussels time, all year round (summer time included)
+  agentio gcal create --summary "Weekly review" --from 2026-11-16T14:00:00+01:00 --to 2026-11-16T15:00:00+01:00 \\
+    --rrule "RRULE:FREQ=WEEKLY;BYDAY=MO" --timezone Europe/Brussels
+
+  # yearly all-day event (no time zone needed)
+  agentio gcal create --summary "Anniversary" --from 2026-06-12 --to 2026-06-13 --all-day --rrule "RRULE:FREQ=YEARLY"
 
   # private event on a specific calendar, no notifications
   agentio gcal create team@example.com --summary "1:1" --from 2024-04-15T10:00:00-07:00 \\
@@ -253,6 +265,8 @@ export function registerGCalCommands(program: Command): void {
     .option('--all-day', 'Convert to all-day event')
     .option('--attendee <email>', 'Replace attendees (repeatable)', (val, acc: string[]) => [...acc, val], [])
     .option('--add-attendee <email>', 'Add attendee (repeatable)', (val, acc: string[]) => [...acc, val], [])
+    .option('--rrule <rule>', 'Replace the recurrence rules (repeatable, e.g., RRULE:FREQ=WEEKLY;BYDAY=MO)', (val, acc: string[]) => [...acc, val], [])
+    .option('--timezone <iana>', "Time zone for the event's times, an IANA name (e.g., Europe/Brussels); a recurring event keeps its own, else the calendar's")
     .option('--color <id>', 'New color ID (1-11)')
     .option('--visibility <v>', 'Visibility: default, public, private, confidential')
     .option('--show-as <v>', 'Show as: busy, free')
@@ -269,6 +283,7 @@ export function registerGCalCommands(program: Command): void {
           throw new CliError('INVALID_PARAMS', 'Cannot use both --attendee and --add-attendee');
         }
 
+        const timeZone = parseTimeZone(options.timezone);
         const { client, profile } = await getGCalClient(options.profile);
         await enforceWriteAccess('gcal', profile, 'update event');
         const event = await client.updateEvent({
@@ -282,6 +297,8 @@ export function registerGCalCommands(program: Command): void {
           allDay: options.allDay,
           attendees: options.attendee.length ? options.attendee : undefined,
           addAttendees: options.addAttendee.length ? options.addAttendee : undefined,
+          recurrence: options.rrule.length ? options.rrule : undefined,
+          timeZone,
           colorId: options.color,
           visibility: options.visibility,
           transparency: options.showAs === 'free' ? 'transparent' : options.showAs === 'busy' ? 'opaque' : undefined,
@@ -308,7 +325,10 @@ export function registerGCalCommands(program: Command): void {
   agentio gcal update primary abc123def456 --add-attendee carol@example.com --send-updates none
 
   # mark as free time
-  agentio gcal update primary abc123def456 --show-as free`,
+  agentio gcal update primary abc123def456 --show-as free
+
+  # make it repeat every other Tuesday, in Brussels time
+  agentio gcal update primary abc123def456 --rrule "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU" --timezone Europe/Brussels`,
   );
 
   // Delete event

@@ -19,6 +19,10 @@ import type {
 
 export function printSlackSendResult(result: SlackSendResult): void {
   console.log('Message sent');
+  if (result.channelId) {
+    console.log(`Channel: ${result.channelId}${result.target && result.target !== result.channelId ? ` (${result.target})` : ''}`);
+  }
+  if (result.ts) console.log(`Timestamp: ${result.ts}`);
   if (result.isJsonPayload) {
     console.log('Type: Block Kit payload');
   }
