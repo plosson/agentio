@@ -4,6 +4,8 @@ import { withTempVault } from '../helpers/vault';
 import { lockVault } from '../../src/vault/vault';
 import { createRequestHandler, type PeerSource } from '../../src/daemon/api';
 import { clearSessions } from '../../src/daemon/session';
+import { stopSessions } from '../../src/daemon/sessions';
+import { stopKeepalive } from '../../src/daemon/keepalive';
 import { getCredentials } from '../../src/auth/token-store';
 import { unlockLimiter } from '../../src/daemon/routes-ui';
 import { deviceLimiter } from '../../src/daemon/routes-v1';
@@ -54,7 +56,12 @@ beforeEach(() => {
   resetDeviceAuth();
 });
 
-afterEach(() => clearSessions());
+// Unlocking through the UI starts the keepalive and the session supervisor; leave neither running for later files.
+afterEach(async () => {
+  stopKeepalive();
+  await stopSessions();
+  clearSessions();
+});
 
 describe('daemon HTTP surface', () => {
   test('/health is public and reports the lock state', async () => {
