@@ -38,6 +38,7 @@ const SERVICE_ORDER = [
   'higgsfield',
   'notes',
   'pagerio',
+  'picsi',
   'revolut',
   'rss',
   'secrets',

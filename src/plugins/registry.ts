@@ -23,6 +23,7 @@ import notes from './notes';
 import metube from './metube';
 import higgsfield from './higgsfield';
 import pagerio from './pagerio';
+import picsi from './picsi';
 import revolut from './revolut';
 import rss from './rss';
 import secrets from './secrets';
@@ -60,6 +61,7 @@ export const SERVICE_PLUGINS = [
   higgsfield,
   notes,
   pagerio,
+  picsi,
   revolut,
   rss,
   secrets,

@@ -2,7 +2,7 @@
 
 For each plugin: how it signs in, whose app or key it uses, what the vault stores, and what's needed before wide or commercial use.
 
-**Last reviewed:** 2026-11-12. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
+**Last reviewed:** 2026-11-27. Update this file whenever a plugin's authentication changes, or a plugin is added or removed.
 
 ## Summary
 
@@ -21,6 +21,7 @@ For each plugin: how it signs in, whose app or key it uses, what the vault store
 | memory | Bearer token of the proxy in front of the user's own Graphiti REST server; the URL is a profile value | **The user's own server and token**, no app | No | The server needs its own LLM key (OpenAI) to extract facts |
 | metube | HTTP basic auth (user and password) in front of the user's own MeTube server; the URL is a profile value. A server without auth takes no credentials | **The user's own server**, no app | No | YouTube often asks datacenter IPs to sign in; downloads then fail until the server runs from another IP or has cookies |
 | higgsfield | API key (`<key id>:<key secret>`), sent as `Authorization: Key …` to api.higgsfield.ai | **Created by the user at console.higgsfield.ai** | No | Generations are paid from the account balance; the API key cannot read the balance |
+| picsi | A separate Chrome/Chromium/Edge window through Picsi's Discord login, or an existing Picsi session token | **The user's own Picsi account**, no Discord token or developer app | No published API approval process; third-party access is not confirmed | Internal web endpoints may change; needs a Chromium browser for sign-in. Picsi's terms restrict automation without authorization |
 | notes | API key of the user's own apple-notes-api server, sent as a Bearer token | **The user's own server, on their Mac**, no app | No | The server must be reachable from the agent; exposing it is up to the user |
 | pagerio | The user's secret pager URL; posting to it sends the page | **The user's own Pocket Pager account**, no app | No | Anyone with the URL can page its owner |
 | claude | A `claude setup-token` token or an Anthropic API key, given only to the user's own `claude` CLI | **The user's own subscription or key** | No | Needs the `claude` CLI where the command runs |
@@ -570,6 +571,32 @@ Runs any model of the [Higgsfield API](https://docs.higgsfield.ai) (Soul, Genjut
 **Remote mode:** agents with a key that covers the profile receive the whole credential, as with the other static-credential plugins.
 
 **What's needed:** a Higgsfield API account with balance. Only completed requests are charged; `failed` and `nsfw` are refunded.
+
+---
+
+## Picsi.Ai
+
+**Code:** `src/plugins/picsi/`
+
+Makes one image face swap per invocation through the same internal web protocol as the official Chrome extension (inspected version 1.0.3). It does not send messages or commands to Discord. See `agentio picsi --help` for the current commands and options.
+
+**Sign-in**
+
+- `agentio picsi profile add` opens `https://www.picsi.ai/user/login` in a dedicated Chrome, Chromium or Edge window. The user signs in to Discord there. Agentio reads only Picsi's `/user/callback` response through the browser's local debugging connection, before its script can close the window or log the session. The response is parsed as JSON, never evaluated as JavaScript. The returned session is checked with `GET /user/info` before the host saves it.
+- Picsi extracts `window.opener.postMessage` and calls it as a detached function. In Chrome, when its opener is a different origin, this sends to the callback window itself. A localhost opener therefore never receives the session. Capturing the callback response avoids that broken handoff and also works when Picsi serves its script as plain text.
+- The browser uses a new temporary profile and a debugging port bound locally. Agentio never attaches to a running personal browser or reads an existing browser profile. It closes its own browser and deletes the temporary profile on success, refusal or timeout (three minutes). This follows [Chrome's requirement to separate debugging from real profiles](https://developer.chrome.com/blog/remote-debugging-port). `AGENTIO_CHROME` can name a compatible browser executable if automatic detection does not find one.
+- `--no-browser` asks for an existing Picsi session token as a hidden answer, for machines without a browser.
+- `agentio picsi profile add --token` asks for an existing **Picsi session token** as a hidden answer. An explicit `--token <value>` is also accepted. This is never a Discord account token.
+- Reauthentication opens a new browser sign-in. No refresh endpoint or session lifetime is documented; an expired session requires signing in again or replacing the profile with a current token.
+- Browser regressions run a real Chromium browser against local sign-in responses, covering callback parsing, immediate closure, plain-text responses, cancellation and refused sign-in. Account lookup and swaps use local fakes; a successful live sign-in and swap still need validation with the user's account.
+
+**What the vault stores:** the Picsi session token, display name and email. Public account output excludes the token. Local photos are read when a swap is requested; the plugin does not keep a face library.
+
+**Image processing:** the CLI obtains a processing ticket from `POST /api/morph/token`, waiting ten seconds between queue responses, and posts one multipart request to `/api/morph/image`. It sends the source and target images, extension-compatible options, target coordinates and the ticket's timing fields. Image submission is never retried automatically, to avoid a duplicate charge. Input files are JPG, PNG or WebP, at most 30 MB each. Paid accounts select the face nearest to `--at` (default: image centre); free accounts select the largest face. The output file must be new. Downloads carry no Picsi session header. GIF and video processing are outside this integration.
+
+**Remote mode:** agents with a key that covers the profile receive the Picsi session, as with the other static-credential plugins. Read-only profiles cannot submit swaps.
+
+**Provider support:** these are internal endpoints, not a documented public API, and the implementation may need updating when Picsi changes its web service. Manual use does not establish provider approval. [Picsi's terms](https://www.picsi.ai/en/terms) prohibit automation without explicit authorization. The [official extension guide](https://www.picsi.ai/en/docs/chrome-extension) describes the underlying manual workflow.
 
 ---
 
