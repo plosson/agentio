@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { abbrHome, boldStderr } from '../../src/utils/output';
+import { abbrHome, boldStderr, logThroughStdout } from '../../src/utils/output';
 
 describe('abbrHome', () => {
   test('replaces $HOME prefix with ~', () => {
@@ -71,5 +71,49 @@ describe('boldStderr', () => {
     expect(written[1]).toBe("Error: no hub 42 { code: 'X' }\n");
     expect(written[2]).toStartWith('Error: boom\n');
     expect(written.join('')).not.toContain('\x1b[');
+  });
+});
+
+describe('logThroughStdout', () => {
+  function capture(run: () => void): string[] {
+    const original = { log: console.log, info: console.info, error: console.error };
+    const written: string[] = [];
+    logThroughStdout({ write: (text: string) => written.push(text) });
+    try {
+      run();
+    } finally {
+      Object.assign(console, original);
+    }
+    return written;
+  }
+
+  test('a write well over 64 KiB goes to the stream in one piece', () => {
+    const big = 'x'.repeat(300_000);
+    expect(capture(() => console.log(big))).toEqual([big + '\n']);
+  });
+
+  test('format strings, several arguments, objects and an empty call print as console.log would', () => {
+    const written = capture(() => {
+      console.log('%s has %d profiles', 'gmail', 2);
+      console.log('a', 1, null, undefined);
+      console.log({ nested: { deep: [1, 2] } });
+      console.log();
+      console.info('info too');
+    });
+    expect(written).toEqual([
+      'gmail has 2 profiles\n',
+      'a 1 null undefined\n',
+      '{ nested: { deep: [ 1, 2 ] } }\n',
+      '\n',
+      'info too\n',
+    ]);
+  });
+
+  test('console.error is left alone, so diagnostics never reach stdout', () => {
+    const before = console.error;
+    const written = capture(() => {
+      expect(console.error).toBe(before);
+    });
+    expect(written).toEqual([]);
   });
 });

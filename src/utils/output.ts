@@ -28,6 +28,20 @@ export function boldStderr(
   console.warn = write;
 }
 
+/**
+ * Send console.log and console.info through the stdout stream. Bun's own
+ * console.log cuts a write over 64 KiB short at a pipe once process.stdout
+ * has been read, which @inquirer/core does on import, so `agentio docs | …`
+ * or a long document piped to another program lost all but 65,536 bytes.
+ */
+export function logThroughStdout(stream: { write(text: string): unknown } = process.stdout): void {
+  const write = (...args: unknown[]): void => {
+    stream.write(format(...args) + '\n');
+  };
+  console.log = write;
+  console.info = write;
+}
+
 /** Version of the `--json` output format; every printed object carries it as `v`. */
 export const JSON_OUTPUT_VERSION = 1;
 

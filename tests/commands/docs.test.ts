@@ -1,5 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Command } from 'commander';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { renderDocs } from '../../src/commands/docs';
 import { CliError } from '../../src/utils/errors';
 
@@ -77,4 +80,38 @@ describe('docs', () => {
       expect(thrown).toMatchObject({ code: 'INVALID_PARAMS', message: `Unknown format: ${format}`, suggestion: 'Use --format markdown or --format json' });
     }
   });
+});
+
+describe('docs through a pipe', () => {
+  // Bun cut a console.log over 64 KiB short at an OS pipe once process.stdout
+  // had been read, which @inquirer/core does on import: `agentio docs | …` got 65,536 bytes.
+  // Bun.spawn's own stdout pipe never showed it, so a shell makes the pipe.
+  let home: string;
+  beforeAll(async () => { home = await mkdtemp(join(tmpdir(), 'agentio-docs-pipe-')); });
+  afterAll(async () => { await rm(home, { recursive: true, force: true }); });
+
+  async function sh(script: string): Promise<{ code: number; stdout: string }> {
+    const proc = Bun.spawn(['sh', '-c', script], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: { ...process.env, HOME: home, AGENTIO_HOME: home, AGENTIO_NO_AUTO_UPDATE: '1', AGENTIO_TOKEN: '' },
+    });
+    const stdout = await new Response(proc.stdout).text();
+    return { code: await proc.exited, stdout };
+  }
+
+  for (const format of ['json', 'markdown']) {
+    test(`--format ${format} piped to a slow reader is the same as written to a file`, async () => {
+      const file = join(home, `docs.${format}`);
+      const cli = `bun run src/index.ts docs --format ${format}`;
+      const piped = await sh(`${cli} | (sleep 1; cat)`);
+      const direct = await sh(`${cli} > '${file}' && cat '${file}'`);
+      expect(piped.code).toBe(0);
+      expect(direct.stdout.length).toBeGreaterThan(65536);
+      expect(piped.stdout.length).toBe(direct.stdout.length);
+      expect(piped.stdout).toBe(direct.stdout);
+      if (format === 'json') expect(JSON.parse(piped.stdout).commands.length).toBeGreaterThan(100);
+    });
+  }
 });
